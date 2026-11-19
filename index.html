@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מירוץ העכברים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
+<style>
+/* VOICE: family board-game night with a wise, slightly cheeky mentor
+   IDEA: a wooden board game floating in golden-hour light — your money statement is the scorecard
+   PICTURE: the live 3D board, full screen; assets you buy rise up in its centre
+   COLOUR and TYPE: golden-hour sky, cream board, gold accent; Secular One titles, Rubik for everything else
+   LAYOUT: full-bleed 3D, income statement as a paper sheet on the right, mentor + dice docked at the bottom */
+:root{color-scheme:light dark;--paper:light-dark(#fffaf0,#1f1b27);--paper2:light-dark(#f6eedd,#2a2533);--ink:light-dark(#1d1a2b,#f3eee4);--mut:light-dark(#6b6478,#aaa3b6);--line:light-dark(#e6d9c1,#3b3447);--gold:#f2b632;--gold2:#c98a12;--green:light-dark(#178a55,#3ccf8a);--red:light-dark(#d23b30,#ff7a6e);--blue:#2f6fdb;--shadow:0 10px 30px rgba(40,20,0,.18)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{margin:0;color:var(--ink);font:16px/1.5 Rubik,system-ui,sans-serif;overflow:hidden;background:linear-gradient(180deg,light-dark(#ffe0a8,#2b2240) 0%,light-dark(#f7b27a,#4a2f45) 55%,light-dark(#d9785c,#5a3340) 100%)}
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:12px;min-height:44px;padding:0 16px;background:var(--paper2)}
+button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.primary{background:var(--gold);color:#2b1d00;font-weight:800;box-shadow:0 4px 0 var(--gold2)}
+.primary:active:not(:disabled){transform:translateY(2px);box-shadow:0 2px 0 var(--gold2)}
+.chip{min-height:36px;padding:0 12px;font-size:14px;border:1px solid var(--line);background:transparent}
+.hud{position:fixed;top:12px;inset-inline:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;pointer-events:none}
+.hud>*{pointer-events:auto}
+.brand{font:28px/1 "Secular One",Rubik,sans-serif;color:#3a1f00;padding:8px 16px;background:var(--gold);border-radius:14px;box-shadow:var(--shadow)}
+.stat{background:var(--paper);border-radius:14px;padding:6px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;line-height:1.15}
+.stat span{font-size:13px;color:var(--mut)}.stat b{font-size:20px;white-space:nowrap}
+#sheetBtn{display:none;background:var(--paper);box-shadow:var(--shadow);margin-inline-start:auto}
+#sheet{position:fixed;inset-inline-start:12px;top:84px;bottom:12px;width:340px;background:var(--paper);border-radius:18px;box-shadow:var(--shadow);overflow:auto;padding:18px 18px 22px}
+#sheet h2{font:24px/1.1 "Secular One",Rubik;margin:0}
+#sheet h3{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:4px}
+.sub{margin:4px 0 0;color:var(--mut);font-size:14px}
+.row{display:flex;justify-content:space-between;gap:10px;font-size:15px;padding:3px 0}
+.row b,.row span:last-child{white-space:nowrap;font-variant-numeric:tabular-nums}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.empty{font-size:14px;color:var(--mut);margin:2px 0}
+.total{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--paper2);display:flex;justify-content:space-between;font-weight:700}
+.freedom{margin-top:14px;padding:12px;border-radius:14px;background:light-dark(#fff3d2,#33291a);border:1px solid light-dark(#f2d48a,#5b4720)}
+.freedom .fl{display:flex;justify-content:space-between;font-weight:700}
+.track{height:14px;border-radius:9px;background:light-dark(#efe2c2,#463a26);margin:8px 0 6px;overflow:hidden}
+.track i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),#3ccf8a);border-radius:9px;transition:width .6s}
+.freedom p{margin:0;font-size:13px;color:var(--mut)}
+.loans{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.loans button{flex:1;font-size:14px;min-width:120px}
+#bar{position:fixed;bottom:12px;inset-inline-start:364px;inset-inline-end:12px;display:flex;gap:12px;align-items:stretch}
+#mentor{flex:1;display:flex;gap:12px;align-items:flex-start;background:var(--paper);border-radius:18px;box-shadow:var(--shadow);padding:12px 14px}
+.av{flex:none;width:48px;height:48px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe08a,var(--gold) 55%,var(--gold2));display:grid;place-items:center;font:800 18px Rubik;color:#3a1f00}
+#mentor .mt{flex:1}#mentor b{font-size:14px}#mText{margin:2px 0 0;font-size:16px;max-width:70ch}
+.ctrls{display:flex;flex-direction:column;gap:8px;align-items:stretch;background:var(--paper);border-radius:18px;box-shadow:var(--shadow);padding:12px}
+.die{width:56px;height:56px;margin:0 auto;border-radius:12px;background:#fff;box-shadow:inset 0 -4px 0 #ddd,0 3px 8px rgba(0,0,0,.2);display:grid;grid-template:repeat(3,1fr)/repeat(3,1fr);padding:8px;gap:2px}
+.die i{width:10px;height:10px;border-radius:50%;background:#1d1a2b;place-self:center;visibility:hidden}
+.die.spin{animation:spin .5s linear}
+@keyframes spin{to{transform:rotate(360deg) scale(1.05)}}
+#roll{font-size:18px;min-width:150px}
+.modal{position:fixed;inset:0;background:rgba(20,10,0,.35);display:grid;place-items:center;padding:16px;z-index:5}
+.modal[hidden]{display:none}
+.card{width:min(460px,100%);max-height:calc(100vh - 32px);overflow:auto;background:var(--paper);border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:22px;animation:pop .35s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{from{transform:scale(.85) translateY(20px);opacity:0}}
+.tag{display:inline-block;background:var(--c);color:#fff;font-weight:700;font-size:14px;padding:4px 12px;border-radius:999px}
+.card h2{font:30px/1.1 "Secular One",Rubik;margin:12px 0 6px;text-wrap:balance}
+.card .d{margin:0 0 12px;color:var(--mut)}
+.grid{display:grid;gap:2px;background:var(--paper2);border-radius:14px;padding:10px 14px;margin:8px 0}
+.grid .row{border-bottom:1px dashed var(--line)}.grid .row:last-child{border:0}
+.big{font-size:22px;font-weight:800}
+.acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.acts button{flex:1 1 auto}
+.roi{margin-top:8px;padding:10px 12px;border-radius:12px;border:1px dashed var(--gold2);font-size:15px}
+.qty{display:flex;gap:6px;align-items:center;justify-content:center;margin:10px 0}
+.qty button{min-width:52px;padding:0 8px;font-size:14px}.qty output{min-width:90px;text-align:center;font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.note{font-size:14px;color:var(--mut);margin:6px 0 0}
+.err{color:var(--red);font-size:14px;min-height:1.4em;margin:4px 0 0}
+.sellrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.overlay{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:16px;overflow:auto;background:linear-gradient(180deg,rgba(255,224,168,.55),rgba(217,120,92,.6))}
+.overlay[hidden]{display:none}
+@media(max-height:900px),(max-width:600px){.overlay{place-items:start center}}
+.intro{width:min(880px,100%);background:var(--paper);border-radius:26px;padding:clamp(20px,4vw,36px);box-shadow:0 30px 80px rgba(60,20,0,.35)}
+.intro h1{font:clamp(36px,6vw,52px)/1.05 "Secular One",Rubik;margin:0}
+.intro .lead{font-size:18px;max-width:60ch;margin:10px 0 18px}
+.profs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));gap:12px}
+.prof{text-align:start;display:block;padding:14px;border-radius:16px;background:var(--paper2);border:2px solid transparent;min-height:auto}
+.prof:hover,.prof:focus-visible{border-color:var(--gold)}
+.prof h3{margin:0 0 6px;font-size:20px}
+.prof .row{font-size:14px}
+.cont{margin-bottom:14px}.cont:empty{display:none}.cont button{width:100%}
+#toast{position:fixed;top:84px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:999px;font-weight:700;opacity:0;transition:opacity .3s;pointer-events:none;z-index:6;white-space:nowrap}
+#toast.on{opacity:1}
+#loading{font:24px "Secular One",Rubik;color:#3a1f00}
+button.brand{border:0;min-height:auto;cursor:pointer}
+#modeStat b{font-size:16px;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+.lh{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.who{font-size:16px;display:flex;align-items:center;gap:8px}
+.lgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr));gap:14px;margin:14px 0}
+.lcard{background:var(--paper2);border-radius:18px;padding:16px}
+.lcard h2{font:22px/1.1 "Secular One",Rubik;margin:0 0 8px}
+.lcard .prof{background:var(--paper)}
+input,select{font:inherit;font-size:16px;color:var(--ink);background:var(--paper);border:1.5px solid var(--line);border-radius:12px;min-height:44px;padding:0 12px;width:100%}
+input:focus,select:focus{outline:3px solid var(--blue);outline-offset:1px}
+.inl{display:flex;gap:8px;align-items:center}.inl input{flex:1}.inl button{flex:none}
+.namef{background:light-dark(#fff3d2,#33291a);border:1px solid light-dark(#f2d48a,#5b4720);border-radius:16px;padding:14px;margin:12px 0}
+.namef label{display:block;font-weight:700;margin-bottom:6px}
+.lb{list-style:none;margin:8px 0 0;padding:0}
+.lb li{display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:10px}
+.lb li:nth-child(odd){background:light-dark(rgba(0,0,0,.035),rgba(255,255,255,.04))}
+.lb li.me{background:light-dark(#fff1c4,#4a3a14);font-weight:700}
+.lb .rk{width:26px;text-align:center;font-weight:800;color:var(--gold2)}.lb .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb .rs{white-space:nowrap;font-size:14px;color:var(--mut)}
+.glist{display:grid;gap:8px;margin:6px 0 12px}
+.gitem{display:flex;justify-content:space-between;align-items:center;text-align:start;width:100%;background:var(--paper);padding:10px 14px}
+.gitem small{color:var(--mut)}
+.code{font:800 30px/1 Rubik;letter-spacing:.18em;direction:ltr;unicode-bidi:isolate;text-align:end}
+.chal{background:var(--paper);border-radius:14px;padding:12px 14px;margin-top:10px}
+.chal h3{margin:0;font-size:18px}.meta{font-size:14px;color:var(--mut);margin:2px 0 6px}
+.members{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.members span{background:var(--paper);border-radius:999px;padding:4px 12px;font-size:14px}
+.cf{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:8px}
+@media(max-width:600px){.cf{grid-template-columns:1fr}}
+.stack8>*+*{margin-top:8px}
+@media(max-width:820px){
+ #sheetBtn{display:block}
+ #sheet{display:none;inset:76px 8px 8px 8px;width:auto;z-index:4}
+ #sheet.open{display:block}
+ #bar{inset-inline:8px;bottom:8px;flex-direction:column}
+ .ctrls{flex-direction:row;align-items:center}.ctrls #roll{flex:1}
+ .die{margin:0}
+ .brand{font-size:22px}.stat b{font-size:17px}
+ #mText{font-size:15px}
+}
+@media(prefers-reduced-motion:reduce){.card,.die.spin{animation:none}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<header class="hud">
+  <button id="lobbyBtn" class="brand" title="חזרה ללובי">מירוץ העכברים</button>
+  <div class="stat" id="modeStat"><span>מצב</span><b id="hMode">חופשי</b></div>
+  <div class="stat"><span>מזומן</span><b id="hCash">₪0</b></div>
+  <div class="stat"><span>תזרים חודשי</span><b id="hCf">₪0</b></div>
+  <div class="stat"><span>חודש</span><b id="hMonth">1</b></div>
+  <button id="sheetBtn">הדוח שלי</button>
+</header>
+<aside id="sheet" aria-label="הדוח הכספי"></aside>
+<section id="bar">
+  <div id="mentor"><div class="av" aria-hidden="true">אע</div><div class="mt"><b>אבא עשיר</b><p id="mText">בחר מקצוע ונתחיל.</p></div><button id="voiceBtn" class="chip">קול: כבוי</button></div>
+  <div class="ctrls"><div id="die" class="die" aria-live="polite"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><button id="roll" class="primary" disabled>הטל קובייה</button></div>
+</section>
+<div id="toast"></div>
+<div id="modal" class="modal" hidden><div class="card" id="card" role="dialog" aria-modal="true"></div></div>
+<div id="start" class="overlay" hidden><div class="intro" id="lobby"></div></div>
+<div id="loading" class="overlay">טוען את העיר…</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+{
+const $=s=>document.querySelector(s);
+const fmt=n=>{const r=Math.round(n);return (r<0?'−':'')+'₪'+Math.abs(r).toLocaleString('he-IL')};
+const fmtP=n=>'₪'+(n<1?n.toFixed(2):(+n.toFixed(2)).toLocaleString('he-IL'));
+const sgn=n=>(n>0?'+':'')+fmt(n);
+const cls=n=>n>0?'pos':n<0?'neg':'';
+const rnd=a=>a[Math.floor(R()*a.length)];
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function R(){let t=(S.rng=(S.rng+0x6D2B79F5)>>>0);t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}
+const MAXM=100;
+/* ---------------- ONLINE ---------------- */
+const SB='https://xvqaxphyfqdzkddmoosu.supabase.co',SBK='sb_publishable_w3ubvawN4BnqOul66NSaLg_KM6yTJhc';
+const ERR={unauthorized:'החשבון שלך לא מזוהה בשרת.',group_not_found:'לא מצאנו קבוצה עם הקוד הזה',group_full:'הקבוצה מלאה (50 שחקנים)',not_member:'אתה לא חבר בקבוצה הזו',too_many_groups:'הגעת למקסימום של 20 קבוצות',bad_nickname:'כינוי צריך להיות 2–20 תווים',bad_name:'שם קבוצה צריך להיות 2–40 תווים',bad_title:'שם אתגר צריך להיות 2–50 תווים',too_many_challenges:'יש כבר 5 אתגרים פעילים בקבוצה',challenge_closed:'האתגר הזה כבר נסגר',already_finished:'כבר סיימת את המשחק הזה',challenge_not_found:'האתגר לא נמצא'};
+async function api(fn,args={}){let r;try{r=await fetch(`${SB}/rest/v1/rpc/${fn}`,{method:'POST',headers:{apikey:SBK,'Content-Type':'application/json'},body:JSON.stringify(args)})}catch(e){throw new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.')}
+ const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(ERR[j?.message]||'משהו השתבש בשרת. נסה שוב.');return j}
+let ME=null;try{ME=JSON.parse(localStorage.getItem('rr-player')||'null')}catch(e){}
+const auth=()=>({p_id:ME.id,p_secret:ME.secret});
+const PNAME={teacher:'מורה',driver:'נהג משאית',dev:'מתכנת',doctor:'רופאה'};
+
+/* ---------------- DATA ---------------- */
+const PROFS=[
+ {id:'teacher',n:'מורה',salary:9000,cash:5000,exp:[['שכירות',3200],['רכב',900],['אוכל ושוטף',2800],['הלוואת סטודנט',400]]},
+ {id:'driver',n:'נהג משאית',salary:8500,cash:3500,exp:[['שכירות',2900],['רכב',1200],['אוכל ושוטף',2700],['החזר כרטיס אשראי',600]]},
+ {id:'dev',n:'מתכנת',salary:22000,cash:9000,exp:[['משכנתא',7500],['ליסינג',2800],['אוכל ומסעדות',5200],['מנויים ובילויים',2300],['הלוואת רכב',1200]]},
+ {id:'doctor',n:'רופאה',salary:30000,cash:12000,exp:[['משכנתא',11000],['רכב יוקרה',3800],['אוכל ומסעדות',6000],['בית ספר פרטי',3500],['הלוואות לימודים',2400]]},
+];
+const TICK={TCHN:{n:'TCHN · טכנולוגיה',div:0,step:[10,100]},BANK:{n:'BANK · בנק',div:0.15,step:[10,100]},MOON:{n:'MOON · קריפטו',div:0,step:[100,1000]}};
+const DEALS=[
+ {k:'re',n:'דירת סטודיו בבאר שבע',d:'דירה קטנה ליד האוניברסיטה. סטודנטים תמיד מחפשים.',cost:85000,down:8000,cf:450},
+ {k:'re',n:'דירת 3 חדרים בחדרה',d:'שכונה ותיקה, דייר קבוע כבר 4 שנים.',cost:140000,down:14000,cf:700},
+ {k:'re',n:'פנטהאוז בצפון תל אביב',d:'נוף לים ולובי מפואר. השכירות לא מכסה את המשכנתא.',cost:320000,down:40000,cf:-900,q:'נראה מרשים. רגע לפני שאתה מתאהב — מי משלם כל חודש, הדייר או אתה?'},
+ {k:'re',n:'דירה בעיר פיתוח',d:'מחיר נמוך וביקוש יציב לשכירות.',cost:70000,down:6000,cf:500},
+ {k:'re',n:'בניין 4 דירות בעפולה',d:'עסקה גדולה: ארבעה דיירים, משכנתא אחת.',cost:300000,down:30000,cf:2400},
+ {k:'re',n:'דירה ישנה שדורשת שיפוץ',d:'זולה, אבל התיקונים אוכלים את כל השכירות.',cost:60000,down:5000,cf:-200,q:'זול זה לא אותו דבר כמו משתלם. מה המספר בשורה התחתונה?'},
+ {k:'biz',n:'עגלת קפה בתחנת רכבת',d:'בלי הלוואה — משלמים הכל במזומן.',cost:9000,down:9000,cf:700},
+ {k:'biz',n:'מכבסה בשירות עצמי',d:'מכונות שעובדות לבד 24 שעות ביממה.',cost:50000,down:10000,cf:1300},
+ {k:'biz',n:'זיכיון פיצה',d:'מותג מוכר, מנהל משמרת מנהל בשבילך.',cost:120000,down:25000,cf:2600},
+ {k:'biz',n:'חנות צעצועים ברחוב ראשי',d:'לקוחות קבועים וספקים מסודרים.',cost:60000,down:12000,cf:1100},
+ {k:'biz',n:'הסטארט־אפ של חבר',d:'"זה הולך להיות הדבר הבא". אין הכנסות עדיין.',cost:6000,down:6000,cf:0,q:'שאלה אחת: כמה זה מכניס לך החודש? ובחודש הבא?'},
+ {k:'stock',tk:'TCHN',p:5,n:'TCHN צנחה ל־₪5',d:'דוח רבעוני חלש. כולם מוכרים בפאניקה.'},
+ {k:'stock',tk:'TCHN',p:15,n:'TCHN נסחרת ב־₪15',d:'שוק רגוע, אין חדשות מיוחדות.'},
+ {k:'stock',tk:'BANK',p:18,n:'BANK נסחרת ב־₪18',d:'בנק יציב שמחלק דיבידנד כל חודש.'},
+ {k:'stock',tk:'BANK',p:14,n:'BANK ירדה ל־₪14',d:'כל השוק ירד. העסק של הבנק לא השתנה.'},
+ {k:'crypto',tk:'MOON',p:1,n:'MOON — מטבע חדש ב־₪1',d:'כל הטלגרם מדבר עליו.'},
+ {k:'crypto',tk:'MOON',p:4,n:'MOON עלה ל־₪4',d:'משפיענים מבטיחים שזה רק ההתחלה.'},
+];
+const DOODADS=[
+ {n:'אייפון חדש',a:4500,inst:true,q:'הישן עוד עובד מצוין… אבל לכולם כבר יש את החדש.'},
+ {n:'חופשה באילת',a:3800,q:'מגיע לך לנוח. רק תשאל: מאיפה הכסף הזה הגיע — מנכס, או מהמשכורת?'},
+ {n:'ארוחה עם חברים במסעדה',a:650,q:'הוצאות קטנות הן לא הבעיה. הרגל של הוצאות קטנות — כן.'},
+ {n:'תיקון לרכב',a:2200,q:'את זה אי אפשר לדחות. בגלל זה צריך קרן חירום.'},
+ {n:'נעלי מותג',a:900,q:'נעליים לא מכניסות כסף. הן רק נראות כאילו יש לך.'},
+ {n:'קונסולה חדשה',a:2400,inst:true,q:'שים לב לכפתור "בתשלומים". הוא נראה נחמד. הוא לא.'},
+ {n:'משקפי שמש של מעצב',a:1200,q:'עשירים קונים צעצועים מהתזרים של הנכסים — לא מהמשכורת.'},
+];
+const MARKET=[
+ {k:'sell',type:'re',mult:1.6,n:'משקיע קונה דירות',d:'משקיע מציע פי 1.6 ממה ששילמת על כל דירה.'},
+ {k:'sell',type:'biz',mult:2,n:'רשת רוצה לקנות עסקים',d:'רשת גדולה מציעה פי 2 ממחיר הקנייה על כל עסק.'},
+ {k:'price',tk:'TCHN',p:32,n:'TCHN זינקה ל־₪32',d:'דוח מעולה ומוצר חדש. כולם רוצים את המניה.'},
+ {k:'price',tk:'TCHN',p:3,n:'TCHN צנחה ל־₪3',d:'המוצר נכשל. המשקיעים בורחים.'},
+ {k:'price',tk:'MOON',p:14,n:'MOON בשמיים: ₪14',d:'בורסה גדולה הכריזה שהיא מוסיפה את המטבע.'},
+ {k:'price',tk:'MOON',p:0.05,n:'MOON קרס ל־₪0.05',d:'המפתחים נעלמו עם הכסף.'},
+ {k:'repair',type:'re',amt:1500,n:'נזילה!',d:'כל דירה שבבעלותך צריכה תיקון של ₪1,500.'},
+ {k:'bonus',type:'biz',n:'עונת חגים',d:'העסקים שלך מכניסים החודש בונוס חד־פעמי בגובה התזרים החודשי שלהם.'},
+ {k:'div',tk:'BANK',amt:2,n:'דיבידנד מיוחד מ־BANK',d:'הבנק מחלק ₪2 לכל מניה.'},
+];
+const TT={P:{n:'יום משכורת',c:'#f2b632',ink:'#3a2400'},O:{n:'הזדמנות',c:'#1f9d63',ink:'#ffffff'},D:{n:'הוצאה מפתה',c:'#e2483d',ink:'#ffffff'},M:{n:'שוק',c:'#2f6fdb',ink:'#ffffff'},X:{n:'פיטורים',c:'#3b3f4e',ink:'#ffffff'}};
+const BOARD='PODOMOPOXODMPODOMOPODOMO';
+const MODEL_FOR={re:'apartment',biz:'business',stock:'stock',crypto:'crypto'};
+
+/* ---------------- STATE ---------------- */
+let S=null, busy=false;
+const passive=()=>S.assets.reduce((s,a)=>s+a.cf,0)+S.shares.BANK*TICK.BANK.div;
+const expTotal=()=>S.exp.reduce((s,e)=>s+e[1],0)+S.loans*0.1+Math.round(S.credit*0.05);
+const cashflow=()=>S.salary+passive()-expTotal();
+function newState(p,o={}){const seed=(o.seed??Math.floor(Math.random()*2147483646)+1)>>>0;return{mode:o.mode||'free',seed,rng:seed,resultId:o.resultId||null,challengeId:o.challengeId||null,groupId:o.groupId||null,title:o.title||'',profId:p.id,prof:p.n,salary:p.salary,cash:p.cash,exp:p.exp.map(e=>[...e]),assets:[],shares:{TCHN:0,BANK:0,MOON:0},prices:{TCHN:10,BANK:18,MOON:1},loans:0,credit:0,pos:0,month:1,turn:0,nextId:1,stats:{deals:0,bad:0,doodad:0,autoLoan:0,sold:0},deck:[],won:false}}
+const saveKey=st=>st.resultId?'rr-save-'+st.resultId:'rr-save-free';
+function save(){if(!S)return;try{localStorage.setItem(saveKey(S),JSON.stringify(S,(k,v)=>k==='m'?undefined:v))}catch(e){}}
+function dropSave(st){try{localStorage.removeItem(saveKey(st))}catch(e){}}
+function loadSave(key){try{const s=JSON.parse(localStorage.getItem(key)||'null');return s&&!s.over?s:null}catch(e){return null}}
+
+/* ---------------- 3D ---------------- */
+const canvas=$('#c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(42,1,0.1,200);
+camera.position.set(3,20,22);
+const controls=new OrbitControls(camera,canvas);
+controls.enableDamping=true;controls.minDistance=9;controls.maxDistance=45;controls.maxPolarAngle=1.38;controls.target.set(0,0,0);
+scene.add(new THREE.HemisphereLight(0xfff1d6,0x7a5a48,1.15));
+const sun=new THREE.DirectionalLight(0xffe2b0,2.7);sun.position.set(12,22,9);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-15,right:15,top:15,bottom:-15,near:1,far:60});sun.shadow.bias=-0.0005;
+scene.add(sun);
+const shadowFloor=new THREE.Mesh(new THREE.PlaneGeometry(80,80),new THREE.ShadowMaterial({opacity:.22}));
+shadowFloor.rotation.x=-Math.PI/2;shadowFloor.position.y=-1.6;shadowFloor.receiveShadow=true;scene.add(shadowFloor);
+const std=(c,r=.8)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
+const base=new THREE.Mesh(new THREE.BoxGeometry(22,0.7,22),std('#6b4430',.7));base.position.y=-0.35;base.castShadow=true;base.receiveShadow=true;scene.add(base);
+const top=new THREE.Mesh(new THREE.BoxGeometry(21,0.1,21),std('#f6efe2',.9));top.position.y=0.05;top.receiveShadow=true;scene.add(top);
+
+function centerTex(){const cv=document.createElement('canvas');cv.width=cv.height=1024;const g=cv.getContext('2d');
+ g.fillStyle='#efe3cb';g.fillRect(0,0,1024,1024);g.strokeStyle='#d9c6a2';g.lineWidth=6;g.setLineDash([22,16]);
+ for(let r=0;r<4;r++)for(let c=0;c<4;c++){g.strokeRect(28+c*246,28+r*246,226,226)}
+ g.setLineDash([]);g.fillStyle='rgba(120,90,50,.22)';g.font='800 92px Rubik';g.textAlign='center';g.textBaseline='middle';g.direction='rtl';g.fillText('התיק שלך',512,512);
+ const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t}
+
+const SZ=2.25;
+function tileGrid(i){i%=24;if(i<=6)return[6-i,6];if(i<=12)return[0,6-(i-6)];if(i<=18)return[i-12,0];return[6,i-18]}
+const tilePos=i=>{const[gx,gz]=tileGrid(i);return new THREE.Vector3((gx-3)*SZ,0.26,(gz-3)*SZ)};
+const tileRot=i=>i<6?0:i<12?-Math.PI/2:i<18?Math.PI:Math.PI/2;
+function drawIcon(g,t,x,y,c){g.save();g.fillStyle=c;g.strokeStyle=c;g.lineWidth=9;g.lineCap='round';g.lineJoin='round';
+ if(t==='P'){g.beginPath();g.arc(x,y,42,0,7);g.stroke();g.font='800 50px Rubik';g.textAlign='center';g.textBaseline='middle';g.fillText('₪',x,y+3)}
+ else if(t==='O'){g.beginPath();g.moveTo(x-46,y+34);g.lineTo(x-14,y+2);g.lineTo(x+8,y+22);g.lineTo(x+44,y-26);g.stroke();g.beginPath();g.moveTo(x+44,y-26);g.lineTo(x+16,y-26);g.moveTo(x+44,y-26);g.lineTo(x+44,y+2);g.stroke()}
+ else if(t==='D'){g.beginPath();g.roundRect(x-36,y-20,72,62,8);g.stroke();g.beginPath();g.arc(x,y-20,20,Math.PI,0);g.stroke()}
+ else if(t==='M'){[[-34,-10,30],[-6,-30,50],[22,-4,24]].forEach(([dx,dy,h])=>{g.fillRect(x+dx,y+dy,18,h);g.fillRect(x+dx+7,y+dy-12,4,h+24)})}
+ else{g.beginPath();g.moveTo(x-34,y-34);g.lineTo(x+34,y+34);g.moveTo(x+34,y-34);g.lineTo(x-34,y+34);g.stroke()}
+ g.restore()}
+const texCache={};
+function tileTex(t){if(texCache[t])return texCache[t];const T=TT[t];const cv=document.createElement('canvas');cv.width=cv.height=256;const g=cv.getContext('2d');
+ g.fillStyle='#fbf6ea';g.fillRect(0,0,256,256);g.fillStyle=T.c;g.beginPath();g.roundRect(12,12,232,232,28);g.fill();
+ drawIcon(g,t,128,94,T.ink);g.fillStyle=T.ink;g.textAlign='center';g.textBaseline='middle';g.direction='rtl';g.font='800 38px Rubik';
+ const w=T.n.split(' ');if(g.measureText(T.n).width>214&&w.length>1){g.fillText(w[0],128,172);g.fillText(w.slice(1).join(' '),128,212)}else g.fillText(T.n,128,190);
+ const tx=new THREE.CanvasTexture(cv);tx.colorSpace=THREE.SRGBColorSpace;tx.anisotropy=8;return texCache[t]=tx}
+
+const MODELS={};let pawn=null;
+const tweens=[];
+const tween=(dur,fn)=>new Promise(res=>tweens.push({t0:performance.now(),dur,fn,res}));
+const easeBack=p=>{const c=1.7;return 1+(c+1)*Math.pow(p-1,3)+c*Math.pow(p-1,2)};
+
+function label(text,color,pos,rise=true){const cv=document.createElement('canvas');cv.width=512;cv.height=128;const g=cv.getContext('2d');
+ g.font='800 64px Rubik';g.direction='rtl';const w=Math.min(500,g.measureText(text).width+48);
+ g.fillStyle='rgba(255,250,240,.95)';g.beginPath();g.roundRect(256-w/2,14,w,100,50);g.fill();g.fillStyle=color;g.textAlign='center';g.textBaseline='middle';g.fillText(text,256,66);
+ const tx=new THREE.CanvasTexture(cv);tx.colorSpace=THREE.SRGBColorSpace;const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx,depthTest:false,transparent:true}));
+ sp.scale.set(4,1,1);sp.position.copy(pos);sp.renderOrder=10;scene.add(sp);
+ if(rise){const y0=pos.y;tween(1900,p=>{sp.position.y=y0+p*1.6;sp.material.opacity=p<.7?1:1-(p-.7)/.3;if(p>=1){scene.remove(sp);tx.dispose()}})}
+ return sp}
+
+const SLOTS=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)SLOTS.push(new THREE.Vector3((c-1.5)*2.48,0.1,(r-1.5)*2.48));
+const slotUsed=Array(16).fill(null);
+const mModels={stock:null,crypto:null};
+function spawn(kind,text,color){const idx=slotUsed.indexOf(null);if(idx<0)return null;const m=MODELS[kind].clone(true);
+ m.position.copy(SLOTS[idx]);m.rotation.y=(Math.random()-.5)*.3;m.userData.slot=idx;slotUsed[idx]=m;m.scale.setScalar(0.001);scene.add(m);
+ tween(650,p=>m.scale.setScalar(Math.max(.001,easeBack(p)*0.86)));
+ if(text)label(text,color||'#178a55',SLOTS[idx].clone().add(new THREE.Vector3(0,2.6,0)));return m}
+function despawn(m){if(!m)return;slotUsed[m.userData.slot]=null;tween(350,p=>{m.scale.setScalar(Math.max(.001,(1-p)*.86));if(p>=1)scene.remove(m)})}
+function syncMarketModels(silent){const want={stock:S.shares.TCHN+S.shares.BANK>0,crypto:S.shares.MOON>0};
+ for(const k of['stock','crypto']){if(want[k]&&!mModels[k])mModels[k]=spawn(k,silent?null:(k==='stock'?'תיק מניות':'ארנק קריפטו'),'#2f6fdb');if(!want[k]&&mModels[k]){despawn(mModels[k]);mModels[k]=null}}}
+
+function confetti(){const n=320,geo=new THREE.BoxGeometry(.18,.04,.12),mat=new THREE.MeshStandardMaterial({roughness:.5});
+ const im=new THREE.InstancedMesh(geo,mat,n);const cols=['#f2b632','#e2483d','#1f9d63','#2f6fdb','#ffffff'];const P=[];const d=new THREE.Object3D();
+ for(let i=0;i<n;i++){P.push({x:(Math.random()-.5)*16,y:10+Math.random()*8,z:(Math.random()-.5)*16,v:2+Math.random()*3,r:Math.random()*6,s:Math.random()*4});im.setColorAt(i,new THREE.Color(cols[Math.floor(Math.random()*cols.length)]))}
+ scene.add(im);tween(5200,p=>{const t=p*5.2;P.forEach((q,i)=>{d.position.set(q.x+Math.sin(t*2+i)*.4,q.y-q.v*t,q.z);d.rotation.set(q.r+t*q.s,t*q.s,q.r);d.updateMatrix();im.setMatrixAt(i,d.matrix)});im.instanceMatrix.needsUpdate=true;if(p>=1)scene.remove(im)})}
+
+function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
+ const narrow=w<820;const tg=new THREE.Vector3(narrow?0:3.2,0,narrow?1.2:0.6);controls.target.copy(tg);
+ const half=Math.tan(THREE.MathUtils.degToRad(camera.fov/2));const dist=Math.max(28,(narrow?12.2:16.5)/(half*Math.min(camera.aspect,1.5)));
+ controls.maxDistance=Math.max(45,dist*1.4);camera.position.copy(tg).add(new THREE.Vector3(narrow?0:.2,.68,.73).normalize().multiplyScalar(dist))}
+addEventListener('resize',resize);
+renderer.setAnimationLoop(()=>{const now=performance.now();for(let i=tweens.length-1;i>=0;i--){const tw=tweens[i];const p=Math.min(1,(now-tw.t0)/tw.dur);tw.fn(p);if(p>=1){tweens.splice(i,1);tw.res()}}
+ if(pawn&&!busy)pawn.rotation.y+=.01;
+ if(mModels.crypto)mModels.crypto.rotation.y=Math.sin(now/900)*.25;
+ controls.update();renderer.render(scene,camera)});
+
+async function buildWorld(){
+ await Promise.race([document.fonts.load('800 40px Rubik'),new Promise(r=>setTimeout(r,2500))]);
+ const loader=new GLTFLoader();
+ await Promise.all(['apartment','business','stock','crypto','pawn'].map(async n=>{const g=await loader.loadAsync('assets/'+n+'.glb');g.scene.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true}});MODELS[n]=g.scene}));
+ const cm=new THREE.Mesh(new THREE.PlaneGeometry(10.6,10.6),new THREE.MeshStandardMaterial({map:centerTex(),roughness:.95}));cm.rotation.x=-Math.PI/2;cm.position.y=0.102;cm.receiveShadow=true;scene.add(cm);
+ const tGeo=new THREE.BoxGeometry(2.12,0.16,2.12),tMat=std('#fbf6ea',.85),pGeo=new THREE.PlaneGeometry(2.04,2.04);
+ for(let i=0;i<24;i++){const g=new THREE.Group();const p=tilePos(i);g.position.set(p.x,0.18,p.z);g.rotation.y=tileRot(i);
+  const b=new THREE.Mesh(tGeo,tMat);b.castShadow=true;b.receiveShadow=true;g.add(b);
+  const f=new THREE.Mesh(pGeo,new THREE.MeshStandardMaterial({map:tileTex(BOARD[i]),roughness:.7}));f.rotation.x=-Math.PI/2;f.position.y=0.081;f.receiveShadow=true;g.add(f);scene.add(g)}
+ [['apartment',-1,1],['business',-1,-1],['stock',1,-1],['crypto',1,1]].forEach(([n,sx,sz])=>{const m=MODELS[n].clone(true);m.position.set(sx*9.25,0.1,sz*9.25);m.scale.setScalar(.82);m.lookAt(sx*30,0.1,sz*30);scene.add(m)});
+ pawn=MODELS.pawn.clone(true);pawn.traverse(o=>{if(o.isMesh){o.material=o.material.clone();o.material.color.set('#e2483d')}});pawn.scale.setScalar(1.7);pawn.position.copy(tilePos(0));scene.add(pawn);
+ resize()}
+
+async function hop(from,to){const a=tilePos(from),b=tilePos(to);await tween(270,p=>{pawn.position.lerpVectors(a,b,p);pawn.position.y=a.y+Math.sin(p*Math.PI)*0.9;pawn.scale.setScalar(1.7*(1+Math.sin(p*Math.PI)*.08))})}
+
+/* ---------------- UI ---------------- */
+let voiceOn=false,heVoice=null;
+function pickVoice(){heVoice=(speechSynthesis.getVoices()||[]).find(v=>/^he|iw/i.test(v.lang))||null}
+if('speechSynthesis' in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
+$('#voiceBtn').onclick=()=>{if(!('speechSynthesis' in window)){toast('הדפדפן לא תומך בהקראה');return}pickVoice();if(!heVoice){toast('לא נמצא קול עברי בדפדפן הזה');return}
+ voiceOn=!voiceOn;$('#voiceBtn').textContent='קול: '+(voiceOn?'פועל':'כבוי');if(voiceOn)speak($('#mText').textContent);else speechSynthesis.cancel()};
+function speak(t){if(!voiceOn||!heVoice)return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.voice=heVoice;u.lang=heVoice.lang;u.rate=1.02;speechSynthesis.speak(u)}catch(e){}}
+function mentor(t){$('#mText').textContent=t;speak(t)}
+let toastT;function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),2200)}
+const PIPS={1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+function showDie(n){const d=$('#die');d.querySelectorAll('i').forEach((el,i)=>el.style.visibility=PIPS[n].includes(i)?'visible':'hidden');d.setAttribute('aria-label','יצא '+n)}
+async function rollDie(){const d=$('#die');d.classList.remove('spin');void d.offsetWidth;d.classList.add('spin');let n=1;for(let k=0;k<7;k++){showDie(1+Math.floor(Math.random()*6));await new Promise(r=>setTimeout(r,65))}n=1+Math.floor(R()*6);showDie(n);return n}
+
+function render(){if(!S)return;const cf=cashflow(),pas=passive(),ex=expTotal();
+ $('#hCash').textContent=fmt(S.cash);$('#hCf').textContent=sgn(cf);$('#hCf').className=cls(cf);$('#hMonth').textContent=S.mode==='free'?S.month:S.month+'/'+MAXM;$('#hMode').textContent=S.mode==='free'?'חופשי':S.mode==='weekly'?'אתגר שבועי':S.title;
+ const pct=Math.min(100,ex?pas/ex*100:0);
+ const inc=[['משכורת',S.salary],...S.assets.map(a=>[a.n,a.cf])];if(S.shares.BANK)inc.push(['דיבידנד BANK',S.shares.BANK*TICK.BANK.div]);
+ const exps=[...S.exp];if(S.loans)exps.push(['הלוואה בנקאית (10%)',S.loans*0.1]);if(S.credit)exps.push(['חוב אשראי (5%)',Math.round(S.credit*0.05)]);
+ const holdings=Object.keys(S.shares).filter(k=>S.shares[k]>0);
+ const liab=S.assets.filter(a=>a.cost>a.down).map(a=>['משכנתא · '+a.n,a.cost-a.down]);if(S.loans)liab.push(['הלוואה בנקאית',S.loans]);if(S.credit)liab.push(['חוב כרטיס אשראי',S.credit]);
+ const row=(a,b,c='')=>`<div class="row"><span>${a}</span><span class="${c}">${b}</span></div>`;
+ $('#sheet').innerHTML=`<h2>הדוח הכספי שלך</h2><p class="sub">${S.prof} · חודש ${S.month}</p>
+ <div class="freedom"><div class="fl"><span>מד החופש</span><span>${fmt(pas)} / ${fmt(ex)}</span></div><div class="track"><i style="width:${pct}%"></i></div><p>הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.</p></div>
+ <h3>הכנסות בחודש</h3>${inc.map(([a,b])=>row(a,sgn(b),cls(b))).join('')}
+ <h3>הוצאות בחודש</h3>${exps.map(([a,b])=>row(a,fmt(b))).join('')}
+ <div class="total"><span>תזרים חודשי</span><span class="${cls(cf)}">${sgn(cf)}</span></div>
+ <h3>נכסים</h3>${S.assets.length||holdings.length?S.assets.map(a=>row(a.n,fmt(a.cost))).join('')+holdings.map(k=>row(`${S.shares[k].toLocaleString('he-IL')} מניות ${k} · ${fmtP(S.prices[k])}`,fmt(S.shares[k]*S.prices[k]))).join(''):'<p class="empty">עוד אין. נכס = משהו שמכניס כסף לכיס שלך.</p>'}
+ <h3>התחייבויות</h3>${liab.length?liab.map(([a,b])=>row(a,fmt(b))).join(''):'<p class="empty">אין חובות.</p>'}
+ <div class="loans"><button data-act="loan">לקחת הלוואה ₪5,000</button><button data-act="repay" ${S.loans>=5000&&S.cash>=5000?'':'disabled'}>להחזיר ₪5,000</button>${S.credit?`<button data-act="credit" ${S.cash>=S.credit?'':'disabled'}>לסגור חוב אשראי</button>`:''}</div>
+ <p class="note">כל ₪5,000 הלוואה עולים ₪500 בחודש.</p>`}
+$('#sheet').onclick=e=>{const b=e.target.closest('[data-act]');if(!b||busy)return;const a=b.dataset.act;
+ if(a==='loan'){S.loans+=5000;S.cash+=5000;mentor('לקחת הלוואה: ₪5,000 במזומן, ו־₪500 בחודש להוצאות. הלוואה טובה רק אם היא קונה נכס שמכניס יותר ממה שהיא עולה.')}
+ if(a==='repay'){S.loans-=5000;S.cash-=5000;mentor('החזרת ₪5,000. התזרים החודשי שלך גדל ב־₪500 — זה כמו לקנות נכס.')}
+ if(a==='credit'){S.cash-=S.credit;S.credit=0;mentor('סגרת את חוב האשראי. זה החוב הכי יקר שיש — כל הכבוד.')}
+ render();save()};
+$('#sheetBtn').onclick=()=>$('#sheet').classList.toggle('open');
+
+function card({tag,color,title,html='',actions,onExtra}){const c=$('#card');
+ c.innerHTML=`<span class="tag" style="--c:${color}">${tag}</span><h2>${title}</h2>${html}<div class="acts">${actions.map((a,i)=>`<button data-i="${i}" class="${a.cls||''}" ${a.dis?'disabled':''}>${a.label}</button>`).join('')}</div>`;
+ $('#modal').hidden=false;setTimeout(()=>c.querySelector('.acts button:not(:disabled)')?.focus(),50);
+ return new Promise(res=>{c.onclick=e=>{const b=e.target.closest('button[data-i]');if(!b){onExtra&&onExtra(e);return}const a=actions[+b.dataset.i];if(a.fn&&a.fn()===false)return;$('#modal').hidden=true;res(a.v)}})}
+
+function ensureCash(){if(S.cash>=0)return;const need=Math.ceil(-S.cash/5000)*5000;S.loans+=need;S.cash+=need;S.stats.autoLoan+=need;
+ toast('הבנק נתן לך הלוואה של '+fmt(need));mentor('נגמר לך המזומן, אז הבנק לקח החלטה בשבילך: הלוואה של '+fmt(need)+'. ככה נראית חיים בלי קרן חירום.')}
+
+function payday(landed){const cf=cashflow();S.cash+=cf;S.month++;ensureCash();label(sgn(cf),cf>=0?'#178a55':'#d23b30',pawn.position.clone().add(new THREE.Vector3(0,2.4,0)));toast('יום משכורת: '+sgn(cf));render();return cf}
+
+/* ---------------- TILES ---------------- */
+async function onPayday(){const cf=payday(true),pas=passive(),ex=expTotal();
+ mentor(pas===0?'כל הכסף שלך מגיע מהעבודה. אם תפסיק לעבוד — הוא נעצר. המטרה: נכסים שעובדים בשבילך.':`הנכסים שלך מכסים ${Math.round(pas/ex*100)}% מההוצאות. תמשיך ככה.`);
+ await card({tag:'יום משכורת',color:'#c98a12',title:'קיבלת משכורת',html:`<div class="grid"><div class="row"><span>משכורת</span><span class="pos">${sgn(S.salary)}</span></div><div class="row"><span>הכנסה פסיבית</span><span class="pos">${sgn(pas)}</span></div><div class="row"><span>הוצאות</span><span class="neg">−${fmt(ex)}</span></div><div class="row"><b>נכנס לכיס</b><b class="${cls(cf)}">${sgn(cf)}</b></div></div>`,actions:[{label:'המשך',cls:'primary'}]})}
+
+function drawDeal(){if(!S.deck.length){const d=DEALS.map((_,i)=>i);for(let i=d.length-1;i>0;i--){const j=Math.floor(R()*(i+1));[d[i],d[j]]=[d[j],d[i]]}S.deck=d}return DEALS[S.deck.pop()]}
+
+async function onDeal(){const d=drawDeal();if(d.k==='stock'||d.k==='crypto'){S.prices[d.tk]=d.p;return trade(d.tk,d.n,d.d,'הזדמנות','#1f9d63')}
+ const loan=d.cost-d.down,roi=d.down?d.cf*12/d.down*100:0,short=Math.max(0,d.down-S.cash),loanNeed=Math.ceil(short/5000)*5000;
+ mentor(d.q||'לפני שאתה מחליט: כמה כסף אתה שם, וכמה זה מחזיר לך כל חודש? נסה לחשב את התשואה לבד.');
+ const v=await card({tag:'הזדמנות · '+(d.k==='re'?'נדל"ן':'עסק'),color:'#1f9d63',title:d.n,html:`<p class="d">${d.d}</p>
+  <div class="grid"><div class="row"><span>מחיר</span><span>${fmt(d.cost)}</span></div><div class="row"><span>הון עצמי (משלמים עכשיו)</span><b>${fmt(d.down)}</b></div>
+  <div class="row"><span>${d.k==='re'?'משכנתא':'הלוואה'} (חוב)</span><span>${fmt(loan)}</span></div><div class="row"><span>תזרים חודשי נטו</span><b class="big ${cls(d.cf)}">${sgn(d.cf)}</b></div></div>
+  <button class="chip" data-roi>תראה לי את החישוב</button><div class="roi" id="roiBox" hidden>תשואה על ההון = תזרים שנתי ÷ הון עצמי<br>${fmt(d.cf)} × 12 ÷ ${fmt(d.down)} = <b class="${cls(roi)}">${Math.round(roi)}% בשנה</b><br><span class="note">התזרים כבר כולל את תשלומי ה${d.k==='re'?'משכנתא':'הלוואה'}.</span></div>
+  <p class="note">יש לך ${fmt(S.cash)} במזומן.${short?` חסרים ${fmt(short)}.`:''}</p>`,
+  onExtra:e=>{if(e.target.closest('[data-roi]'))$('#roiBox').hidden=false},
+  actions:[short?{label:`הלוואה ${fmt(loanNeed)} וקנייה`,v:'loanbuy'}:{label:'לקנות ב־'+fmt(d.down),cls:'primary',v:'buy'},{label:'לוותר',v:'pass'}]});
+ if(v==='pass'){mentor(d.cf<0?'החלטה חכמה. נכס שמוציא לך כסף כל חודש הוא בעצם התחייבות.':d.cf===0?'נכון. בלי תזרים זה הימור, לא נכס.':'ויתרת. לפעמים זה נכון — רק תוודא שזה בגלל המספרים, לא בגלל פחד.');return}
+ if(v==='loanbuy'){S.loans+=loanNeed;S.cash+=loanNeed}
+ S.cash-=d.down;const a={id:S.nextId++,k:d.k,n:d.n,cost:d.cost,down:d.down,cf:d.cf};S.assets.push(a);S.stats.deals++;if(d.cf<0)S.stats.bad++;
+ a.m=spawn(MODEL_FOR[d.k],sgn(d.cf)+' לחודש',d.cf>=0?'#178a55':'#d23b30');
+ if(d.cf>0)mentor(`זה נכס: ${fmt(d.cf)} נכנסים לך כל חודש בלי לעבוד. תשואה של ${Math.round(roi)}% בשנה על הכסף ששמת.${v==='loanbuy'?' ושים לב: גם ההלוואה עולה ₪'+(loanNeed*0.1).toLocaleString('he-IL')+' בחודש.':''}`);
+ else if(d.cf<0)mentor('קנית משהו שמוציא לך כסף כל חודש. בעולם האמיתי קוראים לזה "השקעה". אבא עשיר קורא לזה התחייבות.');
+ else mentor('קנית משהו שלא מכניס כלום. אולי יום אחד הוא יהיה שווה הרבה — אבל עד אז, הוא לא עוזר לך לצאת מהמירוץ.');
+ render()}
+
+async function trade(tk,title,desc,tag,color){const T=TICK[tk],p=S.prices[tk];let q=0;
+ mentor(tk==='BANK'?'מניית דיבידנד: כל מניה מכניסה ₪0.15 בחודש. זה נכס אמיתי — קטן, אבל יציב.':tk==='TCHN'?'מניה בלי דיבידנד לא מכניסה כלום כל חודש. מרוויחים רק אם מוכרים ביותר ממה שקנית.':'מטבע בלי שום עסק מאחוריו. יכול לעשות פי 10 ויכול להתאפס. רק כסף שאתה מוכן להפסיד.');
+ const upd=()=>{$('#qv').value=q.toLocaleString('he-IL');$('#qinfo').textContent=q?`עסקה של ${fmt(q*p)}`:'בחר כמות';$('#qerr').textContent=''};
+ const maxBuy=()=>Math.floor(S.cash/p);
+ const v=await card({tag,color,title,html:`<p class="d">${desc}</p><div class="grid"><div class="row"><span>${T.n}</span><b class="big">${fmtP(p)}</b></div><div class="row"><span>יש לך</span><span>${S.shares[tk].toLocaleString('he-IL')} מניות · ${fmt(S.shares[tk]*p)}</span></div>${T.div?`<div class="row"><span>דיבידנד חודשי למניה</span><span class="pos">${fmtP(T.div)}</span></div>`:''}</div>
+  <div class="qty"><button data-q="${-T.step[1]}">−${T.step[1]}</button><button data-q="${-T.step[0]}">−${T.step[0]}</button><output id="qv">0</output><button data-q="${T.step[0]}">+${T.step[0]}</button><button data-q="${T.step[1]}">+${T.step[1]}</button></div>
+  <div class="qty"><button class="chip" data-q="max">מקסימום לקנייה (${maxBuy().toLocaleString('he-IL')})</button>${S.shares[tk]?`<button class="chip" data-q="all">כל המניות שלי</button>`:''}</div>
+  <p class="note" id="qinfo" style="text-align:center">בחר כמות</p><p class="err" id="qerr"></p>`,
+  onExtra:e=>{const b=e.target.closest('[data-q]');if(!b)return;const s=b.dataset.q;q=s==='max'?maxBuy():s==='all'?S.shares[tk]:Math.max(0,q+ +s);upd()},
+  actions:[{label:'לקנות',cls:'primary',v:'buy',fn:()=>{if(!q||q*p>S.cash){$('#qerr').textContent=q?'אין מספיק מזומן':'בחר כמות';return false}}},
+   {label:'למכור',v:'sell',dis:!S.shares[tk],fn:()=>{if(!q||q>S.shares[tk]){$('#qerr').textContent=q?'אין לך כל כך הרבה מניות':'בחר כמות';return false}}},{label:'לא עכשיו',v:'no'}]});
+ if(v==='buy'){S.cash-=q*p;S.shares[tk]+=q;S.basis=S.basis||{};S.basis[tk]=(S.basis[tk]||0)+q*p;syncMarketModels();
+  mentor(tk==='BANK'?`קנית ${q.toLocaleString('he-IL')} מניות. הן יכניסו ${fmt(q*T.div)} כל חודש.`:'קנית. עכשיו זה משחק של סבלנות ומזל — אין פה תזרים, רק מחיר.')}
+ if(v==='sell'){const avg=(S.basis?.[tk]||0)/(S.shares[tk]||1),gain=(p-avg)*q;S.cash+=q*p;S.basis[tk]=Math.max(0,(S.basis?.[tk]||0)-avg*q);S.shares[tk]-=q;syncMarketModels();
+  label(sgn(gain),gain>=0?'#178a55':'#d23b30',pawn.position.clone().add(new THREE.Vector3(0,2.4,0)));
+  mentor(gain>=0?`רווח של ${fmt(gain)}. עכשיו השאלה החשובה: איזה נכס תקנה עם הכסף הזה?`:`הפסד של ${fmt(-gain)}. קורה. השאלה אם מכרת בגלל המספרים או בגלל הפחד.`)}
+ render()}
+
+async function onDoodad(){const d=rnd(DOODADS),pay=Math.round(d.a*0.05);mentor(d.q);
+ const v=await card({tag:'הוצאה מפתה',color:'#e2483d',title:d.n,html:`<div class="grid"><div class="row"><span>מחיר</span><b class="big neg">${fmt(d.a)}</b></div></div><p class="note">אין ברירה — זה כבר קרה. יש לך ${fmt(S.cash)}.</p>`,
+  actions:[{label:'לשלם '+fmt(d.a),cls:'primary',v:'cash'},...(d.inst?[{label:`בתשלומים (${fmt(pay)} בחודש)`,v:'inst'}]:[])]});
+ S.stats.doodad+=d.a;
+ if(v==='inst'){S.credit+=d.a;mentor(`עכשיו יש לך חוב אשראי של ${fmt(d.a)} שעולה ${fmt(pay)} כל חודש — עד שתסגור אותו. ככה בונים את המירוץ בעצמנו.`)}
+ else{S.cash-=d.a;ensureCash();if(S.cash>=0)mentor('כסף שיצא ולא יחזור. עשירים קונים קודם נכסים, ואת הצעצועים הם קונים מהתזרים שהנכסים מייצרים.')}
+ render()}
+
+async function onLayoff(){const ex=expTotal();mentor(`אם היו לך 3–6 חודשי הוצאות בצד, זה היה סתם חודש רע. בלי קרן חירום — זה משבר.`);
+ await card({tag:'פיטורים',color:'#3b3f4e',title:'פוטרת החודש',html:`<p class="d">החברה מצמצמת. החודש אין משכורת, אבל ההוצאות לא מחכות.</p><div class="grid"><div class="row"><span>הוצאות לחודש</span><b class="big neg">−${fmt(ex)}</b></div><div class="row"><span>ההכנסה הפסיבית שלך</span><span class="pos">${sgn(passive())}</span></div></div><p class="note">הנכסים ממשיכים לעבוד גם כשאתה לא.</p>`,actions:[{label:'לשלם ולהמשיך',cls:'primary'}]});
+ S.cash+=passive()-ex;ensureCash();render()}
+
+async function onMarket(){const m=rnd(MARKET);
+ if(m.k==='price'){S.prices[m.tk]=m.p;return trade(m.tk,m.n,m.d,'שוק','#2f6fdb')}
+ if(m.k==='sell'){const own=S.assets.filter(a=>a.k===m.type);
+  mentor(own.length?'מכירה נותנת כסף פעם אחת, אבל מוותרת על הכנסה כל חודש. תמכור רק אם יש לך תוכנית לנכס גדול יותר.':'אין לך מה למכור הפעם. תזכור את זה כשתקנה — ככה מרוויחים פעמיים: תזרים ועליית ערך.');
+  const rows=()=>own.filter(a=>S.assets.includes(a)).map(a=>{const offer=Math.round(a.cost*m.mult),net=offer-(a.cost-a.down);return`<div class="sellrow"><span>${a.n}<br><span class="note">הצעה ${fmt(offer)} · אחרי סגירת חוב: <b class="pos">${fmt(net)}</b> · מוותר על ${sgn(a.cf)} בחודש</span></span><button data-sell="${a.id}">למכור</button></div>`}).join('')||'<p class="empty">אין לך נכסים מהסוג הזה.</p>';
+  await card({tag:'שוק',color:'#2f6fdb',title:m.n,html:`<p class="d">${m.d}</p><div id="sellList">${rows()}</div>`,
+   onExtra:e=>{const b=e.target.closest('[data-sell]');if(!b)return;const a=S.assets.find(x=>x.id==b.dataset.sell);if(!a)return;const net=Math.round(a.cost*m.mult)-(a.cost-a.down);
+    S.cash+=net;S.stats.sold++;S.assets=S.assets.filter(x=>x!==a);despawn(a.m);label('+'+fmt(net),'#178a55',pawn.position.clone().add(new THREE.Vector3(0,2.4,0)));render();$('#sellList').innerHTML=rows();
+    mentor(`מכרת ברווח של ${fmt(net-a.down)} על ההון ששמת. עכשיו תחפש נכס עם תזרים גדול יותר.`)},
+   actions:[{label:'סיום',cls:'primary'}]});return}
+ let amt=0,html='';
+ if(m.k==='repair'){const n=S.assets.filter(a=>a.k==='re').length;amt=-n*m.amt;html=n?`<div class="grid"><div class="row"><span>${n} דירות × ${fmt(m.amt)}</span><b class="big neg">${fmt(amt)}</b></div></div>`:'<p class="empty">אין לך דירות — הפעם זה לא נוגע אליך.</p>';
+  mentor(n?'לנכסים יש גם הוצאות לא צפויות. בגלל זה לא קונים עם השקל האחרון.':'יום אחד יהיו לך דירות, ואז תזכור: תמיד להשאיר כרית לתיקונים.')}
+ if(m.k==='bonus'){amt=S.assets.filter(a=>a.k==='biz').reduce((s,a)=>s+Math.max(0,a.cf),0);html=amt?`<div class="grid"><div class="row"><span>בונוס חד־פעמי</span><b class="big pos">${sgn(amt)}</b></div></div>`:'<p class="empty">אין לך עסקים — הבונוס הולך למישהו אחר.</p>';
+  mentor(amt?'עסקים טובים מרוויחים יותר כשהשוק חם. ככה נראה נכס שעובד בשבילך.':'בעלי עסקים קיבלו עכשיו בונוס. העובדים שלהם — לא.')}
+ if(m.k==='div'){amt=S.shares[m.tk]*m.amt;html=amt?`<div class="grid"><div class="row"><span>${S.shares[m.tk].toLocaleString('he-IL')} מניות × ${fmtP(m.amt)}</span><b class="big pos">${sgn(amt)}</b></div></div>`:'<p class="empty">אין לך מניות BANK.</p>';
+  mentor(amt?'בעלי מניות מקבלים חלק מהרווחים. בלי לעבוד.':'מי שמחזיק מניות BANK קיבל עכשיו כסף בלי לעשות כלום.')}
+ await card({tag:'שוק',color:'#2f6fdb',title:m.n,html:`<p class="d">${m.d}</p>${html}`,actions:[{label:'המשך',cls:'primary'}]});
+ S.cash+=amt;ensureCash();render()}
+
+const netWorth=()=>S.cash+S.assets.reduce((s,a)=>s+a.down,0)+Object.keys(S.shares).reduce((s,k)=>s+S.shares[k]*S.prices[k],0)-S.loans-S.credit;
+
+function boardHtml(b,limit=10){if(!b||!b.length)return'<p class="empty">עוד אף אחד לא סיים. תהיה הראשון.</p>';let n=0;
+ return`<ol class="lb">${b.slice(0,limit).map(r=>{const done=r.status!=='playing';if(done)n++;
+  return`<li class="${r.me?'me':''}"><span class="rk">${done?n:'·'}</span><span class="nm">${esc(r.nickname)}${r.me?' (אתה)':''}</span><span class="rs">${r.status==='won'?`יצא בחודש ${r.months}`:r.status==='lost'?`${Math.round((r.passive||0)/Math.max(1,r.expenses||1)*100)}% מהדרך`:'משחק עכשיו'}</span></li>`}).join('')}</ol>`}
+const daysLeft=d=>{const ms=new Date(d)-Date.now();if(ms<=0)return'נסגר';const h=Math.ceil(ms/36e5);return h<48?`נשארו ${h} שעות`:`נשארו ${Math.ceil(h/24)} ימים`};
+
+/* ---------------- END OF GAME ---------------- */
+async function finishGame(status){const st=S.stats,pas=passive(),ex=expTotal(),nw=netWorth();S.over=status;save();
+ if(status==='won'){confetti();mentor('יצאת מהמירוץ. מעכשיו אתה עובד כי אתה רוצה, לא כי אתה צריך.')}
+ else mentor(`עברו ${MAXM} חודשים והנכסים מכסים ${Math.round(pas/ex*100)}% מההוצאות. רוב האנשים נשארים במירוץ כל החיים — עכשיו אתה יודע למה.`);
+ let board='';
+ if(S.resultId){for(;;){try{await api('rr_finish',{...auth(),p_result:S.resultId,p_status:status,p_months:Math.min(S.month,200),p_passive:Math.round(pas),p_expenses:Math.round(ex),p_net_worth:Math.round(nw),p_stats:st});
+    const b=S.mode==='weekly'?(await api('rr_weekly',auth())).board:((await api('rr_group',{...auth(),p_group:S.groupId})).challenges.find(c=>c.id===S.challengeId)||{}).board;
+    const mine=(b||[]).filter(r=>r.status!=='playing').findIndex(r=>r.me);
+    board=`<h3 style="margin:14px 0 0">${mine>=0?`המקום שלך: ${mine+1}`:'הטבלה'}</h3>${boardHtml(b,10)}`;break}
+   catch(e){if(/כבר סיימת/.test(e.message))break;const v=await card({tag:'שגיאה',color:'#d23b30',title:'התוצאה לא נשמרה',html:`<p class="d">${esc(e.message)}</p>`,actions:[{label:'לנסות שוב',cls:'primary',v:'retry'},{label:'לוותר',v:'skip'}]});if(v==='skip')break}}}
+ await card({tag:status==='won'?'ניצחון':'נגמר הזמן',color:status==='won'?'#c98a12':'#3b3f4e',title:status==='won'?'יצאת ממירוץ העכברים!':'נשארת במירוץ',
+  html:`<p class="d">${status==='won'?`ההכנסה הפסיבית שלך (${fmt(pas)}) עברה את ההוצאות (${fmt(ex)}).`:`הכנסה פסיבית ${fmt(pas)} מול הוצאות ${fmt(ex)}.`}</p>
+  <div class="grid"><div class="row"><span>חודשים</span><b>${S.month}</b></div><div class="row"><span>שווי נקי</span><span>${fmt(nw)}</span></div><div class="row"><span>עסקאות שקנית</span><span>${st.deals}</span></div><div class="row"><span>"נכסים" שהוציאו כסף</span><span class="${st.bad?'neg':''}">${st.bad}</span></div><div class="row"><span>הוצאות מפתות</span><span>${fmt(st.doodad)}</span></div><div class="row"><span>הלוואות חירום</span><span>${fmt(st.autoLoan)}</span></div></div>
+  <p class="note">${st.bad?'בפעם הבאה: תבדוק את התזרים לפני שאתה מתאהב בנכס.':st.doodad>8000?'בפעם הבאה: פחות צעצועים מהמשכורת = יציאה מהירה יותר.':status==='won'?'משחק נקי. נסה מקצוע אחר וראה כמה זה משנה.':'בפעם הבאה: תחפש נכסים עם תזרים חיובי מוקדם יותר.'}</p>${board}`,
+  actions:[{label:'חזרה ללובי',cls:'primary'}]});
+ dropSave(S);const g=S.groupId;S=null;resetWorld();openLobby(g&&ME?{k:'group',id:g}:{k:'home'})}
+
+async function turn(){if(busy||!S||S.over)return;busy=true;$('#roll').disabled=true;$('#sheet').classList.remove('open');
+ let end=null;
+ try{const n=await rollDie();for(let s=0;s<n;s++){const from=S.pos;S.pos=(S.pos+1)%24;await hop(from,S.pos);if(BOARD[S.pos]==='P'&&s<n-1)payday(false)}
+  const t=BOARD[S.pos];
+  if(t==='P')await onPayday();else if(t==='O')await onDeal();else if(t==='D')await onDoodad();else if(t==='M')await onMarket();else await onLayoff();
+  S.turn++;render();save();
+  const pas=passive();if(pas>0&&pas>=expTotal())end='won';else if(S.month>MAXM&&S.mode!=='free')end='lost'}
+ finally{busy=false;$('#roll').disabled=false}
+ if(end)await finishGame(end);else $('#roll').focus()}
+$('#roll').onclick=turn;
+addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='Enter')&&$('#modal').hidden&&$('#start').hidden&&document.activeElement===document.body){e.preventDefault();turn()}});
+
+function resetWorld(){slotUsed.forEach((m,i)=>{if(m){scene.remove(m);slotUsed[i]=null}});mModels.stock=mModels.crypto=null;pawn.position.copy(tilePos(0))}
+function begin(state,fresh){resetWorld();S=state;$('#start').hidden=true;$('#roll').disabled=false;
+ pawn.position.copy(tilePos(S.pos));
+ if(!fresh){S.assets.forEach(a=>a.m=spawn(MODEL_FOR[a.k]));syncMarketModels(true)}
+ render();showDie(1);save();
+ const goal=S.mode==='free'?'':` יש לך ${MAXM} חודשים. כולם מקבלים את אותן קוביות ואותם קלפים — מה שקובע זה ההחלטות שלך.`;
+ mentor(fresh?`אתה ${S.prof}. כל חודש נכנס לך ${fmt(cashflow())} אחרי הוצאות. המטרה: נכסים שמכניסים ${fmt(expTotal())} בחודש.${goal}`:`חזרת לחודש ${S.month}. נמשיך מאיפה שעצרנו.`)}
+$('#lobbyBtn').onclick=()=>{if(busy)return;save();openLobby(view)};
+
+/* ---------------- LOBBY ---------------- */
+const lobby=$('#lobby');let view={k:'home'},pendingJoin=new URLSearchParams(location.search).get('join');
+function openLobby(v){$('#start').hidden=false;$('#sheet').classList.remove('open');if(v&&v.k==='group')showGroup(v.id);else showHome()}
+const profCards=()=>PROFS.map((p,i)=>{const ex=p.exp.reduce((s,e)=>s+e[1],0);return`<button class="prof" data-p="${i}"><h3>${p.n}</h3>
+ <div class="row"><span>משכורת</span><span>${fmt(p.salary)}</span></div><div class="row"><span>הוצאות</span><span>${fmt(ex)}</span></div><div class="row"><span>נשאר בחודש</span><b class="pos">${sgn(p.salary-ex)}</b></div><div class="row"><span>מזומן בהתחלה</span><span>${fmt(p.cash)}</span></div></button>`}).join('');
+
+function showHome(){view={k:'home'};const free=loadSave('rr-save-free');
+ lobby.innerHTML=`<div class="lh"><h1>מירוץ העכברים</h1>${ME?`<div class="who">שלום, <b>${esc(ME.nickname)}</b><button class="chip" id="renBtn">שינוי כינוי</button></div>`:''}</div>
+ <p class="lead">משכורת נכנסת, הוצאות יוצאות, וחוזר חלילה. המטרה: לבנות <b>הכנסה פסיבית</b> מנכסים שעוברת את ההוצאות שלך — ולעשות את זה מהר יותר מהחברים.</p>
+ ${ME?'':`<form class="namef" id="nameF"><label for="nick">${pendingJoin?'הוזמנת לקבוצה! ':''}איך יקראו לך בטבלאות?</label><div class="inl"><input id="nick" maxlength="20" placeholder="כינוי" autocomplete="nickname" required><button class="primary">יאללה</button></div><p class="err" id="nErr"></p></form>`}
+ <div class="lgrid">
+  <section class="lcard"><h2>האתגר השבועי</h2><div id="weekly">${ME?'<p class="note">טוען…</p>':'<p class="note">כל השחקנים, אותו מקצוע, אותן קוביות. בחר כינוי כדי להיכנס לטבלה.</p>'}</div></section>
+  <section class="lcard"><h2>הקבוצות שלי</h2>${ME?`<div id="groups"><p class="note">טוען…</p></div>
+   <form id="joinF" class="stack8"><label class="note" for="jcode">קיבלת קוד מחבר?</label><div class="inl"><input id="jcode" maxlength="6" placeholder="קוד קבוצה" style="direction:ltr;text-transform:uppercase"><button>להצטרף</button></div></form>
+   <form id="newG" class="stack8" style="margin-top:10px"><label class="note" for="gname">או פתח קבוצה חדשה</label><div class="inl"><input id="gname" maxlength="40" placeholder="שם הקבוצה"><button class="primary">ליצור</button></div></form><p class="err" id="gErr"></p>`
+   :'<p class="note">פותחים קבוצה, שולחים קישור לחברים, ומתחרים מי יוצא מהמירוץ הכי מהר.</p>'}</section>
+ </div>
+ <section class="lcard"><h2>משחק חופשי</h2>${free?`<button class="primary" id="contFree" style="width:100%;margin-bottom:10px">להמשיך · ${esc(free.prof)}, חודש ${free.month}</button>`:''}<p class="note" style="margin:0 0 8px">בלי טבלה ובלי לחץ. בחר מקצוע — משכורת גבוהה לא אומרת שתגיע ראשון.</p><div class="profs" id="profs">${profCards()}</div></section>
+ <p class="note">המספרים במשחק מפושטים כדי שהמשחק יזרום — העקרונות אמיתיים.</p>`;
+ $('#profs').onclick=e=>{const b=e.target.closest('[data-p]');if(b){if(free)dropSave(free);begin(newState(PROFS[+b.dataset.p]),true)}};
+ if(free)$('#contFree').onclick=()=>begin(free,false);
+ if(!ME){$('#nameF').onsubmit=async e=>{e.preventDefault();const n=$('#nick').value.trim();$('#nErr').textContent='';
+   try{ME=await api('rr_register',{p_nickname:n});localStorage.setItem('rr-player',JSON.stringify(ME))}catch(err){$('#nErr').textContent=err.message;return}
+   if(pendingJoin)return joinCode(pendingJoin);showHome()};return}
+ $('#renBtn').onclick=async()=>{const v=await card({tag:'פרופיל',color:'#2f6fdb',title:'שינוי כינוי',html:`<input id="rn" maxlength="20" value="${esc(ME.nickname)}"><p class="err" id="rnE"></p>`,
+   actions:[{label:'לשמור',cls:'primary',v:'ok',fn:()=>{const n=$('#rn').value.trim();if(n.length<2){$('#rnE').textContent='כינוי צריך להיות 2–20 תווים';return false}}},{label:'ביטול'}]});
+  if(v!=='ok')return;try{const r=await api('rr_rename',{...auth(),p_nickname:$('#rn')?.value?.trim()||ME.nickname});ME.nickname=r.nickname;localStorage.setItem('rr-player',JSON.stringify(ME))}catch(e){toast(e.message)}showHome()};
+ $('#joinF').onsubmit=e=>{e.preventDefault();joinCode($('#jcode').value)};
+ $('#newG').onsubmit=async e=>{e.preventDefault();$('#gErr').textContent='';try{const g=await api('rr_create_group',{...auth(),p_name:$('#gname').value});showGroup(g.id)}catch(err){$('#gErr').textContent=err.message}};
+ loadWeekly();loadGroups();
+ if(pendingJoin)joinCode(pendingJoin)}
+
+async function joinCode(code){pendingJoin=null;history.replaceState(null,'',location.pathname);
+ try{const g=await api('rr_join_group',{...auth(),p_code:code});toast('הצטרפת ל'+g.name);showGroup(g.id)}catch(e){showHome();setTimeout(()=>{const el=$('#gErr');if(el)el.textContent=e.message},0)}}
+
+async function loadWeekly(){const box=$('#weekly');try{const w=await api('rr_weekly',auth());if(!box.isConnected)return;
+ box.innerHTML=`<p class="meta">מקצוע השבוע: <b>${PNAME[w.profession]}</b> · ${daysLeft(w.ends_at)}</p>
+  ${w.my_status==='won'||w.my_status==='lost'?'<p class="note">סיימת את האתגר השבוע. נתראה בשבוע הבא.</p>':`<button class="primary" id="playW" style="width:100%">${w.my_status==='playing'?'להמשיך את האתגר':'להתחיל את האתגר'}</button>`}
+  ${boardHtml(w.board,10)}`;
+ $('#playW')&&($('#playW').onclick=()=>playRanked({weekly:true,title:'אתגר שבועי'}))}catch(e){if(box.isConnected)box.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+
+async function loadGroups(){const box=$('#groups');try{const gs=await api('rr_my_groups',auth());if(!box.isConnected)return;
+ box.innerHTML=gs.length?`<div class="glist">${gs.map(g=>`<button class="gitem" data-g="${g.id}"><span><b>${esc(g.name)}</b><br><small>${g.members===1?'שחקן אחד':g.members+' שחקנים'}${g.active?` · ${g.active} אתגרים פעילים`:''}</small></span><span aria-hidden="true">‹</span></button>`).join('')}</div>`:'<p class="empty">עוד אין לך קבוצות.</p>';
+ box.onclick=e=>{const b=e.target.closest('[data-g]');if(b)showGroup(b.dataset.g)}}catch(e){if(box.isConnected)box.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+
+async function showGroup(id){view={k:'group',id};if(!ME)return showHome();lobby.innerHTML='<p class="note">טוען את הקבוצה…</p>';let g;
+ try{g=await api('rr_group',{...auth(),p_group:id})}catch(e){view={k:'home'};showHome();toast(e.message);return}
+ const link=`${location.origin}${location.pathname}?join=${g.code}`;
+ lobby.innerHTML=`<div class="lh"><button class="chip" id="back">› חזרה</button><button class="chip" id="refresh">רענון</button></div>
+ <h1 style="margin-top:10px">${esc(g.name)}</h1>
+ <div class="lgrid">
+  <section class="lcard"><h2>הזמנת חברים</h2><p class="meta">שלח את הקישור, או תן להם את הקוד:</p><div class="code">${g.code}</div>
+   <div class="inl" style="margin-top:10px"><input id="lnk" value="${esc(link)}" readonly style="direction:ltr"><button class="primary" id="copy">להעתיק קישור</button></div>
+   <h3 class="meta" style="margin-top:14px">${g.members.length===1?'שחקן אחד — שלח את הקישור לחברים':g.members.length+' שחקנים'}</h3><div class="members">${g.members.map(m=>`<span>${esc(m.nickname)}${m.owner?' · מנהל':''}</span>`).join('')}</div></section>
+  <section class="lcard"><h2>אתגר חדש</h2><p class="meta">כל מי שבקבוצה משחק עם אותו מקצוע, אותן קוביות ואותם קלפים. מנצח מי שיוצא מהמירוץ בפחות חודשים.</p>
+   <form id="newC"><input id="ct" maxlength="50" placeholder="שם האתגר (למשל: מי יוצא ראשון?)"><div class="cf">
+    <select id="cp" aria-label="מקצוע">${PROFS.map(p=>`<option value="${p.id}">${p.n}</option>`).join('')}</select>
+    <select id="cd" aria-label="משך">${[[1,'יום'],[3,'3 ימים'],[7,'שבוע'],[14,'שבועיים']].map(([d,l])=>`<option value="${d}" ${d===7?'selected':''}>${l}</option>`).join('')}</select>
+    <button class="primary">לפתוח</button></div></form><p class="err" id="cErr"></p></section>
+ </div>
+ <section class="lcard"><h2>אתגרים</h2>${g.challenges.length?g.challenges.map(c=>`<div class="chal"><h3>${esc(c.title)}</h3>
+   <p class="meta">${PNAME[c.profession]} · ${c.active?daysLeft(c.ends_at):'נסגר'}</p>
+   ${c.active&&c.my_status!=='won'&&c.my_status!=='lost'?`<button class="primary" data-play="${c.id}" data-t="${esc(c.title)}">${c.my_status==='playing'?'להמשיך':'לשחק'}</button>`:c.my_status?'<p class="note">סיימת את האתגר הזה.</p>':''}
+   ${boardHtml(c.board,15)}</div>`).join(''):'<p class="empty">אין עדיין אתגרים. פתח את הראשון.</p>'}</section>
+ <p style="margin-top:14px"><button class="chip" id="leave">לעזוב את הקבוצה</button></p>`;
+ $('#back').onclick=showHome;$('#refresh').onclick=()=>showGroup(id);
+ $('#copy').onclick=async()=>{try{await navigator.clipboard.writeText(link);toast('הקישור הועתק')}catch(e){$('#lnk').select();toast('סמן והעתק את הקישור')}};
+ $('#newC').onsubmit=async e=>{e.preventDefault();$('#cErr').textContent='';try{await api('rr_create_challenge',{...auth(),p_group:id,p_title:$('#ct').value,p_profession:$('#cp').value,p_days:+$('#cd').value});showGroup(id)}catch(err){$('#cErr').textContent=err.message}};
+ lobby.onclick=e=>{const b=e.target.closest('[data-play]');if(b)playRanked({challenge:b.dataset.play,groupId:id,title:b.dataset.t})};
+ let sure=false;$('#leave').onclick=async e=>{if(!sure){sure=true;e.target.textContent='בטוח? לחץ שוב כדי לעזוב';return}try{await api('rr_leave_group',{...auth(),p_group:id});showHome()}catch(err){toast(err.message)}}}
+
+async function playRanked(o){let r;try{r=await api('rr_start',{...auth(),p_challenge:o.challenge||null,p_weekly:!!o.weekly})}catch(e){toast(e.message);return}
+ if(r.status!=='playing'){toast('כבר סיימת את המשחק הזה');return}
+ const sv=loadSave('rr-save-'+r.result_id);if(sv)return begin(sv,false);
+ const p=PROFS.find(x=>x.id===r.profession);
+ begin(newState(p,{mode:o.weekly?'weekly':'challenge',seed:Number(r.seed),resultId:r.result_id,challengeId:o.challenge||null,groupId:o.groupId||null,title:o.title}),true)}
+
+buildWorld().then(()=>{$('#loading').hidden=true;openLobby()}).catch(err=>{$('#loading').textContent='משהו נכשל בטעינה: '+err.message;console.error(err)});
+}
+</script>
+</body>
+</html>
