@@ -411,21 +411,28 @@ async function onDeal(){const d=drawDeal();if(d.k==='stock'||d.k==='crypto'){S.p
 
 async function trade(tk,title,desc,tag,color){const T=TICK[tk],p=S.prices[tk];let q=0;
  mentor(tk==='BANK'?'מניית דיבידנד: כל מניה מכניסה ₪0.15 בחודש. זה נכס אמיתי — קטן, אבל יציב.':tk==='TCHN'?'מניה בלי דיבידנד לא מכניסה כלום כל חודש. מרוויחים רק אם מוכרים ביותר ממה שקנית.':'מטבע בלי שום עסק מאחוריו. יכול לעשות פי 10 ויכול להתאפס. רק כסף שאתה מוכן להפסיד.');
- const upd=()=>{$('#qv').value=q.toLocaleString('he-IL');$('#qinfo').textContent=q?`עסקה של ${fmt(q*p)}`:'בחר כמות';$('#qerr').textContent=''};
- const maxBuy=()=>Math.floor(S.cash/p);
- const v=await card({tag,color,title,html:`<p class="d">${desc}</p><div class="grid"><div class="row"><span>${T.n}</span><b class="big">${fmtP(p)}</b></div><div class="row"><span>יש לך</span><span>${S.shares[tk].toLocaleString('he-IL')} מניות · ${fmt(S.shares[tk]*p)}</span></div>${T.div?`<div class="row"><span>דיבידנד חודשי למניה</span><span class="pos">${fmtP(T.div)}</span></div>`:''}</div>
-  <div class="qty"><button data-q="${-T.step[1]}">−${T.step[1]}</button><button data-q="${-T.step[0]}">−${T.step[0]}</button><output id="qv">0</output><button data-q="${T.step[0]}">+${T.step[0]}</button><button data-q="${T.step[1]}">+${T.step[1]}</button></div>
-  <div class="qty"><button class="chip" data-q="max">מקסימום לקנייה (${maxBuy().toLocaleString('he-IL')})</button>${S.shares[tk]?`<button class="chip" data-q="all">כל המניות שלי</button>`:''}</div>
-  <p class="note" id="qinfo" style="text-align:center">בחר כמות</p><p class="err" id="qerr"></p>`,
-  onExtra:e=>{const b=e.target.closest('[data-q]');if(!b)return;const s=b.dataset.q;q=s==='max'?maxBuy():s==='all'?S.shares[tk]:Math.max(0,q+ +s);upd()},
-  actions:[{label:'לקנות',cls:'primary',v:'buy',fn:()=>{if(!q||q*p>S.cash){$('#qerr').textContent=q?'אין מספיק מזומן':'בחר כמות';return false}}},
-   {label:'למכור',v:'sell',dis:!S.shares[tk],fn:()=>{if(!q||q>S.shares[tk]){$('#qerr').textContent=q?'אין לך כל כך הרבה מניות':'בחר כמות';return false}}},{label:'לא עכשיו',v:'no'}]});
- if(v==='buy'){S.cash-=q*p;S.shares[tk]+=q;S.basis=S.basis||{};S.basis[tk]=(S.basis[tk]||0)+q*p;syncMarketModels();
-  mentor(tk==='BANK'?`קנית ${q.toLocaleString('he-IL')} מניות. הן יכניסו ${fmt(q*T.div)} כל חודש.`:'קנית. עכשיו זה משחק של סבלנות ומזל — אין פה תזרים, רק מחיר.')}
- if(v==='sell'){const avg=(S.basis?.[tk]||0)/(S.shares[tk]||1),gain=(p-avg)*q;S.cash+=q*p;S.basis[tk]=Math.max(0,(S.basis?.[tk]||0)-avg*q);S.shares[tk]-=q;syncMarketModels();
-  label(sgn(gain),gain>=0?'#178a55':'#d23b30',pawn.position.clone().add(new THREE.Vector3(0,2.4,0)));
-  mentor(gain>=0?`רווח של ${fmt(gain)}. עכשיו השאלה החשובה: איזה נכס תקנה עם הכסף הזה?`:`הפסד של ${fmt(-gain)}. קורה. השאלה אם מכרת בגלל המספרים או בגלל הפחד.`)}
- render()}
+ const maxBuy=()=>Math.floor(S.cash/p),maxSell=()=>S.shares[tk],lim=()=>Math.max(maxBuy(),maxSell());
+ const N=n=>n.toLocaleString('he-IL');
+ const upd=()=>{q=Math.max(0,Math.min(q,lim()));$('#qv').value=N(q);const sl=$('#qs');sl.max=lim();sl.value=q;sl.disabled=!lim();
+  $('#qhold').textContent=`${N(S.shares[tk])} מניות · ${fmt(S.shares[tk]*p)}`;$('#qcash').textContent=fmt(S.cash);
+  $('#qinfo').textContent=q?`עסקה של ${fmt(q*p)}`:'בחר כמות עם הסרגל או הכפתורים';$('#qerr').textContent='';
+  const bb=$('#card .acts button[data-i="0"]'),sb=$('#card .acts button[data-i="1"]');
+  bb.disabled=!q||q>maxBuy();sb.disabled=!q||q>maxSell();
+  bb.textContent=q&&q<=maxBuy()?`לקנות ${N(q)}`:'לקנות';sb.textContent=q&&q<=maxSell()?`למכור ${N(q)}`:'למכור'};
+ const pr=card({tag,color,title,html:`<p class="d">${desc}</p><div class="grid"><div class="row"><span>${T.n}</span><b class="big">${fmtP(p)}</b></div><div class="row"><span>יש לך</span><span id="qhold"></span></div><div class="row"><span>מזומן</span><span id="qcash"></span></div>${T.div?`<div class="row"><span>דיבידנד חודשי למניה</span><span class="pos">${fmtP(T.div)}</span></div>`:''}</div>
+  <input type="range" id="qs" dir="ltr" min="0" step="1" value="0" aria-label="כמות מניות" style="width:100%;margin-top:12px;accent-color:#f2b632">
+  <div class="qty" dir="ltr"><button data-q="${-T.step[1]}">−${T.step[1]}</button><button data-q="${-T.step[0]}">−${T.step[0]}</button><output id="qv">0</output><button data-q="${T.step[0]}">+${T.step[0]}</button><button data-q="${T.step[1]}">+${T.step[1]}</button></div>
+  <div class="qty"><button class="chip" data-q="max">מקסימום לקנייה</button>${''}<button class="chip" data-q="all">כל המניות שלי</button><button class="chip" data-q="zero">איפוס</button></div>
+  <p class="note" id="qinfo" style="text-align:center"></p><p class="err" id="qerr"></p><p class="note" style="text-align:center">אפשר לקנות ולמכור כמה פעמים. כשמסיימים — "סיום".</p>`,
+  onExtra:e=>{const b=e.target.closest('[data-q]');if(!b)return;const s=b.dataset.q;q=s==='max'?maxBuy():s==='all'?maxSell():s==='zero'?0:q+ +s;upd()},
+  actions:[{label:'לקנות',cls:'primary',fn:()=>{if(!q||q>maxBuy())return false;S.cash-=q*p;S.shares[tk]+=q;S.basis=S.basis||{};S.basis[tk]=(S.basis[tk]||0)+q*p;syncMarketModels();render();
+     mentor(tk==='BANK'?`קנית ${N(q)} מניות. הן יכניסו ${fmt(q*T.div)} כל חודש. טעית? אפשר למכור עכשיו באותו מחיר.`:'קנית. אין פה תזרים, רק מחיר. טעית? אפשר למכור עכשיו באותו מחיר.');toast('קנית '+N(q)+' מניות');q=0;upd();return false}},
+   {label:'למכור',fn:()=>{if(!q||q>maxSell())return false;const avg=(S.basis?.[tk]||0)/(S.shares[tk]||1),gain=(p-avg)*q;S.cash+=q*p;S.basis[tk]=Math.max(0,(S.basis?.[tk]||0)-avg*q);S.shares[tk]-=q;syncMarketModels();render();
+     if(Math.abs(gain)>=1)label(sgn(gain),gain>=0?'#178a55':'#d23b30',pawn.position.clone().add(new THREE.Vector3(0,2.4,0)));
+     mentor(Math.abs(gain)<1?'מכרת באותו מחיר שקנית — כאילו לא קרה כלום.':gain>0?`רווח של ${fmt(gain)}. עכשיו השאלה החשובה: איזה נכס תקנה עם הכסף הזה?`:`הפסד של ${fmt(-gain)}. קורה. השאלה אם מכרת בגלל המספרים או בגלל הפחד.`);toast('מכרת '+N(q)+' מניות');q=0;upd();return false}},
+   {label:'סיום',v:'done'}]});
+ $('#qs').oninput=e=>{q=+e.target.value;upd()};upd();
+ await pr;render()}
 
 async function onDoodad(){const d=rnd(DOODADS),pay=Math.round(d.a*0.05);mentor(d.q);
  const v=await card({tag:'הוצאה מפתה',color:'#e2483d',title:d.n,html:`<div class="grid"><div class="row"><span>מחיר</span><b class="big neg">${fmt(d.a)}</b></div></div><p class="note">אין ברירה — זה כבר קרה. יש לך ${fmt(S.cash)}.</p>`,
