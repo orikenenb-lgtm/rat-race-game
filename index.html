@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>מירוץ העכברים</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Ccircle cx=%2232%22 cy=%2232%22 r=%2228%22 fill=%22%23f2b632%22/%3E%3Ctext x=%2232%22 y=%2243%22 font-size=%2230%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-weight=%22bold%22 fill=%22%233a1f00%22%3E%E2%82%AA%3C/text%3E%3C/svg%3E">
+<meta name="description" content="משחק לוח תלת־ממדי שמלמד איך יוצאים ממירוץ העכברים. פותחים קבוצה, מזמינים חברים ומתחרים.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
@@ -465,7 +467,7 @@ function boardHtml(b,limit=10){if(!b||!b.length)return'<p class="empty">עוד �
 const daysLeft=d=>{const ms=new Date(d)-Date.now();if(ms<=0)return'נסגר';const h=Math.ceil(ms/36e5);return h<48?`נשארו ${h} שעות`:`נשארו ${Math.ceil(h/24)} ימים`};
 
 /* ---------------- END OF GAME ---------------- */
-async function finishGame(status){const st=S.stats,pas=passive(),ex=expTotal(),nw=netWorth();S.over=status;save();
+async function finishGame(status){const st=S.stats,pas=passive(),ex=expTotal(),nw=netWorth();S.over=status;save();if(S.resultId)toast('שומר את התוצאה…');
  if(status==='won'){confetti();mentor('יצאת מהמירוץ. מעכשיו אתה עובד כי אתה רוצה, לא כי אתה צריך.')}
  else mentor(`עברו ${MAXM} חודשים והנכסים מכסים ${Math.round(pas/ex*100)}% מההוצאות. רוב האנשים נשארים במירוץ כל החיים — עכשיו אתה יודע למה.`);
  let board='';
@@ -488,8 +490,8 @@ async function turn(){if(busy||!S||S.over)return;busy=true;$('#roll').disabled=t
   if(t==='P')await onPayday();else if(t==='O')await onDeal();else if(t==='D')await onDoodad();else if(t==='M')await onMarket();else await onLayoff();
   S.turn++;render();save();
   const pas=passive();if(pas>0&&pas>=expTotal())end='won';else if(S.month>MAXM&&S.mode!=='free')end='lost'}
- finally{busy=false;$('#roll').disabled=false}
- if(end)await finishGame(end);else $('#roll').focus()}
+ finally{busy=false;if(!end)$('#roll').disabled=false}
+ if(end){busy=true;try{await finishGame(end)}finally{busy=false;$('#roll').disabled=false}}else $('#roll').focus()}
 $('#roll').onclick=turn;
 addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='Enter')&&$('#modal').hidden&&$('#start').hidden&&document.activeElement===document.body){e.preventDefault();turn()}});
 
