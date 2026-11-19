@@ -1,0 +1,108 @@
+// מירוץ העכברים 2.0 — boot: load the 3D world, then hand over to the lobby (js/lobby.js).
+// If the lobby module is missing or fails, a minimal built-in picker (world + character + free play) keeps the game playable.
+import { bus } from './bus.js';
+import { unlock, sfx } from './audio.js';
+import { esc, achievementToast, showLoading, hideLoading, goalWords } from './ui.js';
+import { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } from './engine.js';
+
+// mobile audio needs a gesture
+addEventListener('pointerdown', unlock, { passive: true });
+addEventListener('keydown', unlock);
+
+// theme: <html data-theme> wins, else prefers-color-scheme (handled by CSS light-dark())
+try { const t = JSON.parse(localStorage.getItem('rr2-settings') || '{}').theme; if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) { /* ignore */ }
+
+let openLobby = null;
+// three.js + the 3D world load in the background while the lobby is already on screen; startGame() waits for them.
+const gameMod = import('./game.js');
+let G = null;
+const gameP = gameMod.then((g) => { G = g; g.initGame().catch((e) => { console.error(e); showLoading('משהו נכשל בטעינת התלת־ממד: ' + (e && e.message ? e.message : e)); }); return g; });
+
+async function boot() {
+  await Promise.race([Promise.all([document.fonts.load('800 20px Rubik'), document.fonts.load('20px "Secular One"')]), new Promise((r) => setTimeout(r, 1500))]).catch(() => {});
+  try {
+    const mod = await import('./lobby.js');
+    if (typeof mod.openLobby !== 'function') throw new Error('lobby.js has no openLobby()');
+    openLobby = mod.openLobby;
+  } catch (e) {
+    console.warn('lobby.js not available — using the built-in picker.', e);
+    await gameP.catch(() => null);
+    useFallback();
+  }
+  bus.on('lobby:open', (p) => safeOpen(p || {}));
+  safeOpen({});
+  hideLoading();
+}
+function safeOpen(p) {
+  try { const r = openLobby(p); if (r && r.catch) r.catch((e) => { console.error(e); useFallback(); fallbackLobby(p); }); }
+  catch (e) { console.error(e); useFallback(); fallbackLobby(p); }
+}
+
+/* ============================================================ built-in picker (no lobby.js) */
+let fbOn = false;
+function useFallback() {
+  if (fbOn) return; fbOn = true;
+  openLobby = fallbackLobby;
+  bus.on('game:end', fallbackEnd);
+  bus.on('achievement', ({ ids = [] } = {}) => ids.forEach((id) => { const a = achievementById(id); if (a) achievementToast({ name: a.name, desc: a.desc }); }));
+}
+const root = () => document.getElementById('lobby-root');
+const show = () => { document.getElementById('start').hidden = false; };
+let pick = { worldId: 'w1', charId: null, tutorial: false };
+try { pick = { ...pick, ...JSON.parse(localStorage.getItem('rr2-fallback') || '{}') }; } catch (e) { /* ignore */ }
+
+function fallbackLobby() {
+  show();
+  const worlds = worldList();
+  const w = worlds.find((x) => x.id === pick.worldId) || worlds[0];
+  if (!w.characters.some((c) => c.id === pick.charId)) pick.charId = w.characters[0].id;
+  const sv = G ? G.savedGame(G.saveKeyFor({ mode: 'free', worldId: w.id })) : null;
+  root().innerHTML = `<div class="intro fb">
+    <div class="lh"><h1>מירוץ העכברים</h1><span class="tag" style="--c:#2f6fdb">משחק חופשי</span></div>
+    <p class="lead">משכורת נכנסת, הוצאות יוצאות. בונים נכסים שעובדים בשבילך — עד שיוצאים מהמירוץ.</p>
+    <h3 class="fbh">בחר עולם</h3>
+    <div class="fbw" role="radiogroup" aria-label="עולם">${worlds.map((x) => `<button class="fbworld ${x.id === w.id ? 'on' : ''}" role="radio" aria-checked="${x.id === w.id}" data-w="${x.id}" style="--s1:${x.theme.sky[0]};--s2:${x.theme.sky[1]}"><small>עולם ${x.order}</small><b>${esc(x.name)}</b><span>${esc(goalWords(x.goalLabel))}</span></button>`).join('')}</div>
+    <p class="note">${esc(w.tagline)}</p>
+    ${sv ? `<button class="primary wide" id="fbCont">להמשיך · ${esc(sv.charName)}, חודש ${sv.month}</button>` : ''}
+    <h3 class="fbh">בחר דמות</h3>
+    <div class="profs">${w.characters.map((c) => { const t = starThresholds(w.id, c.id); return `<button class="prof ${c.id === pick.charId ? 'on' : ''}" data-c="${c.id}"><h3>${esc(c.name)}</h3><p class="note">${esc(c.desc)}</p>
+      <div class="row"><span>משכורת</span><span class="num">${c.salaryUsd ? '$' + c.salaryUsd.toLocaleString('en-US') : fmtM(c.salary)}</span></div><div class="row"><span>הוצאות</span><span class="num">${fmtM(c.expenses)}</span></div>
+      <div class="row"><span>נשאר בחודש</span><b class="num ${c.surplus >= 0 ? 'pos' : 'neg'}">${sgn(c.surplus)}</b></div><div class="row"><span>מזומן בהתחלה</span><span class="num">${fmtM(c.cash)}</span></div>
+      <div class="row"><span>★★★</span><span class="num">עד חודש ${t.t3}</span></div></button>`; }).join('')}</div>
+    <label class="fbt"><input type="checkbox" id="fbTut" ${pick.tutorial ? 'checked' : ''}> משחק ראשון? הדרכה קצרה + עסקה ראשונה קלה</label>
+    <button class="primary wide" id="fbGo">${sv ? 'משחק חדש' : 'יאללה, משחקים'}</button>
+    <p class="note">המספרים מפושטים כדי שהמשחק יזרום — העקרונות אמיתיים.</p></div>`;
+  const r = root();
+  r.onclick = (e) => {
+    const wb = e.target.closest('[data-w]'); if (wb) { pick.worldId = wb.dataset.w; pick.charId = null; save(); sfx('click'); fallbackLobby(); return; }
+    const cb = e.target.closest('[data-c]'); if (cb) { pick.charId = cb.dataset.c; save(); sfx('click'); r.querySelectorAll('.prof').forEach((b) => b.classList.toggle('on', b === cb)); return; }
+  };
+  const go = r.querySelector('#fbGo'); go.onclick = () => {
+    pick.tutorial = r.querySelector('#fbTut').checked; save();
+    G.startGame({ worldId: pick.worldId, charId: pick.charId, mode: 'free', seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'classic', pawnColor: '#e2483d', tutorial: pick.tutorial, bailout: true, resume: false });
+  };
+  const cont = r.querySelector('#fbCont'); if (cont) cont.onclick = () => G.startGame({ ...sv.cfg, resume: true });
+  setTimeout(() => (cont || go).focus({ preventScroll: true }), 50);
+}
+function save() { try { localStorage.setItem('rr2-fallback', JSON.stringify(pick)); } catch (e) { /* ignore */ } }
+
+function fallbackEnd(p) {
+  const w = getWorld(p.worldId); const e = p.end || {};
+  show();
+  const stars = [1, 2, 3].map((i) => `<span class="${i <= p.stars ? 'on' : ''}">★</span>`).join('');
+  root().innerHTML = `<div class="intro fb end">
+    <span class="tag" style="--c:${p.status === 'won' ? '#c98a12' : '#3b3f4e'}">${p.status === 'won' ? 'ניצחון' : e.reason === 'bankrupt' ? 'פשיטת רגל' : 'נגמר הזמן'}</span>
+    <h1>${p.status === 'won' ? 'יצאת מהמירוץ!' : 'נשארת במירוץ'}</h1>
+    <div class="stars" aria-label="${p.stars} כוכבים">${stars}</div>
+    <p class="lead">${esc(e.nearMiss ? e.nearMiss.text : '')}</p>
+    <div class="grid"><div class="row"><span>חודשים</span><b class="num">${p.months}</b></div><div class="row"><span>שווי נקי</span><span class="num">${fmtM(p.netWorth)}</span></div>
+    <div class="row"><span>הכנסה פסיבית</span><span class="num">${fmtM(p.passive)}</span></div><div class="row"><span>הוצאות</span><span class="num">${fmtM(p.expenses)}</span></div></div>
+    ${(e.leaks || []).filter((l) => l.amount > 0).length ? `<h3 class="fbh">לאן הכסף דלף</h3><div class="grid">${e.leaks.filter((l) => l.amount > 0).slice(0, 4).map((l) => `<div class="row"><span>${esc(l.label)}</span><span class="num neg">${fmtM(l.amount)}</span></div>`).join('')}</div>` : ''}
+    <p class="note"><b>הלקח של ${esc(w.name)}:</b> ${esc(w.lesson)}</p><p class="note">${esc(e.tip || '')}</p>
+    <div class="acts"><button class="primary" id="fbAgain">עוד פעם</button><button id="fbBack">בחירת עולם</button></div></div>`;
+  root().querySelector('#fbAgain').onclick = () => G.startGame({ worldId: p.worldId, charId: p.charId, mode: 'free', seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false });
+  root().querySelector('#fbBack').onclick = () => fallbackLobby();
+  setTimeout(() => root().querySelector('#fbAgain').focus(), 50);
+}
+
+boot();

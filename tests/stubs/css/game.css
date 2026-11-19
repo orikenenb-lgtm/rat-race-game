@@ -1,0 +1,21 @@
+/* TEST STUB of css/game.css — tokens + base classes from v1 (the real file is owned by the game agent). */
+:root{color-scheme:light dark;--paper:light-dark(#fffaf0,#1f1b27);--paper2:light-dark(#f6eedd,#2a2533);--ink:light-dark(#1d1a2b,#f3eee4);--mut:light-dark(#6b6478,#aaa3b6);--line:light-dark(#e6d9c1,#3b3447);--gold:#f2b632;--gold2:#c98a12;--green:light-dark(#178a55,#3ccf8a);--red:light-dark(#d23b30,#ff7a6e);--blue:#2f6fdb;--shadow:0 10px 30px rgba(40,20,0,.18)}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{margin:0;color:var(--ink);font:16px/1.5 Rubik,system-ui,sans-serif;overflow:hidden;background:linear-gradient(180deg,light-dark(#ffe0a8,#2b2240) 0%,light-dark(#f7b27a,#4a2f45) 55%,light-dark(#d9785c,#5a3340) 100%)}
+button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:12px;min-height:44px;padding:0 16px;background:var(--paper2)}
+button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.primary{background:var(--gold);color:#2b1d00;font-weight:800;box-shadow:0 4px 0 var(--gold2)}
+.primary:active:not(:disabled){transform:translateY(2px);box-shadow:0 2px 0 var(--gold2)}
+.chip{min-height:36px;padding:0 12px;font-size:14px;border:1px solid var(--line);background:transparent}
+.row{display:flex;justify-content:space-between;gap:10px}
+.note{font-size:14px;color:var(--mut);margin:6px 0 0}
+.err{color:var(--red);font-size:14px;min-height:1.4em;margin:4px 0 0}
+.overlay{position:fixed;inset:0;z-index:8;display:grid;place-items:center;padding:16px;overflow:auto;background:linear-gradient(180deg,rgba(255,224,168,.55),rgba(217,120,92,.6))}
+.overlay[hidden]{display:none}
+#toast{position:fixed;top:84px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:999px;font-weight:700;opacity:0;transition:opacity .3s;pointer-events:none;z-index:6}
+#toast.on{opacity:1}
+.stub-game{position:fixed;inset:20px;background:var(--paper);border-radius:20px;padding:20px;z-index:2}
+.stub-game[hidden]{display:none}
+.stub-game pre{white-space:pre-wrap;direction:ltr;font-size:12px;max-height:50vh;overflow:auto}

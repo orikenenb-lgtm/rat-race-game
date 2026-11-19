@@ -1,2 +1,9 @@
 assets/report.json
-assets/*.blend1
+*.blend1
+blender/__pycache__/
+blender/report_*.json
+blender/preview_w2.png
+blender/preview_w3.png
+blender/preview_w4.png
+blender/preview_pawns.png
+.git-commit-msg.txt

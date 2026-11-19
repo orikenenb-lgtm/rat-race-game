@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מירוץ העכברים — lobby test shell</title>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/game.css">
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+</head>
+<body>
+<!-- TEST STUB: stands in for the real in-game screen (index.html/main.js/game.js are owned by the game agent) -->
+<div id="stubGame" class="stub-game" hidden>
+  <h2>משחק (stub)</h2>
+  <pre id="stubInfo"></pre>
+  <div class="row">
+    <button class="primary" id="stubWin">לנצח</button>
+    <button id="stubLose">להפסיד</button>
+    <button id="stubAch">הישג</button>
+    <button id="stubLobby">ללובי</button>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="start" class="overlay" hidden><div id="lobby-root"></div></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
