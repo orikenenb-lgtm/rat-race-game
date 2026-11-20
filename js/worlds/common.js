@@ -14,7 +14,21 @@ export const TILE_TYPES = {
   S: { type: 'shipping', name: 'משלוח', color: '#0369a1', ink: '#ffffff', icon: 'ship' },
   A: { type: 'pitch', name: 'פיץ\' סטארט־אפ', color: '#7c3aed', ink: '#ffffff', icon: 'rocket' },
   G: { type: 'giving', name: 'נתינה', color: '#db2777', ink: '#ffffff', icon: 'heart' },
+  // v3
+  L: { type: 'life', name: 'החיים', color: '#f472b6', ink: '#3b0a24', icon: 'life' },
+  E: { type: 'edu', name: 'לימודים וקריירה', color: '#6366f1', ink: '#ffffff', icon: 'school' },
+  T: { type: 'tax', name: 'מס הכנסה', color: '#64748b', ink: '#ffffff', icon: 'tax' },
+  I: { type: 'index', name: 'קרן מדד ופנסיה', color: '#0f766e', ink: '#ffffff', icon: 'piggy' },
 };
+
+/** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */
+export const INDEX_TICKER = { name: 'קרן מחקה מדד', kind: 'index', start: 100, div: 0, step: [10, 100], model: 'stock', modelLabel: 'תיק השקעות', unit: 'יחידות' };
+
+/** 40-tile ring (11×11): paydays on the corners 0, 10, 20, 30. `sides` = 4 strings of 9 tiles each. */
+export function ring(sides) {
+  if (sides.length !== 4 || sides.some((x) => x.length !== 9)) throw new Error('ring: 4 sides × 9 tiles');
+  return 'P' + sides.join('P');
+}
 
 /** Build a tiles map for a board string, with per-world overrides {ch:{name,color,ink}}. */
 export function tilesFor(board, over = {}) {
@@ -99,5 +113,26 @@ export const MENTOR = {
   givePass: 'לא הפעם. רק זכור: נתינה היא הרגל, לא אירוע.',
   won: 'יצאת מהמירוץ. מעכשיו אתה עובד כי אתה רוצה, לא כי אתה צריך.',
   lostTime: 'נגמר הזמן, ועשית {pct} מהדרך. רוב האנשים נשארים במירוץ כל החיים — עכשיו אתה יודע למה.',
+  // v3 — life, plans, taxes, negotiation, index
+  planAsk: 'כסף אפשר להרוויח שוב. זמן ואנרגיה — לא. איך תשתמש בחודש הבא?',
+  planSet: 'התוכנית לחודשים הבאים: {plan}.',
+  burnout: 'נשחקת. חודש בלי משכורת, והוצאות רפואיות. מנוחה היא לא מותרות — היא חלק מהתוכנית.',
+  raiseYes: 'ביקשת — וקיבלת: {gross} ברוטו בחודש. העלאה היא נכס שמכניס כל חודש.',
+  raiseNo: 'הפעם לא. תמשיך להשקיע, ותבקש שוב בעוד חצי שנה — עם מספרים.',
+  studyDone: 'סיימת ללמוד! המשכורת עלתה ב־{pct} — לתמיד. ככה נראית השקעה בעצמך.',
+  sideBiz: 'העסק הצדדי שלך הפך לעסק אמיתי: {cf} בחודש, גם כשאתה לא שם.',
+  lifeAsk: 'אין פה תשובה אחת נכונה. תסתכל על הכסף, אבל גם על האנרגיה ועל האושר.',
+  negYes: 'המוכר הסכים! חסכת {saved}. המחיר הראשון הוא רק הצעה.',
+  negNo: 'המוכר העדיף קונה אחר. משא ומתן הוא סיכון — כדאי לדעת מראש כמה העסקה שווה לך.',
+  taxAsk: 'פעם בשנה עושים סדר עם מס הכנסה. מי שבודק — לפעמים מקבל כסף בחזרה.',
+  taxRefund: 'החזר מס של {amount}! כסף ששילמת ביותר — וחזר רק כי ביקשת.',
+  taxBill: 'מס על ההכנסה הנוספת: {amount}. הכנסה מעסק צדדי חייבת בדיווח.',
+  taxNone: 'הכל מסודר: אין חוב ואין החזר. שילמת השנה {paid} מס — {rate} מהברוטו.',
+  indexAsk: 'קרן מדד קונה קצת מכל השוק. לא מנחשים — מחזיקים לאורך זמן.',
+  indexSellLoss: 'מכרת בהפסד. אם המדד יעלה שוב — ההפסד הזה כבר לא יחזור. מכירה בפאניקה היא ההחלטה הכי יקרה.',
+  autoInvest: 'הוראת קבע של {amount} בחודש לקרן. ככה עשירים משקיעים — בלי לחשוב על זה.',
+  doubleEnergy: 'דאבל! קפה טוב ושינה טובה: +8 אנרגיה.',
+  doublePeek: 'דאבל! שמעת שמועה מהשוק: בעסקה הבאה למשא ומתן יש לך יותר סיכוי.',
+  inflationYear: 'שנה עברה: המחירים עלו ב־{infl}. ההוצאות שלך עלו איתם, והמשכורת — רק ב־{wage}.',
   bankrupt: 'פשיטת רגל. החובות גדלו מהר יותר מהנכסים. הלקח: תזרים שלילי + הלוואות = בור שרק מעמיק.',
 };

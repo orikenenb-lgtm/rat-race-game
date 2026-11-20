@@ -24,7 +24,7 @@ async def main():
         gid = None
         for name, vp, scheme in CONFIGS:
             ctx = await b.new_context(viewport=vp, color_scheme=scheme)
-            init = "if(!sessionStorage.getItem('seeded')){sessionStorage.setItem('seeded','1');localStorage.setItem('rr-player'," + json.dumps(json.dumps(CREDS['A'])) + ");localStorage.setItem('rr2-progress'," + json.dumps(json.dumps(SEED)) + ");}"
+            init = "if(!sessionStorage.getItem('seeded')){sessionStorage.setItem('seeded','1');localStorage.setItem('rr-player'," + json.dumps(json.dumps(CREDS['A'])) + ");localStorage.setItem('rr2-onboarded','1');localStorage.setItem('rr2-progress'," + json.dumps(json.dumps(SEED)) + ");}"
             await ctx.add_init_script(init)
             pg = await ctx.new_page()
             pg.on('pageerror', lambda e: log('PAGEERR', name, e))

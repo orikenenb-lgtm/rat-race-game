@@ -21,6 +21,9 @@ const ERR = {
   challenge_not_found: 'האתגר לא נמצא',
   already_finished: 'כבר סיימת את המשחק הזה',
   result_not_found: 'המשחק לא נמצא בשרת',
+  already_sent_today: 'כבר שלחת לו ⚡ היום',
+  player_not_found: 'השחקן לא נמצא בקבוצה',
+  rate_limited: 'יותר מדי עדכונים היום',
   stale_checkpoint: 'יש שמירה חדשה יותר בשרת',
   state_too_big: 'השמירה גדולה מדי',
 };
@@ -44,7 +47,18 @@ export const net = {
   /** current player or null: {id, secret, nickname} */
   me: () => me,
   hasMe: () => !!me,
-  async register(nickname) { me = await rpc('rr_register', { p_nickname: nickname }); store(); return me; },
+  /** ref = player id of the friend whose link brought you (?ref=<id>) — they get +5⚡ */
+  async register(nickname, ref = null) { me = await rpc('rr_register2', { p_nickname: nickname, p_ref: ref || null }); store(); return me; },
+  /** id to put in invite links as ?ref= */
+  refId: () => me ? me.id : null,
+  /** send 3⚡ to a friend in a shared group (once a day per friend) */
+  sendEnergy: (groupId, nickname) => rpc('rr_send_energy', { ...auth(), p_group: groupId, p_nickname: nickname }),
+  /** claim waiting gifts + referral bonuses → {total, from:[{nickname, kind:'gift'|'referral', amount}]} */
+  claimEnergy: () => rpc('rr_claim_energy', auth()),
+  /** free-play milestones for friends' feeds, e.g. logEvent('escaped', {world:'w1', age:34, months:29}) */
+  logEvent: (kind, data) => rpc('rr_log_event', { ...auth(), p_kind: kind, p_data: data || {} }),
+  /** {feed:[{nickname, kind, data, at, me}], gifted_today:[nickname]} */
+  groupFeed: (groupId) => rpc('rr_group_feed', { ...auth(), p_group: groupId }),
   async rename(nickname) { const r = await rpc('rr_rename', { ...auth(), p_nickname: nickname }); me.nickname = r.nickname; store(); return me; },
   /** {id,nickname,stars:{w1..w4},total_stars,achievements[],pawn,daily_streak,best_streak,last_daily} */
   profile: () => rpc('rr_profile', auth()),

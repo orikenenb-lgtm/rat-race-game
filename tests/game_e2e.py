@@ -93,7 +93,7 @@ async def handle_card(pg, rnd, tag, s):
     if await roi.count() and rnd.random() < 0.5:
         await roi.click(); await pg.wait_for_timeout(100)
         assert await pg.is_visible('#roiBox'), 'ROI box did not open'
-    btns = card.locator('.acts button[data-o]:not([disabled])')
+    btns = card.locator('button[data-o]:not([disabled])')
     n = await btns.count()
     if n == 0: raise Exception('card without enabled options: ' + s['title'])
     labels = [await btns.nth(i).get_attribute('data-o') for i in range(n)]
@@ -133,8 +133,17 @@ async def play(pg, turns, tag, rnd, shot_at=None):
         await handle_card(pg, rnd, tag, s); await pg.wait_for_timeout(250); s = await wait_idle(pg)
     return 'ok'
 
+async def top_up_energy(pg):
+    await pg.evaluate("async () => { try { const e = await import('/js/energy.js'); e.add && e.add(99, 'test'); } catch (x) {} }")
+
 async def start_world(pg, world, char_idx=0, tutorial=False):
     await pg.wait_for_selector('.fbworld', timeout=120000)
+    await top_up_energy(pg)
+    if world.startswith('h:'):
+        await pg.click(f'.fbworld[data-h="{world[2:]}"]')
+        await pg.wait_for_selector('#start', state='hidden', timeout=30000)
+        await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
+        return
     await pg.click(f'.fbworld[data-w={world}]'); await pg.wait_for_timeout(300)
     profs = pg.locator('.prof'); n = await profs.count()
     await profs.nth(char_idx % n).click()
@@ -149,8 +158,9 @@ async def run_world(b, world, turns, phone=False, hq=False):
     ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone, color_scheme='dark' if dark else 'light')
     pg = await ctx.new_page(); tag = f'{world}{"-phone" if phone else ""}{"-dark" if dark else ""}'; attach(pg, tag)
     rnd = random.Random(hash(tag) & 0xffff)
+    tag = tag.replace(':', '_')
     await pg.goto(BASE + ('?hq' if hq else ''))
-    await start_world(pg, world, char_idx={'w1': 0, 'w2': 1, 'w3': 2, 'w4': 0}[world])
+    await start_world(pg, world, char_idx={'w1': 0, 'w2': 1, 'w3': 2, 'w4': 0}.get(world, 0))
     for i in (1, 2):  # first visit to a world: 2 coach marks about its mechanic
         try: await pg.wait_for_selector('#coach:not([hidden]) .bubble', timeout=6000)
         except Exception: log(tag, 'no world coach mark', i); break
@@ -184,8 +194,13 @@ async def run_world(b, world, turns, phone=False, hq=False):
         await ctx.close(); return r
     # resume: reload mid-game and continue
     month = (await st(pg))['month']
-    await pg.reload(); await pg.wait_for_selector('#fbCont', timeout=120000)
-    await pg.click('#fbCont')
+    await pg.reload()
+    if world.startswith('h:'):
+        await pg.wait_for_selector('.fbworld', timeout=120000); await top_up_energy(pg)
+        await pg.evaluate("async (sid) => { const g = await import('/js/game.js'); const sv = g.savedGame('rr2-save-history-' + sid); await g.startGame({ ...sv.cfg, resume: true }); }", world[2:])
+    else:
+        await pg.wait_for_selector('#fbCont', timeout=120000)
+        await pg.click('#fbCont')
     await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
     m2 = (await st(pg))['month']
     log(tag, f'resume: month before {month} after {m2}')

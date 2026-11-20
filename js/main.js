@@ -3,7 +3,8 @@
 import { bus } from './bus.js';
 import { unlock, sfx } from './audio.js';
 import { esc, achievementToast, showLoading, hideLoading, goalWords } from './ui.js';
-import { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } from './engine.js';
+import * as EN from './engine.js';
+const { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } = EN;
 
 // mobile audio needs a gesture
 addEventListener('pointerdown', unlock, { passive: true });
@@ -70,11 +71,13 @@ function fallbackLobby() {
       <div class="row"><span>נשאר בחודש</span><b class="num ${c.surplus >= 0 ? 'pos' : 'neg'}">${sgn(c.surplus)}</b></div><div class="row"><span>מזומן בהתחלה</span><span class="num">${fmtM(c.cash)}</span></div>
       <div class="row"><span>★★★</span><span class="num">עד חודש ${t.t3}</span></div></button>`; }).join('')}</div>
     <label class="fbt"><input type="checkbox" id="fbTut" ${pick.tutorial ? 'checked' : ''}> משחק ראשון? הדרכה קצרה + עסקה ראשונה קלה</label>
+    ${(typeof EN.scenarioList === 'function' ? EN.scenarioList() : []).length ? `<h3 class="fbh">🕰️ מכונת הזמן — שוק אמיתי</h3><div class="fbw">${EN.scenarioList().map((x) => `<button class="fbworld hist" data-h="${esc(x.id)}" style="--s1:#efe2c4;--s2:#c9b089"><small>${esc(x.start || '')}</small><b>${esc(x.name)}</b><span>${esc(x.blurb || '')}</span></button>`).join('')}</div>` : ''}
     <button class="primary wide" id="fbGo">${sv ? 'משחק חדש' : 'יאללה, משחקים'}</button>
     <p class="note">המספרים מפושטים כדי שהמשחק יזרום — העקרונות אמיתיים.</p></div>`;
   const r = root();
   r.onclick = (e) => {
     const wb = e.target.closest('[data-w]'); if (wb) { pick.worldId = wb.dataset.w; pick.charId = null; save(); sfx('click'); fallbackLobby(); return; }
+    const hb = e.target.closest('[data-h]'); if (hb) { G.startGame({ worldId: 'h', mode: 'history', scenarioId: hb.dataset.h, seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'tophat', pawnColor: '#8b5e34', tutorial: false, bailout: true, resume: false }); return; }
     const cb = e.target.closest('[data-c]'); if (cb) { pick.charId = cb.dataset.c; save(); sfx('click'); r.querySelectorAll('.prof').forEach((b) => b.classList.toggle('on', b === cb)); return; }
   };
   const go = r.querySelector('#fbGo'); go.onclick = () => {

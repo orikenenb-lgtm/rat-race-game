@@ -11,9 +11,9 @@
 //  • grow: monthly change of an asset's value. Growing industries rise, hyped/declining ones sink — buying the
 //    right thing (and not the shiny thing) is what builds net worth here. Shown on the deal card (data.grow).
 //  • 'S' tiles: shipping events — freight booms, lost containers (cargo insurance pays), port strikes.
-import { MENTOR, tilesFor } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
 
-const board = 'POFOSDPOMFX?POFODSPOMOMO';
+const board = ring(['OFODSOLMO', 'FOXOM?OSL', 'ODFOEMOSI', 'XOFLDMTOI']); // v3: 40 tiles, paydays on the corners
 
 export default {
   id: 'w3', order: 3, name: 'הנמל הגלובלי', mechanic: 'fx',
@@ -32,27 +32,28 @@ export default {
   loan: { unit: 20000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
   goal: { type: 'netWorth', target: 10_000_000 },
-  maxMonths: 48,
-  stars: { t2: 33, t3: 23 },
+  maxMonths: 62,
+  stars: { t2: 41, t3: 30 },
   daily: { chars: ['importer', 'exporter', 'captain'], maxMonths: 24 },
   start: { usd: 3.6, goldUsd: 2700, insuredUntil: 0 },
   // valueSens: how much of an FX hit to profits also hits the asset's value. hedgeCost: fee = value × |sens| × hedgeCost.
   fx: { ref: 3.6, min: 2.7, max: 4.7, drift: 0.09, revert: 0.08, valueSens: 1.0, hedgeMonths: 12, hedgeCost: 0.0025, goldDrift: 0.004 },
-  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory' },
-  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' } },
+  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory', side: 'warehouse' },
+  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' } },
   tickers: {
+    IDX: { ...INDEX_TICKER, model: 'gold' },
     GOLD: { name: 'זהב · אונקייה', kind: 'gold', start: 9720, div: 0, step: [1, 10], model: 'gold', modelLabel: 'כספת זהב', unit: 'אונקיות' },
     USD: { name: 'דולרים · $1,000', kind: 'usd', start: 3600, div: 0, step: [1, 10], model: 'gold', modelLabel: 'כספת', unit: 'אלפי דולרים' },
   },
 
   characters: [
-    { id: 'importer', name: 'יבואנית צעצועים', icon: 'box', stars: { t2: 32, t3: 22 }, desc: 'יש לך עסק יבוא רווחי — שמשלם לספקים בדולרים. דולר חזק = רווח חלש.', salary: 20000, cash: 500000,
+    { id: 'importer', age: 35, family: { partner: 'married', kids: 1 }, name: 'יבואנית צעצועים', icon: 'box', maxMonths: 62, stars: { t2: 41, t3: 30 }, desc: 'יש לך עסק יבוא רווחי — שמשלם לספקים בדולרים. דולר חזק = רווח חלש.', salary: 20000, cash: 500000,
       expenses: [['משכנתא', 7500], ['רכב', 2500], ['אוכל ושוטף', 4000], ['ביטוחים', 2000]],
       assets: [{ k: 'warehouse', n: 'חברת יבוא הצעצועים שלך', cost: 1200000, down: 300000, cf: 14000, sens: -3, grow: 0.009 }] },
-    { id: 'exporter', name: 'מגדל אבוקדו ליצוא', icon: 'avocado', stars: { t2: 34, t3: 24 }, desc: 'המטע מוכר לאירופה בדולרים. דולר חלש = שנה קשה.', salary: 16000, cash: 400000,
+    { id: 'exporter', age: 33, family: { partner: 'married', kids: 2 }, name: 'מגדל אבוקדו ליצוא', icon: 'avocado', maxMonths: 62, stars: { t2: 43, t3: 32 }, desc: 'המטע מוכר לאירופה בדולרים. דולר חלש = שנה קשה.', salary: 16000, cash: 400000,
       expenses: [['משכנתא', 6000], ['טנדר', 2000], ['אוכל ושוטף', 3500], ['ביטוחים', 1500]],
       assets: [{ k: 'factory', n: 'מטע האבוקדו שלך', cost: 1000000, down: 300000, cf: 11000, sens: 2.5, grow: 0.011 }] },
-    { id: 'captain', name: 'קברניטית', icon: 'anchor', stars: { t2: 32, t3: 22 }, desc: 'משכורת גבוהה — בדולרים. כשהשקל מתחזק, המשכורת שלך מתכווצת.', salaryUsd: 9000, cash: 760000,
+    { id: 'captain', age: 31, family: { partner: 'none', kids: 0 }, name: 'קברניטית', icon: 'anchor', maxMonths: 60, stars: { t2: 40, t3: 33 }, desc: 'משכורת גבוהה — בדולרים. כשהשקל מתחזק, המשכורת שלך מתכווצת.', salaryUsd: 9000, cash: 760000,
       expenses: [['שכירות', 8000], ['רכב', 3000], ['אוכל ושוטף', 5000], ['טיסות הביתה', 3000], ['ביטוחים', 3000]] },
   ],
 

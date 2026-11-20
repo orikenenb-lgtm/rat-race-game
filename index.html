@@ -29,9 +29,12 @@
     <div class="stat mon"><span>חודש</span><b id="hMonth" class="num">1</b></div>
   </div>
   <div class="hcard hgoal" id="hGoal" role="meter" aria-label="מד החופש"></div>
+  <div class="hlife" id="hLife" hidden></div>
+  <button class="hcard hen" id="hEnergy" hidden aria-label="אנרגיה להטלות"><span>⚡</span><b class="num" id="hEnVal">25</b><small id="hEnT"></small></button>
   <div class="htools">
     <button id="turboBtn" class="ibtn" aria-label="טורבו (מהירות כפולה)" aria-pressed="false"></button>
     <button id="muteBtn" class="ibtn" aria-label="השתקה" aria-pressed="false"></button>
+    <button id="camBtn" class="ibtn" aria-label="מבט על כל הלוח" aria-pressed="false"></button>
   </div>
 </header>
 
@@ -45,9 +48,9 @@
     <button id="voiceBtn" class="ibtn sm" aria-label="הקראה בקול" aria-pressed="false" title="הקראה: כבויה"></button>
   </div>
   <div class="ctrls">
-    <div id="die" class="die" role="img" aria-label="קובייה"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="dice" class="dice" role="img" aria-label="קוביות"><div class="die"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="die"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
     <p id="dieSr" class="sr" aria-live="polite"></p>
-    <button id="roll" class="primary" disabled>הטל קובייה</button>
+    <button id="roll" class="primary" disabled>הטל קוביות<small id="rollEn" hidden></small></button>
     <button id="sheetBtn" class="chip" aria-controls="sheet" aria-expanded="false"></button>
   </div>
 </section>
@@ -55,6 +58,9 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="achv" aria-live="polite"></div>
 <div id="banner" class="banner" aria-hidden="true"></div>
+<div id="hist" class="hist" hidden aria-label="מכונת הזמן: המדד עד עכשיו"></div>
+<div id="paper" aria-live="polite"></div>
+<div id="story" class="story" hidden role="dialog" aria-label="סיפור החיים שלך"></div>
 
 <div id="evm" class="modal" hidden><div class="card" id="evCard" role="dialog" aria-modal="true" aria-labelledby="evTitle"></div></div>
 <div id="coach" hidden></div>

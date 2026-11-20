@@ -7,7 +7,7 @@ import { sfx } from './audio.js';
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 /** Wrap signed ₪ amounts / percentages inside Hebrew sentences in LTR isolates (LRI…PDI) so "(+₪4,830)" stays readable. */
-const NUMRE = /[+−-]?(?:[₪$]\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?%(?:[–-]\d+(?:\.\d+)?%)?)|[+−]\d{1,3}(?:,\d{3})*(?:\.\d+)?/g;
+const NUMRE = /[+−-]?(?:[₪$]\d{1,3}(?:,\d{3})*(?:\.\d+)?[KM]?|\d+(?:\.\d+)?%(?:[–-]\d+(?:\.\d+)?%)?)|[+−]\d{1,3}(?:,\d{3})*(?:\.\d+)?/g;
 export const iso = (t) => String(t ?? '').replace(/→/g, '←').replace(NUMRE, (m) => '\u2066' + m.replace(/^([+−-])(?=[₪$])/, '$1\u2060') + '\u2069');
 /** "≥" mirrors in RTL and confuses readers — say it in words. */
 export const goalWords = (t) => String(t ?? '').replace(/הכנסה פסיבית\s*≥\s*הוצאות/g, 'הכנסה פסיבית שמכסה את ההוצאות').replace(/\s*≥\s*/g, ' של לפחות ');
@@ -41,6 +41,7 @@ export const ICON = {
   home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.2 12 4l9 7.2V20a1 1 0 0 1-1 1h-5.2v-6.2H9.2V21H4a1 1 0 0 1-1-1z"/></svg>',
   soundOn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   soundOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="m16 9 6 6m0-6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  overview: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><rect x="8.5" y="8.5" width="7" height="7" rx="1.5"/></svg>',
   bolt: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 2 4 14h6.5L9 22l11-13h-7z"/></svg>',
   doc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6z" opacity=".25"/><path d="M6 2h9l5 5v15H6zM15 2v5h5M9 12h8M9 16h8M9 8h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg>',
@@ -136,7 +137,7 @@ export function hideLoading() { const el = $('#loading'); if (el) el.hidden = tr
 
 /** Paint the page for a world: sky, accents, data-world. */
 export function applyTheme(w) {
-  const T = w.theme, r = document.documentElement.style;
+  const T = w.mechanic === 'history' ? { ...w.theme, sky: ['#efe2c4', '#c9b089'], accent: '#a8763e' } : w.theme, r = document.documentElement.style;
   r.setProperty('--sky1', T.sky[0]); r.setProperty('--sky2', T.sky[1]);
   r.setProperty('--accent', T.accent || '#f2b632'); r.setProperty('--accent2', T.accent2 || T.accent || '#f2b632');
   document.body.dataset.world = w.id;
@@ -184,7 +185,8 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   // world indicator
   const wi = m.worldIndicators || {}; const box = $('#hInd');
   let key = null, v = null, text = '', goodUp = 0, extra = '';
-  if (w.mechanic === 'rate') { key = 'rate'; v = wi.rate; text = `ריבית ${num(pctTxt(wi.rate))}`; goodUp = -1; }
+  if (wi.ymText) { key = 'ym'; v = wi.index; text = `🗞️ ${esc(wi.ymText)}${wi.index != null ? ` · מדד ${num(Math.round(wi.index))}` : ''}`; goodUp = 1; }
+  else if (w.mechanic === 'rate') { key = 'rate'; v = wi.rate; text = `ריבית ${num(pctTxt(wi.rate))}`; goodUp = -1; }
   else if (w.mechanic === 'fx') {
     key = 'usd'; v = wi.usd; text = `דולר ${num(usdTxt(wi.usd))}`;
     goodUp = (wi.exposure && wi.exposure.cf) ? Math.sign(wi.exposure.cf) : 0;
@@ -202,6 +204,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     box.hidden = false;
   } else { box.innerHTML = ''; box.hidden = true; }
   $('#hWorld').classList.toggle('noind', !key);
+  renderLife(m, ctx);
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
   const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : 'יעד העולם';
@@ -234,7 +237,57 @@ function shownPct(m) {
   return Math.max(0, Math.min(100, Math.floor(p * 100)));
 }
 
+/* ============================================================ v3 life row (age · energy · happiness · credit · inflation) */
+const BAND_CLS = { 'מצוין': 'pos', 'טוב': 'pos', 'בינוני': '', 'חלש': 'neg', 'גרוע': 'neg' };
+function renderLife(m, ctx) {
+  const box = $('#hLife'); if (!box) return;
+  const L = m.life;
+  if (!L) { box.hidden = true; document.body.classList.remove('has-life'); return; }
+  box.hidden = false; document.body.classList.add('has-life');
+  const en = Math.round(L.energy ?? 0), hp = Math.round(L.happiness ?? 0);
+  const enc = en < 25 ? 'neg' : en < 50 ? 'warn' : 'pos';
+  const hpe = hp >= 75 ? '😄' : hp >= 60 ? '🙂' : hp >= 40 ? '😐' : hp >= 25 ? '🙁' : '😣';
+  const infl = L.inflationYear != null ? Math.round(L.inflationYear * 10) / 10 : null;
+  box.innerHTML = `<button class="lc age" data-life="age" title="גיל"><span>🎂</span><b class="num">${Math.floor(L.age)}</b></button>
+    <button class="lc en ${enc}" data-life="energy" title="אנרגיה (${en}/100)"><span>🔋</span><i class="mb"><i style="width:${Math.max(3, en)}%"></i></i><b class="num">${en}</b></button>
+    <button class="lc hp" data-life="happy" title="אושר (${hp}/100)"><span>${hpe}</span><b class="num">${hp}</b></button>
+    <button class="lc cr ${BAND_CLS[L.creditBand] ?? ''}" data-life="credit" title="דירוג אשראי: ${esc(L.creditBand || '')}"><span>🏦</span><b class="num">${L.creditScore ?? '—'}</b></button>
+    ${infl != null ? `<button class="lc cpi" data-life="cpi" title="אינפלציה שנתית"><span>🛒</span><b class="num">${infl}%</b></button>` : ''}
+    <button class="lc plan" data-life="plan" title="התוכנית החודשית — לשנות"><span>${PLAN_ICON[L.plan] || '📅'}</span><b>${esc(L.planLabel || '')}</b></button>`;
+}
+/** Details popover for a life chip (tap). */
+export function lifeDetails(kind, m) {
+  const L = m.life || {}; const p = m.payslip || {};
+  const T = {
+    age: ['הגיל שלך', `${esc(L.ageText || Math.floor(L.age))}. כל חודש במשחק הוא חודש בחיים.${L.freeTimeMonths ? ` עד עכשיו היו לך ${L.freeTimeMonths} חודשים של זמן חופשי.` : ''}`],
+    energy: ['אנרגיה', `${Math.round(L.energy)}/100. שעות נוספות, לימודים ועסק צדדי שוחקים; מנוחה ומשפחה ממלאות. מתחת ל־25 — סכנת שחיקה: חודש בלי משכורת.`],
+    happy: ['אושר', `${Math.round(L.happiness)}/100${L.happinessBase != null && Math.round(L.happinessBase) !== Math.round(L.happiness) ? ` (מתוכם ${Math.round(L.happiness - L.happinessBase)} מ"צעצועים" — וזה דועך)` : ''}. ל־★★★ צריך גם לצאת מהר וגם אושר של לפחות 60.`],
+    credit: ['דירוג אשראי', `${L.creditScore} — ${esc(L.creditBand || '')}. הלוואות כפויות ואשראי לא משולם מורידים; החזר בזמן מעלה. הדירוג קובע את הריבית שלך${L.loanPctAdj ? ` (כרגע ${iso((L.loanPctAdj > 0 ? '+' : '') + L.loanPctAdj + '%')})` : ''}.`],
+    cpi: ['אינפלציה', `השנה המחירים עולים ב־${iso(L.inflationYear + '%')}. המזומן שלך שווה היום ${iso(fmtM(L.realCash ?? m.cash))} במחירים של תחילת המשחק. כסף שלא עובד — מתכווץ.`],
+  }[kind];
+  return T;
+}
+
 /* ============================================================ statement sheet */
+function payslipHtml(m, ctx) {
+  const p = m.payslip; if (!p || !p.gross) return '';
+  const L = m.life || {};
+  const hist = (ctx.st && ctx.st.ui && ctx.st.ui.pensionHist) || [];
+  const pctU = (x) => (x == null ? null : x > 1 ? x / 100 : x);
+  const eff = pctU(p.effectiveTaxRate), marg = pctU(p.marginalRate);
+  const lines = (p.lines && p.lines.length ? p.lines.filter((x) => !/^נטו/.test(x.label)) : [
+    { label: 'ברוטו', amount: p.gross }, p.overtime ? { label: 'שעות נוספות', amount: p.overtime } : null,
+    { label: 'מס הכנסה', amount: -p.incomeTax }, { label: 'ביטוח לאומי ובריאות', amount: -p.bl }, { label: 'פנסיה (6% שלך)', amount: -p.pensionEmployee },
+  ].filter(Boolean));
+  return `<details class="slip" open><summary><span>🧾 התלוש שלך</span><b class="num">${fmtM(p.net)} נטו</b></summary>
+    <div class="slipb">${lines.map((x) => row(escI(x.label), (x.amount > 0 && x !== lines[0] ? '+' : '') + fmtM(x.amount), x.amount < 0 ? 'neg' : '')).join('')}
+    <div class="row net"><b>נטו לחשבון</b><b class="num pos">${fmtM(p.net)}</b></div>
+    ${eff != null ? `<p class="note">מס אפקטיבי ${iso(Math.round(eff * 1000) / 10 + '%')} · מדרגת המס שלך ${iso(Math.round((marg || 0) * 100) + '%')} — מכל שקל נוסף בברוטו נכנסים לכיס בערך ${iso(Math.round((1 - (marg || 0) - 0.12) * 100) + '%')}.</p>` : ''}
+    ${p.employerPension || p.pensionDeposit ? `<p class="note">המעסיק מפקיד עוד ${num(fmtM((p.employerPension || 0) + (p.severanceDeposit || 0)))} לפנסיה שלך — זה הכסף שלך, גם אם לא רואים אותו בעו"ש.</p>` : ''}</div></details>
+    ${L.pension != null ? `<div class="wbox pens"><div class="wl"><span>🏝️ קרן הפנסיה שלך</span><b class="num">${fmtM(L.pension)}</b></div>${hist.length > 1 ? spark(hist, { color: 'var(--green)', w: 300, h: 34 }) : ''}<p class="note">גדלה כל חודש מהפקדות ומהתשואה — ריבית דריבית. לא מזומן, אבל נספרת בשווי הנקי.</p></div>` : ''}
+    ${L.realCash != null ? `<div class="wbox"><div class="wl"><span>🛒 אינפלציה ${iso((L.inflationYear ?? 0) + '%')} בשנה</span><b class="num">מדד ${(L.cpi ?? 1).toFixed(3)}</b></div>
+      ${row('מזומן (נומינלי)', fmtM(m.cash))}${row('מזומן בכסף של היום הראשון (ריאלי)', fmtM(L.realCash), L.realCash < m.cash ? 'neg' : '')}${L.realNetWorth != null ? row('שווי נקי ריאלי', fmtM(L.realNetWorth)) : ''}</div>` : ''}`;
+}
 function spark(hist, { color = 'currentColor', w = 120, h = 30 } = {}) {
   if (!hist || hist.length < 2) return '';
   const mn = Math.min(...hist), mx = Math.max(...hist), span = mx - mn || 1;
@@ -285,6 +338,12 @@ export function renderSheet(m, ctx) {
    ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
    <p>${goalHelp}</p></div>
   ${world}
+  ${payslipHtml(m, ctx)}
+  ${m.index ? `<div class="wbox idx"><div class="wl"><span>📈 קרן מחקה מדד</span><b class="num">${fmtM(m.index.value || 0)}</b></div>
+    ${m.index.history && m.index.history.length > 1 ? spark(m.index.history, { color: 'var(--green)', w: 300, h: 30 }) : ''}
+    <p class="note">${m.index.qty ? `${N(m.index.qty)} יחידות · ${iso(fmtP(m.index.price))} ליחידה` : 'עוד לא השקעת. משעמם, זול, ועובד לאורך זמן.'}${m.index.autoInvest ? ` · הוראת קבע ${iso(fmtM(m.index.autoInvest))} בחודש` : ''}</p>
+    <div class="loans"><button data-act="invest">להשקיע / למכור</button></div></div>` : ''}
+  ${m.taxes ? (() => { const t = m.taxes; const tot = (t.income || 0) + (t.bl || 0) + (t.capGains || 0) + (t.rental || 0) + (t.betterment || 0); return tot ? `<details class="slip"><summary><span>🏛️ מסים ששילמת עד עכשיו</span><b class="num">${fmtM(tot)}</b></summary><div class="slipb">${row('מס הכנסה', fmtM(t.income || 0))}${row('ביטוח לאומי ובריאות', fmtM(t.bl || 0))}${t.capGains ? row('מס רווחי הון (25%)', fmtM(t.capGains)) : ''}${t.rental ? row('מס על שכירות (10%)', fmtM(t.rental)) : ''}${t.betterment ? row('מס שבח', fmtM(t.betterment)) : ''}</div></details>` : ''; })() : ''}
   <h3>הכנסות בחודש</h3>${m.incomeLines.map((x) => row(escI(x.label), sgn(x.amount), cls(x.amount))).join('')}
   <h3>הוצאות בחודש</h3>${m.expenseLines.map((x) => row(escI(x.label), fmtM(x.amount))).join('')}
   <div class="total"><span>תזרים חודשי</span>${num(sgn(m.cashflow), cls(m.cashflow))}</div>
@@ -346,19 +405,26 @@ export function speakLast() { speak(lastMentor); }
 
 /* ============================================================ dice */
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
-export function showDie(n) {
-  const d = $('#die'); if (!d) return;
-  d.querySelectorAll('i').forEach((el, i) => { el.style.visibility = PIPS[n].includes(i) ? 'visible' : 'hidden'; });
-  d.setAttribute('aria-label', 'יצא ' + n);
+export function showDice(faces) {
+  faces = (Array.isArray(faces) ? faces : [faces || 1]).filter(Boolean);
+  const box = $('#dice'); if (!box) return;
+  [...box.querySelectorAll('.die')].forEach((d, k) => {
+    const n = faces[k]; d.hidden = !n; if (!n) return;
+    d.querySelectorAll('i').forEach((el, i) => { el.style.visibility = PIPS[n].includes(i) ? 'visible' : 'hidden'; });
+  });
+  const tot = faces.reduce((a, b) => a + b, 0);
+  box.setAttribute('aria-label', faces.length > 1 ? `יצא ${faces.join(' ו־')} — סה"כ ${tot}` : 'יצא ' + tot);
+  box.classList.toggle('double', faces.length === 2 && faces[0] === faces[1]);
 }
-export async function rollDie(n) {
-  const d = $('#die');
-  d.classList.remove('spin', 'land'); void d.offsetWidth; d.classList.add('spin');
-  const k = speed < 1 ? 4 : 7;
-  for (let i = 0; i < k; i++) { showDie(1 + Math.floor(Math.random() * 6)); await wait(60); }
-  showDie(n); d.classList.remove('spin'); void d.offsetWidth; d.classList.add('land');
-  $('#dieSr').textContent = 'יצא ' + n;
+export const showDie = (n) => showDice([n]);
+/** DOM dice after the 3D throw settled. */
+export function landDice(faces) {
+  const box = $('#dice'); showDice(faces);
+  box.classList.remove('land'); void box.offsetWidth; box.classList.add('land');
+  const tot = faces.reduce((a, b) => a + b, 0);
+  $('#dieSr').textContent = (faces.length > 1 ? `יצא ${faces.join(' ו־')}, סה"כ ${tot}` : 'יצא ' + tot) + (faces.length === 2 && faces[0] === faces[1] ? ' — דאבל!' : '');
 }
+export function shakeDomDice(on) { const box = $('#dice'); if (box) box.classList.toggle('shaking', !!on); }
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 export function setRollEnabled(b) { const r = $('#roll'); if (r) { r.disabled = !b; r.classList.toggle('ready', !!b); } }
 export function focusRoll() { const r = $('#roll'); if (r && !r.disabled && $('#evm').hidden && $('#gm').hidden && !lobbyOpen()) r.focus({ preventScroll: true }); }
@@ -488,6 +554,50 @@ function optButtons(ev, filter = () => true, extraCls = '') {
   const long = opts.some((o) => o.label.length > 26 || o.netLabel) || opts.length > 3;
   return `<div class="acts ${long ? 'col' : ''} ${extraCls}">${opts.map((o, i) => `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} ${o.kind === 'sell' ? 'sell' : ''} ${o.netLabel ? 'hasnet' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>${optLabel(o)}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
 }
+const PLAN_ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
+/** Effect chips: ₪ now · ₪/month × months · 😊 · 🔋 */
+function effectChips(e = {}) {
+  const c = [];
+  if (e.cash) c.push(`<em class="fx ${cls(e.cash)}">${iso(sgn(e.cash))}</em>`);
+  if (e.net != null && e.net !== 0) c.push(`<em class="fx ${cls(e.net)}">${iso(sgn(e.net))} בחודש</em>`);
+  if (e.monthly) c.push(`<em class="fx ${cls(e.monthly)}">${iso(sgn(e.monthly))} בחודש${e.months ? ` × ${e.months}` : ''}</em>`);
+  if (e.happiness) c.push(`<em class="fx ${cls(e.happiness)}">😊 ${iso((e.happiness > 0 ? '+' : '−') + Math.abs(Math.round(e.happiness)))}</em>`);
+  if (e.glow) c.push(`<em class="fx pos">✨ ${iso('+' + Math.round(e.glow))} זמני</em>`);
+  if (e.risk) c.push(`<em class="fx neg">סיכון ${iso(fmtM(e.risk))}</em>`);
+  if (e.energy) c.push(`<em class="fx ${cls(e.energy)}">🔋 ${iso((e.energy > 0 ? '+' : '−') + Math.abs(Math.round(e.energy)))}</em>`);
+  return c.join('');
+}
+/** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile. */
+function planPicker(ev) {
+  const cur = ev.options.find((o) => o.id === 'ok');
+  const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
+  const raise = ev.options.find((o) => o.id === 'raise');
+  const rest = ev.options.filter((o) => !o.id.startsWith('plan:') && o.id !== 'ok' && o.id !== 'raise');
+  const tile = (o) => {
+    const id = o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5));
+    const lbl = o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label;
+    const e0 = o.effects || {}; const e = { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
+    return `<button class="plan ${o.id === 'ok' ? 'cur' : ''} ${o.primary ? 'rec' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}>
+      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(lbl)}</b>${o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מומלץ</small>' : ''}
+      <span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
+  };
+  return `<div class="plans">${plans.map(tile).join('')}</div>` +
+    (raise ? `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>` : '') +
+    (rest.length ? optButtons({ ...ev, options: rest }) : '') + (cur ? '' : '');
+}
+/** Life-event dilemmas: each option is a card with its money / energy / happiness consequences. */
+function effectChoices(ev) {
+  return `<div class="choices">${ev.options.map((o, i) => `<div class="opt"><button class="choice ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>
+    <b>${escI(o.label)}</b><span class="fxs">${effectChips(o.effects)}</span>${o.effects && o.effects.note ? `<small class="pn">${escI(o.effects.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
+}
+/** Negotiation: offer −5/−10/−15% with the acceptance chance (and the risk of losing the deal). */
+function offerRow(offers) {
+  return `<div class="nego"><p class="mh">🤝 להציע מחיר נמוך יותר? <small>אם המוכר יסרב — העסקה נסגרת.</small></p><div class="nrow">${offers.map((o) => {
+    const pct = +o.id.split(':')[1]; const ch = o.chance != null ? Math.round(o.chance * 100) : null;
+    return `<button class="noff" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}><b>${iso('−' + pct + '%')}</b>${ch != null ? `<small class="${ch >= 60 ? 'pos' : ch >= 35 ? '' : 'neg'}">סיכוי ${iso(ch + '%')}</small><i class="chbar"><i style="width:${ch}%"></i></i>` : ''}</button>`;
+  }).join('')}</div></div>`;
+}
+
 /** "חסרים ₪X — הבנק ייתן הלוואה של ₪Y (עולה ₪Z בחודש)" — any card that makes you pay more than you have. */
 function shortfallLine(d) {
   if (!d || !(d.shortfall > 0)) return '';
@@ -522,9 +632,14 @@ function renderEvent(first) {
   const fn = BODY[ev.type] || (() => '');
   let body = '';
   try { body = fn(ev, ctx) || ''; } catch (e) { console.error('card body', e); }
+  const hasPlans = ev.options.some((o) => o.id.startsWith('plan:'));
+  const hasEffects = ev.options.some((o) => o.effects && !o.id.startsWith('plan:'));
+  const offers = ev.options.filter((o) => /^offer:/.test(o.id));
   const actions = ev.type === 'mystery' && ev.data.kind === 'quiz' ? optButtons(quizView(ev), () => true, 'quiz')
     : ev.type === 'market' && ev.data.kind === 'sell' && ev.data.offers.length ? optButtons(ev, (o) => o.kind !== 'sell') // sales are buttons inside the list
-    : optButtons(ev);
+    : hasPlans ? planPicker(ev)
+    : hasEffects ? effectChoices(ev)
+    : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id));
   c.innerHTML = head(ev) + body + shortfallLine(ev.data) + '<p class="err" role="alert"></p>' + actions;
   if (first) c.scrollTop = 0;
 }
@@ -532,9 +647,15 @@ function renderEvent(first) {
 /* ---------- per-type bodies */
 const BODY = {
   payday(ev) {
-    const d = ev.data;
-    return grid([row('משכורת', sgn(d.salary), 'pos'), row('הכנסה פסיבית', sgn(d.passive), cls(d.passive)), row('הוצאות', fmtM(-d.expenses), 'neg'), `<div class="row"><b>נכנס לכיס</b>${big(d.cashflow)}</div>`]) +
-      '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>';
+    const d = { ...ev.data }; const plans = ev.options.some((o) => o.id.startsWith('plan:'));
+    if (d.payslip) { d.gross = d.payslip.gross; d.net = d.payslip.net; }
+    const rows = [d.gross ? row('ברוטו', sgn(d.gross)) : null, d.gross ? row('מסים, ביטוח לאומי ופנסיה', fmtM(-(d.gross - (d.net ?? d.salary))), 'neg') : null,
+      row(d.gross ? 'משכורת נטו' : 'משכורת', sgn(d.net ?? d.salary), 'pos'), row('הכנסה פסיבית', sgn(d.passive), cls(d.passive)), row('הוצאות', fmtM(-d.expenses), 'neg'), `<div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div>`];
+    return grid(rows) + (plans ? '<h3 class="ph">איך תעביר את החודש הבא?</h3>' : '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>');
+  },
+  life(ev) {
+    const d = ev.data || {};
+    return d.text ? `<p class="d">${escI(d.text)}</p>` : '';
   },
   deal(ev, ctx) {
     const d = ev.data; const w = ctx.world;
@@ -562,7 +683,8 @@ const BODY = {
     const roiBtn = d.down ? `<button class="chip" data-roi aria-expanded="${evState.roi}" aria-controls="roiBox">תראה לי את החישוב</button>
       <div class="roi" id="roiBox" ${evState.roi ? '' : 'hidden'}>תשואה על ההון = תזרים שנתי ÷ הון עצמי<br>${roiEq(d)}<br><span class="note">התזרים כבר כולל את תשלומי ה${esc(d.debtLabel)}.${d.roiFix != null ? ` בריבית קבועה: ${iso(d.roiFix + '%')} בשנה.` : ''}</span>${d.roiVsLoan ? `<p class="vs">${escI(d.roiVsLoan)}</p>` : ''}</div>` : '';
     const cash = `<p class="note">יש לך ${num(fmtM(d.cash))} במזומן.${short ? ` חסרים ${num(fmtM(short))}${d.loanNeeded ? ` — הבנק ילווה ${num(fmtM(d.loanNeeded))} (עולה ${num(fmtM(d.loanMonthly))} בחודש)` : ''}.` : ''}</p>`;
-    return grid(rows) + extra + roiBtn + cash;
+    const neg = d.negotiated ? `<p class="okmsg">🤝 המוכר הסכים: ${iso('−' + d.negotiated.pct + '%')} — חסכת ${num(fmtM(d.negotiated.saved), 'pos')}</p>` : '';
+    return neg + grid(rows) + extra + roiBtn + cash;
   },
   doodad(ev) {
     const d = ev.data; const canSkip = ev.options.some((o) => o.id === 'skip');
@@ -576,7 +698,7 @@ const BODY = {
     const d = ev.data;
     if (d.kind === 'sell') {
       if (!d.offers.length) return '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
-      return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.net)}</b><br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
+      return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.netAfterTax ?? o.net)}</b>${o.tax ? ` <small>(אחרי מס ${num(fmtM(o.tax))})</small>` : ''}<br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
     }
     if (d.kind === 'rate' || d.kind === 'fx') return fromTo(d.from, d.to, d.kind === 'rate' ? pctTxt : usdTxt, d.kind === 'rate' ? 'הריבית' : 'הדולר', d.kind === 'rate' ? -1 : 0);
     if (d.kind === 'reval') return d.changed.length ? grid([row('השינוי בשווי הנכסים שלך', sgn(d.valueChange), cls(d.valueChange))]) + '<p class="note">זה משנה את השווי הנקי, לא את המזומן.</p>' : '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
@@ -655,12 +777,24 @@ function fromTo(a, b, f, what, goodDir) {
   return `<div class="fromto"><span class="num">${f(a)}</span><i class="${good > 0 ? 'pos' : good < 0 ? 'neg' : ''}">${dir > 0 ? ICON.up : dir < 0 ? ICON.down : '='}</i><b class="num ${good > 0 ? 'pos' : good < 0 ? 'neg' : ''}">${f(b)}</b><small>${moved(what, dir)}</small></div>`;
 }
 
+/** Index fund: price path so far + "what time in the market does" (₪1,000/month at ~7% a year). */
+function compoundBox(d) {
+  const hist = (d.history && d.history.length > 1 ? d.history : null);
+  const fv = (pm, yrs, r = 0.07) => { const i = r / 12; return pm * ((Math.pow(1 + i, yrs * 12) - 1) / i); };
+  const bars = [5, 10, 20, 30].map((y) => ({ y, v: fv(1000, y), put: 1000 * 12 * y }));
+  const mx = bars[bars.length - 1].v;
+  return `<div class="comp"><p class="mh">📈 קרן מחקה מדד — כוחה של ריבית דריבית</p>${hist ? spark(hist, { color: 'var(--green)', w: 300, h: 40 }) : ''}
+    <div class="cbars">${bars.map((b) => `<div><i style="height:${Math.max(6, (b.v / mx) * 70)}px"><s style="height:${(b.put / b.v) * 100}%"></s></i><small>${b.y} שנים</small><b class="num">${fmtC(b.v)}</b></div>`).join('')}</div>
+    <p class="note">₪1,000 בחודש, בערך 7% בשנה. החלק הכהה = מה ששמת; כל השאר = הריבית שעבדה בשבילך. הזמן בשוק חשוב יותר מתזמון השוק.</p></div>`;
+}
+
 /* ---------- trade window (v1.1: slider dir=ltr, clamp, ±steps, max/all/reset, repeated buy/sell, 'סיום') */
 function tradeHtml(ev) {
   const d = ev.data; const [s1, s2] = d.step || [10, 100]; const u = esc(d.unit);
   return `${head(ev)}<div class="grid"><div class="row"><span>${esc(d.name)}</span><b class="big num" id="qprice">${fmtP(d.price)}</b></div>
     <div class="row"><span>יש לך</span><span class="num rtl" id="qhold"></span></div><div class="row" id="qgainRow" hidden><span>אם תמכור הכל עכשיו</span><b class="num" id="qgain"></b></div><div class="row"><span>מזומן</span><span class="num" id="qcash"></span></div>
     ${d.div ? `<div class="row"><span>תשלום חודשי ליחידה</span><span class="num pos">${fmtP(d.div)}</span></div>` : ''}</div>
+    ${d.ticker === 'IDX' || d.kind === 'index' ? compoundBox(d) : ''}
     ${d.wiped && d.wiped.qty ? `<p class="warn">המטבע הקודם (${esc(d.wiped.oldName)}) מת: ${N(d.wiped.qty)} יחידות ששוות היו ${num(fmtM(d.wiped.value))} — נמחקו.</p>` : ''}
     <label class="sr" for="qs">כמות ${u}</label><input type="range" id="qs" dir="ltr" min="0" step="1" value="0">
     <div class="qty" dir="ltr"><button data-q="${-s2}" aria-label="פחות ${s2}">−${N(s2)}</button><button data-q="${-s1}" aria-label="פחות ${s1}">−${N(s1)}</button><output id="qv" aria-live="polite">0</output><button data-q="${s1}" aria-label="עוד ${s1}">+${N(s1)}</button><button data-q="${s2}" aria-label="עוד ${s2}">+${N(s2)}</button></div>
@@ -686,7 +820,10 @@ function tradeUpd(fromEvent = false) {
   $('#qcash').textContent = fmtM(d.cash);
   const gain = d.qty ? Math.round((d.price - d.avg) * d.qty) : 0;
   $('#qgainRow').hidden = !d.qty;
-  if (d.qty) { const g = $('#qgain'); g.textContent = (gain > 0 ? '+' : '') + fmtM(gain); g.className = 'num ' + cls(gain); }
+  if (d.qty) {
+    const g = $('#qgain'); const ug = d.unrealizedGain ?? gain; const tax = d.taxRate && ug > 0 ? Math.round(ug * d.taxRate) : 0;
+    g.innerHTML = `${(ug > 0 ? '+' : '') + fmtM(ug)}${tax ? ` <small class="mut">(מס רווחי הון ${Math.round(d.taxRate * 100)}%: ${fmtM(-tax)})</small>` : ''}`; g.className = 'num rtl ' + cls(ug);
+  }
   const lr = d.lastResult;
   const last = lr && fromEvent ? `${lr.action === 'buy' ? 'קנית' : 'מכרת'} ${N(lr.qty)} ב־${iso(fmtP(lr.price))}. ` : '';
   $('#qinfo').innerHTML = q ? `${last}עסקה של <b class="num">${fmtM(q * d.price)}</b>${d.div ? ` · ${num(sgn(q * d.div), 'pos')} בחודש` : ''}` : last ? `${last}אפשר להמשיך או לסיים.` : 'בחר כמות עם הסרגל או הכפתורים';
@@ -710,4 +847,80 @@ export function freeRect() {
   }
   if (y1 - y0 < 200) { y0 = Math.max(0, y1 - 200); }
   return { x0, y0, x1, y1 };
+}
+
+
+/* ============================================================ v3: ⚡ roll-energy chip */
+export function renderRollEnergy(g, msNext) {
+  const b = $('#hEnergy'); if (!b) return;
+  const re = $('#rollEn');
+  if (!g) { b.hidden = true; if (re) re.hidden = true; return; }
+  if (re) { re.hidden = false; re.textContent = `⚡${g.value}`; re.className = g.value <= 3 ? 'low' : ''; }
+  b.hidden = false;
+  $('#hEnVal').textContent = `${g.value}`;
+  b.classList.toggle('low', g.value <= 3); b.classList.toggle('empty', g.value <= 0);
+  const t = $('#hEnT');
+  if (g.value < g.max && msNext > 0) { const s = Math.ceil(msNext / 1000); t.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } else t.textContent = '';
+  b.title = `⚡ ${g.value}/${g.max} — כל הטלה עולה ⚡ אחת`;
+}
+
+/* ============================================================ v3: lessons unlocked */
+export function lessonToast(list, onOpen) {
+  (list || []).forEach((l, i) => setTimeout(() => toast(`📚 שיעור חדש בספרייה: ${l.title}`, { kind: 'gold', action: onOpen ? { label: 'לקרוא', fn: () => onOpen(l) } : null }), i * 1400));
+}
+/** One lesson as a reading card (in-game). */
+export function lessonCard(l) {
+  return modal({ tag: 'ספריית השיעורים', color: '#7c3aed', title: l.title, html: `<p class="lesson">${escI(l.text || '')}</p>`, actions: [{ label: 'הבנתי', cls: 'primary' }], dismissable: true });
+}
+
+/* ============================================================ v3: history mode — newspaper + market strip */
+let paperT = 0;
+export function newspaper(item) {
+  const el = $('#paper'); if (!el || !item) return;
+  clearTimeout(paperT);
+  el.innerHTML = `<div class="np"><div class="np-h"><b>העיתון</b><small>${esc(item.ymText || item.ym || '')}</small></div><p>${escI(item.text)}</p></div>`;
+  const c = el.firstElementChild; requestAnimationFrame(() => c.classList.add('in'));
+  paperT = setTimeout(() => { c.classList.remove('in'); c.classList.add('out'); }, Math.max(2600, 1400 + item.text.length * 40) * Math.max(0.6, speed));
+}
+export function historyStrip(hist, wi) {
+  const el = $('#hist'); if (!el) return;
+  if (!wi || !wi.ymText) { el.hidden = true; return; }
+  el.hidden = false;
+  const vals = (hist || []).map((x) => x.index).filter((x) => x != null);
+  const first = vals[0], last = vals[vals.length - 1];
+  const chg = first ? Math.round((last / first - 1) * 1000) / 10 : 0;
+  el.innerHTML = `<div class="hh"><b>${esc(wi.ymText)}</b><span class="num ${cls(chg)}">${iso((chg > 0 ? '+' : '') + chg + '%')}</span></div>${vals.length > 1 ? spark(vals, { color: chg >= 0 ? 'var(--green)' : 'var(--red)', w: 220, h: 38 }) : '<p class="note">המדד יתחיל להתקדם בתשלום הראשון</p>'}
+    <div class="hv">${wi.rate != null ? `<span>ריבית ${iso(wi.rate + '%')}</span>` : ''}${wi.cpi != null ? `<span>מדד מחירים ${(+wi.cpi).toFixed(1)}</span>` : ''}${wi.usd != null ? `<span>$ ${(+wi.usd).toFixed(2)}</span>` : ''}</div>`;
+}
+
+/* ============================================================ v3: the story of your life (before the end screen) */
+export function lifeStory(sum, { won = false } = {}) {
+  const el = $('#story'); if (!el || !sum) return Promise.resolve();
+  return new Promise((res) => {
+    const yrs = Math.round((sum.years ?? ((sum.age || 0) - (sum.startAge || 0))) * 10) / 10;
+    el.innerHTML = `<div class="st-card">
+      <small>סיפור החיים שלך</small>
+      <div class="st-age"><b class="num" id="stAge">${Math.floor(sum.startAge || sum.age || 0)}</b><span>שנים</span></div>
+      <div class="st-row">
+        ${sum.family ? `<span>👨‍👩‍👧 ${esc(sum.family)}</span>` : ''}
+        ${sum.happiness != null ? `<span>😊 אושר ${Math.round(sum.happiness)}</span>` : ''}
+        ${sum.freeTimeMonths != null ? `<span>🌿 ${sum.freeTimeMonths} חודשים חופשיים</span>` : ''}
+        ${sum.pension != null ? `<span>🏝️ פנסיה ${iso(fmtC(sum.pension))}</span>` : ''}
+      </div>
+      <p class="st-s" id="stS"></p>
+      <button class="primary" id="stGo">לסיכום המלא</button></div>`;
+    el.hidden = false; el.className = 'story ' + (won ? 'won' : 'lost');
+    requestAnimationFrame(() => el.classList.add('in'));
+    const a0 = sum.startAge || sum.age || 0, a1 = sum.age || a0;
+    const t0 = performance.now(), dur = 1300 * Math.max(0.6, speed);
+    const step = (now) => { const p = Math.min(1, (now - t0) / dur); const e = 1 - Math.pow(1 - p, 3); const n = $('#stAge'); if (n) n.textContent = Math.floor(a0 + (a1 - a0) * e); if (p < 1) requestAnimationFrame(step); else { sfx('tick'); } };
+    requestAnimationFrame(step);
+    const sent = String(sum.sentence || ''); let i = 0; const sEl = $('#stS');
+    const ty = setInterval(() => { i += 2; if (sEl) sEl.textContent = sent.slice(0, i); if (i >= sent.length) clearInterval(ty); }, 28);
+    let done = false;
+    const close = () => { if (done) return; done = true; clearInterval(ty); el.classList.remove('in'); setTimeout(() => { el.hidden = true; res(); }, 350); };
+    $('#stGo').onclick = close;
+    setTimeout(close, Math.max(4200, 1600 + sent.length * 45) * Math.max(0.7, speed));
+    void yrs;
+  });
 }

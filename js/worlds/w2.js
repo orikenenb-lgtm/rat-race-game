@@ -8,9 +8,9 @@
 //  • Bonds (AGAH) are priced from the rate: rate up ⇒ bond price down.
 //  • 'U' tiles: upgrade an owned asset (+noi, +value, no new debt) or trim a lifestyle expense (cuts the finish line).
 //  • Doodads here come with "מנוי" (subscription) options — lifestyle inflation that permanently raises expenses.
-import { MENTOR, tilesFor } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
 
-const board = 'POBODUPOMOX?POUDOBPOMUDB';
+const board = ring(['OBODUOLMO', 'XODBOL?UO', 'OMDOLEOBM', 'UOXLDITOI']); // v3: 40 tiles, paydays on the corners
 
 export default {
   id: 'w2', order: 2, name: 'העיר הגדולה', mechanic: 'rate',
@@ -29,8 +29,8 @@ export default {
   loan: { unit: 10000, autoUnit: 1000, pct: 1.5, rateLinked: true, rateMult: 0.25, bankrupt: 10, cap: 2.5 },
   creditPct: 5,
   goal: { type: 'passive' },
-  maxMonths: 48,
-  stars: { t2: 28, t3: 20 },
+  maxMonths: 66,
+  stars: { t2: 35, t3: 24 },
   daily: { chars: ['lawyer', 'chef'], maxMonths: 24 },
   start: { rate: 3 }, // starts low — the long-run average is higher, so variable looks cheap at first
   // lockBelow: the bank card highlights 'refi' when the new rate is at/below this (the long-run average is higher)
@@ -44,21 +44,22 @@ export default {
     },
   },
   trim: { pct: 0.35, costMonths: 5 },
-  models: { tower: 'tower', mall: 'mall', hotel: 'hotel' },
-  kinds: { tower: { label: 'נדל"ן למגורים', debtLabel: 'משכנתא' }, mall: { label: 'מסחר', debtLabel: 'הלוואה' }, hotel: { label: 'מלונאות', debtLabel: 'הלוואה' } },
+  models: { tower: 'tower', mall: 'mall', hotel: 'hotel', side: 'mall' },
+  kinds: { tower: { label: 'נדל"ן למגורים', debtLabel: 'משכנתא', rent: true }, mall: { label: 'מסחר', debtLabel: 'הלוואה', rent: true }, hotel: { label: 'מלונאות', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' } },
   tickers: {
+    IDX: { ...INDEX_TICKER, model: 'bank' },
     MADAD: { name: 'מדד ת"א · סל מניות', start: 100, div: 0.4, step: [10, 100], model: 'bank', modelLabel: 'תיק השקעות' },
     AGAH: { name: 'אג"ח ממשלתי', kind: 'bond', start: 100, duration: 6, r0: 4, div: 0.4, divLabel: 'ריבית אג"ח', step: [10, 100], model: 'bank', modelLabel: 'תיק השקעות', unit: 'אג"ח' },
     CHIP: { name: 'CHIP · מניית הייטק', start: 30, div: 0, step: [100, 1000], model: 'bank', modelLabel: 'תיק השקעות' },
   },
 
   characters: [
-    { id: 'lawyer', name: 'עורכת דין בפירמה', icon: 'scale', maxMonths: 54, stars: { t2: 27, t3: 20 }, desc: 'משכורת ענקית, וסגנון חיים בהתאם. הרבה מה לקצץ — אם תעזי.', salary: 42000, cash: 90000,
+    { id: 'lawyer', age: 34, family: { partner: 'married', kids: 2 }, name: 'עורכת דין בפירמה', icon: 'scale', maxMonths: 66, stars: { t2: 35, t3: 24 }, desc: 'משכורת ענקית, וסגנון חיים בהתאם. הרבה מה לקצץ — אם תעזי.', salary: 42000, cash: 90000,
       expenses: [['משכנתא על הבית', 11000], ['ליסינג רכב יוקרה', 4500, true], ['מסעדות ומשלוחים', 6000, true], ['בית ספר פרטי', 4000], ['קאנטרי ומנויים', 2500, true], ['בגדים ומותגים', 3000, true], ['חופשות', 3500, true]] },
-    { id: 'chef', name: 'שף ובעל ביסטרו', icon: 'chef', stars: { t2: 26, t3: 17 }, desc: 'משכורת קטנה, אבל כבר יש לך עסק — עם הלוואה בריבית משתנה.', salary: 15000, cash: 30000,
+    { id: 'chef', age: 30, family: { partner: 'together', kids: 0 }, name: 'שף ובעל ביסטרו', icon: 'chef', maxMonths: 62, stars: { t2: 31, t3: 22 }, desc: 'משכורת קטנה, אבל כבר יש לך עסק — עם הלוואה בריבית משתנה.', salary: 15000, cash: 30000,
       expenses: [['שכירות', 6500], ['רכב', 2000, true], ['אוכל ושוטף', 3200], ['ביטוחים', 1600], ['ציוד ובגדי עבודה', 1700, true]],
       assets: [{ k: 'mall', n: 'הביסטרו שלך', cost: 400000, down: 40000, noi: 3600 }] },
-    { id: 'pm', name: 'מנהל מוצר בהייטק', icon: 'chip', maxMonths: 54, stars: { t2: 30, t3: 22 }, desc: 'מעט מזומן, אבל 2,500 מניות של החברה. למכור ולהשקיע — או לחכות לזינוק?', salary: 34000, cash: 30000,
+    { id: 'pm', age: 33, family: { partner: 'married', kids: 2 }, name: 'מנהל מוצר בהייטק', icon: 'chip', maxMonths: 66, stars: { t2: 35, t3: 25 }, desc: 'מעט מזומן, אבל 2,500 מניות של החברה. למכור ולהשקיע — או לחכות לזינוק?', salary: 34000, cash: 30000,
       expenses: [['משכנתא', 9000], ['שני רכבים', 4000, true], ['משלוחים ומסעדות', 5000, true], ['צהרון ומטפלת', 5000], ['גאדג\'טים ומנויים', 2500, true], ['חוגים לילדים', 2500]],
       holdings: { CHIP: 2500 } },
   ],

@@ -105,7 +105,7 @@ function scanNumbers(obj, path, bad) {
   if (obj && typeof obj === 'object') for (const [k, v] of Object.entries(obj)) scanNumbers(v, path + '.' + k, bad);
 }
 const SOUNDS = new Set(['roll', 'hop', 'coin', 'loss', 'buy', 'sell', 'card', 'win', 'lose', 'unlock', 'achievement', 'golden']);
-const EVENT_TYPES = new Set(['payday', 'deal', 'trade', 'doodad', 'market', 'crisis', 'mystery', 'bank', 'upgrade', 'fx', 'shipping', 'pitch', 'giving']);
+const EVENT_TYPES = new Set(['payday', 'deal', 'trade', 'doodad', 'market', 'crisis', 'mystery', 'bank', 'upgrade', 'fx', 'shipping', 'pitch', 'giving', 'life', 'edu', 'tax']);
 const typesSeen = {};
 const achSeen = new Set();
 let endings = { won: 0, lost: 0, bankrupt: 0 };
@@ -160,7 +160,7 @@ for (const w of E.WORLDS) {
         if (!st.over && r() < 0.05 && st.credit) E.payCredit(st);
         if (st.over) break;
         const roll = E.rollDice(st);
-        assert.ok(roll.die >= 1 && roll.die <= 6);
+        assert.ok(roll.die >= 2 && roll.die <= 12 && roll.dice.length === 2 && roll.dice[0] + roll.dice[1] === roll.die && roll.dice.every((d) => d >= 1 && d <= 6));
         assert.equal(roll.steps.length, roll.die);
         let ev = E.landing(st); let n = 0;
         while (ev) {
@@ -187,7 +187,7 @@ for (const w of E.WORLDS) {
 
 test('every event type of every world appeared in the random run', () => {
   for (const w of E.WORLDS) for (const ch of new Set(w.board)) {
-    const t = w.tiles[ch].type;
+    const t = w.tiles[ch].type === 'index' ? 'trade' : w.tiles[ch].type; // the index tile opens a trade window on IDX
     assert.ok(typesSeen[t] > 0, 'never saw ' + t);
   }
   assert.ok(endings.won > 0 && endings.lost > 0, 'expected both wins and losses ' + JSON.stringify(endings));
@@ -210,10 +210,10 @@ test('payday on corners incl. passing; months advance only on paydays (v1 rule)'
     const st = E.createGame({ worldId: 'w1', seed });
     const m0 = st.month; const c0 = st.cash; const cf0 = E.metrics(st).cashflow;
     const r = E.rollDice(st);
-    const corners = r.steps.filter((i) => i % 6 === 0).length;
+    const corners = r.steps.filter((i) => i % 10 === 0).length;
     assert.equal(r.paydays.length, corners);
     assert.equal(st.month, m0 + corners);
-    if (corners) assert.equal(st.cash, c0 + cf0 * corners);
+    if (corners === 1) assert.equal(st.cash, c0 + cf0);
   }
 });
 
@@ -227,7 +227,9 @@ test('auto bank loan when cash < 0, in small units, at the bank-loan rate', () =
   assert.equal(st.loans, 8000, 'forced loans are rounded to ₪1,000, not ₪5,000');
   assert.ok(st.cash >= 0 && st.cash < 1000);
   assert.ok(res.effects.some((e) => e.type === 'loan' && e.auto));
-  assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 240, '3% a month');
+  assert.equal(st.life.creditScore, 680 - 25, 'a forced loan costs 25 credit-score points');
+  assert.equal(E.loanPct(st), 3.25, '3% a month + 0.25 for a "fair" credit score');
+  assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 260);
   assert.equal(st.stats.forcedLoans, 8000);
 });
 
@@ -253,7 +255,7 @@ test('trade window: repeated buy & sell inside one event, then done', () => {
         const tk = ev.data.ticker; const price = ev.data.price; const cash0 = st.cash;
         let r = E.choose(st, ev, 'buy', { qty: 2 }); assert.ok(r.ok && !r.done); assert.equal(st.holdings[tk].qty, 2);
         r = E.choose(st, r.event, 'buy', { qty: 1 }); assert.equal(st.holdings[tk].qty, 3);
-        r = E.choose(st, r.event, 'sell', { qty: 3 }); assert.equal(st.holdings[tk].qty, 0); assert.equal(st.cash, cash0);
+        r = E.choose(st, r.event, 'sell', { qty: 3 }); assert.equal(st.holdings[tk].qty, 0); assert.ok(Math.abs(st.cash - cash0) <= 1, 'round trip at the same price (±₪1 rounding)'); assert.ok(Number.isInteger(st.cash));
         const bad = E.choose(st, r.event, 'sell', { qty: 1 }); assert.equal(bad.ok, false);
         const over = E.choose(st, r.event, 'buy', { qty: r.event.data.maxBuy + 1 }); assert.equal(over.ok, false);
         r = E.choose(st, r.event, 'done'); assert.ok(r.done && r.event === null);
@@ -376,7 +378,7 @@ test('crypto: expected value < 1, a dead coin cannot be bought, a new launch wip
   assert.ok(ev < 1, 'crypto EV must be < 1, got ' + ev);
   const st = E.createGame({ worldId: 'w1', seed: 3 });
   st.world.coin.path = [0.05]; st.world.coin.step = 0; st.holdings.MOON.qty = 1000; st.holdings.MOON.basis = 1000;
-  st.pending = null; st.phase = 'land'; st.pos = 4; // M tile
+  st.pending = null; st.phase = 'land'; st.pos = w.board.indexOf('M'); // M tile
   st.decks.market = [E.getWorld('w1').market.findIndex((c) => c.crypto === 'news')];
   let e = E.landing(st); assert.equal(e.type, 'trade'); assert.equal(st.world.coin.alive, false); assert.equal(e.options.find((o) => o.id === 'buy').enabled, false);
   E.choose(st, e, 'done');
@@ -452,7 +454,9 @@ test('all Hebrew strings are non-empty (world data, mentor lines, achievements)'
     });
     for (const [k, v] of Object.entries(w.mentor)) if (v !== null) { const arr = Array.isArray(v) ? v : [v]; for (const x of arr) { assert.ok(HEB.test(x), `${w.id}.mentor.${k}`); assert.ok(x.split(/\s+/).length <= 32, `${w.id}.mentor.${k} too long (${x.split(/\s+/).length} words)`); } }
     for (const q of w.mystery.filter((m) => m.kind === 'quiz')) { assert.ok(q.correct >= 0 && q.correct < q.answers.length); assert.ok(q.reward > 0); }
-    assert.equal(w.board.length, 24); for (const i of [0, 6, 12, 18]) assert.equal(w.board[i], 'P');
+    assert.equal(w.board.length, 40); for (const i of [0, 10, 20, 30]) assert.equal(w.board[i], 'P');
+    assert.equal([...w.board].filter((c) => c === 'P').length, 4, 'paydays only on the corners');
+    for (const t of ['L', 'E', 'T', 'I']) assert.ok(w.board.includes(t), `${w.id} board has a ${t} tile`);
     assert.ok(w.deals.length >= 15 && w.deals.length <= 25, `${w.id} deals ${w.deals.length}`);
     assert.ok(w.doodads.length >= 7 && w.market.length >= 9, `${w.id} doodads/market`);
     for (const d of w.deals) if (!d.tk && !d.crypto) assert.ok(w.models[d.k], `${w.id} deal kind ${d.k} has no model`);
@@ -462,7 +466,7 @@ test('all Hebrew strings are non-empty (world data, mentor lines, achievements)'
 });
 
 test('engine & worlds use no Math.random / Date / DOM', () => {
-  for (const f of ['../js/engine.js', '../js/rng.js', '../js/achievements.js', '../js/worlds/common.js', '../js/worlds/w1.js', '../js/worlds/w2.js', '../js/worlds/w3.js', '../js/worlds/w4.js', '../js/worlds/index.js']) {
+  for (const f of ['../js/engine.js', '../js/rng.js', '../js/achievements.js', '../js/life.js', '../js/history.js', '../js/worlds/common.js', '../js/worlds/w1.js', '../js/worlds/w2.js', '../js/worlds/w3.js', '../js/worlds/w4.js', '../js/worlds/h.js', '../js/worlds/index.js']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
     assert.ok(!/Math\.random|new Date|Date\.|document\.|window\.|THREE/.test(src), f + ' uses a forbidden API');
   }
@@ -485,6 +489,239 @@ test('dailyConfig is pure & rotates worlds', () => {
   assert.deepEqual(a, b); assert.notEqual(a.worldId, c.worldId); assert.notEqual(a.seed, c.seed);
   const worlds = new Set(['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'].map((d) => E.dailyConfig(d).worldId));
   assert.equal(worlds.size, 4);
+});
+
+/* ------------------------------------------------------------------ v3: money precision (known expected results) */
+import * as LIFE from '../js/life.js';
+import * as REAL from '../js/data/real.js';
+const W1 = (o = {}) => E.createGame({ worldId: 'w1', charId: 'teacher', seed: 21, ...o });
+function playOut(st, r, maxTurns = 200) { for (let t = 0; t < maxTurns && !st.over; t++) turn(st, (ev, n) => randomChoice(ev, r, n)); return st; }
+
+test('payslip: ₪15,000 gross → ₪11,312 net (2026 TAX_IL), lines add up, gross↔net inverse', () => {
+  const s = LIFE.slip(15000);
+  assert.equal(s.net, 11312);
+  assert.equal(s.gross - s.incomeTax - s.bl - s.pensionEmployee, s.net, 'lines add up exactly');
+  assert.equal(s.bituahLeumi + s.health, s.bl);
+  assert.equal(s.pensionEmployee, 900); assert.equal(s.employerPension, 975); assert.equal(s.severanceDeposit, 900);
+  assert.equal(LIFE.slip(5000).incomeTax, 0, 'credit points wipe out the tax on a low salary');
+  for (const net of [5000, 9000, 22000, 55000]) { const g = LIFE.grossFromNet(net); assert.ok(LIFE.slip(g).net >= net && LIFE.slip(g - 10).net < net, 'grossFromNet ' + net); }
+  assert.ok(LIFE.marginalRate(15000) === 0.2 && LIFE.marginalRate(70000) === 0.5);
+  // the engine uses the same table: take-home of every character equals its v2 salary (±₪10 rounding of the gross)
+  for (const w of E.WORLDS) for (const ch of w.characters) if (ch.salary) { const st = E.createGame({ worldId: w.id, charId: ch.id, seed: 1 }); const m = E.metrics(st); assert.ok(Math.abs(m.salary - ch.salary) <= 10, `${w.id}/${ch.id} net ${m.salary} vs ${ch.salary}`); assert.ok(m.payslip.gross > m.salary); }
+});
+
+test('compound interest, bank-loan cost and inflation have exact known values', () => {
+  assert.equal(LIFE.compound(10000, 0.005, 12), 10617); // 10,000 × 1.005^12 = 10,616.78
+  assert.equal(LIFE.compound(100000, 0.07 / 12, 120), 200966); // 7%/yr monthly for 10 years
+  // the game's bank loan is interest-only: ₪5,000 at 3% a month costs ₪150 every month until repaid
+  const st = W1(); E.takeLoan(st); assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 150);
+  // Israeli CPI: ₪10,000 of June 2021 in June 2023 prices (real data, exact month index)
+  const cpi = REAL.SERIES.cpiIL; const i0 = (2021 - +cpi.start.slice(0, 4)) * 12 + (6 - +cpi.start.slice(5, 7)); const i1 = i0 + 24;
+  assert.equal(E.inflate(10000, '2021-06', '2023-06'), Math.round(10000 * cpi.values[i1] / cpi.values[i0]));
+  assert.ok(E.inflate(10000, '2021-06', '2023-06') > 10700, 'prices rose ~8% in 2021–2023');
+});
+
+test('money stays in whole shekels (cash, debts, basis, pension, taxes) through random games', () => {
+  for (const w of E.WORLDS) for (let g = 0; g < 25; g++) {
+    const st = E.createGame({ worldId: w.id, seed: 7000 + g }); const r = prng(g + 3);
+    for (let t = 0; t < 120 && !st.over; t++) {
+      if (r() < 0.05) E.takeLoan(st); if (!st.over && r() < 0.05 && st.loans) E.repayLoan(st);
+      if (!st.over && r() < 0.05) E.invest(st, r() < 0.6 ? 'buy' : 'sell', 1 + Math.floor(r() * 20));
+      if (st.over) break;
+      turn(st, (ev, n) => randomChoice(ev, r, n));
+      for (const k of ['cash', 'loans', 'credit']) assert.ok(Number.isInteger(st[k]), `${w.id}/g${g} ${k}=${st[k]}`);
+      for (const [tk, h] of Object.entries(st.holdings)) assert.ok(Number.isInteger(Math.round(h.basis * 1000) / 1000) || Math.abs(h.basis - Math.round(h.basis)) < 1e-6, `${w.id} basis ${tk} ${h.basis}`);
+      assert.ok(Number.isInteger(st.life.pension), 'pension ' + st.life.pension);
+      for (const v of Object.values(st.taxes)) assert.ok(Number.isInteger(v), 'taxes ' + JSON.stringify(st.taxes));
+      for (const a of st.assets) assert.ok(Number.isInteger(a.value) && Number.isInteger(a.debt), 'asset money');
+    }
+  }
+});
+
+/* ------------------------------------------------------------------ v3: replay (server = source of truth) */
+test('replay(config, actions) rebuilds the exact final state — every world, ranked + free + history', () => {
+  const cfgs = [];
+  for (const w of E.WORLDS) { cfgs.push({ worldId: w.id, seed: 4242, mode: 'daily', maxMonths: 24 }); cfgs.push({ worldId: w.id, charId: w.characters[1].id, seed: 99, mode: 'free', tutorial: true, bailout: true }); }
+  cfgs.push({ mode: 'history', scenarioId: 'gfc', seed: 5 });
+  for (const cfg of cfgs) {
+    const st = E.createGame(cfg); const r = prng(cfg.seed);
+    for (let t = 0; t < 90 && !st.over; t++) {
+      if (r() < 0.06) E.setPlan(st, ['work', 'overtime', 'rest', 'side', 'study'][Math.floor(r() * 5)]);
+      if (!st.over && r() < 0.04) E.takeLoan(st);
+      if (!st.over && r() < 0.04 && st.loans) E.repayLoan(st);
+      if (!st.over && r() < 0.03) E.setAutoInvest(st, 500);
+      if (!st.over && r() < 0.04) E.invest(st, 'buy', 3);
+      if (st.over) break;
+      turn(st, (ev, n) => randomChoice(ev, r, n));
+    }
+    const again = E.replay(E.replayConfig(st), st.actions);
+    assert.equal(E.serialize(again), E.serialize(st), 'replay diverged for ' + JSON.stringify(cfg));
+    const sum = E.summaryForServer(st); assert.deepEqual(sum.config, E.replayConfig(st)); assert.equal(sum.actions.length, st.actions.length);
+    assert.ok(JSON.stringify(sum).length < 12000, 'summary size ' + JSON.stringify(sum).length);
+  }
+  // a tampered log is rejected
+  const st = E.createGame({ worldId: 'w1', seed: 3 }); E.rollDice(st); E.landing(st);
+  assert.throws(() => E.replay(E.replayConfig(st), [['r'], ['r']]), /replay_mismatch/);
+});
+
+/* ------------------------------------------------------------------ v3: saves */
+test('v2 saves (st.v = 1, 24-tile board) migrate to v3 with defaults; junk is rejected as save_incompatible', () => {
+  for (const w of E.WORLDS) {
+    const st = playOut(E.createGame({ worldId: w.id, seed: 17 }), prng(1), 6);
+    // make it look like a v2 save
+    const old = JSON.parse(E.serialize(st));
+    old.v = 1; old.pos = 13; old.phase = 'roll'; old.pending = null; delete old.life; delete old.lessons; delete old.taxes; delete old.actions;
+    delete old.rng.life; delete old.rng.index; delete old.holdings.IDX; delete old.prices.IDX;
+    const mig = E.deserialize(JSON.stringify(old));
+    assert.equal(mig.v, 3); assert.ok(mig.pos >= 0 && mig.pos < 40 && w.board[mig.pos] !== 'P');
+    assert.ok(mig.life && mig.life.energy > 0 && Array.isArray(mig.lessons) && mig.holdings.IDX && mig.prices.IDX === 100);
+    assert.ok(Math.abs(E.metrics(mig).salary - E.metrics(st).salary) <= 20, 'take-home preserved');
+    playOut(mig, prng(2), 15); // and it plays on
+  }
+  assert.throws(() => E.deserialize({ v: 2, worldId: 'w1' }), /save_incompatible/);
+  assert.throws(() => E.deserialize({ v: 999 }), /save_incompatible/);
+  assert.throws(() => E.deserialize('null'), /save_incompatible/);
+});
+
+/* ------------------------------------------------------------------ v3: dice & board */
+test('two dice: both drawn every roll (also in the tutorial), doubles give a small deterministic bonus', () => {
+  let doubles = 0;
+  for (let seed = 1; seed < 300; seed++) {
+    const st = E.createGame({ worldId: 'w1', seed }); const e0 = st.life.energy;
+    const r = E.rollDice(st);
+    assert.ok(r.dice[0] >= 1 && r.dice[0] <= 6 && r.dice[1] >= 1 && r.dice[1] <= 6 && r.die === r.dice[0] + r.dice[1]);
+    assert.deepEqual(st.lastRoll.dice, r.dice);
+    if (r.dice[0] === r.dice[1]) { doubles++; assert.ok(r.double && r.news.some((n) => n.kind === 'double')); if (r.double.kind === 'energy') assert.ok(st.life.energy >= Math.min(100, e0)); else assert.equal(st.life.peek, true); } else assert.equal(r.double, null);
+    const t = E.createGame({ worldId: 'w1', seed, tutorial: true }); E.rollDice(t); assert.equal(t.rng.dice, st.rng.dice, 'tutorial consumes both dice');
+  }
+  assert.ok(doubles > 25 && doubles < 80, 'about 1 in 6 rolls is a double: ' + doubles);
+  for (const w of E.WORLDS) { const b = E.boardInfo(w.id); assert.equal(b.length, 40); assert.deepEqual(b.corners, [0, 10, 20, 30]); assert.ok(b.every((t) => t.type && t.color && t.icon && t.name)); }
+  assert.equal(E.rollCost(E.createGame({ worldId: 'w1', mode: 'daily', seed: 1 })), 0); assert.equal(E.rollCost(W1()), 1);
+});
+
+/* ------------------------------------------------------------------ v3: negotiation is fair in ranked play */
+test('negotiation: the seller\'s answer is sealed with the card; offering never shifts the RNG', () => {
+  let tried = 0, acc = 0;
+  for (let seed = 1; seed < 400 && tried < 60; seed++) {
+    const a = E.createGame({ worldId: 'w2', seed, mode: 'challenge' }); const b = E.createGame({ worldId: 'w2', seed, mode: 'challenge' });
+    for (let t = 0; t < 12; t++) {
+      E.rollDice(a); E.rollDice(b); let ea = E.landing(a); let eb = E.landing(b);
+      const off = ea.type === 'deal' && ea.options.find((o) => o.id === 'offer:10');
+      if (off) {
+        tried++;
+        const res = E.choose(a, ea, 'offer:10');
+        assert.equal(res.negotiation.accepted, a.pending ? true : false);
+        if (res.negotiation.accepted) { acc++; assert.ok(res.event && !res.event.options.some((o) => o.kind === 'offer') && res.event.data.negotiated.pct === 10); assert.ok(res.event.data.cost < eb.data.cost); ea = res.event; } else ea = null;
+        assert.equal(res.negotiation.accepted, b.pending.negR < off.chance, 'same answer for everyone with this card');
+      }
+      for (const [st, ev0] of [[a, ea], [b, eb]]) { let ev = ev0; while (ev) { const o = ev.options.find((x) => x.enabled && ['pass', 'done', 'ok', 'skip'].includes(x.id)) || ev.options.find((x) => x.enabled && x.kind !== 'offer'); ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : undefined).event; } }
+      for (const k of ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index']) assert.equal(a.rng[k], b.rng[k], 'stream ' + k + ' shifted');
+    }
+  }
+  assert.ok(tried >= 20 && acc > 0 && acc < tried, `tried ${tried} accepted ${acc}`);
+});
+
+/* ------------------------------------------------------------------ v3: plans, burnout, study, raise */
+test('plans: overtime pays less than +25% net (marginal tax), burnout is deterministic, study gives a permanent raise', () => {
+  const st = W1({ charId: 'doctor' }); const m = E.metrics(st);
+  const ot = m.life.plans.find((p) => p.id === 'overtime'); assert.ok(ot);
+  E.setPlan(st, 'overtime'); const m2 = E.metrics(st);
+  assert.ok(m2.salary > m.salary && m2.salary - m.salary < (m2.payslip.gross - m.payslip.gross) * 0.75, 'extra hours are taxed at the top bracket');
+  // constant overtime → burnout, identical for the same seed
+  const burn = (seed) => { const s = E.createGame({ worldId: 'w1', seed, mode: 'challenge' }); E.setPlan(s, 'overtime'); let at = null; for (let t = 0; t < 80 && !s.over && at == null; t++) { if (s.life.plan !== 'overtime' && s.life.burnouts === 0) E.setPlan(s, 'overtime'); const r = turn(s, (ev) => [(ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id, { qty: 1 }]); if (s.life.burnouts) at = s.turn; } return at; };
+  const b1 = burn(5); assert.ok(b1 != null, 'constant overtime ends in a burnout'); assert.equal(burn(5), b1);
+  // study: 8 months on the study plan ⇒ +20% gross, for good
+  const s = W1(); const g0 = E.metrics(s).payslip.gross; E.setPlan(s, 'study');
+  for (let t = 0; t < 60 && !s.life.study.done && !s.over; t++) turn(s, (ev) => [(ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id, { qty: 1 }]);
+  assert.ok(s.life.study.done && s.lessons.includes('human_capital'));
+  assert.ok(s.life.gross >= Math.round(g0 * 1.2) - 10, 'permanent +20% gross');
+  assert.equal(E.setPlan(s, 'study').ok, false, 'cannot study twice');
+});
+
+test('credit score: forced loans hurt, repaying helps, a poor score blocks voluntary loans', () => {
+  const st = W1();
+  st.life.creditScore = 800; const lowPct = E.loanPct(st);
+  st.life.creditScore = 500; assert.ok(E.loanPct(st) > lowPct); assert.equal(E.loanCap(st), 0);
+  const r = E.takeLoan(st); assert.equal(r.ok, false); assert.ok(/דירוג האשראי/.test(r.error));
+  st.life.creditScore = 680; E.takeLoan(st); const s0 = st.life.creditScore; E.repayLoan(st); assert.equal(st.life.creditScore, s0 + 6);
+  assert.equal(E.metrics(st).life.creditBand, 'טוב');
+});
+
+test('★★★ needs money AND happiness; checkEnd carries "סיפור החיים שלך"', () => {
+  const mk = (h) => { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 5, mode: 'challenge' }); st.assets.push({ id: 900, k: 'biz', n: 'בדיקה', cost: 1, down: 1, debt: 0, value: 1, cf: 99999, month: 1, ups: 0 }); st.life.happiness = h; return E.checkEnd(st); };
+  const sad = mk(40), happy = mk(75);
+  assert.equal(happy.stars, 3); assert.equal(sad.stars, 2); assert.equal(sad.starsBlockedByHappiness, true); assert.equal(happy.starsBlockedByHappiness, false);
+  const L = happy.lifeSummary;
+  for (const k of ['age', 'ageText', 'headline', 'freeTimeMonths', 'family', 'happiness', 'avgHappiness', 'topDecisions', 'sentence', 'pension', 'realNetWorth', 'taxesPaid']) assert.ok(L[k] !== undefined, 'lifeSummary.' + k);
+  assert.ok(/בגיל \d+ יצאת מהמירוץ/.test(L.headline) && /[֐-׿]/.test(L.sentence));
+  assert.ok(E.starThresholds('w1', 'teacher').happy === 60);
+});
+
+/* ------------------------------------------------------------------ v3: lessons + life events */
+test('lessons: 40+ unique Hebrew lessons; unlocked by experience and reported in results', () => {
+  assert.ok(E.LESSONS.length >= 40); const ids = E.LESSONS.map((l) => l.id); assert.equal(new Set(ids).size, ids.length);
+  for (const l of E.LESSONS) assert.ok(HEB.test(l.title) && HEB.test(l.text) && l.cat, l.id);
+  const st = W1(); let got = [];
+  for (let t = 0; t < 60 && !st.over; t++) { const r = E.rollDice(st); got = got.concat(r.lessons || []); let ev = E.landing(st); while (ev) { const o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled); const res = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : undefined); got = got.concat(res.lessons || []); ev = res.event; } }
+  assert.ok(got.length >= 6 && got.every((l) => l.id && l.title && l.text));
+  assert.deepEqual([...new Set(got.map((l) => l.id))].sort(), [...st.lessons].sort());
+  assert.ok(st.lessons.includes('gross_net'));
+});
+
+test('life events: every option of every dilemma is choosable and shows money + happiness/energy effects', () => {
+  for (const w of E.WORLDS) for (const E0 of LIFE.LIFE_EVENTS) for (const o0 of E0.options) {
+    const st = E.createGame({ worldId: w.id, seed: 3 });
+    st.pending = { id: 1, type: 'life', tile: 'L', pos: w.board.indexOf('L'), eventId: E0.id, r: 0.5 }; st.phase = 'event';
+    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, 1);
+    const o = ev.options.find((x) => x.id === o0.id);
+    for (const k of ['cash', 'monthly', 'months', 'happiness', 'energy']) assert.ok(Number.isFinite(o.effects[k]), `${E0.id}/${o.id}.${k}`);
+    const res = E.choose(st, ev, o.id); assert.ok(res.ok && res.done, `${E0.id}/${o.id}`);
+    assert.ok(Number.isInteger(st.cash));
+  }
+  // friend loan / guarantee resolves 6 months later (pre-drawn)
+  const st = W1(); st.pending = { id: 1, type: 'life', tile: 'L', pos: 4, eventId: 'friend', r: 0.9 }; st.phase = 'event';
+  E.choose(st, E.currentEvent(st), 'guarantee'); assert.equal(st.life.friend.ok, true);
+});
+
+/* ------------------------------------------------------------------ v3: history mode */
+function stubReal() {
+  const n = 40; const mk = (f) => Array.from({ length: n }, (_, i) => +f(i).toFixed(2));
+  return { SERIES: { sp500: { start: '2001-01', values: mk((i) => 100 * (i < 12 ? 1 - i * 0.03 : 0.67 + (i - 12) * 0.02)) }, ta125: { start: '2001-01', values: mk(() => 100) }, boiRate: { start: '2001-01', values: mk((i) => 5 - i * 0.05) }, cpiIL: { start: '2001-01', values: mk((i) => 100 + i * 0.25) }, homeIL: { start: '2001-01', values: mk((i) => 100 + i) }, usdIls: { start: '2001-01', values: mk(() => 4.2) } },
+    SCENARIOS: [{ id: 'test', name: 'מבחן', start: '2001-01', months: 24, blurb: 'תרחיש בדיקה', lesson: 'שיעור', headlines: [{ ym: '2001-06', text: 'כותרת בדיקה' }] }], TAX_IL: REAL.TAX_IL };
+}
+test('history mode (stub data): deterministic, real-data driven, ends against the buy-and-hold benchmark', () => {
+  E.registerRealData(stubReal());
+  try {
+    assert.deepEqual(E.scenarioList().map((s) => s.id), ['test']);
+    const run = (buy) => { const st = E.createGame({ mode: 'history', scenarioId: 'test', seed: 9 }); const r = prng(4); let heads = 0;
+      for (let t = 0; t < 200 && !st.over; t++) { const roll = E.rollDice(st); heads += roll.news.filter((x) => x.kind === 'headline').length; let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (buy && ev.type === 'trade' && ev.data.maxBuy > 0 && !ev.data.lastResult) { id = 'buy'; p = { qty: ev.data.maxBuy }; } const res = E.choose(st, ev, id, p); ev = res.event; } }
+      return { st, heads }; };
+    const a = run(true), b = run(true);
+    assert.equal(E.serialize(a.st), E.serialize(b.st));
+    assert.equal(a.st.worldId, 'h'); assert.equal(a.st.month, 25); assert.ok(a.st.over);
+    assert.equal(a.st.history.ym, '2003-01'); assert.equal(a.heads, 1);
+    const res = a.st.result; assert.ok(res.benchmark && res.benchmark.whatIf.length >= 3 && res.benchmark.netWorth > 0);
+    assert.equal(a.st.prices.IDX, Math.round(100 * (0.67 + 12 * 0.02) * 100) / 100 || a.st.prices.IDX);
+    assert.equal(a.st.world.rate, +(5 - 24 * 0.05).toFixed(2));
+    const m = E.metrics(a.st); assert.equal(m.worldIndicators.ym, '2003-01'); assert.ok(m.goalType === 'benchmark');
+    assert.deepEqual(E.replay(E.replayConfig(a.st), a.st.actions).result, a.st.result);
+  } finally { E.registerRealData(REAL); }
+  assert.ok(E.scenarioList().length >= 5, 'real scenarios are back');
+});
+
+test('history mode (real data): every scenario plays to the end; panic selling loses to holding', () => {
+  for (const sc of E.scenarioList()) {
+    const res = {};
+    for (const strat of ['hold', 'panic']) {
+      const st = E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7 });
+      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass';
+        if (ev.type === 'trade' && !ev.data.lastResult) { if (strat === 'hold' && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.floor(ev.data.maxBuy * 0.8) }; } if (strat === 'panic' && st.prices.IDX < 80 && ev.data.maxSell > 0) { id = 'sell'; p = { qty: ev.data.maxSell }; } if (strat === 'panic' && st.prices.IDX >= 95 && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.floor(ev.data.maxBuy * 0.8) }; } }
+        ev = E.choose(st, ev, id, p).event; } }
+      assert.ok(st.over && st.month === sc.months + 1, sc.id + ' ended at ' + st.month);
+      res[strat] = E.metrics(st).netWorth;
+    }
+    assert.ok(res.hold >= res.panic, `${sc.id}: hold ${res.hold} < panic ${res.panic}`);
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed · event types seen: ${JSON.stringify(typesSeen)} · endings ${JSON.stringify(endings)} · achievements seen ${achSeen.size}/${ACHIEVEMENTS.length}`);

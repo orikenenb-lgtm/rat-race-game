@@ -93,6 +93,7 @@ export async function init(canvas) {
       if (pawnRing) pawnRing.rotation.z += dt * 0.8;
     }
     if (pawn && pawnRing) { pawnRing.position.x = pawn.position.x; pawnRing.position.z = pawn.position.z; }
+    camStep(dt);
     controls.update();
     let off = null;
     if (now < shakeUntil) {
@@ -137,6 +138,37 @@ export function frame(rect) {
 // key points that must stay on screen: the board slab and the corner landmarks
 const FIT = [];
 for (const x of [-11.1, 11.1]) for (const z of [-11.1, 11.1]) FIT.push(new THREE.Vector3(x, -0.72, z), new THREE.Vector3(x * 0.9, 2.9, z * 0.9));
+// camera modes: 'follow' (close, tracks the pawn / dice) and 'overview' (the whole board fitted in the free area)
+let camMode = 'follow';
+const camGoal = { target: new THREE.Vector3(0, 0.3, 0), dist: 30, dir: new THREE.Vector3(0, 1, 1).normalize() };
+let overviewDist = 30, followDist = 20, followOff = { x: 0, y: 0 }, overviewOff = { x: 0, y: 0 }, camAnimUntil = 0;
+const focus = new THREE.Vector3();
+export function getCameraMode() { return camMode; }
+export function cameraState() { return { mode: camMode, target: controls.target.toArray().map((x) => +x.toFixed(2)), pos: camera.position.toArray().map((x) => +x.toFixed(2)), focus: focus.toArray(), followDist, overviewDist, goal: camGoal.target.toArray() }; }
+/** 'follow' | 'overview' — smooth transition. */
+export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; applyCamGoal(true); }
+/** Point the follow camera at a world position (pawn, dice landing…). */
+export function focusOn(v) { if (v) focus.copy(v); if (camMode === 'follow') applyCamGoal(false); }
+function applyCamGoal(transition) {
+  if (camMode === 'overview') { camGoal.target.set(0, 0.3, 0); camGoal.dist = overviewDist; }
+  else { camGoal.target.set(focus.x, 0.3, focus.z); camGoal.dist = followDist; }
+  camAnimUntil = performance.now() + (transition ? 900 : 700); wake(1200);
+}
+/** Per-frame smoothing toward the goal; keeps the user's orbit angle, eases distance/target. */
+function camStep(dt) {
+  if (celebrating || interacting) return;
+  const now = performance.now(); if (now > camAnimUntil) return;
+  const k = 1 - Math.exp(-dt * 5.5);
+  const off = camera.position.clone().sub(controls.target);
+  const len = off.length(); const dir = len > 1e-3 ? off.divideScalar(len) : camGoal.dir.clone();
+  // drift the viewing direction back toward the default angle a little (user can still orbit)
+  dir.lerp(camGoal.dir, k * 0.35).normalize();
+  controls.target.lerp(camGoal.target, k);
+  const nl = len + (camGoal.dist - len) * k;
+  camera.position.copy(controls.target).addScaledVector(dir, nl);
+  const o = camMode === 'overview' ? overviewOff : followOff;
+  const vo = camera.view; if (vo) { vo.offsetX += (o.x - vo.offsetX) * k; vo.offsetY += (o.y - vo.offsetY) * k; camera.updateProjectionMatrix(); }
+}
 let camDist = 30;
 function resize() {
   if (!renderer) return;
@@ -170,13 +202,22 @@ function resize() {
     const b = bbox(dist);
     offX += (b.x0 + b.x1) / 2 - (r.x0 + r.x1) / 2; offY += (b.y0 + b.y1) / 2 - (r.y0 + r.y1) / 2;
   }
-  camera.setViewOffset(W, H, offX, offY, W, H); camera.updateProjectionMatrix();
-  camDist = dist;
-  controls.target.copy(tgt);
+  camDist = dist; overviewDist = dist; overviewOff = { x: offX, y: offY };
+  followOff = { x: W / 2 - (r.x0 + r.x1) / 2, y: H / 2 - (r.y0 + r.y1) / 2 };
+  // follow distance: close enough that ~5–7 tiles fill the free area (the board feels huge); never beyond the overview
+  const portraitF = fw / fh < 0.95;
+  followDist = Math.min(dist * 0.8, Math.max(12, (portraitF ? 17 : 15) * Math.max(0.85, Math.min(1.25, 900 / Math.max(fw, fh) * (portraitF ? 0.6 : 1)))));
+  camGoal.dir.copy(dir);
+  const o = camMode === 'overview' ? overviewOff : followOff;
+  camera.setViewOffset(W, H, o.x, o.y, W, H); camera.updateProjectionMatrix();
+  const goalT = camMode === 'overview' ? tgt : new THREE.Vector3(focus.x, 0.3, focus.z);
+  const goalD = camMode === 'overview' ? dist : followDist;
+  camGoal.target.copy(goalT); camGoal.dist = goalD;
+  controls.target.copy(goalT);
   controls.maxDistance = Math.max(40, dist * 1.7);
-  controls.minDistance = Math.min(9, dist * 0.5);
-  if (!celebrating) camera.position.copy(tgt).addScaledVector(dir, dist);
-  if (scene.fog) { scene.fog.near = dist * 1.25; scene.fog.far = dist * 3.4; }
+  controls.minDistance = Math.min(7, dist * 0.35);
+  if (!celebrating) camera.position.copy(goalT).addScaledVector(dir, goalD);
+  if (scene.fog) { scene.fog.near = dist * 1.25; scene.fog.far = dist * 3.6; }
   controls.update();
 }
 let celebrating = false;
@@ -215,6 +256,51 @@ function landmarkNames(w) {
   for (const t of Object.values(w.tickers || {})) if (t.model && !list.includes(t.model)) list.push(t.model);
   return list.slice(0, 4);
 }
+// Life-model GLBs delivered by the 3D lead (list only files that exist — a missing file would log a 404).
+// Others use the procedural stand-ins below.
+export const LIFE_MODELS = ['home_family', 'university', 'pension', 'index_fund', 'side_hustle', 'wedding', 'hospital'];
+export const HISTORY_MODELS = ['time_machine', 'ticker_board'];
+export function preloadLife() { return Promise.all([...LIFE_MODELS.map((n) => loadGLB(modelUrl('life', n)).catch(() => null)), ...HISTORY_MODELS.map((n) => loadGLB(modelUrl('history', n)).catch(() => null))]); }
+const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, ...o });
+const shadowAll = (g) => { g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); return g; };
+const LIFE_FALLBACK = {
+  home_family() { return LIFE_FALLBACK.house(); },
+  index_fund() { return LIFE_FALLBACK.indexfund(); },
+  house() {
+    const g = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1, 1.3), mat('#f4e3c3')); b.position.y = 0.5; g.add(b);
+    const r = new THREE.Mesh(new THREE.ConeGeometry(1.25, 0.8, 4), mat('#c2553a')); r.position.y = 1.4; r.rotation.y = Math.PI / 4; g.add(r);
+    const d = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, 0.05), mat('#7a4b2a')); d.position.set(0, 0.25, 0.66); g.add(d);
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), mat('#ff4f9a', { emissive: '#ff4f9a', emissiveIntensity: 0.6 })); h.position.set(0, 1.95, 0); h.scale.set(1, 0.85, 0.5); g.add(h);
+    const lawn = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.06, 20), mat('#7dbb4f')); lawn.position.set(0, 0.03, 0); lawn.scale.set(1, 1, 1); g.add(lawn);
+    return shadowAll(g);
+  },
+  university() {
+    const g = new THREE.Group(); const stone = mat('#e9e1d0');
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.2, 1.2), stone); base.position.y = 0.1; g.add(base);
+    for (let i = 0; i < 4; i++) { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.9, 10), stone); c.position.set(-0.6 + i * 0.4, 0.65, 0.4); g.add(c); }
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 0.7), mat('#d9cdb4')); body.position.set(0, 0.65, -0.15); g.add(body);
+    const pd = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.0, 0.45, 3), stone); pd.rotation.set(0, 0, 0); pd.position.set(0, 1.32, 0.1); pd.scale.set(1, 1, 0.6); g.add(pd);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, 0.6), mat('#1d1a2b')); cap.position.set(0, 1.7, 0.1); cap.rotation.y = Math.PI / 4; g.add(cap);
+    return shadowAll(g);
+  },
+  pension() {
+    const g = new THREE.Group();
+    const isl = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.7, 0.35, 18), mat('#f1d9a0')); isl.position.y = 0.17; g.add(isl);
+    const water = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.04, 24), mat('#38bdf8', { roughness: 0.2 })); water.position.y = 0.02; g.add(water);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 1.2, 8), mat('#8b5e34')); trunk.position.set(0.25, 0.9, 0); trunk.rotation.z = 0.2; g.add(trunk);
+    for (let i = 0; i < 5; i++) { const l = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.8, 4), mat('#2f9e44')); l.position.set(0.13, 1.5, 0); l.rotation.set(0, (i / 5) * Math.PI * 2, 1.2); l.translateY(0.3); g.add(l); }
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.3), mat('#f2b632', { metalness: 0.6, roughness: 0.3 })); chest.position.set(-0.35, 0.48, 0.2); g.add(chest);
+    return shadowAll(g);
+  },
+  indexfund() {
+    const g = new THREE.Group();
+    const t = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.2, 1.1), mat('#1e3a5f', { roughness: 0.25, metalness: 0.3 })); t.position.y = 1.1; g.add(t);
+    [0.35, 0.7, 1.05].forEach((h, i) => { const b = new THREE.Mesh(new THREE.BoxGeometry(0.22, h, 0.08), mat('#22c55e', { emissive: '#22c55e', emissiveIntensity: 0.8 })); b.position.set(-0.3 + i * 0.3, 1.0 + h / 2 - 0.5, 0.56); g.add(b); });
+    const top = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 8), mat('#f2b632', { metalness: 0.6 })); top.position.y = 2.45; g.add(top);
+    return shadowAll(g);
+  },
+};
 export function worldLoaded(w) { return worldModelNames(w).every((n) => ready.has(modelUrl(w.id, n))); }
 export async function preloadWorld(w, onProgress) {
   const names = worldModelNames(w);
@@ -224,8 +310,10 @@ export async function preloadWorld(w, onProgress) {
     .finally(() => { done++; if (onProgress) onProgress(done / names.length); })));
 }
 function inst(name, dir = world && world.id) {
+  if (name && name.includes('/')) [dir, name] = name.split('/');
   const g = ready.get(modelUrl(dir, name));
   if (g) return g.clone(true);
+  if (dir === 'life' && LIFE_FALLBACK[name]) return LIFE_FALLBACK[name]();
   // placeholder so a missing model never breaks the game
   const grp = new THREE.Group();
   const m = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 1.6), new THREE.MeshStandardMaterial({ color: (theme && theme.accent) || '#f2b632', roughness: 0.6 }));
@@ -236,6 +324,14 @@ function inst(name, dir = world && world.id) {
 /* ============================================================ board geometry */
 const SZ = 2.25;
 let boardN = 24;
+// board geometry derived from the tile count (24 → 7×7 ring, 40 → 11×11 ring). K scales everything around the ring.
+let HB = 11, CS = 10.6, K = 1;
+function setBoardSize(n) {
+  boardN = n; const side = n / 4; const ringR = (side / 2) * SZ;
+  HB = ringR + 4.25; CS = (side - 1) * SZ - 0.65; K = HB / 11;
+  FIT.length = 0;
+  for (const x of [-HB - 0.1, HB + 0.1]) for (const z of [-HB - 0.1, HB + 0.1]) FIT.push(new THREE.Vector3(x, -0.72, z), new THREE.Vector3(x * 0.9, 2.9, z * 0.9));
+}
 export function tilePos(i) {
   const n = boardN, side = n / 4;
   i = ((i % n) + n) % n;
@@ -274,7 +370,25 @@ function drawIcon(g, icon, x, y, c) {
     case 'ship': P(); g.moveTo(x - 50, y + 4); g.lineTo(x + 50, y + 4); g.lineTo(x + 34, y + 30); g.lineTo(x - 34, y + 30); g.closePath(); g.fill(); g.fillRect(x - 24, y - 24, 30, 24); g.fillRect(x + 12, y - 14, 18, 14); g.lineWidth = 6; P(); g.moveTo(x - 52, y + 44); g.quadraticCurveTo(x - 26, y + 34, x, y + 44); g.quadraticCurveTo(x + 26, y + 54, x + 52, y + 44); g.stroke(); break;
     case 'rocket': P(); g.moveTo(x, y - 50); g.quadraticCurveTo(x + 26, y - 20, x + 18, y + 26); g.lineTo(x - 18, y + 26); g.quadraticCurveTo(x - 26, y - 20, x, y - 50); g.fill(); P(); g.moveTo(x - 18, y + 4); g.lineTo(x - 34, y + 34); g.lineTo(x - 16, y + 26); g.fill(); P(); g.moveTo(x + 18, y + 4); g.lineTo(x + 34, y + 34); g.lineTo(x + 16, y + 26); g.fill(); g.save(); g.globalCompositeOperation = 'destination-out'; P(); g.arc(x, y - 14, 9, 0, 7); g.fill(); g.restore(); P(); g.moveTo(x - 9, y + 32); g.lineTo(x, y + 50); g.lineTo(x + 9, y + 32); g.fill(); break;
     case 'heart': P(); g.moveTo(x, y + 40); g.bezierCurveTo(x - 60, y, x - 40, y - 50, x, y - 22); g.bezierCurveTo(x + 40, y - 50, x + 60, y, x, y + 40); g.fill(); break;
-    default: P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke();
+    case 'life': case 'family': // house with a heart
+      P(); g.moveTo(x - 44, y - 2); g.lineTo(x, y - 44); g.lineTo(x + 44, y - 2); g.stroke(); g.strokeRect(x - 32, y - 6, 64, 48);
+      P(); g.moveTo(x, y + 32); g.bezierCurveTo(x - 26, y + 14, x - 16, y - 6, x, y + 6); g.bezierCurveTo(x + 16, y - 6, x + 26, y + 14, x, y + 32); g.fill(); break;
+    case 'edu': case 'school': case 'cap': case 'study': // graduation cap
+      P(); g.moveTo(x - 52, y - 8); g.lineTo(x, y - 34); g.lineTo(x + 52, y - 8); g.lineTo(x, y + 18); g.closePath(); g.fill();
+      g.fillRect(x - 30, y + 2, 60, 26); g.lineWidth = 6; P(); g.moveTo(x + 40, y - 4); g.lineTo(x + 40, y + 30); g.stroke(); break;
+    case 'tax': case 'receipt': // receipt with %
+      P(); g.moveTo(x - 32, y - 44); g.lineTo(x + 32, y - 44); g.lineTo(x + 32, y + 42); g.lineTo(x + 20, y + 34); g.lineTo(x + 8, y + 42); g.lineTo(x - 4, y + 34); g.lineTo(x - 16, y + 42); g.lineTo(x - 32, y + 34); g.closePath(); g.stroke();
+      g.font = '800 46px Rubik'; g.fillText('%', x, y + 2); break;
+    case 'piggy':
+      P(); g.ellipse(x, y + 4, 46, 34, 0, 0, 7); g.fill(); g.fillRect(x - 30, y + 28, 12, 18); g.fillRect(x + 18, y + 28, 12, 18);
+      P(); g.arc(x + 44, y - 2, 10, 0, 7); g.fill(); g.save(); g.globalCompositeOperation = 'destination-out'; g.fillRect(x - 12, y - 26, 24, 6); P(); g.arc(x + 22, y - 8, 4, 0, 7); g.fill(); g.restore(); break;
+    case 'index': case 'fund': case 'pension': case 'chart': // growing bars with a trend
+      [[-36, 10, 24], [-12, -6, 40], [12, -22, 56]].forEach(([dx, dy, h]) => g.fillRect(x + dx, y + dy + 6, 18, h)); g.lineWidth = 7;
+      P(); g.moveTo(x - 46, y - 2); g.lineTo(x - 10, y - 26); g.lineTo(x + 10, y - 14); g.lineTo(x + 46, y - 44); g.stroke(); break;
+    case 'news': case 'newspaper':
+      g.strokeRect(x - 44, y - 34, 88, 68); g.fillRect(x - 34, y - 24, 68, 12); [0, 14, 28].forEach((d) => g.fillRect(x - 34, y - 4 + d, 30, 6)); g.fillRect(x + 4, y - 4, 30, 34); break;
+    case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
+    default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
   g.restore();
 }
@@ -367,6 +481,7 @@ function heart() {
 
 /* ============================================================ world build */
 const LIGHTS = {
+  history: { hemi: 1.0, sun: 2.3, exp: 1.0, env: 0.3, sunPos: [14, 18, 6] },
   trees: { hemi: 1.0, sun: 2.5, exp: 1.02, env: 0.32, sunPos: [12, 22, 9] },
   skyline: { hemi: 0.95, sun: 1.8, exp: 1.0, env: 0.32, sunPos: [-13, 19, 10], fill: ['#ff4fd8', 9] },
   sea: { hemi: 1.15, sun: 2.7, exp: 1.04, env: 0.42, sunPos: [10, 24, 12] },
@@ -391,7 +506,7 @@ const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness
 /** Build the whole board + decor for a world (models must be preloaded). */
 export function buildWorld(w) {
   clearWorld(); clearCity();
-  world = w; theme = w.theme; boardN = w.board.length;
+  world = w; theme = w.mechanic === 'history' ? HISTORY_THEME(w.theme) : w.theme; setBoardSize(w.board.length);
   const T = theme;
   const L = LIGHTS[T.decor] || LIGHTS.trees;
   scene.fog = new THREE.Fog(T.fog, 42, 130);
@@ -404,16 +519,16 @@ export function buildWorld(w) {
   const dark = lum(T.board) < 0.35;
   const glass = !!T.glass;
   // base + top
-  const base = own(new THREE.Mesh(new THREE.BoxGeometry(22, 0.7, 22), std(T.boardEdge, { roughness: T.planks ? 0.85 : 0.65 })));
+  const base = own(new THREE.Mesh(new THREE.BoxGeometry(HB * 2, 0.7, HB * 2), std(T.boardEdge, { roughness: T.planks ? 0.85 : 0.65 })));
   base.position.y = -0.35; base.castShadow = true; base.receiveShadow = true; worldGroup.add(base);
   const topMat = T.planks ? std('#ffffff', { map: plankTexture(T.board), roughness: 0.9 })
     : glass ? std(T.board, { roughness: 0.18, metalness: 0.08 })
     : std(T.board, { roughness: dark ? 0.55 : 0.9 });
-  const top = own(new THREE.Mesh(new THREE.BoxGeometry(21, 0.1, 21), topMat));
+  const top = own(new THREE.Mesh(new THREE.BoxGeometry(HB * 2 - 1, 0.1, HB * 2 - 1), topMat));
   top.position.y = 0.05; top.receiveShadow = true; worldGroup.add(top);
   // centre
   centerMat = std('#ffffff', { roughness: glass ? 0.3 : 0.95 });
-  const cm = own(new THREE.Mesh(new THREE.PlaneGeometry(10.6, 10.6), centerMat));
+  const cm = own(new THREE.Mesh(new THREE.PlaneGeometry(CS, CS), centerMat));
   cm.rotation.x = -Math.PI / 2; cm.position.y = 0.102; cm.receiveShadow = true; worldGroup.add(cm);
   drawCenter(gridN);
   // tiles
@@ -440,25 +555,94 @@ export function buildWorld(w) {
   const lm = landmarkNames(w);
   [[-1, 1], [-1, -1], [1, -1], [1, 1]].forEach(([sx, sz], k) => {
     const name = lm[k % lm.length]; if (!name) return;
-    const m = inst(name); m.position.set(sx * 9.3, 0.1, sz * 9.3); m.scale.setScalar(0.95);
+    const m = inst(name); m.position.set(sx * (HB - 1.7), 0.1, sz * (HB - 1.7)); m.scale.setScalar(0.95 * Math.min(1.5, K));
     m.lookAt(sx * 3, 0.1, 40);
     worldGroup.add(m);
   });
   // decor
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars }[T.decor] || decorTrees)(T);
+  const before = worldGroup.children.length;
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory }[T.decor] || decorTrees)(T);
+  if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   resize(); invalidate(); wake(1500);
+}
+
+/** "מכונת הזמן": sepia newspaper world, whatever the data theme says. */
+export const HISTORY_THEME = (t = {}) => ({ ...t, sky: ['#efe2c4', '#c9b089'], fog: '#d8c7a3', board: '#efe4c8', boardEdge: '#5b4127', center: '#e6d6b0', accent: '#a8763e', decor: 'history',
+  light: { hemiSky: '#fff1d6', hemiGround: '#6b5236', sun: '#ffe2b0' } });
+function decorHistory(T) {
+  island(33, std('#d9c7a0', { roughness: 1 }), '#7a5f3e');
+  const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.4, 64), std('#c8b48c', { roughness: 1 })));
+  plaza.rotation.x = -Math.PI / 2; plaza.position.y = -0.7; plaza.receiveShadow = true; worldGroup.add(plaza);
+  // an old downtown: sepia blocks with cornices, mostly behind the board
+  const pts = scatter(lowPower ? 26 : 40, 16, 31, { seed: 17, backOnly: false });
+  const bodyG = new THREE.BoxGeometry(1.6, 1, 1.6), capG = new THREE.BoxGeometry(1.8, 0.16, 1.8);
+  const body = new THREE.InstancedMesh(bodyG, std('#ffffff', { roughness: 0.9 }), pts.length);
+  const cap = new THREE.InstancedMesh(capG, std('#6b5236', { roughness: 0.8 }), pts.length);
+  const d = new THREE.Object3D(); const tones = ['#cdb48a', '#b99b6e', '#e0cfa9', '#a8875c', '#d6c19b'];
+  pts.forEach((p, i) => {
+    const front = p.z > 4 && Math.abs(p.x) < 18; const h = front ? 1 + p.k * 1.4 : 2 + p.k * 5;
+    d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, Math.round(p.a * 2) / 2, 0); d.scale.set(1 + p.k * 0.6, h, 1 + (1 - p.k) * 0.6); d.updateMatrix(); body.setMatrixAt(i, d.matrix); body.setColorAt(i, new THREE.Color(tones[i % tones.length]));
+    d.position.y = -0.72 + h + 0.08; d.scale.set(1 + p.k * 0.6, 1, 1 + (1 - p.k) * 0.6); d.updateMatrix(); cap.setMatrixAt(i, d.matrix);
+  });
+  [body, cap].forEach((m) => { m.castShadow = true; m.receiveShadow = true; own(m); worldGroup.add(m); });
+  // the time machine: a clock tower behind the board (assets/history/clocktower.glb if the 3D lead delivered one)
+  const tower = new THREE.Group(); tower.position.set(0, -0.72, -20);
+  const glb = ready.get(modelUrl('history', 'time_machine'));
+  if (glb) { const m = glb.clone(true); m.scale.setScalar(5.5); tower.add(m); tower.position.z = -18.5;
+    const tb = ready.get(modelUrl('history', 'ticker_board'));
+    if (tb) [[-11, -15, 0.5], [11, -15, -0.5]].forEach(([x, z, r]) => { const b = tb.clone(true); b.scale.setScalar(3.2); b.position.set(x, -0.72, z); b.rotation.y = r; worldGroup.add(b); });
+  }
+  else {
+    const st0 = std('#a8875c', { roughness: 0.85 }), st1 = std('#7a5f3e', { roughness: 0.8 });
+    const b0 = new THREE.Mesh(new THREE.BoxGeometry(4, 9, 4), st0); b0.position.y = 4.5; b0.castShadow = true; tower.add(b0);
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(3.2, 3.4, 3.2), st0); b1.position.y = 10.7; tower.add(b1);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 3.2, 4), st1); roof.position.y = 14; roof.rotation.y = Math.PI / 4; tower.add(roof);
+    const cv = mkCanvas(256), g = cv.getContext('2d');
+    g.fillStyle = '#f4ead2'; g.beginPath(); g.arc(128, 128, 120, 0, 7); g.fill(); g.strokeStyle = '#3b2a17'; g.lineWidth = 10; g.stroke();
+    g.fillStyle = '#3b2a17'; for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; g.fillRect(128 + Math.sin(a) * 96 - 5, 128 - Math.cos(a) * 96 - 5, 10, 10); }
+    const face = new THREE.Mesh(new THREE.CircleGeometry(1.3, 40), new THREE.MeshStandardMaterial({ map: canvasTex(cv), roughness: 0.6 }));
+    face.position.set(0, 10.8, 1.62); tower.add(face);
+    const handM = std('#2a1c0e'); const hh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.05), handM), mh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.1, 0.05), handM);
+    hh.geometry.translate(0, 0.35, 0); mh.geometry.translate(0, 0.5, 0); hh.position.set(0, 10.8, 1.66); mh.position.set(0, 10.8, 1.68); tower.add(hh, mh);
+    tower.traverse((o) => { if (o.isMesh) { o.userData.ownGeo = true; } });
+    updaters.add((t) => { mh.rotation.z = -t * 1.6; hh.rotation.z = -t * 0.14; }); // time runs fast in the machine
+  }
+  worldGroup.add(tower);
+  // street lamps
+  const glow = new THREE.SpriteMaterial({ map: soft(), color: '#ffcf7a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 });
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.26; const x = Math.sin(a) * 14.9, z = Math.cos(a) * 14.9;
+    const pole = own(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2, 6), std('#3b2a17'))); pole.position.set(x, 0.28, z); worldGroup.add(pole);
+    const gl = new THREE.Sprite(glow); gl.position.set(x, 1.4, z); gl.scale.setScalar(1.2); worldGroup.add(gl); }
+  disposables.push(glow);
+}
+
+/** Spread decor made for the 24-tile board outward for a bigger board (positions × K; centred rings/islands stretched). */
+function spreadDecor(list, k) {
+  const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  for (const o of list) {
+    if (o.isInstancedMesh) {
+      for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, m); m.decompose(p, q, sc); p.x *= k; p.z *= k; m.compose(p, q, sc); o.setMatrixAt(i, m); }
+      o.instanceMatrix.needsUpdate = true; o.computeBoundingSphere && o.computeBoundingSphere();
+      continue;
+    }
+    if (Math.abs(o.position.x) + Math.abs(o.position.z) > 0.01) { o.position.x *= k; o.position.z *= k; if (o.userData.k0) o.userData.k0.multiplyScalar(k); continue; }
+    if (o.isPoints) continue; // sky
+    const flat = Math.abs(Math.abs(o.rotation.x) - Math.PI / 2) < 0.01;
+    if (flat) { o.scale.x *= k; o.scale.y *= k; } else { o.scale.x *= k; o.scale.z *= k; }
+  }
 }
 
 function neonTrim(T) {
   const a = new THREE.MeshStandardMaterial({ color: '#000000', emissive: T.accent || '#ff4fd8', emissiveIntensity: 2.4 });
   const b = new THREE.MeshStandardMaterial({ color: '#000000', emissive: T.accent2 || '#22d3ee', emissiveIntensity: 2.2 });
   const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.userData.ownGeo = true; worldGroup.add(m); };
-  const gx = new THREE.BoxGeometry(21.1, 0.06, 0.1), gz = new THREE.BoxGeometry(0.1, 0.06, 21.1);
-  add(gx, a, 0, 0.13, 10.5); add(gx, a, 0, 0.13, -10.5); add(gz, a, 10.5, 0.13, 0); add(gz, a, -10.5, 0.13, 0);
-  const sx = new THREE.BoxGeometry(22.1, 0.08, 0.06), sz = new THREE.BoxGeometry(0.06, 0.08, 22.1);
-  add(sx, b, 0, -0.42, 11.02); add(sx, b, 0, -0.42, -11.02); add(sz, b, 11.02, -0.42, 0); add(sz, b, -11.02, -0.42, 0);
-  const ix = new THREE.BoxGeometry(10.9, 0.04, 0.06), iz = new THREE.BoxGeometry(0.06, 0.04, 10.9);
-  add(ix, b, 0, 0.12, 5.42); add(ix, b, 0, 0.12, -5.42); add(iz, b, 5.42, 0.12, 0); add(iz, b, -5.42, 0.12, 0);
+  const L1 = HB * 2 - 0.9, E1 = HB - 0.5, L2 = HB * 2 + 0.1, E2 = HB + 0.02, L3 = CS + 0.3, E3 = CS / 2 + 0.12;
+  const gx = new THREE.BoxGeometry(L1, 0.06, 0.1), gz = new THREE.BoxGeometry(0.1, 0.06, L1);
+  add(gx, a, 0, 0.13, E1); add(gx, a, 0, 0.13, -E1); add(gz, a, E1, 0.13, 0); add(gz, a, -E1, 0.13, 0);
+  const sx = new THREE.BoxGeometry(L2, 0.08, 0.06), sz = new THREE.BoxGeometry(0.06, 0.08, L2);
+  add(sx, b, 0, -0.42, E2); add(sx, b, 0, -0.42, -E2); add(sz, b, E2, -0.42, 0); add(sz, b, -E2, -0.42, 0);
+  const ix = new THREE.BoxGeometry(L3, 0.04, 0.06), iz = new THREE.BoxGeometry(0.06, 0.04, L3);
+  add(ix, b, 0, 0.12, E3); add(ix, b, 0, 0.12, -E3); add(iz, b, E3, 0.12, 0); add(iz, b, -E3, 0.12, 0);
   disposables.push({ dispose() { a.dispose(); b.dispose(); } });
 }
 
@@ -597,8 +781,8 @@ function decorSea(T) {
   });
   // gulls (tiny white sprites circling)
   const gm = new THREE.SpriteMaterial({ map: soft(), color: '#ffffff', transparent: true, depthWrite: false, opacity: 0.85 });
-  const gulls = [0, 1, 2].map(() => { const s = new THREE.Sprite(gm); s.scale.set(0.5, 0.2, 1); worldGroup.add(s); return s; });
-  updaters.add((t) => gulls.forEach((g, i) => { const a = t * 0.25 + i * 2.1; g.position.set(Math.sin(a) * (16 + i * 3), 9 + i * 1.5 + Math.sin(t * 2 + i), Math.cos(a) * (14 + i * 2) - 4); }));
+  const gulls = [0, 1, 2].map(() => { const s = new THREE.Sprite(gm); s.scale.set(0.5, 0.2, 1); s.position.set(5, 9, 5); worldGroup.add(s); return s; });
+  updaters.add((t) => gulls.forEach((g, i) => { const a = t * 0.25 + i * 2.1; g.position.set(Math.sin(a) * (16 + i * 3) * K, 9 + i * 1.5 + Math.sin(t * 2 + i), (Math.cos(a) * (14 + i * 2) - 4) * K); }));
   disposables.push(gm);
 }
 
@@ -647,8 +831,8 @@ function decorStars(T) {
   });
   // floating light motes
   const mm = new THREE.SpriteMaterial({ map: soft(), color: T.accent2 || '#a78bfa', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.7 });
-  const motes = Array.from({ length: 14 }, (_, i) => { const s = new THREE.Sprite(mm); s.scale.setScalar(0.5); worldGroup.add(s); return { s, a: i * 0.45, r: 12 + (i % 4) * 2.5, h: 1.5 + (i % 5) }; });
-  updaters.add((t) => motes.forEach((m) => { const a = m.a + t * 0.07; m.s.position.set(Math.sin(a) * m.r, m.h + Math.sin(t + m.a * 3) * 0.6, Math.cos(a) * m.r); }));
+  const motes = Array.from({ length: 14 }, (_, i) => { const s = new THREE.Sprite(mm); s.scale.setScalar(0.5); s.position.set(5, 2, 5); worldGroup.add(s); return { s, a: i * 0.45, r: 12 + (i % 4) * 2.5, h: 1.5 + (i % 5) }; });
+  updaters.add((t) => motes.forEach((m) => { const a = m.a + t * 0.07; m.s.position.set(Math.sin(a) * m.r * K, m.h + Math.sin(t + m.a * 3) * 0.6, Math.cos(a) * m.r * K); }));
   disposables.push(mm);
 }
 
@@ -670,12 +854,12 @@ export async function setPawn(id = 'classic', color = '#e2483d') {
     pawnRing.rotation.x = -Math.PI / 2; pawnRing.position.y = 0.27; scene.add(pawnRing);
   } else pawnRing.material.color.set(color);
 }
-export function placePawn(i) { cancelTweens('hop'); hopping = false; if (pawn) { pawn.position.copy(tilePos(i)); pawn.scale.setScalar(1.7); } invalidate(); }
+export function placePawn(i) { cancelTweens('hop'); hopping = false; if (pawn) { pawn.position.copy(tilePos(i)); pawn.scale.setScalar(1.7); } focus.copy(tilePos(i)); if (camMode === 'follow') { resize(); } invalidate(); }
 /** One hop from tile `from` to tile `to`. last=true adds a squash on landing. */
 export async function hop(from, to, last = false) {
   if (!pawn) return;
   const a = tilePos(from), b = tilePos(to);
-  hopping = true;
+  hopping = true; focusOn(b);
   pawn.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
   await tween(D(190), (p) => {
     if (!pawn) return;
@@ -690,8 +874,8 @@ export async function hop(from, to, last = false) {
 /* ============================================================ the city (bought assets) */
 const city = new Map(); // key -> {obj, slot, model}
 let gridN = 4;
-const slotScale = (n) => (0.86 * 4) / n;
-function slotXZ(idx, n) { const sp = 10 / n; const r = Math.floor(idx / n), c = idx % n; return [(c - (n - 1) / 2) * sp, (r - (n - 1) / 2) * sp]; }
+const slotScale = (n) => ((0.86 * 4) / n) * Math.min(1.45, CS / 10.6);
+function slotXZ(idx, n) { const sp = (CS - 0.6) / n; const r = Math.floor(idx / n), c = idx % n; return [(c - (n - 1) / 2) * sp, (r - (n - 1) / 2) * sp]; }
 function freeSlot() { const used = new Set([...city.values()].map((x) => x.slot)); let i = 0; while (used.has(i)) i++; return i; }
 function relayout(animate = true) {
   const s = slotScale(gridN);
@@ -851,4 +1035,204 @@ export async function celebrate(win) {
     camera.position.copy(tgt).add(new THREE.Vector3().setFromSpherical(s)); camera.lookAt(tgt);
   });
   controls.enabled = true;
+}
+
+
+/* ============================================================ 3D dice thrown by a hand
+   Scripted, not simulated: every throw ends EXACTLY on the engine's faces. Die faces (standard: opposite sides sum to 7):
+   +Y=1 −Y=6 +Z=2 −Z=5 +X=3 −X=4. BoxGeometry material order is [+X, −X, +Y, −Y, +Z, −Z]. */
+const DIE = 0.62;
+const FACE_NORMAL = { 1: [0, 1, 0], 6: [0, -1, 0], 2: [0, 0, 1], 5: [0, 0, -1], 3: [1, 0, 0], 4: [-1, 0, 0] };
+const FACE_ORDER = [3, 4, 1, 6, 2, 5];
+let diceObjs = [], hand = null, handFingers = [], handGLB = false, holding = false, holdT0 = 0, diceHideT = 0;
+const PIPXY = { 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
+function dieFaceTex(n) {
+  const cv = mkCanvas(128), g = cv.getContext('2d');
+  g.fillStyle = '#e9e4da'; g.fillRect(0, 0, 128, 128);
+  const gr = g.createRadialGradient(64, 54, 10, 64, 64, 90); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#efe9de');
+  g.fillStyle = gr; g.beginPath(); g.roundRect(5, 5, 118, 118, 22); g.fill();
+  g.fillStyle = n === 1 ? '#d23b30' : '#1d1a2b';
+  for (const [x, y] of PIPXY[n]) { g.beginPath(); g.arc(64 + x * 33, 64 + y * 33, n === 1 ? 15 : 11.5, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+let dieMats = null, dieGeo = null;
+function makeDie() {
+  const g = ready.get(modelUrl('life', 'die'));
+  if (g) { const m = g.clone(true); m.scale.setScalar(DIE); m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); m.visible = false; scene.add(m); return m; }
+  if (!dieMats) { dieMats = FACE_ORDER.map((n) => new THREE.MeshStandardMaterial({ map: dieFaceTex(n), roughness: 0.35, metalness: 0.02 })); dieGeo = new THREE.BoxGeometry(DIE, DIE, DIE); }
+  const m = new THREE.Mesh(dieGeo, dieMats); m.castShadow = true; m.receiveShadow = true; m.visible = false;
+  scene.add(m); return m;
+}
+/** Quaternion that puts face `n` on top, then turns it by `yaw` around the vertical. */
+export function faceUpQuat(n, yaw = 0) {
+  const nv = new THREE.Vector3(...FACE_NORMAL[n]);
+  const q = new THREE.Quaternion().setFromUnitVectors(nv, new THREE.Vector3(0, 1, 0));
+  return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiply(q);
+}
+/** Which face points up for a quaternion (used by the tests). */
+export function faceUpOf(q) {
+  let best = 1, bd = -2; const up = new THREE.Vector3(0, 1, 0);
+  for (const [n, v] of Object.entries(FACE_NORMAL)) { const d = new THREE.Vector3(...v).applyQuaternion(q).dot(up); if (d > bd) { bd = d; best = +n; } }
+  return best;
+}
+/** Faces currently showing on the 3D dice (null when none). */
+export function diceTopFaces() { return diceObjs.filter((d) => d.visible).map((d) => faceUpOf(d.quaternion)); }
+
+function skin(c) { return new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 }); }
+function makeHand() {
+  const g = new THREE.Group(); g.visible = false; scene.add(g);
+  const open = ready.get(modelUrl('life', 'hand')), fist = ready.get(modelUrl('life', 'hand_closed'));
+  if (open && fist) {
+    // glb: origin at the wrist, fingers +Z, palm −Y — same frame as the procedural hand; swap meshes to open/close
+    const o = open.clone(true), c = fist.clone(true); const S = 1.25; o.scale.setScalar(S); c.scale.setScalar(S);
+    o.position.z = c.position.z = -0.55; o.visible = false; g.add(o, c); handGLB = { open: o, fist: c };
+    return g;
+  }
+  const sk = skin('#f1c9a5'), sl = skin('#2f6fdb');
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.32, 1.05), sk); palm.castShadow = true; g.add(palm);
+  palm.geometry.translate(0, 0, 0);
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 1.1, 14), sl); cuff.rotation.x = Math.PI / 2; cuff.position.z = -1.05; cuff.castShadow = true; g.add(cuff);
+  const fg = new THREE.CapsuleGeometry(0.11, 0.55, 4, 8);
+  [-0.36, -0.12, 0.12, 0.36].forEach((x, i) => {
+    const pivot = new THREE.Group(); pivot.position.set(x, -0.02, 0.5); g.add(pivot);
+    const f = new THREE.Mesh(fg, sk); f.rotation.x = Math.PI / 2; f.position.z = 0.33 - (i === 0 || i === 3 ? 0.06 : 0); f.castShadow = true; pivot.add(f);
+    handFingers.push(pivot);
+  });
+  const tp = new THREE.Group(); tp.position.set(0.55, -0.02, 0.05); tp.rotation.y = -0.7; g.add(tp);
+  const th = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.38, 4, 8), sk); th.rotation.x = Math.PI / 2; th.position.z = 0.25; th.castShadow = true; tp.add(th);
+  handFingers.push(tp);
+  return g;
+}
+function curl(k) {
+  if (handGLB) { handGLB.fist.visible = k > 0.5; handGLB.open.visible = k <= 0.5; return; }
+  handFingers.forEach((f, i) => { f.rotation.x = (i === 4 ? 0.6 : 1.25) * k; });
+}
+export async function preloadDice() {
+  await Promise.all(['hand', 'hand_closed', 'die'].map((n) => loadGLB(modelUrl('life', n)).catch(() => null)));
+}
+
+function throwFrame() {
+  const P = pawn ? pawn.position.clone() : new THREE.Vector3();
+  const inward = new THREE.Vector3(-P.x, 0, -P.z); if (inward.lengthSq() < 0.01) inward.set(0, 0, -1); inward.normalize();
+  const side = new THREE.Vector3(inward.z, 0, -inward.x);
+  const land = P.clone().addScaledVector(inward, 2.0); land.y = 0.12 + DIE / 2;
+  const start = land.clone().addScaledVector(inward, -3.2).add(new THREE.Vector3(0, 3.3, 0));
+  return { P, inward, side, land, start };
+}
+function placeHand(f, t, shake = 0) {
+  if (!hand) hand = makeHand();
+  hand.visible = true;
+  const pos = f.start.clone().add(new THREE.Vector3(0, 0.55, 0)).addScaledVector(f.inward, -0.35);
+  hand.position.copy(pos);
+  hand.position.x += Math.sin(t * 38) * shake * 0.18; hand.position.y += Math.cos(t * 31) * shake * 0.12;
+  hand.lookAt(pos.clone().add(f.inward)); hand.rotateX(0.55 + Math.sin(t * 30) * shake * 0.15);
+}
+function diceInHand(f, t) {
+  diceObjs.forEach((d, i) => {
+    d.visible = true; d.scale.setScalar(1);
+    d.position.copy(f.start).addScaledVector(f.side, (i - (diceObjs.length - 1) / 2) * 0.38);
+    d.position.y -= 0.05; d.rotation.set(t * 9 + i, t * 7 + i * 2, t * 5);
+  });
+}
+/** Touch/mouse hold: the hand comes in and shakes the dice until throwDice() is called. */
+export function holdDice(count = 2) {
+  if (holding) return;
+  holding = true; holdT0 = performance.now();
+  while (diceObjs.length < count) diceObjs.push(makeDie());
+  clearTimeout(diceHideT);
+  const f = throwFrame(); focusOn(f.land);
+  const step = () => {
+    if (!holding) return;
+    const t = (performance.now() - holdT0) / 1000;
+    placeHand(f, t, 1); curl(1); diceInHand(f, t);
+    wake(300); requestAnimationFrame(step);
+  };
+  step();
+}
+export function cancelHold() { holding = false; if (hand) hand.visible = false; diceObjs.forEach((d) => { d.visible = false; }); invalidate(); }
+
+/**
+ * Throw dice that land showing exactly `faces` (array of 1..6). opts {held, onBounce(i), turbo}. Resolves when settled.
+ */
+export async function throwDice(faces, opts = {}) {
+  faces = (faces || []).map((n) => Math.max(1, Math.min(6, n | 0)));
+  while (diceObjs.length < faces.length) diceObjs.push(makeDie());
+  diceObjs.forEach((d, i) => { d.visible = i < faces.length; });
+  const dice = diceObjs.slice(0, faces.length);
+  clearTimeout(diceHideT);
+  const f = throwFrame(); focusOn(f.land);
+  const wasHeld = holding; holding = false;
+  // 1) the hand swoops in (skipped when the player was already holding) and shakes
+  if (!wasHeld) {
+    const from = f.start.clone().add(new THREE.Vector3(0, 5, 0)).addScaledVector(f.inward, -5);
+    await tween(D(260), (p) => { placeHand(f, p, 0); curl(1); const e = 1 - Math.pow(1 - p, 3); hand.position.lerpVectors(from, hand.position, e); diceInHand(f, p); hand.visible = true; });
+    await tween(D(opts.held ? 120 : 380), (p) => { placeHand(f, p * 2, 1); curl(1); diceInHand(f, p * 2); });
+  }
+  // 2) release: fingers open, dice fly in an arc, bounce twice and roll to their faces
+  const yaw = () => (Math.random() - 0.5) * 0.9;
+  const finals = dice.map((d, i) => ({
+    q: faceUpQuat(faces[i], Math.atan2(f.inward.x, f.inward.z) + yaw()),
+    land: f.land.clone().addScaledVector(f.side, (i - (dice.length - 1) / 2) * (DIE * 1.45)).addScaledVector(f.inward, (Math.random() - 0.5) * 0.35),
+    from: dice[i].position.clone(),
+    ax: new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.3, Math.random() - 0.5).normalize(),
+    spin: Math.PI * (4 + Math.floor(Math.random() * 3)) + Math.random(),
+    q0: dice[i].quaternion.clone(),
+  }));
+  const T = D(1050);
+  const handFrom = hand ? hand.position.clone() : null;
+  let bounced = [0, 0];
+  const yAt = (u, h0) => {
+    // flight 0..0.55 (parabola from start height to floor), bounce 0.55..0.78 (h .28), bounce 0.78..0.92 (h .08), settle
+    const fl = DIE / 2 + 0.12;
+    if (u < 0.55) { const t = u / 0.55; return h0 + (fl - h0) * t + Math.sin(t * Math.PI) * 0.9 - 0.9 * t * t * 0; }
+    if (u < 0.78) { const t = (u - 0.55) / 0.23; return fl + Math.sin(t * Math.PI) * 0.42; }
+    if (u < 0.92) { const t = (u - 0.78) / 0.14; return fl + Math.sin(t * Math.PI) * 0.12; }
+    return fl;
+  };
+  await tween(T, (u) => {
+    if (hand) { curl(Math.max(0, 1 - u * 5)); hand.position.lerpVectors(handFrom, handFrom.clone().add(new THREE.Vector3(0, 3.5, 0)).addScaledVector(f.inward, -4), Math.min(1, u * 1.6)); if (u > 0.6) hand.visible = false; }
+    dice.forEach((d, i) => {
+      const F = finals[i];
+      const ex = 1 - Math.pow(1 - Math.min(1, u / 0.95), 2.2); // horizontal: fast then slow (roll out)
+      d.position.lerpVectors(F.from, F.land, ex);
+      d.position.y = yAt(u, F.from.y);
+      // rotation decays to exactly the final quaternion (angle → 0 at u = 1)
+      const left = Math.pow(1 - u, 1.7) * F.spin;
+      d.quaternion.copy(F.q).multiply(new THREE.Quaternion().setFromAxisAngle(F.ax, left));
+    });
+    const hit = u >= 0.55 ? (u >= 0.78 ? 2 : 1) : 0;
+    if (hit > bounced[0]) { bounced[0] = hit; if (opts.onBounce) opts.onBounce(hit); if (hit === 1) shake(0.12, 220); }
+  });
+  dice.forEach((d, i) => { d.quaternion.copy(finals[i].q); d.position.copy(finals[i].land); d.position.y = DIE / 2 + 0.12; });
+  if (hand) hand.visible = false;
+  if (faces.length === 2 && faces[0] === faces[1]) {
+    const mid = finals[0].land.clone().lerp(finals[1].land, 0.5);
+    particlesAt(mid, 22, { tex: star(), color: '#ffffff', size: 0.5, spread: 1.2, up: 2.4, dur: 1300, additive: true, y: 0.4 });
+    floatLabelAt('דאבל!', 'gold', mid.clone().add(new THREE.Vector3(0, 1.6, 0)));
+  }
+  invalidate();
+  diceHideT = setTimeout(() => hideDice(), 2600 * speed + 400);
+  return faces;
+}
+export function hideDice() {
+  const ds = diceObjs.filter((d) => d.visible); if (!ds.length) return;
+  tween(D(300), (p) => ds.forEach((d) => d.scale.setScalar(Math.max(0.001, 1 - p)))).then(() => ds.forEach((d) => { d.visible = false; d.scale.setScalar(1); }));
+}
+function particlesAt(pos, n, o) {
+  const mat = new THREE.SpriteMaterial({ map: o.tex, color: o.color, transparent: true, depthWrite: false, blending: o.additive ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const ps = [];
+  for (let i = 0; i < n; i++) { const sp = new THREE.Sprite(mat); ps.push({ sp, a: Math.random() * 6.28, r: (0.3 + Math.random()) * o.spread, h: Math.random(), v: 0.6 + Math.random() * 0.8 }); sp.position.copy(pos); fxGroup.add(sp); }
+  return tween(D(o.dur), (p) => { for (const q of ps) { const rr = q.r * (0.3 + p * 0.9); q.sp.position.set(pos.x + Math.cos(q.a) * rr, pos.y + o.y + q.h * 0.4 + p * o.up * q.v, pos.z + Math.sin(q.a) * rr); q.sp.material.opacity = 1 - p; q.sp.scale.setScalar(o.size * (0.6 + p * 0.9)); } })
+    .then(() => { for (const q of ps) fxGroup.remove(q.sp); mat.dispose(); });
+}
+function floatLabelAt(text, color, pos) {
+  const col = COLORS[color] || color;
+  const cv = mkCanvas(512, 128), g = cv.getContext('2d');
+  g.font = '800 70px Rubik'; g.direction = 'rtl'; const w = Math.min(500, g.measureText(text).width + 60);
+  g.fillStyle = 'rgba(255,246,214,.97)'; g.beginPath(); g.roundRect(256 - w / 2, 10, w, 108, 54); g.fill(); g.strokeStyle = col; g.lineWidth = 6; g.stroke();
+  g.fillStyle = col; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 66);
+  const tx = new THREE.CanvasTexture(cv); tx.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthTest: false, transparent: true })); sp.scale.set(3.2, 0.8, 1); sp.renderOrder = 20; sp.position.copy(pos); fxGroup.add(sp);
+  const y0 = pos.y;
+  return tween(D(1500), (p) => { sp.position.y = y0 + p * 1.2; sp.material.opacity = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3; }).then(() => { fxGroup.remove(sp); tx.dispose(); sp.material.dispose(); });
 }

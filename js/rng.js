@@ -56,7 +56,7 @@ export function mix32(x) {
 }
 
 /** Build the named streams object for a seed. Stream order/names are part of the save format — append only. */
-export const STREAMS = ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift'];
+export const STREAMS = ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index'];
 export function makeStreams(seed) {
   const s = {};
   STREAMS.forEach((name, k) => { s[name] = mix32((seed >>> 0) + Math.imul(k + 1, 0x9E3779B9)); });

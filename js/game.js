@@ -31,6 +31,7 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms * speed()));
 export function saveKeyFor(cfg) {
   if (!cfg) return null;
   if (cfg.mode === 'free' || !cfg.mode) return `rr2-save-free-${cfg.worldId || 'w1'}`;
+  if (cfg.mode === 'history') return `rr2-save-history-${cfg.scenarioId || 'x'}`;
   if (cfg.resultId) return `rr2-save-${cfg.resultId}`;
   return `rr2-save-${cfg.mode}-${cfg.worldId || 'w1'}-${cfg.seed >>> 0}`;
 }
@@ -102,6 +103,8 @@ async function doInit() {
   await Promise.all([
     scene.preloadWorld(w1, (p) => initProgress(0.1 + p * 0.85)),
     scene.setPawn('classic', '#e2483d'),
+    scene.preloadDice(),
+    scene.preloadLife(),
   ]);
   W = w1;
   scene.buildWorld(w1); scene.placePawn(0);
@@ -132,6 +135,13 @@ function wireUI() {
   $('#voiceBtn').innerHTML = ui.ICON.voice;
   $('#sheetBtn').innerHTML = ui.ICON.doc + '<span>הדוח שלי</span>';
   $('#roll').onclick = () => { unlock(); ui.hideCoach(); turn(); };
+  wireHold();
+  $('#hLife').onclick = (e) => { const b = e.target.closest('[data-life]'); if (!b || !S) return; sfx('click'); lifeChip(b.dataset.life); };
+  $('#hEnergy').onclick = async () => { const en = await energyMod(); if (en) showNoEnergy(en, true); };
+  bus.on('energy:change', () => updateRollEnergy());
+  setInterval(() => { if (!document.hidden && S && usesEnergy() && $('#start').hidden) updateRollEnergy(); }, 1000);
+  $('#camBtn').innerHTML = ui.ICON.overview;
+  $('#camBtn').onclick = () => { const o = scene.getCameraMode() !== 'overview'; scene.setCameraMode(o ? 'overview' : 'follow'); $('#camBtn').setAttribute('aria-pressed', String(o)); $('#camBtn').title = o ? 'חזרה למצלמה שעוקבת אחרי החייל' : 'מבט על כל הלוח'; sfx('click'); };
   $('#homeBtn').onclick = () => { sfx('click'); goLobby(); };
   $('#turboBtn').onclick = () => { settings.turbo = !settings.turbo; writeSettings({ turbo: settings.turbo }); applySettings(); sfx('click'); ui.toast(settings.turbo ? 'טורבו פועל: הכל זז פי 2' : 'מהירות רגילה'); };
   $('#muteBtn').onclick = () => { unlock(); setMuted(!isMuted()); applySettings(); sfx('click'); };
@@ -201,14 +211,17 @@ export async function startGame(cfg = {}) {
       st = E.deserialize(src);
       st.ui = newUi({ ...((local && local.ui) || {}), ...(st.ui || {}) }); // (older saves kept ui beside the state)
       cfg = { ...((local && local.cfg) || {}), ...cfg, worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode };
-    } catch (e) { console.warn('bad save, starting fresh', e); st = null; }
+    } catch (e) {
+      console.warn('bad save, starting fresh', e); st = null;
+      if (String(e && e.message).includes('save_incompatible')) { clearSave(cfg); ui.toast('המשחק השמור מגרסה ישנה — מתחילים מחדש'); }
+    }
   }
   // never send a checkpoint number the server already has (it would be rejected as stale)
   const ckFloor = Math.max(0, Number(cfg.checkpointTurn) || 0);
   delete cfg.state; delete cfg.checkpointTurn;
   const resumed = !!st;
   if (!st) {
-    st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout });
+    st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout, scenarioId: cfg.scenarioId });
     st.ui = newUi();
     cfg.charId = st.charId;
   }
@@ -230,7 +243,7 @@ export async function startGame(cfg = {}) {
   ui.resetHud();
   frame(); scene.resetCamera();
   render(false);
-  ui.showDie(S.lastRoll ? S.lastRoll.die : 1);
+  ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
   const intro = E.intro(S, resumed);
   ui.mentor(intro.mentor);
   ui.worldBanner(W, resumed ? `חזרת לחודש ${S.month}` : ui.goalWords(W.goalLabel));
@@ -245,6 +258,7 @@ export async function startGame(cfg = {}) {
   busy = false;
   if (S.over) return;
   ui.setRollEnabled(true); ui.focusRoll();
+  updateRollEnergy();
   offerTurbo();
   const tutorialHere = CFG.tutorial && W.id === 'w1';
   if (tutorialHere) markWorldCoached(W.id); // the tutorial explains w1
@@ -316,8 +330,149 @@ function ctx() { return { world: W, st: S, cfg: CFG }; }
 function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
+  track(m);
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
+  const wi = m.worldIndicators || {};
+  ui.historyStrip(S.ui.hist, wi.ymText ? wi : null);
+  syncLifeCity(m);
+}
+/** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
+function track(m) {
+  const u = S.ui; if (u.trackMonth === m.month) return; u.trackMonth = m.month;
+  if (m.life && m.life.pension != null) { (u.pensionHist ||= []).push(Math.round(m.life.pension)); if (u.pensionHist.length > 120) u.pensionHist.shift(); }
+  const wi = m.worldIndicators || {};
+  if (wi.ymText) { (u.hist ||= []).push({ ym: wi.ym, index: wi.index }); if (u.hist.length > 240) u.hist.shift(); }
+}
+/* life models in the city: family house, university, pension island, index-fund building */
+function syncLifeCity(m) {
+  const L = m.life; if (!L) return;
+  const fam = L.family || {};
+  const want = {
+    'L:home': (fam.kids || 0) > 0 || (fam.partner === 'married' && (L.age - (S.ui.weddingAge || 0)) > 0.5),
+    'L:wedding': fam.partner === 'married' && !(fam.kids > 0) && (L.age - (S.ui.weddingAge ??= L.age)) <= 0.5,
+    'L:side': L.plan === 'side' || (L.sideLevel || 0) > 0,
+    'L:hospital': ((S.life && S.life.burnouts) || 0) > (S.ui.burnSeen || 0) && L.plan === 'rest',
+    'L:uni': L.plan === 'study' || (L.studyProgress > 0 && L.studyProgress < 1),
+    'L:pension': (L.pension || 0) > 0,
+    'L:index': !!(m.index && m.index.qty > 0),
+  };
+  if (fam.partner !== 'married') delete S.ui.weddingAge;
+  if (!want['L:hospital'] && L.plan !== 'rest') S.ui.burnSeen = (S.life && S.life.burnouts) || 0;
+  const MODEL = { 'L:home': 'life/home_family', 'L:wedding': 'life/wedding', 'L:uni': 'life/university', 'L:pension': 'life/pension', 'L:index': 'life/index_fund', 'L:side': 'life/side_hustle', 'L:hospital': 'life/hospital' };
+  const LABEL = { 'L:home': 'הבית של המשפחה', 'L:wedding': 'מזל טוב!', 'L:uni': 'לומד!', 'L:pension': 'קרן הפנסיה', 'L:index': 'קרן מחקה מדד', 'L:side': 'העסק הצדדי', 'L:hospital': 'מנוחה והחלמה' };
+  for (const [k, on] of Object.entries(want)) {
+    if (on && !scene.hasKey(k)) scene.spawn(k, MODEL[k], { label: busy || ui.isEventOpen() ? LABEL[k] : null, color: 'gold', silent: !S.ui.lifeSeen });
+    else if (!on && scene.hasKey(k)) scene.despawn(k);
+  }
+  S.ui.lifeSeen = true;
+}
+
+/* ============================================================ ⚡ energy gate (js/energy.js is owned by the lobby lead) */
+let enP = null;
+function energyMod() {
+  if (!enP) enP = import('./energy.js').then((m) => m.energy || m.default || m).catch(() => null);
+  return enP;
+}
+function safeCall(o, fn, dflt) {
+  try {
+    if (typeof o[fn] !== 'function') return dflt;
+    const v = o[fn]();
+    // get() may be a number (current js/energy.js) or {value, max} (contract) — normalise
+    if (fn === 'get') return typeof v === 'number' ? { value: v, max: o.MAX || 25 } : v ? { value: v.value ?? v.energy ?? 0, max: v.max ?? o.MAX ?? 25 } : dflt;
+    return v;
+  } catch (e) { console.error(e); return dflt; }
+}
+const RANKED = new Set(['daily', 'weekly', 'challenge']);
+const usesEnergy = () => {
+  if (!CFG || RANKED.has(CFG.mode) || CFG.resultId) return false;
+  if (S && typeof E.rollCost === 'function') { try { return E.rollCost(S) > 0; } catch (e) { /* fall through */ } }
+  return true;
+};
+let noEnTimer = 0;
+function showNoEnergy(en, info = false) {
+  if (info && safeCall(en, 'canRoll', true)) {
+    const g0 = safeCall(en, 'get', null) || { value: 0, max: 25 };
+    ui.modal({ tag: 'אנרגיה', color: '#f2b632', title: `⚡ ${g0.value}/${g0.max}`, html: '<p class="d">כל הטלה במשחק חופשי עולה ⚡ אחת, והאנרגיה מתמלאת לבד עם הזמן. אתגרים מדורגים (יומי, שבועי, קבוצות) לא עולים אנרגיה. בונוסים: האתגר היומי, חברים שמצטרפים, ורצף ימים.</p>', actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
+    return;
+  }
+  sfx('loss');
+  const fmtMs = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, '0')}`; };
+  const left = () => safeCall(en, 'msUntilNext', 0);
+  const g = safeCall(en, 'get', null) || { value: 0, max: 25 };
+  const p = ui.modal({
+    tag: 'אנרגיה', color: '#f2b632', title: 'נגמרה האנרגיה ⚡',
+    html: `<div class="noen"><div class="noen-ring"><b id="noenT" class="num">${fmtMs(left())}</b><small>עד ⚡ הבאה</small></div>
+      <p class="d">כל הטלה עולה ⚡ אחת. האנרגיה מתמלאת לבד — ${g.max ? `עד ${g.max}` : ''}, אחת כל כמה דקות. המשחק שלך שמור ומחכה.</p>
+      <p class="note">בינתיים אפשר:</p>
+      <div class="noen-acts"><button data-go="library">📚 ספריית השיעורים</button><button data-go="daily">📅 האתגר היומי (בלי ⚡)</button><button data-go="groups">⚡ לשלוח אנרגיה לחברים</button><button data-go="sheet">📄 לעבור על הדוח שלי</button></div></div>`,
+    actions: [{ label: 'סגירה', cls: 'primary', v: 'close' }],
+    dismissable: true,
+    onExtra: (e) => {
+      const b = e.target.closest('[data-go]'); if (!b) return;
+      const go = b.dataset.go;
+      document.querySelector('#gm .acts button')?.click();
+      if (go === 'sheet') setTimeout(() => ui.toggleSheet(true), 50);
+      else { persist(); bus.emit('lobby:open', { view: go }); }
+    },
+  });
+  clearInterval(noEnTimer);
+  noEnTimer = setInterval(() => {
+    const el = document.getElementById('noenT'); if (!el) { clearInterval(noEnTimer); return; }
+    el.textContent = fmtMs(left());
+    if (safeCall(en, 'canRoll', false)) { el.textContent = '⚡ מוכן!'; clearInterval(noEnTimer); }
+  }, 500);
+  p.then(() => clearInterval(noEnTimer));
+}
+
+async function updateRollEnergy() {
+  if (!S || !usesEnergy()) { ui.renderRollEnergy(null); return; }
+  const en = await energyMod(); if (!en) { ui.renderRollEnergy(null); return; }
+  ui.renderRollEnergy(safeCall(en, 'get', null), safeCall(en, 'msUntilNext', 0));
+}
+/* life chips: details, or change the monthly plan between events */
+async function lifeChip(kind) {
+  const m = E.metrics(S);
+  if (kind === 'plan') {
+    if (busy || ui.isEventOpen() || typeof E.setPlan !== 'function') { ui.toast('אפשר לשנות תוכנית בין תורות, או ביום המשכורת'); return; }
+    const L = m.life || {}; const plans = L.plans || [];
+    const ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
+    const v = await ui.modal({ tag: 'התוכנית החודשית', color: '#0e7490', title: 'איך תעביר את החודשים הבאים?',
+      html: `<p class="d">התוכנית חלה מיום המשכורת הבא. זמן ואנרגיה הם משאב — בחר על מה לבזבז אותם.</p><div class="plans">${plans.map((p) => `<button class="plan ${p.id === L.plan ? 'cur' : ''}" data-plan="${p.id}"><span class="pi">${ICON[p.id] || '📅'}</span><b>${ui.esc(p.label)}</b>${p.id === L.plan ? '<small class="tagc">עכשיו</small>' : ''}<small class="pn">${ui.esc(p.desc || '')}</small></button>`).join('')}</div>`,
+      actions: [{ label: 'ביטול', v: null }], dismissable: true,
+      onExtra: (e) => { const b = e.target.closest('[data-plan]'); if (!b) return; chosenPlan = b.dataset.plan; document.querySelector('#gm .acts button').click(); } });
+    void v;
+    if (chosenPlan && chosenPlan !== L.plan) {
+      const id = chosenPlan; chosenPlan = null;
+      try { const out = E.setPlan(S, id); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי עכשיו'); return; } if (out && out.mentor) ui.mentor(out.mentor); }
+      catch (e) { console.error(e); return; }
+      sfx('card'); render(); persist(); checkpoint(); ui.toast('התוכנית עודכנה — מהמשכורת הבאה');
+    }
+    chosenPlan = null; return;
+  }
+  const T = ui.lifeDetails(kind, m); if (!T) return;
+  ui.modal({ tag: 'החיים שלך', color: '#0e7490', title: T[0], html: `<p class="d">${T[1]}</p>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
+}
+let chosenPlan = null;
+
+/* ============================================================ hold-to-shake (touch & mouse) */
+const holdState = { down: false, held: false, t: 0 };
+function wireHold() {
+  const r = $('#roll');
+  r.addEventListener('pointerdown', (e) => {
+    if (r.disabled || busy || !S || S.over) return;
+    unlock(); holdState.down = true; holdState.held = false;
+    clearTimeout(holdState.t);
+    holdState.t = setTimeout(() => {
+      if (!holdState.down || busy) return;
+      holdState.held = true; scene.holdDice(2); ui.shakeDomDice(true);
+      const rattle = () => { if (holdState.down && holdState.held) { sfx('rattle'); setTimeout(rattle, 210); } };
+      rattle(); ui.vibrate(6);
+    }, 170);
+  });
+  const up = () => { holdState.down = false; clearTimeout(holdState.t); };
+  r.addEventListener('pointerup', up); r.addEventListener('pointercancel', () => { up(); if (holdState.held && !busy) { holdState.held = false; scene.cancelHold(); ui.shakeDomDice(false); } });
+  r.addEventListener('pointerleave', () => { if (holdState.down) { up(); if (holdState.held && !busy) { turn(); } } });
 }
 
 /* ============================================================ turn */
@@ -326,10 +481,27 @@ async function turn() {
   const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false);
   const m0 = E.metrics(S);
   let out;
-  try { out = E.rollDice(S); } catch (e) { console.error(e); busy = false; ui.setRollEnabled(true); return; }
+  // ⚡ the real-time limit (free/story play only — ranked modes never pay energy)
+  if (usesEnergy()) {
+    const en = await energyMod();
+    if (my !== gen) return;
+    if (en) setTimeout(updateRollEnergy, 50);
+    if (en && (!safeCall(en, 'canRoll', true) || !safeCall(en, 'spend', true))) {
+      scene.cancelHold(); ui.shakeDomDice(false); busy = false; ui.setRollEnabled(true);
+      showNoEnergy(en); return;
+    }
+  }
+  try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); return; }
+  const faces = Array.isArray(out.dice) && out.dice.length ? out.dice : [out.die];
+  ui.shakeDomDice(false);
   sfx('roll'); ui.vibrate(10);
-  await ui.rollDie(out.die);
+  let bounces = 0;
+  await scene.throwDice(faces, { held: holdState.held, onBounce: () => { sfx('clack'); if (!bounces++) ui.vibrate(8); } });
+  holdState.held = false;
+  ui.landDice(faces);
+  if (faces.length === 2 && faces[0] === faces[1]) { sfx('golden'); ui.vibrate([12, 30, 12]); }
   if (my !== gen) return;
+  await pause(180);
   let cash = m0.cash;
   for (let i = 0; i < out.steps.length; i++) {
     const from = i ? out.steps[i - 1] : out.from;
@@ -345,6 +517,8 @@ async function turn() {
   render();
   persist();
   if (out.bailout) { await bailoutCard(out.bailout); if (my !== gen) return; render(); }
+  const burn = out.burnout || (out.news || []).find((n) => n.kind === 'burnout');
+  if (burn) { await burnoutCard(burn); if (my !== gen) return; render(); }
   await handleLanding(my);
   if (my !== gen) return;
   busy = false;
@@ -371,7 +545,8 @@ async function handleLanding(my) {
   persist();
   if (ev) checkpoint();
   while (ev && my === gen) {
-    const routinePayday = ev.type === 'payday' && !(CFG.tutorial && !UIS.firstPayday);
+    // landed paydays with plan choices (v3) open the plan picker; passed paydays keep the remembered plan silently
+    const routinePayday = ev.type === 'payday' && !(CFG.tutorial && !UIS.firstPayday) && !ev.options.some((o) => o.id.startsWith('plan:') || o.id === 'raise');
     if (routinePayday || ev.auto) {
       // no card: routine payday (coins already flew) or an event that does not touch you (engine marks it auto)
       if (ev.auto) { ui.toast(ev.toastText || ev.title, { ms: 1300 * speed() + 200 }); sfx(ev.sound === 'loss' ? 'card' : ev.sound || 'card'); }
@@ -476,13 +651,28 @@ async function applyOut(out, opts = {}) {
   for (const k of out.despawn || []) { const x = exits.get(k); if (x) scene.launch(k, x.mult > 0); else scene.despawn(k); }
   // spawns
   for (const s of out.spawn || []) { scene.spawn(s.key || s.assetId, s.model, { label: s.label, color: s.color, golden: s.golden }); ui.vibrate(14); }
+  if (out.lessons && out.lessons.length) {
+    bus.emit('lesson', { ids: out.lessons.map((l) => l.id), list: out.lessons });
+    ui.lessonToast(out.lessons, (l) => ui.lessonCard(l));
+  }
+  if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
   for (const n of out.news || []) {
-    if (n.kind === 'bailout') continue; // shown as its own mentor card
+    if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
+    if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);
   if (out.toast) ui.toast(out.toast, { kind: 'bad' });
+}
+
+/* ============================================================ burnout */
+async function burnoutCard(b) {
+  sfx('loss'); scene.shake(0.25, 450); ui.vibrate([20, 40, 20]);
+  await ui.modal({ tag: 'שחיקה', color: '#b45309', title: b.title || 'נשרפת. חודש בבית.', html: `<div class="say static"><span class="av sm" aria-hidden="true">אע</span><span class="st">${ui.esc(b.mentor || 'הזמן והכוח שלך הם הנכס הכי יקר. כשרצים בלי עצירה — הגוף עוצר בשבילך.')}</span></div>
+    <p class="d">${ui.esc(b.text || 'עבדת יותר מדי בלי מנוחה. החודש אין משכורת, יש הוצאות רפואיות, והתוכנית שלך עוברת למנוחה.')}</p>
+    ${b.cost ? `<div class="grid"><div class="row"><span>עלות החודש הזה</span><b class="num neg">${E.fmtM(-Math.abs(b.cost))}</b></div></div>` : ''}
+    <p class="note">🔋 בפעם הבאה: כשהאנרגיה יורדת מתחת ל־40 — חודש של מנוחה ומשפחה זול יותר מחודש של שחיקה.</p>`, actions: [{ label: 'הבנתי, נוח קצת', cls: 'primary' }] });
 }
 
 /* ============================================================ bail-out (first bankruptcy → the bank restructures; a teaching moment) */
@@ -503,6 +693,7 @@ async function bailoutCard(b) {
 /* ============================================================ sheet actions (loans / credit) */
 function sheetAction(act) {
   if (!S || S.over || busy || ui.isEventOpen()) { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
+  if (act === 'invest') { indexModal(); return; }
   let out;
   try { out = act === 'loan' ? E.takeLoan(S) : act === 'repay' ? E.repayLoan(S) : act === 'credit' ? E.payCredit(S) : null; }
   catch (e) { console.error(e); return; }
@@ -511,6 +702,26 @@ function sheetAction(act) {
   applyOut(out);
   render(); persist(); checkpoint();
   if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my); }
+}
+
+/* ============================================================ index fund any time (E.invest / E.setAutoInvest) */
+async function indexModal() {
+  if (typeof E.invest !== 'function') { ui.toast('אפשר להשקיע בקרן במשבצת "קרן מדד ופנסיה"'); return; }
+  const m = E.metrics(S); const ix = m.index || {}; const price = ix.price || 100;
+  let qty = 0, auto = (m.index && m.index.autoInvest) || 0;
+  const maxBuy = Math.floor(Math.max(0, S.cash) / price), maxSell = ix.qty || 0;
+  const v = await ui.modal({ tag: 'קרן מחקה מדד', color: '#0f766e', title: 'להשקיע בקרן מדד',
+    html: `<p class="d">מחיר יחידה ${ui.esc(E.fmtP(price))}. יש לך ${maxSell} יחידות. מזומן ${ui.esc(E.fmtM(S.cash))}.</p>
+      <label class="note" for="ixq">כמות (+ קנייה, − מכירה)</label><input id="ixq" type="number" inputmode="numeric" dir="ltr" value="${Math.min(10, maxBuy)}" min="${-maxSell}" max="${maxBuy}">
+      ${typeof E.setAutoInvest === 'function' ? `<label class="note" for="ixa" style="display:block;margin-top:10px">הוראת קבע חודשית לקרן (₪, 0 = בלי)</label><input id="ixa" type="number" inputmode="numeric" dir="ltr" step="100" min="0" value="${auto}">` : ''}
+      <p class="note">רווח במכירה ממוסה ב־25% (מס רווחי הון). הוראת קבע = השקעה אוטומטית בכל יום משכורת — הדרך הכי פשוטה לתת לריבית דריבית לעבוד.</p><p class="err" id="ixe"></p>`,
+    actions: [{ label: 'לבצע', cls: 'primary', v: 'go', fn: () => { qty = Math.trunc(+document.getElementById('ixq').value || 0); const a = document.getElementById('ixa'); if (a) auto = Math.max(0, Math.round(+a.value || 0)); if (qty > maxBuy || -qty > maxSell) { document.getElementById('ixe').textContent = 'הכמות לא אפשרית'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
+  if (v !== 'go') return;
+  try {
+    if (qty) { const out = E.invest(S, qty > 0 ? 'buy' : 'sell', Math.abs(qty)); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); } else if (out) await applyOut(out); }
+    if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = E.setAutoInvest(S, auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
+  } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); }
+  render(); persist(); checkpoint();
 }
 
 /* ============================================================ lobby button */
@@ -532,6 +743,7 @@ async function endGame(end, my) {
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
   await scene.celebrate(win);
   if (my !== gen) return;
+  if (end.lifeSummary) { await ui.lifeStory(end.lifeSummary, { won: win }); if (my !== gen) return; }
   await pause(win ? 350 : 250);
   persist();
   settings.games = (settings.games || 0) + 1; writeSettings({ games: settings.games });
@@ -542,6 +754,7 @@ async function endGame(end, my) {
     achievements: (S.ach || []).slice(),
     summary: typeof E.summaryForServer === 'function' ? { seed: S.seed, ...E.summaryForServer(S) } : null,
     bailoutUsed: !!(S.flags && S.flags.bailoutUsed),
+    lifeSummary: end.lifeSummary || null, benchmark: end.benchmark || null, scenarioId: (S.history && S.history.scenarioId) || CFG.scenarioId || null,
   };
   busy = false;
   bus.emit('game:end', payload);

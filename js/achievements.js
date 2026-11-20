@@ -23,6 +23,11 @@ export const ACHIEVEMENTS = [
   { id: 'comeback', name: 'קאמבק', desc: 'ניצחת אחרי שהיה לך חודש עם תזרים שלילי.', icon: 'phoenix', hidden: true },
   { id: 'strong_will', name: 'כוח רצון', desc: 'ויתרת על 4 פיתויים במשחק אחד.', icon: 'shield' },
   { id: 'no_installments', name: 'בלי תשלומים', desc: 'ניצחת בלי לקנות אף פעם בתשלומים או במנוי.', icon: 'scissors' },
+  // ---- v3 "החיים האמיתיים" (any world)
+  { id: 'balanced', name: 'עשיר ושמח', desc: 'יצאת מהמירוץ עם אושר 70 ומעלה.', icon: 'sun' },
+  { id: 'negotiator', name: 'סוחר ממולח', desc: 'שתי הצעות מחיר נמוכות התקבלו במשחק אחד.', icon: 'handshake' },
+  { id: 'scholar', name: 'השקעתי בעצמי', desc: 'סיימת ללמוד וקיבלת העלאה קבועה.', icon: 'cap' },
+  { id: 'steady_hand', name: 'יד יציבה', desc: 'במכונת הזמן: ניצחת את "קנה והחזק" בלי למכור בהפסד.', icon: 'anchor', world: 'h' },
   // ---- w1 השכונה
   { id: 'three_apts', name: 'בעל בית', desc: 'שלוש דירות בבעלותך בבת אחת.', icon: 'house', world: 'w1' },
   { id: 'w1_fast', name: 'שועל השכונה', desc: 'יצאת מהשכונה בפחות מ־30 חודשים.', icon: 'fox', world: 'w1' },
@@ -84,6 +89,10 @@ const TESTS = {
   impact25: (s, t, p) => s.worldId === 'w4' && (s.world.impact || 0) >= 25,
   impact100: (s, t, p) => s.worldId === 'w4' && (s.world.impact || 0) >= 100,
   pledge: (s, t, p) => t === 'give' && !!p.pledge,
+  balanced: (s, t, p) => t === 'end' && p.end.status === 'won' && !!s.life && s.life.happiness >= 70,
+  negotiator: (s) => !!s.life && s.life.negWins >= 2,
+  scholar: (s) => !!s.life && s.life.study.done,
+  steady_hand: (s, t, p) => t === 'end' && p.end.status === 'won' && s.worldId === 'h' && !!s.life && !s.life.idxSold,
 };
 
 /** Newly earned in-game achievements for this event. Pure (never mutates state). */

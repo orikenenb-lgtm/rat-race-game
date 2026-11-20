@@ -10,6 +10,8 @@ import { WORLDS, getWorld } from './worlds/index.js';
 import { characterCard, starThresholds, starsFor, fmt, fmtM } from './engine.js';
 import { ACHIEVEMENTS, titleFor, TITLES } from './achievements.js';
 import * as P from './progress.js';
+import * as EN from './energy.js';
+import * as LIB from './library.js';
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -49,7 +51,9 @@ const NEW_HERE = {
   fx: 'שער הדולר, גידור, וזהב שמציל במשבר.',
   angel: 'השקעות אנג׳ל לפי חוק החזקה — ונתינה שמשנה עולם.',
 };
-const MODE_NAME = { free: 'משחק חופשי', daily: 'האתגר היומי', weekly: 'האתגר השבועי', challenge: 'אתגר קבוצתי' };
+/** v3: ★★★ also needs happiness ≥ starThresholds().happy (engine default 60). */
+const HAPPY_RULE = true;
+const MODE_NAME = { free: 'משחק חופשי', daily: 'האתגר היומי', weekly: 'האתגר השבועי', challenge: 'אתגר קבוצתי', history: 'מכונת הזמן' };
 const PAWN_INDEX = Object.fromEntries(P.PAWNS.map((p, i) => [p.id, i]));
 
 function timeLeft(d) {
@@ -143,6 +147,15 @@ let view = { k: 'home' };
 let token = 0;
 let booted = false; let installed = false;
 let pendingJoin = safe(() => new URLSearchParams(location.search).get('join'));
+/** ?ref=<player id> from any invite/duel/share link: kept until this device registers (referrer gets +5⚡ on the server). */
+const REFK = 'rr2-ref';
+safe(() => { const r = new URLSearchParams(location.search).get('ref'); if (r && /^[\w-]{8,64}$/.test(r) && !net.hasMe()) localStorage.setItem(REFK, r); });
+const pendingRef = () => safe(() => localStorage.getItem(REFK)) || null;
+/** Append &ref=<my id> to every link we hand out. */
+function withRef(url) {
+  const id = safe(() => net.refId && net.refId()); if (!id) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'ref=' + encodeURIComponent(id);
+}
 const cache = { daily: null, weekly: null, groups: null, group: {} };
 let endCtx = null;
 let duelShown = false;
@@ -164,10 +177,13 @@ export function openLobby(v) {
   const nv = normalize(v);
   if (nv.k === 'end' && !endCtx) nv.k = 'home';
   if (pendingDuel && nv.k === 'home' && !duelShown) { duelShown = true; nv.k = 'duel'; }
+  if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
+  claimGifts();
+  startEnergyTicker();
   go(nv);
 }
 export function closeLobby() {
-  stopGroupRefresh();
+  stopGroupRefresh(); stopEnergyTicker();
   const o = overlay(); if (o) { o.hidden = true; o.classList.remove('lb-open'); }
   document.body.classList.remove('lb-lobby-open');
 }
@@ -180,6 +196,9 @@ function go(v) {
     case 'profile': return renderProfile();
     case 'end': return renderEnd();
     case 'duel': return renderDuel();
+    case 'welcome': return renderWelcome();
+    case 'library': return renderLibrary();
+    case 'history': return renderHistory();
     case 'groups': renderHome(); return setTimeout(() => $('#lbGroups')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     case 'daily': renderHome(); return setTimeout(() => $('#lbDaily')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     default: return renderHome();
@@ -191,6 +210,7 @@ function boot() {
   game().then((m) => { if (m && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); });
   P.syncFromServer().then((ch) => { if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
   flushPending();
+  scenarios(); LIB.lessons().then(() => { const el = $('.map-lib'); if (el) el.outerHTML = libraryCard(); });
   if (pendingJoin) {
     if (net.hasMe()) { const c = pendingJoin; setTimeout(() => joinCode(c), 0); }
   }
@@ -202,7 +222,7 @@ async function launch(cfg) {
   const g = await game();
   if (!g || !g.startGame) { toast('המשחק עוד נטען… נסה שוב בעוד רגע'); return false; }
   lastEndSig = null;
-  P.beginSession();
+  P.beginSession(); sessLessons = [];
   closeLobby();
   try { await g.startGame(cfg); return true; }
   catch (e) { console.error(e); openLobby(view); toast('משהו השתבש בפתיחת המשחק'); return false; }
@@ -315,6 +335,7 @@ function topBar() {
       <span class="lb-pl-txt"><b class="lb-pl-name">${me ? esc(me.nickname) : 'אורח'}</b>${titleBadge(total)}</span>
       <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים">★ ${total}</span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'warn'}" title="ימים ברצף באתגר היומי">🔥 ${streak}</span>` : ''}</span>
     </button>
+    ${energyHtml()}
     ${muteBtn()}
   </header>`;
 }
@@ -378,6 +399,199 @@ function activeBanner() {
 }
 const sigOf = (o) => [o.worldId, o.charId, o.mode, o.resultId || ''].join('|');
 
+/* ============================================================ ⚡ ENERGY · gifts · welcome · library */
+const ONBK = 'rr2-onboarded';
+let sessLessons = [];
+LIB.onUnlock((ids) => { sessLessons.push(...ids); });
+/** Free-play milestones for friends' group feeds (ranked results come from the server itself). */
+function logMilestones(e, res) {
+  if (!net.hasMe() || !net.logEvent || (e.mode && e.mode !== 'free' && e.mode !== 'history')) return;
+  const ls = (e.end && e.end.lifeSummary) || {};
+  const ev = [];
+  if (e.mode === 'history') ev.push(['history_done', { scenario: e.scenarioId, stars: e.stars | 0, beat: e.status === 'won' }]);
+  else {
+    if (e.status === 'won') ev.push(['escaped', { world: e.worldId, age: ls.age != null ? Math.floor(ls.age) : null, months: e.months, stars: e.stars | 0 }]);
+    if (res.unlockedWorld) ev.push(['world_unlocked', { world: res.unlockedWorld }]);
+    if (res.gained > 0 && res.newStars === 3) ev.push(['stars3', { world: e.worldId }]);
+  }
+  for (const [k, d] of ev) net.logEvent(k, d).catch(() => {});
+}
+const ACH_ENERGY = 2;            // ⚡ per new achievement
+const DAILY_ENERGY = 10;         // ⚡ for playing the daily
+const STREAK_ENERGY = { 3: 5, 7: 10, 30: 25 };
+function energyHtml(cls = '') {
+  const e = EN.get(); const ms = EN.msUntilNext();
+  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy" aria-label="אנרגיה ${e} מתוך ${EN.MAX}">
+    <span class="lb-en-ic" aria-hidden="true">⚡</span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
+}
+let enTimer = null;
+function startEnergyTicker() {
+  if (enTimer) return;
+  enTimer = setInterval(() => {
+    if (!lobbyVisible()) return;
+    document.querySelectorAll('.lb-energy').forEach((b) => { b.outerHTML = energyHtml(b.classList.contains('lg') ? 'lg' : ''); });
+    const em = $('#lbEmpty'); if (em && EN.get() > 0) em.remove();
+    const w = $('[data-energy="full-wait"]'); if (w) w.textContent = EN.fmtWait(EN.msUntilNext());
+  }, 1000);
+}
+function stopEnergyTicker() { clearInterval(enTimer); enTimer = null; }
+EN.onChange((p) => { if (p.delta > 0 && p.reason && !['sync', 'roll'].includes(p.reason) && lobbyVisible()) { /* bonus toasts are shown by the caller */ } });
+/** "Out of energy" card: what you CAN do while waiting (DESIGN-v3 §3). */
+function emptyEnergyHtml() {
+  if (EN.get() > 0) return '';
+  const d = cache.daily; const dailyOpen = net.hasMe() && d && !d.error && !d.my_status;
+  return `<section class="lb-empty-en" id="lbEmpty"><div class="lb-en-big" aria-hidden="true">🪫</div>
+    <div><h2>נגמרה האנרגיה ⚡</h2><p>עוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל ⚡ חדש. בינתיים:</p>
+    <div class="lb-acts start">${dailyOpen ? '<button class="primary" data-act="daily">🎲 האתגר היומי (לא עולה ⚡)</button>' : ''}
+      <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח ⚡ לחברים</button>' : ''}</div></div></section>`;
+}
+let claimAt = 0;
+async function claimGifts() {
+  if (!net.hasMe() || !net.claimEnergy || Date.now() - claimAt < 30000) return;
+  claimAt = Date.now();
+  try {
+    const r = await net.claimEnergy();
+    const total = +((r && r.total) ?? r) || 0;
+    if (total > 0) {
+      EN.add(total, 'gift');
+      const from = (r && r.from) || [];
+      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${f.amount}⚡` : `${f.nickname} שלח לך ${f.amount}⚡`) : [`קיבלת ${total}⚡`];
+      lines.slice(0, 3).forEach((t, i) => setTimeout(() => toast('🎁 ' + t), i * 2700));
+      sfx('coin'); refreshEnergyChips();
+    }
+  } catch (e) { /* offline: try next time */ }
+}
+function refreshEnergyChips() { document.querySelectorAll('.lb-energy').forEach((b) => { b.outerHTML = energyHtml(b.classList.contains('lg') ? 'lg' : ''); }); }
+function grantDaily(streak) {
+  const day = P.israelDate();
+  let got = EN.grantOnce('daily:' + day, DAILY_ENERGY, 'daily');
+  const sb = STREAK_ENERGY[+streak];
+  if (sb) got += EN.grantOnce(`streak${streak}:${day}`, sb, 'streak');
+  return got;
+}
+
+function renderWelcome() {
+  view = { k: 'welcome' }; ++token;
+  html(`<div class="lb-shell lb-welcome">
+    <article class="wl-card">
+      <div class="wl-hero"><img src="${cardArt('w1')}" alt=""><div class="lb-logo wl-logo">מירוץ<br>העכברים</div></div>
+      <h1>החיים שלך. הכסף שלך. הזמן שלך.</h1>
+      <p class="wl-lead">כל חודש במשחק הוא חודש בחיים. המטרה: נכסים שמשלמים את ההוצאות — ולהישאר מאושר בדרך.</p>
+      <ul class="wl-points">
+        <li><span>📅</span><div><b>תוכנית חודשית</b><small>בכל משכורת בוחרים: עבודה רגילה, שעות נוספות, לימודים, עסק צדדי או מנוחה ומשפחה. הזמן הוא הנכס הכי יקר.</small></div></li>
+        <li><span>⚡</span><div><b>אנרגיה: ${EN.MAX} הטלות</b><small>כל הטלה עולה ⚡ אחד, ומתמלא ⚡ כל 6 דקות. האתגר היומי והשבועי — בחינם. חברים יכולים לשלוח לך ⚡.</small></div></li>
+        <li><span>😊</span><div><b>כסף זה לא הכל</b><small>★★★ רק למי שיוצא מהר <em>וגם</em> נשאר מאושר.</small></div></li>
+        <li><span>📚</span><div><b>אוספים שיעורים</b><small>כל שיעור של אבא עשיר נכנס לספרייה שלך.</small></div></li>
+      </ul>
+      <button class="primary lb-big" data-act="welcome-go">יאללה, מתחילים ←</button>
+    </article></div>`);
+}
+
+const CAT_HE = { tax: '🧾 משכורת ומסים', invest: '📈 השקעות', money: '💸 כסף ומחירים', debt: '💳 חובות ואשראי', time: '⏳ זמן ואנרגיה', life: '🌱 החיים', world: '🗺️ מהעולמות', history: '📜 מההיסטוריה' };
+async function renderLibrary() {
+  view = { k: 'library' }; const t = ++token;
+  html(`<div class="lb-shell lb-library"><div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div><p class="lb-note">טוען את הספרייה…</p></div>`);
+  const L = await LIB.lessons();
+  if (t !== token) return;
+  const c = LIB.counts();
+  const cats = [];
+  for (const l of L) { const k = CAT_HE[l.cat] || l.cat || 'שיעורים'; let g = cats.find((x) => x.k === k); if (!g) cats.push(g = { k, items: [] }); g.items.push(l); }
+  const pct = c.total ? Math.round((c.have / c.total) * 100) : 0;
+  html(`<div class="lb-shell lb-library">
+    <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
+    <header class="lib-head"><span class="lib-ic" aria-hidden="true">📚</span><div><h1>ספריית השיעורים</h1>
+      <p>כל שיעור שאבא עשיר מלמד אותך במשחק נכנס לכאן. <b>${num(c.have + '/' + c.total)}</b></p>
+      <div class="lb-bar-track"><i style="width:${pct}%"></i></div></div></header>
+    ${L.length ? cats.map((g) => `<section class="lib-sec"><h2>${esc(g.k)} <small>${num(g.items.filter((l) => LIB.isUnlocked(l.id)).length + '/' + g.items.length)}</small></h2>
+      <div class="lib-grid">${g.items.map((l) => { const un = LIB.isUnlocked(l.id); return un
+        ? `<button class="lib-card ${LIB.isNew(l.id) ? 'is-new' : ''}" data-act="lesson" data-id="${esc(l.id)}">${LIB.isNew(l.id) ? '<span class="gp-newtag">חדש</span>' : ''}<b>${esc(l.title)}</b><small>${iso(String(l.text).length > 150 ? String(l.text).slice(0, 147) + '…' : l.text)}</small></button>`
+        : `<div class="lib-card is-locked"><span class="lib-q">?</span><b>שיעור נעול</b><small>${esc(l.hint || (l.world ? 'מחכה לך ' + P.inW(worldOf(l.world).name) : 'שחק כדי לגלות'))}</small></div>`; }).join('')}</div></section>`).join('')
+      : '<p class="lb-empty">הספרייה תתמלא כשתתחיל לשחק.</p>'}
+  </div>`);
+}
+async function openLesson(id) {
+  const L = await LIB.lessons(); const l = L.find((x) => x.id === id); if (!l) return;
+  LIB.markRead(id);
+  const old = $('#lbLesson'); if (old) old.remove();
+  const el = document.createElement('div'); el.id = 'lbLesson'; el.className = 'lb-sheet';
+  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true"><span class="lib-ic sm" aria-hidden="true">📚</span><h2>${esc(l.title)}</h2><p>${iso(l.text)}</p><button class="primary lb-wide" data-act="lesson-close">הבנתי</button></div>`;
+  root().appendChild(el);
+  const card = $(`.lib-card[data-id="${CSS.escape(id)}"]`); if (card) { card.classList.remove('is-new'); card.querySelector('.gp-newtag')?.remove(); }
+}
+
+/* ============================================================ ⏳ מכונת הזמן (history mode) */
+const HIST_ART = asset('assets/history/card.png');
+let SCEN = null; let scenP = null;
+/** E.scenarioList() → [{id, name, start, months, blurb, lesson}] (needs js/data/real.js; null while unavailable). */
+function scenarios() {
+  if (SCEN) return Promise.resolve(SCEN);
+  if (!scenP) scenP = (async () => {
+    const tries = [
+      async () => { const E = await import('./engine.js'); return typeof E.scenarioList === 'function' ? E.scenarioList() : null; },
+      async () => { const H = await import('./history.js'); return typeof H.scenarioList === 'function' ? H.scenarioList() : H.SCENARIOS || null; },
+      async () => { const D = await import('./data/real.js'); const S = D.SCENARIOS || (D.default && D.default.SCENARIOS); return S ? (Array.isArray(S) ? S : Object.entries(S).map(([id, v]) => ({ id, ...v }))) : null; },
+    ];
+    for (const t of tries) { try { const l = await t(); if (Array.isArray(l) && l.length) { SCEN = l.map((x) => ({ ...x, name: x.name || x.title || x.id, blurb: x.blurb || x.desc || x.tagline || '' })); return SCEN; } } catch (e) { /* next */ } }
+    return null;
+  })().finally(() => { if (!SCEN) scenP = null; });
+  return scenP;
+}
+const scenById = (id) => (SCEN || []).find((x) => x.id === id) || null;
+const ymText = (ym) => { const m = String(ym || '').match(/^(\d{4})-?(\d{2})/); return m ? `${+m[2]}/${m[1]}` : String(ym || ''); };
+function historyCard(p) {
+  const open = P.historyUnlocked(); const played = Object.values(p.history || {}).filter((h) => h.best).length;
+  return `<button class="map-hist ${open ? '' : 'is-locked'}" data-act="history">
+    <span class="map-hist-art"><img src="${HIST_ART}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="map-hist-ic" aria-hidden="true">⏳</span></span>
+    <span class="map-hist-body"><b>מכונת הזמן</b><span>שוק אמיתי, חודש אחרי חודש: 2000, 2008, 2020, 2022. תנצח משקיע שרק קנה והחזיק?</span>
+    <em>${open ? (played ? `שיחקת ${played} תקופות` : 'חדש! נסה תקופה ראשונה') : '🔒 נפתח אחרי ★ בשכונה — אפשר להציץ'}</em></span></button>`;
+}
+function libraryCard() {
+  const c = LIB.counts();
+  return `<button class="map-lib" data-act="library"><span class="lib-ic" aria-hidden="true">📚</span><span><b>ספריית השיעורים</b><em>${c.total ? num(c.have + '/' + c.total) + ' שיעורים' : 'כל שיעור שתלמד נכנס לכאן'}${c.fresh ? ` · <span class="gp-newtag">${c.fresh} חדשים</span>` : ''}</em></span></button>`;
+}
+async function renderHistory() {
+  view = { k: 'history' }; const t = ++token;
+  const open = P.historyUnlocked(); const p = P.getProgress();
+  html(`<div class="lb-shell lb-history"><div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div><p class="lb-note">טוען את מכונת הזמן…</p></div>`);
+  const list = await scenarios();
+  if (t !== token) return;
+  const g = await game();
+  const body = !list ? '<div class="wv-locked"><div class="wv-lock-ic" aria-hidden="true">⏳</div><h2>מכונת הזמן מתכיילת…</h2><p>הנתונים ההיסטוריים עוד נטענים. נסה שוב עוד רגע.</p><button class="primary" data-act="history">לנסות שוב</button></div>'
+    : `<div class="hs-grid">${list.map((sc, i) => {
+      const h = p.history[sc.id] || {}; const best = h.best;
+      const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed })) : null;
+      return `<article class="hs-card ${open ? '' : 'is-locked'}" style="--i:${i}">
+        <div class="hs-top"><span class="hs-years">${esc(ymText(sc.start))} · ${sc.months} חודשים</span>${best ? starsHtml(best.stars) : ''}</div>
+        <h3>${esc(sc.name)}</h3><p>${esc(sc.blurb || '')}</p>
+        ${best ? `<p class="hs-best">🏁 הכי טוב שלך: ${iso(fmtM(best.netWorth))}${best.beat ? ' · ניצחת את המדד 🏆' : ''}</p>` : ''}
+        <div class="hs-acts">${open ? `${sv ? `<button class="primary" data-act="history-continue" data-id="${esc(sc.id)}">▶ להמשיך · חודש ${esc(sv.month)}</button>` : ''}<button class="${sv ? '' : 'primary'}" data-act="history-go" data-id="${esc(sc.id)}">${sv ? 'מההתחלה' : 'לחזור בזמן ←'}</button>` : '<span class="lb-mini-lock">🔒 צריך ★ בשכונה</span>'}</div>
+      </article>`; }).join('')}</div>`;
+  html(`<div class="lb-shell lb-history">
+    <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
+    <header class="hs-head"><img src="${HIST_ART}" alt="" onerror="this.remove()"><div><span class="hs-kicker">⏳ מכונת הזמן</span><h1>להשקיע בהיסטוריה האמיתית</h1>
+      <p>המחירים, הריבית והאינפלציה — בדיוק כמו שהיו, חודש אחרי חודש. היריב שלך: משקיע משעמם שקנה קרן מדד ולא נגע בה. תצליח לנצח אותו?</p>
+      ${open ? '' : `<p class="lb-note">🔒 נפתח אחרי ★ ראשון בשכונה. <button class="chip" data-act="world" data-id="w1">לשחק בשכונה</button></p>`}</div></header>
+    ${body}
+    <p class="lb-foot">הנתונים אמיתיים ומפושטים. "ההיסטוריה לא חוזרת על עצמה, אבל היא מתחרזת".</p>
+  </div>`);
+}
+async function startHistory(sid, cont = false) {
+  if (!P.historyUnlocked()) { toast('🔒 מכונת הזמן נפתחת אחרי ★ ראשון בשכונה'); return; }
+  const p = P.getProgress(); const h = p.history[sid] || {};
+  const g = await game();
+  if (cont && h.lastSeed != null) {
+    const sv = g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+    if (sv) return launch(launchCfg({ ...sv.cfg, resume: true, bailout: P.bailoutAvailable() }));
+  }
+  if (!cont && h.lastSeed != null && g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }))) {
+    const ok = await confirmAsk('יש לך משחק שמור בתקופה הזאת. להתחיל מההתחלה?', 'מההתחלה'); if (!ok) return;
+    safe(() => g.clearSave({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+  }
+  const seed = randSeed(); P.setHistorySeed(sid, seed);
+  sfx('click');
+  return launch(launchCfg({ mode: 'history', scenarioId: sid, worldId: 'h', seed, tutorial: false, resume: false, bailout: P.bailoutAvailable(), title: (scenById(sid) || {}).name || 'מכונת הזמן' }));
+}
+
 /* ============================================================ HOME (world map) */
 function renderHome() {
   view = { k: 'home' }; const t = ++token;
@@ -387,10 +601,12 @@ function renderHome() {
     ${pendingJoin && !me ? `<section class="lb-invite"><div class="lb-invite-ic">💌</div><div><h2>הוזמנת לקבוצה!</h2><p>בחר כינוי ונכניס אותך ישר לקבוצה.</p>${nickForm('איך יקראו לך בטבלאות?', 'lb-root-nick')}</div></section>` : ''}
     ${topBar()}
     <div class="lb-mission" role="note"><span class="lb-mission-ic" aria-hidden="true">🎯</span><span><small>המשימה הבאה</small><b>${esc(goal.text)}</b><em>${esc(goal.sub)}</em></span>${goal.worldId && P.isUnlocked(goal.worldId) ? `<button class="primary lb-mission-go" data-act="world" data-id="${goal.worldId}">יאללה</button>` : ''}</div>
+    ${emptyEnergyHtml()}
     <div class="lb-grid ${me ? '' : 'is-guest'}">
       <section class="lb-map" aria-labelledby="lbMapH">
         <div class="map-head"><h2 id="lbMapH">המפה</h2>${trailHtml(p)}</div>
         <div class="map-grid">${WORLDS.map((w, i) => worldCard(w, i, p)).join('')}</div>
+        <div class="map-extra">${historyCard(p)}${libraryCard()}</div>
       </section>
       <section class="lb-card lb-daily" id="lbDaily" aria-label="האתגר היומי">${dailyHtml(cache.daily)}</section>
       <section class="lb-card lb-weekly" id="lbWeekly" aria-label="האתגר השבועי">${weeklyHtml(cache.weekly)}</section>
@@ -501,10 +717,16 @@ async function loadWeekly(t) {
 function groupsHtml(gs) {
   const me = net.me();
   if (!me) return `<div class="lb-ch-head"><h2>הקבוצות שלי</h2></div><p class="lb-note">פותחים קבוצה, שולחים קישור בוואטסאפ, ומתחרים מי יוצא מהמירוץ הכי מהר.</p><button class="chip" data-act="focus-nick">לבחור כינוי</button>`;
-  const list = !gs ? '<p class="lb-note">טוען…</p>' : gs.error ? `<p class="err">${esc(gs.error)}</p>` : gs.length
+  const list = groupsList(gs);
+  return groupsShell(list);
+}
+function groupsList(gs) {
+  return !gs ? '<p class="lb-note">טוען…</p>' : gs.error ? `<p class="err">${esc(gs.error)}</p>` : gs.length
     ? `<div class="lb-glist">${gs.map((g) => `<button class="lb-gitem" data-act="group" data-id="${esc(g.id)}"><span class="lb-gav" aria-hidden="true">${esc([...g.name][0] || '?')}</span><span><b>${esc(g.name)}</b><small>${g.members === 1 ? 'רק אתה — הזמן חברים' : g.members + ' שחקנים'}${g.active ? ` · ${g.active === 1 ? 'אתגר פעיל' : g.active + ' אתגרים פעילים'}` : ''}</small></span><span class="lb-chev" aria-hidden="true">‹</span></button>`).join('')}</div>`
     : '<p class="lb-empty">עוד אין לך קבוצות. פתח אחת ושלח לחברים.</p>';
-  return `<div class="lb-ch-head"><h2>הקבוצות שלי</h2></div>${list}
+}
+function groupsShell(list) {
+  return `<div class="lb-ch-head"><h2>הקבוצות שלי</h2></div><div id="lbGList">${list}</div>
     <form class="lb-form" data-form="newgroup"><label for="lbGname">קבוצה חדשה</label><div class="inl"><input id="lbGname" name="name" maxlength="40" placeholder="למשל: ט׳3 בורסה"><button class="primary">לפתוח</button></div></form>
     <form class="lb-form" data-form="join"><label for="lbJcode">קיבלת קוד מחבר?</label><div class="inl"><input id="lbJcode" name="code" maxlength="6" placeholder="קוד" class="lb-code-in"><button>להצטרף</button></div></form>
     <p class="err" id="lbGErr" aria-live="polite"></p>`;
@@ -512,6 +734,8 @@ function groupsHtml(gs) {
 async function loadGroups(t) {
   try { cache.groups = await net.myGroups(); } catch (e) { cache.groups = { error: e.message }; }
   if (t !== token) return;
+  // only the list is replaced, so a group name being typed survives
+  const l = $('#lbGList'); if (l) { l.innerHTML = groupsList(cache.groups); return; }
   const box = $('#lbGroups'); if (box) box.innerHTML = groupsHtml(cache.groups);
 }
 async function joinCode(code) {
@@ -580,7 +804,7 @@ function charCard(w, c, d) {
       <span><small>נשאר בחודש</small><b class="${cc.surplus > 0 ? 'pos' : cc.surplus < 0 ? 'neg' : ''}">${iso((cc.surplus > 0 ? '+' : '') + fmtM(cc.surplus))}</b></span>
       <span><small>מזומן</small><b>${iso(fmtM(cc.cash))}</b></span>
     </span>
-    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small></span>
+    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small>${T.happy != null || HAPPY_RULE ? `<i class="wv-happy">+ 😊 ${T.happy ?? 60}</i>` : ''}</span>
     ${extras.length ? `<span class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</span>` : ''}
     <span class="wv-go">לשחק ←</span>
   </button>`;
@@ -596,6 +820,7 @@ async function renderGroup(id) {
     const g = await net.group(id); cache.group[id] = g; noteNew(g);
     if (t !== token) return;
     html(groupHtml(g));
+    loadFeed(id);
     startGroupRefresh(id);
   } catch (e) { if (t !== token) return; delete cache.group[id]; toast(e.message); renderHome(); }
 }
@@ -619,6 +844,7 @@ async function refreshGroup(id) {
   if (refreshing || view.k !== 'group' || view.id !== id || !lobbyVisible() || document.hidden) return;
   refreshing = true;
   try {
+    loadFeed(id);
     const g = await net.group(id);
     if (view.k !== 'group' || view.id !== id) return;
     const prev = cache.group[id]; cache.group[id] = g; noteNew(g);
@@ -631,14 +857,51 @@ async function refreshGroup(id) {
 const countText = (g) => (g.members.length === 1 ? 'רק אתה כאן — שלח את הקישור לחברים' : g.members.length + ' שחקנים');
 function membersHtml(g) {
   const members = [...g.members].sort((a, b) => (b.stars || 0) - (a.stars || 0));
-  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(m.stars || 0)}<span class="gp-st">★ ${m.stars || 0}</span></li>`).join('');
+  const gifted = new Set((feedCache[g.id] && feedCache[g.id].gifted_today) || []);
+  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(m.stars || 0)}<span class="gp-st">★ ${m.stars || 0}</span>${m.me ? '' : gifted.has(m.nickname)
+    ? '<button class="gp-send sent" disabled title="שלחת לו ⚡ היום">✓ נשלח</button>'
+    : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3⚡ (פעם ביום)">שלח ⚡</button>`}</li>`).join('');
+}
+/* -------- group feed: friends' milestones + ranked results (net.groupFeed) */
+const feedCache = {};
+const agoText = (at) => { const ms = Date.now() - new Date(at); if (!(ms >= 0)) return ''; const m = Math.floor(ms / 6e4); if (m < 1) return 'עכשיו'; if (m < 60) return `לפני ${m} דק׳`; const h = Math.floor(m / 60); if (h < 24) return `לפני ${h} שע׳`; const d = Math.floor(h / 24); return d === 1 ? 'אתמול' : `לפני ${d} ימים`; };
+const wName = (id) => (id === 'h' ? 'מכונת הזמן' : safe(() => getWorld(id).name, ''));
+function feedLine(f) {
+  const d = f.data || {}; const who = `<b>${esc(f.nickname)}</b>${f.me ? ' <small>(אתה)</small>' : ''}`;
+  const st = d.stars ? ' ' + starStr(Math.min(3, d.stars | 0)) : '';
+  switch (f.kind) {
+    case 'escaped': return ['🎉', `${who} יצא מהמירוץ ${esc(P.inW(wName(d.world)))}${d.age ? ` בגיל ${Math.floor(d.age)}` : ''}${d.months ? ` · ${d.months} חודשים` : ''}${st}`];
+    case 'world_unlocked': return ['🔓', `${who} פתח את ${esc(wName(d.world))}`];
+    case 'stars3': return ['⭐', `${who} השיג ★★★ ${esc(P.inW(wName(d.world)))}`];
+    case 'history_done': return ['⏳', `${who} חזר מ${esc((scenById(d.scenario) || {}).name || 'מכונת הזמן')}${d.beat ? ' — וניצח את המדד 🏆' : ''}${st}`];
+    case 'ranked_won': return ['🏁', `${who} יצא מהמירוץ ${d.title ? `ב״${esc(d.title)}״` : d.mode ? 'ב' + esc(MODE_NAME[d.mode] || '') : 'באתגר'}${d.months ? ` בחודש ${d.months}` : ''}${st}`];
+    case 'ranked_lost': { const pr = d.progress ?? (d.stats && d.stats.progress); return ['💪', `${who} סיים ${d.title ? `את ״${esc(d.title)}״` : d.mode ? 'את ' + esc(MODE_NAME[d.mode] || 'האתגר') : 'אתגר'}${pr != null ? ` עם ${num(Math.round(+pr * 100) + '%')} מהדרך` : ''}`]; }
+    case 'gift': case 'energy': return ['⚡', `${who} שלח ⚡`];
+    case 'joined': return ['👋', `${who} הצטרף לקבוצה`];
+    default: return ['•', `${who} ${esc(f.kind)}`];
+  }
+}
+function feedHtml(gid) {
+  const f = feedCache[gid];
+  const items = f && Array.isArray(f.feed) ? f.feed.slice(0, 12) : null;
+  return `<section class="lb-card gp-feed" id="gpFeed"><h2>מה קורה בקבוצה</h2>${!f ? '<p class="lb-note">טוען…</p>' : !items.length ? '<p class="lb-empty">עוד שקט כאן. סיים משחק — וזה יופיע לכולם.</p>'
+    : `<ul class="gp-flist">${items.map((x) => { const [ic, t] = feedLine(x); return `<li class="${x.me ? 'me' : ''}"><span class="gp-fic" aria-hidden="true">${ic}</span><span class="gp-ft">${t}</span><small>${agoText(x.at)}</small></li>`; }).join('')}</ul>`}</section>`;
+}
+async function loadFeed(gid) {
+  if (!net.groupFeed) return;
+  try {
+    const f = await net.groupFeed(gid); const prev = JSON.stringify(feedCache[gid] || null); feedCache[gid] = f;
+    if (view.k !== 'group' || view.id !== gid || prev === JSON.stringify(f)) return;
+    const a = $('#gpFeed'); if (a) a.outerHTML = feedHtml(gid);
+    const m = $('#gpMembers'); const g = cache.group[gid]; if (m && g) m.innerHTML = membersHtml(g);
+  } catch (e) { if (!feedCache[gid]) feedCache[gid] = { feed: [], gifted_today: [] }; }
 }
 function chalsSection(g) {
   return `<section class="gp-chals" id="gpChals"><h2>אתגרים</h2>
       ${g.challenges.length ? g.challenges.map((c) => chalHtml(g, c)).join('') : '<p class="lb-empty">אין עדיין אתגרים. פתח את הראשון למטה — ותשלח לקבוצה 👇</p>'}
     </section>`;
 }
-function groupLink(g) { return `${baseUrl()}?join=${g.code}`; }
+function groupLink(g) { return withRef(`${baseUrl()}?join=${g.code}`); }
 function groupHtml(g) {
   const link = groupLink(g); const me = net.me();
   const wa = waHref(`בוא להתחרות איתי במירוץ העכברים 🐭💰 הצטרף לקבוצה "${g.name}": ${link}`);
@@ -648,6 +911,7 @@ function groupHtml(g) {
     <div class="lb-bar"><button class="chip" data-act="home">› ללובי</button><button class="chip" data-act="group" data-id="${esc(g.id)}">↻ רענון</button></div>
     <header class="gp-head"><span class="lb-gav lg" aria-hidden="true">${esc([...g.name][0] || '?')}</span><div><h1>${esc(g.name)}</h1><p id="gpCount">${countText(g)}</p></div></header>
     ${chalsSection(g)}
+    ${feedHtml(g.id)}
     <div class="gp-grid">
       <section class="lb-card gp-invite"><h2>להזמין חברים</h2>
         <p class="lb-note">שלח קישור — או תן להם את הקוד:</p>
@@ -823,18 +1087,28 @@ function clearDuelParam() { safe(() => { const q = new URLSearchParams(location.
 function onGameEnd(e, delay) {
   if (!e || !e.worldId) return;
   const cfg = (G && G.activeConfig && safe(() => G.activeConfig())) || null;
-  const same = !!(cfg && cfg.worldId === e.worldId && cfg.charId === e.charId && (cfg.mode || 'free') === (e.mode || 'free'));
+  const same = !!(cfg && cfg.worldId === e.worldId && (cfg.mode || 'free') === (e.mode || 'free') && (e.worldId === 'h' || cfg.charId === e.charId));
+  const hist = e.mode === 'history' || e.worldId === 'h';
+  const seed = e.seed ?? (e.summary && e.summary.seed) ?? (same ? cfg.seed : null);
+  if (hist) e = { ...e, mode: 'history', worldId: 'h', seed, scenarioId: e.scenarioId || (e.end && e.end.scenarioId) || (e.summary && e.summary.scenarioId) || (same && cfg.scenarioId) || null };
+  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', seed }))) || '') : freeKey(e.worldId);
   // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags
-  const saved = localSaveState(e.resultId ? rankedKey(e.resultId) : freeKey(e.worldId));
+  const saved = saveKey ? localSaveState(saveKey) : null;
   if (saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
+  // lessons learned this game → library
+  const lessonIds = [e.lessons, e.end && e.end.lessons, e.summary && e.summary.lessons, saved && saved.lessons].filter(Array.isArray).flat();
+  LIB.unlock(lessonIds);
   const res = P.recordGame(e);
+  res.newLessons = [...sessLessons]; sessLessons = [];
+  if (e.mode === 'daily') { res.energy = grantDaily(P.streakInfo().streak); res.energyWhy = 'על האתגר היומי — אפשר להמשיך לשחק'; }
+  logMilestones(e, res);
   lastEndSig = sigOf(e);
   const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
-  endCtx = { e, res, ranked, seed: e.seed ?? (e.summary && e.summary.seed) ?? (same ? cfg.seed : null), duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null };
+  endCtx = { e, res, ranked, hist, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null };
   if (ranked) {
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       stats: { ...(e.summary || { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
-  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(freeKey(e.worldId))));
+  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', seed } : freeKey(e.worldId))));
   setTimeout(() => {
     ensureCss(); install();
     const o = overlay(); if (!o) return;
@@ -848,24 +1122,27 @@ function onGameEnd(e, delay) {
 function renderEnd(animate = false) {
   if (!endCtx) return renderHome();
   view = { k: 'end' }; ++token;
-  const { e, res, ranked, duel } = endCtx;
-  const w = worldOf(e.worldId); const c = charOf(w, e.charId); const end = e.end || {};
+  const { e, res, ranked, duel, hist } = endCtx;
+  const sc = hist ? scenById(e.scenarioId) : null;
+  const w = hist ? { id: 'h', name: sc ? sc.name : 'מכונת הזמן', lesson: (sc && sc.lesson) || '', goal: { type: 'netWorth', target: (e.end && e.end.benchmark && e.end.benchmark.netWorth) || 0 } } : worldOf(e.worldId);
+  const c = hist ? null : charOf(w, e.charId); const end = e.end || {};
   const won = e.status === 'won'; const bankrupt = end.reason === 'bankrupt';
   const sprint = e.mode === 'daily';
-  const stars = won ? Math.max(0, Math.min(3, e.stars | 0)) : 0;
-  const title = won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
+  const stars = hist ? Math.max(0, Math.min(3, e.stars | 0)) : won ? Math.max(0, Math.min(3, e.stars | 0)) : 0;
+  const title = hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
   const prog = Math.max(0, Math.min(1, e.progress ?? end.progress ?? 0));
   const near = end.nearMiss && end.nearMiss.text;
-  const nextIdx = WORLDS.indexOf(w) + 1; const nextW = WORLDS[nextIdx] || null;
+  const nextIdx = hist ? -1 : WORLDS.indexOf(w) + 1; const nextW = hist ? null : WORLDS[nextIdx] || null;
   const nextOpen = nextW && P.isUnlocked(nextW.id);
-  const modeName = duel ? '⚔️ דו־קרב' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
-  const kicker = `${esc(w.name)} · ${esc(c ? c.name : '')} · ${esc(modeName)}`;
+  const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
+  const kicker = [w.name, c ? c.name : '', modeName].filter(Boolean).map(esc).join(' · ');
   const g = w.goal || {};
   const cell = (label, value, cls = '') => `<span><small>${label}</small><b class="${cls}">${iso(value)}</b></span>`;
   const statCells = [cell('חודשים', String(e.months))];
   if (g.type === 'passive') statCells.push(cell('הכנסה פסיבית', fmtM(e.passive || 0), won ? 'pos' : ''), cell('הוצאות', fmtM(e.expenses || 0)));
   else statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד', fmtM(g.target || 0)));
-  if (g.type === 'netWorthImpact') statCells.push(`<span><small>השפעה</small><b>${num((end.impact ?? 0) + '/' + g.impact)}</b></span>`);
+  if (hist) { statCells.length = 1; statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('קנה והחזק', fmtM((end.benchmark && end.benchmark.netWorth) || 0))); }
+  else if (g.type === 'netWorthImpact') statCells.push(`<span><small>השפעה</small><b>${num((end.impact ?? 0) + '/' + g.impact)}</b></span>`);
   else if (g.type === 'passive') statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), (e.netWorth || 0) < 0 ? 'neg' : ''));
   const leaks = won ? [] : leaksOf(e);
   const resisted = resistedOf(e);
@@ -883,7 +1160,7 @@ function renderEnd(animate = false) {
   }
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
-      <div class="end-art"><img src="${cardArt(w.id)}" alt=""></div>
+      <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" onerror="this.remove()"></div>
       <p class="end-kicker">${kicker}</p>
       <h1 class="end-title">${title}</h1>
       <div class="end-stars" aria-label="${stars} כוכבים">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}">★</span>`).join('')}</div>
@@ -891,8 +1168,11 @@ function renderEnd(animate = false) {
       ${duelHtml}
       ${near ? `<p class="end-near">${iso(near)}</p>` : ''}
       ${!won ? `<div class="end-prog"><div class="lb-bar-track big"><i style="width:${Math.round(prog * 100)}%"></i></div><small>${sprint ? 'הגעת ל־' : 'עשית '}${num(Math.round(prog * 100) + '%')} ${sprint ? 'מהחופש' : g.type === 'passive' ? 'מהדרך לחופש' : 'מהדרך ליעד'}</small></div>` : ''}
+      ${hist ? benchHtml(e) : ''}
+      ${happyGateHtml(e, w, stars)}
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
+      ${lifeHtml(e, won)}
       <div class="end-new">${newsHtml(e, res, won ? resisted : '')}</div>
       <div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>
       ${endButtons(e, res, nextW, nextOpen)}
@@ -900,6 +1180,84 @@ function renderEnd(animate = false) {
   </div>`);
   if (animate) animateEnd(stars, won, res);
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
+}
+/* -------- v3 end-screen blocks */
+const MONTHS_HE = (n) => (n === 1 ? 'חודש' : `${n} חודשים`);
+function benchHtml(e) {
+  const b = (e.end && e.end.benchmark) || null; if (!b) return '';
+  const me = +e.netWorth || 0; const them = +b.netWorth || 0; const max = Math.max(1, Math.abs(me), Math.abs(them));
+  return `<section class="end-bench"><h3>📈 אתה מול "קנה והחזק"</h3>
+    <div class="bn-row me"><span>אתה</span><span class="bn-bar"><i style="width:${Math.max(4, Math.round((Math.max(0, me) / max) * 100))}%"></i></span><b>${iso(fmtM(me))}</b></div>
+    <div class="bn-row"><span>קנה והחזק</span><span class="bn-bar idx"><i style="width:${Math.max(4, Math.round((Math.max(0, them) / max) * 100))}%"></i></span><b>${iso(fmtM(them))}</b></div>
+    ${b.text ? `<p>${iso(b.text)}</p>` : ''}</section>`;
+}
+/** ★ rule v3: ★★★ needs speed AND happiness — show which part was missing. */
+function happyGateHtml(e, w, stars) {
+  const end = e.end || {}; if (e.status !== 'won' || stars >= 3) return '';
+  const ls = end.lifeSummary || {};
+  const happy = end.happiness ?? ls.happiness;
+  if (happy == null) return '';
+  const T = e.worldId === 'h' ? null : safe(() => starThresholds(w, e.charId));
+  const need = (T && T.happy) ?? 60;
+  const timeOk = T ? e.months <= T.t3 : true; const happyOk = happy >= need;
+  if (!end.starsBlockedByHappiness && happyOk) return '';
+  return `<div class="end-gate"><b>${end.starsBlockedByHappiness ? 'הכסף היה שם — האושר לא.' : 'מה חסר ל־★★★'}</b>
+    <span class="${timeOk ? 'ok' : 'no'}">⏱️ ${T ? `לצאת תוך ${T.t3} חודשים` : 'מהירות'} ${timeOk ? '✓' : `✗ (${e.months})`}</span>
+    <span class="${happyOk ? 'ok' : 'no'}">😊 אושר ${need}+ ${happyOk ? '✓' : `✗ (${Math.round(happy)})`}</span></div>`;
+}
+const decText = (d) => [d.c, d.o].filter(Boolean).join(' ← ');
+function lifeHtml(e, won) {
+  const L = (e.end && e.end.lifeSummary) || null; if (!L) return '';
+  const age = L.age != null ? Math.floor(L.age) : null;
+  const cells = [
+    ['🎂', 'גיל', L.startAge != null && age != null ? `${Math.floor(L.startAge)} ← ${age}` : age != null ? String(age) : null],
+    ['💰', 'שווי ריאלי', L.realNetWorth != null ? fmtM(L.realNetWorth) : null],
+    ['🏖️', 'זמן חופשי', L.freeTimeMonths != null ? MONTHS_HE(L.freeTimeMonths) : null],
+    ['👨‍👩‍👧', 'משפחה', L.family || null],
+    ['😊', 'אושר ממוצע', L.avgHappiness != null ? Math.round(L.avgHappiness) + '/100' : L.happiness != null ? Math.round(L.happiness) + '/100' : null],
+    ['🏦', 'פנסיה', L.pension != null ? fmtM(L.pension) : null],
+    ['🔥', 'שחיקות', L.burnouts ? String(L.burnouts) : null],
+  ].filter((x) => x[2] != null && x[2] !== '');
+  const dec = (L.topDecisions || []).slice(0, 3);
+  return `<section class="life-card" id="lifeCard">
+    <div class="life-kicker">📖 סיפור החיים שלך</div>
+    ${age != null ? `<div class="life-age">בגיל <b>${age}</b> ${won ? (e.worldId === 'h' ? 'סיימת את המסע בזמן' : 'יצאת מהמירוץ') : 'עדיין במירוץ'}</div>` : ''}
+    <div class="life-grid">${cells.map(([ic, l, v]) => `<span><i aria-hidden="true">${ic}</i><small>${l}</small><b>${iso(v)}</b></span>`).join('')}</div>
+    ${dec.length ? `<div class="life-dec"><small>ההחלטות הגדולות שלך</small><ol>${dec.map((d) => `<li>${iso(decText(d))}</li>`).join('')}</ol></div>` : ''}
+    ${L.sentence ? `<blockquote class="life-q">“${iso(L.sentence)}”<cite>— אבא עשיר</cite></blockquote>` : ''}
+    <button class="chip life-save" data-act="life-image">📸 לשמור כתמונה</button>
+  </section>`;
+}
+/** A 1080×1350 PNG of the life story (share sheet on phones, download elsewhere). */
+async function lifeImage() {
+  const { e } = endCtx; const L = (e.end && e.end.lifeSummary) || {}; const won = e.status === 'won';
+  const W = 1080, H = 1350; const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#ffd9a0'); grd.addColorStop(0.6, '#f7a77a'); grd.addColorStop(1, '#d9785c'); g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#fffaf0'; const r = 48; const x0 = 70, y0 = 70, w0 = W - 140, h0 = H - 140;
+  g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + w0, y0, x0 + w0, y0 + h0, r); g.arcTo(x0 + w0, y0 + h0, x0, y0 + h0, r); g.arcTo(x0, y0 + h0, x0, y0, r); g.arcTo(x0, y0, x0 + w0, y0, r); g.fill();
+  g.direction = 'rtl'; g.textAlign = 'center';
+  const font = (px, bold) => `${bold ? '800 ' : ''}${px}px "Secular One", Rubik, Arial, sans-serif`;
+  g.font = font(44, true); g.fillStyle = '#c98a12'; g.fillText('📖 סיפור החיים שלי · מירוץ העכברים', W / 2, 170);
+  const w = e.worldId === 'h' ? { name: (scenById(e.scenarioId) || {}).name || 'מכונת הזמן' } : worldOf(e.worldId);
+  g.fillStyle = '#1d1a2b'; g.font = font(80, true);
+  g.fillText(L.age != null ? `בגיל ${Math.floor(L.age)} ${won ? 'יצאתי מהמירוץ' : 'עדיין במירוץ'}` : (won ? 'יצאתי מהמירוץ!' : 'נשארתי במירוץ'), W / 2, 300);
+  g.font = font(46); g.fillStyle = '#6b6478'; g.fillText(`${w.name} · ${e.months} חודשים · ${starStr(e.stars | 0)}`, W / 2, 380);
+  const rows = [['💰 שווי ריאלי', L.realNetWorth != null ? fmtM(L.realNetWorth) : fmtM(e.netWorth || 0)], ['🏖️ זמן חופשי', L.freeTimeMonths != null ? MONTHS_HE(L.freeTimeMonths) : '—'], ['👨‍👩‍👧 משפחה', L.family || '—'], ['😊 אושר', L.avgHappiness != null ? Math.round(L.avgHappiness) + '/100' : L.happiness != null ? Math.round(L.happiness) + '/100' : '—']];
+  let y = 500;
+  for (const [k, v] of rows) { g.font = font(48); g.textAlign = 'right'; g.fillStyle = '#6b6478'; g.fillText(k, W - 140, y); g.textAlign = 'left'; g.fillStyle = '#1d1a2b'; g.font = font(52, true); g.fillText('⁦' + v + '⁩', 140, y); y += 100; }
+  if (L.sentence) {
+    g.textAlign = 'center'; g.fillStyle = '#7a4b00'; g.font = font(44, true);
+    const words = ('“' + L.sentence + '”').split(' '); let line = ''; y += 30;
+    for (const wd of words) { const t = line ? line + ' ' + wd : wd; if (g.measureText(t).width > W - 260) { g.fillText(line, W / 2, y); y += 62; line = wd; } else line = t; }
+    if (line) g.fillText(line, W / 2, y);
+  }
+  g.font = font(38); g.fillStyle = '#2f6fdb'; g.textAlign = 'center'; g.fillText('חושב שתעשה יותר טוב? 👇 ' + location.host, W / 2, H - 130);
+  const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+  window.__lifePng = blob ? blob.size : 0;
+  const file = new File([blob], 'my-life-rat-race.png', { type: 'image/png' });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: shareText() }); return; } } catch (err) { if (err && err.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('התמונה נשמרה — שלח אותה לחברים');
 }
 function newsHtml(e, res, resisted = '') {
   const out = [];
@@ -911,6 +1269,8 @@ function newsHtml(e, res, resisted = '') {
   else if (res.gained > 0 && !res.unlockedWorld) out.push(`<div class="end-news"><span class="end-news-ic">⭐</span><span><small>שיא כוכבים חדש</small><b>${starStr(res.newStars)}</b><em>${esc(P.nextStarLine(res.worldId))}</em></span></div>`);
   if (res.newBest) out.push(`<div class="end-news"><span class="end-news-ic">🏁</span><span><small>שיא אישי חדש</small><b>${res.best} חודשים</b><em>היה ${res.prevBest}</em></span></div>`);
   if (res.titleAfter !== res.titleBefore) out.push(`<div class="end-news end-title-up"><span class="end-news-ic">🎖️</span><span><small>עלית דרגה!</small><b>${titleBadge(res.totalAfter)}</b><em>מ${esc(res.titleBefore)} ל${esc(res.titleAfter)}</em></span></div>`);
+  if (res.newLessons && res.newLessons.length) out.push(`<button class="end-news end-lessons" data-act="library"><span class="end-news-ic">📚</span><span><small>הספרייה גדלה</small><b>+${res.newLessons.length} ${res.newLessons.length === 1 ? 'שיעור חדש' : 'שיעורים חדשים'}</b><em>${num(LIB.counts().have + '/' + (LIB.counts().total || '?'))} בספרייה · לחץ לקרוא</em></span></button>`);
+  if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס אנרגיה</small><b>+${res.energy}⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
   if (resisted) out.push(`<div class="end-news"><span class="end-news-ic">💪</span><span><small>שליטה עצמית</small><b>${iso(resisted)}</b><em>כל פיתוי שוויתרת עליו קירב אותך לחופש</em></span></div>`);
   for (const id of res.newPawns) {
     const pw = P.PAWNS.find((x) => x.id === id);
@@ -926,7 +1286,7 @@ function newsHtml(e, res, resisted = '') {
 }
 function endButtons(e, res, nextW, nextOpen) {
   const btns = [];
-  const free = e.mode === 'free'; const won = e.status === 'won';
+  const free = e.mode === 'free' || e.mode === 'history'; const won = e.status === 'won';
   const sameOk = free && !!endCtx.seed;
   const showNext = nextW && nextOpen && !endCtx.duel && (res.unlockedWorld === nextW.id || won);
   const againLabel = free ? (endCtx.duel ? '↻ לוח חדש' : '↻ עוד פעם') : e.mode === 'challenge' ? 'לטבלת הקבוצה' : 'לטבלה';
@@ -938,7 +1298,8 @@ function endButtons(e, res, nextW, nextOpen) {
   btns.push(`<a class="lb-wa" id="endShare" href="${waHref(shareText())}" target="_blank" rel="noopener" aria-label="לשתף בוואטסאפ">📲 ${free ? (endCtx.duel ? 'להחזיר אתגר' : 'לאתגר חבר') : 'לשתף'}<span class="lb-hide-sm"> בוואטסאפ</span></a>`);
   const more = [];
   if (sameOk && won) more.push(`<button class="chip" data-act="end-same">↻ אותו לוח שוב</button>`);
-  if (free) more.push(`<button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button>`);
+  if (e.mode === 'history') more.push(`<button class="chip" data-act="history">תקופה אחרת</button>`);
+  else if (free) more.push(`<button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button>`);
   more.push(`<button class="chip" data-act="end-lobby">ללובי</button>`);
   return `<div class="end-acts">${btns.join('')}</div><div class="end-more">${more.join('')}</div>`;
 }
@@ -947,20 +1308,26 @@ function duelLink(e) {
   const q = new URLSearchParams({ duel: `${e.worldId}.${e.charId}.${endCtx.seed}` });
   if (me && me.nickname) q.set('by', me.nickname);
   q.set('r', resCode(e));
-  return `${baseUrl()}?${q.toString()}`;
+  return withRef(`${baseUrl()}?${q.toString()}`);
 }
 function shareText() {
   const { e } = endCtx; const w = worldOf(e.worldId); const c = charOf(w, e.charId); const won = e.status === 'won'; const s = won ? e.stars | 0 : 0;
   const pct = Math.round(Math.max(0, Math.min(1, e.progress ?? e.end?.progress ?? 0)) * 100);
+  const ls = (e.end && e.end.lifeSummary) || null;
+  if (e.mode === 'history') {
+    const sc = scenById(e.scenarioId);
+    return `⏳ מכונת הזמן · ${sc ? sc.name : ''} · ${starStr(e.stars | 0)}\n${won ? 'ניצחתי משקיע שרק קנה והחזיק 🏆' : 'המשקיע המשעמם ניצח אותי הפעם 😅'}${ls && ls.sentence ? `\n📖 ${ls.sentence}` : ''}\nתנסה לנצח את ההיסטוריה 👇\n${withRef(baseUrl())}`;
+  }
   if (e.mode === 'free') {
     // Wordle-style line + a duel link: the friend gets the exact same board
     const line = `🐭 ${w.name} · ${c ? c.name : ''} · ${won ? `${e.months} חודשים ${starStr(s)}` : `${pct}% מהדרך ${starStr(0)}`}`;
     let vs = '';
     if (endCtx.duel && endCtx.duel.r) { const v = duelVerdict({ won, months: e.months, stars: s, pct }, endCtx.duel.r); vs = `\n⚔️ דו־קרב מול ${endCtx.duel.by || 'חבר'}: ${v > 0 ? 'ניצחתי' : v < 0 ? 'הפסדתי — הפעם' : 'תיקו'}`; }
-    const tail = endCtx.seed ? `חושב שתעשה יותר טוב? אותו לוח בדיוק 👇\n${duelLink(e)}` : `בוא לנסות 👇\n${baseUrl()}`;
-    return `${line}${vs}\n${tail}`;
+    const tail = endCtx.seed ? `חושב שתעשה יותר טוב? אותו לוח בדיוק 👇\n${duelLink(e)}` : `בוא לנסות 👇\n${withRef(baseUrl())}`;
+    const life = ls && ls.age != null ? `\n🎂 ${won ? 'יצאתי מהמירוץ' : 'עדיין במירוץ'} בגיל ${Math.floor(ls.age)}${ls.avgHappiness != null ? ` · 😊 ${Math.round(ls.avgHappiness)}` : ''}` : '';
+    return `${line}${life}${vs}\n${tail}`;
   }
-  let link = baseUrl();
+  let link = withRef(baseUrl());
   let pre = '';
   if (e.mode === 'daily') pre = `🎲 האתגר היומי (${P.israelDate().split('-').reverse().slice(0, 2).join('.')}): `;
   else if (e.mode === 'weekly') pre = '🗓️ האתגר השבועי: ';
@@ -1029,6 +1396,10 @@ async function submitResult() {
 }
 function endAgain(sameBoard = false) {
   const { e, seed, duel } = endCtx;
+  if (e.mode === 'history') {
+    if (sameBoard && seed) { P.setHistorySeed(e.scenarioId, seed); return launch(launchCfg({ mode: 'history', scenarioId: e.scenarioId, worldId: 'h', seed, tutorial: false, resume: false, bailout: P.bailoutAvailable(), title: (scenById(e.scenarioId) || {}).name || 'מכונת הזמן' })); }
+    return startHistory(e.scenarioId, false);
+  }
   if (e.mode === 'free') {
     if (sameBoard && seed) return startFree(e.worldId, e.charId, { seed, title: duel ? 'דו־קרב' : undefined, duel: duel || undefined, noAsk: true });
     return startFree(e.worldId, e.charId, { noAsk: true });
@@ -1089,6 +1460,23 @@ async function onClick(ev) {
     case 'code-copy': return copyText(net.recoveryCode() || '', 'קוד השחזור הועתק. שמור אותו במקום בטוח');
     case 'end-again': sfx('click'); return endAgain(false);
     case 'end-same': sfx('click'); return endAgain(true);
+    case 'life-image': return lifeImage();
+    case 'energy': return toast(EN.get() >= EN.MAX ? `⚡ מלא: ${EN.get()} הטלות. כל הטלה עולה ⚡ אחד.` : `⚡ ${EN.get()}/${EN.MAX} · עוד ⚡ בעוד ${EN.fmtWait(EN.msUntilNext())} · מלא בעוד ${EN.fmtWait(EN.msUntilFull())}`);
+    case 'library': sfx('click'); return go({ k: 'library' });
+    case 'lesson': sfx('click'); return openLesson(id);
+    case 'lesson-close': { const el = $('#lbLesson'); if (el) el.remove(); const c = $('.map-lib'); if (c) c.outerHTML = libraryCard(); return; }
+    case 'welcome-go': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); return go(P.getProgress().gamesPlayed ? { k: 'home' } : { k: 'world', id: 'w1' });
+    case 'groups-view': return go({ k: 'groups' });
+    case 'history': sfx('click'); return go({ k: 'history' });
+    case 'history-go': return startHistory(id, false);
+    case 'history-continue': return startHistory(id, true);
+    case 'send-energy': {
+      if (b.disabled) return;
+      b.disabled = true;
+      try { await net.sendEnergy(b.dataset.g, b.dataset.n); sfx('coin'); toast(`⚡ שלחת 3⚡ ל${b.dataset.n}`); b.textContent = '✓ נשלח'; b.classList.add('sent'); }
+      catch (e) { toast(e.message); b.disabled = false; if (/כבר שלחת/.test(e.message)) { b.textContent = '✓ נשלח היום'; b.disabled = true; } }
+      return;
+    }
     case 'duel-go': { const d = pendingDuel; if (!d) return renderHome(); const ok = await startFree(d.worldId, d.charId, { seed: d.seed, title: 'דו־קרב', duel: { by: d.by, r: d.r } }); if (ok) { pendingDuel = null; clearDuelParam(); } return; }
     case 'duel-skip': pendingDuel = null; clearDuelParam(); return go({ k: 'home' });
     case 'end-next': sfx('click'); return go({ k: 'world', id });
@@ -1107,7 +1495,8 @@ async function onSubmit(ev) {
     if (kind === 'nick') {
       const n = f.nick.value.trim();
       if (n.length < 2) throw new Error('כינוי צריך להיות 2–20 תווים');
-      await net.register(n);
+      await net.register(n, pendingRef());
+      safe(() => localStorage.removeItem(REFK));
       await P.pushNow();
       sfx('unlock'); toast(`ברוך הבא, ${n}!`);
       if (pendingJoin) return joinCode(pendingJoin);
@@ -1150,4 +1539,5 @@ function onChange(ev) {
 /* ============================================================ bus wiring */
 // game.js already plays its celebration before emitting, so the end screen follows almost immediately
 bus.on('game:end', (e) => onGameEnd(e, 250));
-bus.on('achievement', (p) => { const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => setTimeout(() => achToast(a), i * 900)); });
+bus.on('achievement', (p) => { const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); }); });
+LIB.onUnlock((ids) => { if (!lobbyVisible()) LIB.lessons().then((L) => { const l = L.find((x) => x.id === ids[0]); if (l) ui().then((u) => u.toast && u.toast(`📚 שיעור חדש בספרייה: ${l.title}`)); }); });

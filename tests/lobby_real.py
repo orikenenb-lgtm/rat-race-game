@@ -9,7 +9,7 @@ res = []
 def log(*a): print(*a, flush=True)
 def check(c, m): res.append((bool(c), m)); log(('PASS ' if c else 'FAIL ') + m)
 async def run(b, name, vp, scheme):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme); pg = await ctx.new_page()
+    ctx = await b.new_context(viewport=vp, color_scheme=scheme); await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); pg = await ctx.new_page()
     errs = []
     pg.on('pageerror', lambda e: (errs.append(str(e)), log('PAGEERR', name, e)))
     pg.on('console', lambda m: log('CONSOLE', name, m.type, m.text) if m.type == 'error' and '404' not in m.text else None)
@@ -53,7 +53,7 @@ DRIVE = """async ([rid, world, charIdx, seed, maxM]) => {
 }"""
 async def checkpoint_resume(b):
     import random
-    ctx = await b.new_context(viewport={'width': 1300, 'height': 820}); pg = await ctx.new_page()
+    ctx = await b.new_context(viewport={'width': 1300, 'height': 820}); await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR cp', e))
     await pg.goto(BASE); await pg.wait_for_selector('.lb-home', timeout=120000)
     await pg.fill('#lb-root-nick', 'טסט־צקא' + str(random.randint(100, 999))); await pg.press('#lb-root-nick', 'Enter')
@@ -62,7 +62,7 @@ async def checkpoint_resume(b):
     drove = await pg.evaluate(DRIVE, [r['result_id'], r['world'], r['char_index'] or 0, int(r['seed']), r['max_months'] or 24])
     code = await pg.evaluate("import('./js/net.js').then(m => m.net.recoveryCode())")
     await ctx.close()
-    ctx = await b.new_context(viewport={'width': 390, 'height': 800}, color_scheme='dark'); pg = await ctx.new_page()
+    ctx = await b.new_context(viewport={'width': 390, 'height': 800}, color_scheme='dark'); await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR cp2', e))
     await pg.goto(BASE); await pg.wait_for_selector('.lb-home', timeout=120000)
     await pg.click('.lb-player'); await pg.wait_for_selector('.pf-recover'); await pg.fill('#pfRestore', code); await pg.press('#pfRestore', 'Enter')

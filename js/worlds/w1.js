@@ -1,8 +1,8 @@
 // World 1 — השכונה. v1 rules and numbers (balance must feel like v1), plus a mystery tile, golden deals and quizzes.
 // v2.1: debt order mortgage < bank loan (3%/mo, capped by income) < credit card (5%/mo); wants can be refused; crypto coins have a sealed fate.
-import { MENTOR, tilesFor } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
 
-const board = 'PODOMOPOXODMPODOMOPOD?MO';
+const board = ring(['ODOLMOIOX', 'OOOD?OMEO', 'ODMOLOIXO', 'DOML?OTMO']); // v3: 40 tiles, paydays on the corners
 
 export default {
   id: 'w1', order: 1, name: 'השכונה', mechanic: 'basic',
@@ -19,14 +19,15 @@ export default {
   loan: { unit: 5000, autoUnit: 1000, pct: 3, cap: 1.5, bankrupt: 10 },
   creditPct: 5,
   goal: { type: 'passive' },
-  maxMonths: 48,
+  maxMonths: 46,
   // ★★ ≈ median and ★★★ ≈ top ~13% of good-policy simulated games, per character (see tools/balance-report.md)
-  stars: { t2: 30, t3: 22 },
+  stars: { t2: 41, t3: 31 },
   daily: { chars: ['teacher', 'driver'], maxMonths: 24 },
   start: {},
-  models: { re: 'apartment', biz: 'business' },
-  kinds: { re: { label: 'נדל"ן', debtLabel: 'משכנתא' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
+  models: { re: 'apartment', biz: 'business', side: 'business' },
+  kinds: { re: { label: 'נדל"ן', debtLabel: 'משכנתא', rent: true }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' } },
   tickers: {
+    IDX: { ...INDEX_TICKER, model: 'stock' },
     TCHN: { name: 'TCHN · טכנולוגיה', start: 10, div: 0, step: [10, 100], model: 'stock', modelLabel: 'תיק מניות' },
     BANK: { name: 'BANK · בנק', start: 18, div: 0.15, step: [10, 100], model: 'stock', modelLabel: 'תיק מניות' },
     MOON: { name: 'MOON · קריפטו', start: 1, div: 0, step: [100, 1000], model: 'crypto', modelLabel: 'ארנק קריפטו', kind: 'crypto' },
@@ -47,13 +48,13 @@ export default {
   },
 
   characters: [
-    { id: 'teacher', name: 'מורה', icon: 'book', stars: { t2: 26, t3: 19 }, desc: 'משכורת צנועה, הוצאות צנועות. הדרך הכי קצרה לחופש.', salary: 9000, cash: 5000,
+    { id: 'teacher', age: 26, family: { partner: 'none', kids: 0 }, name: 'מורה', icon: 'book', maxMonths: 46, stars: { t2: 30, t3: 25 }, desc: 'משכורת צנועה, הוצאות צנועות. הדרך הכי קצרה לחופש.', salary: 9000, cash: 5000,
       expenses: [['שכירות', 3200], ['רכב', 900], ['אוכל ושוטף', 2800], ['הלוואת סטודנט', 400]] },
-    { id: 'driver', name: 'נהג משאית', icon: 'truck', maxMonths: 54, stars: { t2: 30, t3: 21 }, desc: 'מעט מזומן בהתחלה וחוב אשראי חודשי. כל שקל נחשב.', salary: 8500, cash: 3500,
+    { id: 'driver', age: 31, family: { partner: 'married', kids: 1 }, name: 'נהג משאית', icon: 'truck', maxMonths: 62, stars: { t2: 36, t3: 26 }, desc: 'מעט מזומן בהתחלה וחוב אשראי חודשי. כל שקל נחשב.', salary: 8500, cash: 3500,
       expenses: [['שכירות', 2900], ['רכב', 1200], ['אוכל ושוטף', 2700], ['החזר כרטיס אשראי', 600]] },
-    { id: 'dev', name: 'מתכנת', icon: 'laptop', maxMonths: 60, stars: { t2: 33, t3: 25 }, desc: 'מרוויח יפה — ומוציא יפה. הרבה מזומן לקנות, אבל קו סיום רחוק.', salary: 22000, cash: 9000,
+    { id: 'dev', age: 29, family: { partner: 'together', kids: 0 }, name: 'מתכנת', icon: 'laptop', maxMonths: 64, stars: { t2: 41, t3: 31 }, desc: 'מרוויח יפה — ומוציא יפה. הרבה מזומן לקנות, אבל קו סיום רחוק.', salary: 22000, cash: 30000,
       expenses: [['משכנתא', 7500], ['ליסינג', 2800], ['אוכל ומסעדות', 5200], ['מנויים ובילויים', 2300], ['הלוואת רכב', 1200]] },
-    { id: 'doctor', name: 'רופאה', icon: 'stethoscope', maxMonths: 72, stars: { t2: 41, t3: 31 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 12000,
+    { id: 'doctor', age: 35, family: { partner: 'married', kids: 2 }, name: 'רופאה', icon: 'stethoscope', maxMonths: 72, stars: { t2: 48, t3: 34 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 45000,
       expenses: [['משכנתא', 11000], ['רכב יוקרה', 3800], ['אוכל ומסעדות', 6000], ['בית ספר פרטי', 3500], ['הלוואות לימודים', 2400]] },
   ],
 

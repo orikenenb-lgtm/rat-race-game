@@ -45,7 +45,7 @@ function fresh() {
   return {
     v: 1, stars: Object.fromEntries(WIDS.map((w) => [w, 0])), best: {}, achievements: [], pawn: 'classic', pawnColor: PAWN_COLORS[0].hex,
     pawnChosenAt: 0, gamesPlayed: 0, wins: 0, tutorialDone: false, lastSeenWorld: null, worldsPlayed: [],
-    streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false,
+    streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
   };
 }
 
@@ -58,6 +58,7 @@ function load() {
   for (const w of WIDS) p.stars[w] = Math.max(0, Math.min(3, +p.stars[w] || 0));
   p.best = { ...(p.best || {}) };
   p.lastChar = { ...(p.lastChar || {}) };
+  p.history = { ...(p.history || {}) };
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
@@ -132,6 +133,7 @@ export function unlockedPawns(p = P) { return PAWNS.filter((x) => pawnUnlocked(x
 export function setPawn(id) { if (!pawnUnlocked(id)) return false; P.pawn = id; P.pawnChosenAt = Date.now(); changed(); scheduleSync(); return true; }
 export function setPawnColor(hex) { if (!PAWN_COLORS.some((c) => c.hex === hex)) return false; P.pawnColor = hex; changed(); return true; }
 export function markWorldSeen(id) { if (!P.seenWorlds.includes(id)) { P.seenWorlds.push(id); changed(); } }
+export function setOnboarded() { if (!P.onboarded) { P.onboarded = true; changed(); } }
 export function setTutorialDone() { if (!P.tutorialDone) { P.tutorialDone = true; changed(); } }
 /** The engine's one-time mentor bail-out is offered until the player has gone bankrupt (or been bailed out) once. */
 export function bailoutAvailable() { return !P.hadBankruptcy; }
@@ -158,7 +160,27 @@ function metaCheck() {
 
 /* ---------------- game results */
 let lastSig = null; let lastResult = null;
+/** History mode (מכונת הזמן): best result per scenario; never counts toward world stars/titles. */
+export function recordHistory(e = {}) {
+  const sid = e.scenarioId || (e.end && e.end.scenarioId) || (e.history && e.history.scenarioId) || 'unknown';
+  const prev = P.history[sid] || { plays: 0, best: null };
+  const stars = e.status === 'won' || e.stars ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0;
+  const cur = { stars, netWorth: Math.round(+e.netWorth || 0), beat: e.status === 'won', at: Date.now() };
+  const better = !prev.best || cur.stars > prev.best.stars || (cur.stars === prev.best.stars && cur.netWorth > prev.best.netWorth);
+  P.history = { ...P.history, [sid]: { plays: prev.plays + 1, best: better ? cur : prev.best, lastSeed: e.seed ?? prev.lastSeed ?? null } };
+  P.gamesPlayed += 1; if (cur.beat) P.wins += 1;
+  if (!P.worldsPlayed.includes('h')) P.worldsPlayed.push('h');
+  P.tutorialDone = true;
+  addAchievements([...(e.achievements || []), ...((e.end && e.end.achievements) || [])]);
+  const newAchievements = [...session].map(achievementById).filter(Boolean); session = new Set();
+  changed(); scheduleSync(300);
+  return { scenarioId: sid, prevBest: prev.best, best: P.history[sid].best, newBest: better && !!prev.best, first: !prev.best, newAchievements, unlockedWorld: null, newPawns: [], titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(), gained: 0, bankedLocked: false, newStars: stars, prevStars: prev.best ? prev.best.stars : 0, worldId: 'h' };
+}
+export function setHistorySeed(sid, seed) { P.history = { ...P.history, [sid]: { plays: 0, best: null, ...(P.history[sid] || {}), lastSeed: seed } }; changed(); }
+/** History mode opens once w1 has ≥1★ (a teaser before). */
+export const historyUnlocked = () => (P.stars.w1 || 0) >= 1;
 export function recordGame(e = {}) {
+  if (e.mode === 'history' || e.worldId === 'h') return recordHistory(e);
   const sig = [e.resultId || '', e.worldId, e.charId, e.mode, e.status, e.months, Math.round(e.netWorth || 0)].join('|');
   if (sig === lastSig && lastResult) return lastResult; // the same game:end delivered twice
   const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
