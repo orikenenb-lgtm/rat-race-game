@@ -64,7 +64,7 @@ export function createGame(o = {}) {
   let scen = null;
   if (history) { if (!hasRealData()) throw new Error('history data not loaded'); scen = scenarioById(o.scenarioId); }
   const st = {
-    v: SAVE_VERSION, worldId: w.id, charId: ch.id, charName: ch.name, seed, mode: history ? 'history' : (o.mode || 'free'),
+    v: SAVE_VERSION, worldId: w.id, charId: ch.id, charName: ch.name, gender: o.gender === 'f' || o.gender === 'm' ? o.gender : (ch.gender || 'm'), seed, mode: history ? 'history' : (o.mode || 'free'),
     maxMonths: history ? scen.months : (o.maxMonths ?? ch.maxMonths ?? w.maxMonths),
     tutorial: !!o.tutorial && (o.mode || 'free') === 'free', bailout: !!o.bailout,
     rng: makeStreams(seed),
@@ -130,6 +130,7 @@ function initLife(st, ch) {
   if (st.savings == null) st.savings = 0;
   if (!st.bizRng) st.bizRng = {};
   L.goalStreak = 0;
+  st.dq = { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0 } };
   const p = st.prices.IDX; if (p != null) { L.idxPeak = p; L.idxHist = [p]; }
   newInflationYear(st);
 }
@@ -267,7 +268,7 @@ const loanPay = (st) => lineInterest(st.loans, loanPct(st));
 const creditPay = (st) => lineInterest(st.credit, W(st).creditPct);
 
 /* ---------------------------------------------------------------- v3 payslip: salary is GROSS, cashflow uses NET */
-const taxPoints = (st) => TAX.points + st.life.family.kids * TAX.kidPoints + (st.life.study.done ? TAX.degreePoints : 0);
+const taxPoints = (st) => TAX.points + st.life.family.kids * TAX.kidPoints + (st.life.study.done && st.month - (st.life.study.doneMonth ?? st.month) < 36 ? TAX.degreePoints : 0); // degree: 1 point a year, up to 3 years after graduating
 /** Base gross (no plan effects). */
 function grossBase(st) { return st.salaryUsd ? r10(st.life.grossUsd * st.world.usd) : st.life.gross; }
 /** Take-home pay of the base gross (the "normal month"). */
@@ -283,7 +284,7 @@ function payslipOf(st, planId) {
   if (L.jobless && L.jobless.until >= st.month) {
     const ben = r10(baseNet(st) * 0.6);
     return { gross: 0, overtime: 0, incomeTax: 0, bl: 0, pensionEmployee: 0, net: ben, employerPension: 0, severanceDeposit: 0, pensionDeposit: 0, effectiveTaxRate: 0, marginalRate: 0, jobless: true,
-      sideIncome: 0, studyCost: 0, lines: [{ label: 'דמי אבטלה (60% מהנטו)', amount: ben }] };
+      sideIncome: 0, studyCost: 0, lines: [{ label: 'דמי אבטלה (בערך 60%)', amount: ben }], reality: '🌍 במציאות דמי אבטלה מחושבים לפי הברוטו, עם תקרה, אחרי ימי המתנה, ורק למי שעבד מספיק חודשים.' };
   }
   const gross = r10(g0 * P.grossMult);
   const s = slip(gross, taxPoints(st));
@@ -292,7 +293,8 @@ function payslipOf(st, planId) {
   const lines = [{ label: 'ברוטו', amount: g0 }];
   if (gross !== g0) lines.push({ label: gross > g0 ? 'שעות נוספות' : 'פחות שעות (מנוחה)', amount: gross - g0 });
   lines.push({ label: 'מס הכנסה', amount: -s.incomeTax }, { label: 'ביטוח לאומי ומס בריאות', amount: -s.bl }, { label: 'פנסיה (6%)', amount: -s.pensionEmployee }, { label: 'נטו', amount: s.net });
-  return { ...s, base: g0, overtime: gross - g0, pensionDeposit: s.pensionEmployee + s.employerPension + s.severanceDeposit, sideIncome: side, studyCost: tuition, lines };
+  return { ...s, base: g0, overtime: gross - g0, pensionDeposit: s.pensionEmployee + s.employerPension + s.severanceDeposit, sideIncome: side, studyCost: tuition, lines,
+    reality: '🌍 על ההפרשה שלך לפנסיה יש גם זיכוי ממס, אז הנטו האמיתי קצת גבוה יותר. במשחק קרן הפנסיה כולה במניות ובלי דמי ניהול; במציאות יש מסלולים לפי גיל ודמי ניהול, ואת הכסף מקבלים רק בפרישה.' };
 }
 /** Take-home pay this month (plan-adjusted, net). */
 function salaryNow(st) { return payslipOf(st).net; }
@@ -365,7 +367,7 @@ function passiveOf(st) {
 }
 function expensesOf(st) {
   let e = studyCost(st);
-  for (const x of st.expenses) if (!x.until || x.until >= st.month) e += x.amount;
+  for (const x of st.expenses) if ((!x.until || x.until >= st.month) && (!x.from || x.from <= st.month)) e += x.amount;
   for (const x of st.subs) e += x.amount;
   for (const x of st.pledges) e += x.amount;
   return e + loanPay(st) + creditPay(st);
@@ -392,7 +394,7 @@ function updateDerivedPrices(st) {
 }
 
 /* ---------------------------------------------------------------- v3 helpers: goal hold, savings, real-world rates */
-export const GOAL_HOLD = 3;
+export const GOAL_HOLD = 2; // "החופש צריך להחזיק": 2 consecutive paydays (education review §3.2)
 /** Is the world goal met right now (before the 3-payday hold)? */
 function goalMet(st) {
   const g = W(st).goal; if (g.type === 'benchmark') return false;
@@ -404,10 +406,13 @@ function goalMet(st) {
 /** Today's Bank of Israel rate (%): the world rate in w2/history, else the 2026 rate. */
 const realBoi = (st) => (st.history || W(st).mechanic === 'rate' ? st.world.rate : LIFE_CFG.realBoi);
 const savingsRate = (st) => Math.max(0, Math.min(BK.BANK.savingsRate, (realBoi(st) - 1.25) / 100));
+const OFFER_CACHE = new Map(); // loanOffer depends only on (BoI, credit band)
 /** The game's rates are deliberately inflated (so you feel them); here is what the same product costs in the real world. */
 function realWorldRates(st) {
   const boi = realBoi(st) / 100; const score = st.life.creditScore;
-  const offer = BK.loanOffer({ principal: 50000, months: 60, track: 'prime', boiRate: boi, creditScore: score });
+  const key = boi + '|' + BK.creditSpread(score);
+  let offer = OFFER_CACHE.get(key);
+  if (!offer) { const o = BK.loanOffer({ principal: 50000, months: 60, track: 'prime', boiRate: boi, creditScore: score }); offer = { ok: o.ok, annualRate: o.annualRate, effectivePct: o.effectivePct, reason: o.reason }; if (OFFER_CACHE.size > 200) OFFER_CACHE.clear(); OFFER_CACHE.set(key, offer); }
   const od = BK.overdraftRate(boi, score);
   return {
     boi: round2(boi * 100),
@@ -463,17 +468,18 @@ export function metrics(st) {
   if (sideIncome) incomeLines.push({ label: 'עסק צדדי (משוער)', amount: sideIncome, id: 'side' });
   for (const a of managedOf(st)) if (!a.biz.manager) incomeLines.push({ label: `${a.n} (אתה עובד בו — לא פסיבי)`, amount: a.bizDraw || 0, id: 'biz:a' + a.id, active: true });
   for (const a of st.assets) if (!a.biz || a.biz.manager) incomeLines.push({ label: a.biz ? `${a.n} (עם מנהל — פסיבי)` : a.n, amount: assetCf(st, a), assetId: 'a' + a.id });
-  const rtax = rentTaxOf(st); if (rtax) incomeLines.push({ label: `מס על שכר דירה (10% מעל ${fmtM(TAX.rentExempt)} פטור)`, amount: -rtax, id: 'rentTax' });
+  const rtax = rentTaxOf(st); if (rtax) incomeLines.push({ label: `מס על שכר דירה: 10% מכל שכר הדירה (עברת את תקרת הפטור של ${fmtM(TAX.rentExempt)} בחודש)`, amount: -rtax, id: 'rentTax' });
   for (const tk of Object.keys(st.holdings)) {
     const h = st.holdings[tk]; const d = tickerDiv(st, tk);
     if (h.qty && d) incomeLines.push({ label: `${w.tickers[tk].divLabel || 'דיבידנד'} ${tk}`, amount: Math.round(h.qty * d) });
   }
-  const expenseLines = st.expenses.filter((x) => !x.until || x.until >= st.month).map((x) => ({ label: x.label + (x.until ? ` (עד חודש ${x.until})` : ''), amount: x.amount, id: x.id }));
+  const expenseLines = st.expenses.filter((x) => (!x.until || x.until >= st.month) && (!x.from || x.from <= st.month)).map((x) => ({ label: x.label + (x.until ? ` (עד חודש ${x.until})` : ''), amount: x.amount, id: x.id }));
   if (ps.studyCost) expenseLines.push({ label: 'שכר לימוד', amount: ps.studyCost, id: 'study' });
   for (const x of st.subs) expenseLines.push({ label: x.label + ' (מנוי)', amount: x.amount, id: x.id });
   for (const x of st.pledges) expenseLines.push({ label: x.label + ' (תרומה חודשית)', amount: x.amount, id: x.id });
-  if (st.loans) expenseLines.push({ label: `ריבית על הלוואה בנקאית (${pct(loanPct(st), 2)} בחודש)`, amount: loanPay(st), id: 'loan' });
-  if (st.credit) expenseLines.push({ label: `חוב אשראי (${W(st).creditPct}% בחודש)`, amount: creditPay(st), id: 'credit' });
+  const RW = realWorldRates(st);
+  if (st.loans) expenseLines.push({ label: `ריבית על הלוואה בנקאית (${pct(loanPct(st), 2)} בחודש במשחק · ${RW.bankLoan.realPerYear != null ? `בעולם האמיתי ≈ ${RW.bankLoan.realPerYear}% בשנה` : 'בעולם האמיתי: אין הלוואה בדירוג כזה'})`, amount: loanPay(st), id: 'loan', reality: '⚠ במשחק ההלוואה פתוחה עד שתחזיר. 🌍 הלוואה אמיתית נפרעת בתשלומים חודשיים (קרן + ריבית) לתקופה קבועה.' });
+  if (st.credit) expenseLines.push({ label: `ריבית על חוב אשראי (${W(st).creditPct}% בחודש במשחק · ${RW.credit.text})`, amount: creditPay(st), id: 'credit' });
 
   const assets = st.assets.map((a) => {
     const v = assetValue(st, a);
@@ -500,7 +506,7 @@ export function metrics(st) {
   if (w.mechanic === 'rate') { wi.rate = st.world.rate; wi.rateHist = st.world.rateHist.slice(-12); wi.loanPct = loanPct(st); wi.fixedPremium = w.rate.fixedPremium; }
   if (w.mechanic === 'fx') { wi.usd = st.world.usd; wi.usdHist = st.world.usdHist.slice(-12); wi.usdRef = w.fx.ref; wi.gold = st.prices.GOLD; wi.insuredUntil = st.world.insuredUntil || 0; wi.exposure = fxExposure(st); }
   if (w.mechanic === 'angel') { wi.impact = Math.floor(st.world.impact || 0); wi.impactPending = Math.round((st.world.vesting || []).reduce((s, v) => s + v.left, 0)); wi.impactPerMonth = round2(st.pledges.reduce((s, p) => s + p.impact, 0) + st.assets.reduce((s, a) => s + (a.impact || 0), 0) + (st.world.vesting || []).reduce((s, v) => s + Math.min(v.left, v.perMonth), 0)); wi.impactTarget = w.goal.impact; wi.angelsActive = st.angels.filter((x) => x.status === 'active').length; wi.angelPaper = angelPaper(st); }
-  if (w.mechanic === 'history' && st.history) { const H = st.history; Object.assign(wi, { ym: H.ym, ymText: ymText(H.ym), index: st.prices.IDX, indexHist: H.idxHist.slice(-24), rate: st.world.rate, rateHist: st.world.rateHist.slice(-12), cpi: round2(st.life.cpi), home: round2(homeRatio(st)), usd: round2(seriesAt('usdIls', H.ym) || 0), headline: H.headline, benchmark: benchNW(st), scenario: H.name }); }
+  if (w.mechanic === 'history' && st.history) { const H = st.history; Object.assign(wi, { ym: H.ym, ymText: ymText(H.ym), index: st.prices.IDX, indexHist: H.idxHist.slice(-24), rate: st.world.rate, rateHist: st.world.rateHist.slice(-12), cpi: round2(st.life.cpi), home: round2(homeRatio(st)), usd: round2(seriesAt('usdIls', H.ym) || 0), headline: H.headline, benchmark: benchNW(st), scenario: H.name, reality: H.index === 'sp500' ? '🌍 המדד האמריקאי נמדד בדולרים; בקרן שקלית גם שער הדולר משנה (למשל 2007–2012: הדולר ירד מ־4.25 ל־3.92).' : null }); }
   const L = st.life; const band = bandOf(st); const idxH = st.holdings.IDX;
   const life = {
     age: round2(L.age), ageText: ageText(L.age), energy: Math.round(L.energy), happiness: Math.round(happyNow(st)), happinessBase: Math.round(L.happiness),
@@ -513,11 +519,11 @@ export function metrics(st) {
     burnoutRisk: L.energy < LIFE_CFG.burnoutBelow ? round2(burnoutChance(L.energy)) : 0, autoInvest: L.autoInvest,
     raiseEligible: raiseEligible(st), raiseChance: raiseEligible(st) ? round2(raiseChance(st)) : 0,
   };
-  const index = { ticker: 'IDX', price: st.prices.IDX, qty: idxH ? idxH.qty : 0, value: idxH ? Math.round(idxH.qty * st.prices.IDX) : 0, avg: idxH && idxH.qty ? round2(idxH.basis / idxH.qty) : 0,
+  const index = { projection: indexProjection(st), maxBuy: st.prices.IDX > 0 ? Math.floor(st.cash / st.prices.IDX) : 0, ticker: 'IDX', price: st.prices.IDX, qty: idxH ? idxH.qty : 0, value: idxH ? Math.round(idxH.qty * st.prices.IDX) : 0, avg: idxH && idxH.qty ? round2(idxH.basis / idxH.qty) : 0,
     history: (L.idxHist || []).slice(-24), autoInvest: L.autoInvest, divPerUnit: round2(tickerDiv(st, 'IDX')) };
   return {
     month: st.month, maxMonths: st.maxMonths, turn: st.turn, mode: st.mode,
-    life, payslip: ps, taxes: { ...st.taxes }, index, sideIncome, netWorthTotal: netWorth + Math.round(L.pension), pension: Math.round(L.pension),
+    life, payslip: ps, taxes: { ...st.taxes, total: Object.values(st.taxes).reduce((a, b) => a + b, 0) }, index, sideIncome, netWorthTotal: netWorth + Math.round(L.pension), pension: Math.round(L.pension),
     savings: st.savings, emergency: emergencyOf(st, expenses), realWorldRates: realWorldRates(st),
     goalHold: { streak: L.goalStreak || 0, need: GOAL_HOLD, met: goalMet(st) },
     activeBizIncome: activeBiz, businesses: managedOf(st).map((a) => ({ assetId: 'a' + a.id, ...BIZ.summary(a.biz) })),
@@ -532,6 +538,17 @@ export function metrics(st) {
   };
 }
 
+/** Compounding preview for the UI (C9): invest.js projectRange — a p10/p50/p90 RANGE with the no-guarantee note. */
+const PROJ_CACHE = new Map(); // pure function of `monthly` — memoized (projectRange is the hot path of metrics())
+function indexProjection(st) {
+  const monthly = st.life.autoInvest || 1000;
+  if (PROJ_CACHE.has(monthly)) return PROJ_CACHE.get(monthly);
+  const r = IV.projectRange({ pv: 0, monthly, years: 20 });
+  const out = { monthly, years: 20, p10: r.p10, p50: r.p50, p90: r.p90, contributed: r.contributed, lossChance: r.lossChance, path: r.path, note: r.note,
+    text: 'תחזית בלבד — אין תשואה מובטחת. כ־7% בשנה זה בערך הממוצע ההיסטורי של מניות בעולם לאורך עשרות שנים, לפני דמי ניהול ומס; היו גם שנים של ‎−30%‎ ויותר.' };
+  if (PROJ_CACHE.size > 50) PROJ_CACHE.clear();
+  PROJ_CACHE.set(monthly, out); return out;
+}
 /** קרן חירום: the savings account measured in months of expenses (target 3). */
 function emergencyOf(st, expenses) {
   const months = expenses > 0 ? Math.round((st.savings / expenses) * 10) / 10 : 0;
@@ -555,7 +572,7 @@ function addAsset(st, card, o = {}) {
   const w = W(st);
   const a = {
     id: st.nextId++, k: card.k, n: card.n, cost: card.cost, down: card.down, debt: card.cost - card.down,
-    value: card.value ?? card.cost, month: st.month, ups: 0,
+    value: card.value ?? card.cost, month: st.month, ups: 0, cpi: st.life ? round6(st.life.cpi) : 1,
   };
   if (card.noi != null) { a.noi = card.noi; if (o.fixed) a.fixedRate = round2(st.world.rate + w.rate.fixedPremium); if (card.fixedRate != null) a.fixedRate = card.fixedRate; }
   else a.cf = card.cf;
@@ -607,8 +624,16 @@ function ach(st, out, type, payload = {}) {
 function mentorLine(st, key, vars) {
   const w = W(st); const m = w.mentor[key];
   if (m == null) return null;
-  return tpl(Array.isArray(m) ? m[(st.turn + st.month) % m.length] : m, vars);
+  return gz(st, tpl(Array.isArray(m) ? m[(st.turn + st.month) % m.length] : m, vars));
 }
+/* ---------------------------------------------------------------- Hebrew gender: the mentor speaks to her as "את" */
+const GZ = [['אתה', 'את'], ['שים לב', 'שימי לב'], ['תחשוב', 'תחשבי'], ['תבדוק', 'תבדקי'], ['תמשיך', 'תמשיכי'], ['תזכור', 'תזכרי'], ['תחפש', 'תחפשי'],
+  ['תסתכל', 'תסתכלי'], ['תתחיל', 'תתחילי'], ['תנסה', 'תנסי'], ['תמכור', 'תמכרי'], ['תקנה', 'תקני'], ['תבקש', 'תבקשי'], ['תוודא', 'תוודאי'], ['תשאל', 'תשאלי'],
+  ['תשאיר', 'תשאירי'], ['תסגור', 'תסגרי'], ['תוכל', 'תוכלי'], ['תגדר', 'תגדרי'], ['תלמד', 'תלמדי'], ['תרגיש', 'תרגישי'], ['מוכן', 'מוכנה'], ['תצא', 'תצאי'], ['נסה', 'נסי'], ['קח', 'קחי']];
+const GZ_RE = GZ.map(([m, f]) => [new RegExp('(^|[^\u05D0-\u05EA])([ושכבלה]?)' + m + '(?![\u05D0-\u05EA])', 'g'), '$1$2' + f]);
+/** Address the player in her/his grammatical gender (st.gender 'f' | 'm'). Data is written in the masculine form. */
+function gz(st, text) { if (!text || !st || st.gender !== 'f') return text; let t = String(text); for (const [re, f] of GZ_RE) t = t.replace(re, f); return t; }
+export function genderize(text, gender) { return gz({ gender }, text); }
 
 /** Force a bank loan when cash < 0 (v1 rule). Returns the loan amount. */
 function ensureCash(st, out, why = '') {
@@ -671,6 +696,7 @@ export function rollDice(st) {
     out.news.push({ kind: 'double', bonus: out.double.kind, text: out.double.text }); sound(out, 'coin');
   }
   st.lastRoll = { die, dice: [a, b], double: dbl, from, to: st.pos, steps };
+  out.mentor = gz(st, out.mentor);
   Object.assign(out, { die, dice: [a, b], from, to: st.pos, steps });
   if (out.bailout === undefined) out.bailout = null;
   if (out.burnout === undefined) out.burnout = null;
@@ -697,7 +723,11 @@ function payday(st, out, step, landed) {
   if (!burnout) {
     st.taxes.income += ps.incomeTax; st.taxes.bl += ps.bl;
     L.pension += ps.pensionDeposit; L.pensionIn += ps.pensionDeposit; L.severance += ps.severanceDeposit;
-    if (sideAct > 0) { const due = Math.round(sideAct * marginalRate(ps.gross || grossBase(st))); L.sideTaxDue += due; L.side.total += sideAct; }
+    if (sideAct > 0) {
+      const due = Math.round(sideAct * marginalRate(ps.gross || grossBase(st))); L.side.total += sideAct;
+      if (L.sideReport) { cf -= due; st.taxes.side += due; } // reported: monthly advance payments (מקדמות), no year-end penalty
+      else L.sideTaxDue += due;
+    }
   }
   st.taxes.rental += rentTaxOf(st);
   // annual-reconciliation refunds: a little over-withholding every month; unused credit points in months without salary
@@ -724,7 +754,7 @@ function payday(st, out, step, landed) {
   ensureCash(st, out, 'payday');
   if (st.cash > 0 && L.autoInvest > 0 && st.prices.IDX > 0) {
     const amt = Math.min(L.autoInvest, st.cash); const q = Math.floor(amt / st.prices.IDX);
-    if (q > 0) { const h = st.holdings.IDX; const before = holdingKeys(st); const cost = Math.round(q * st.prices.IDX); st.cash -= cost; h.qty += q; h.basis += cost; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month; holdingModelDiff(st, before, out); }
+    if (q > 0) { const h = st.holdings.IDX; const before = holdingKeys(st); const cost = Math.round(q * st.prices.IDX); h.cpi = cpiMix(h, cost, st); st.cash -= cost; h.qty += q; h.basis += cost; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month; holdingModelDiff(st, before, out); }
   }
   // emergency fund (bank.js savingsMonth: interest − 15% tax)
   if (st.savings > 0) { const sv = BK.savingsMonth({ balance: st.savings, annualRate: savingsRate(st) }); st.savings = sv.newBalance; st.taxes.savings += sv.tax; }
@@ -828,6 +858,7 @@ function monthlyLife(st, out, o) {
   // a friend's loan / guarantee resolves
   if (L.friend && st.month >= L.friend.at) {
     const f = L.friend; L.friend = null;
+    addLuck(st, 'friend', f.kind === 'lend' ? (f.ok ? f.amount * 0.4 : -f.amount * 0.6) : (f.ok ? f.amount * 0.35 : -f.amount * 0.65));
     if (f.kind === 'lend') {
       if (f.ok) { st.cash += f.amount; cashFx(out, f.amount, '+' + fmtM(f.amount)); out.news.push({ kind: 'lifeNews', text: `החבר החזיר את ההלוואה: ${fmtM(f.amount)}. וגם הזמין אותך לפתיחה של העסק.`, cash: f.amount }); }
       else { L.happiness = clamp(L.happiness - 3, 0, 100); out.news.push({ kind: 'lifeNews', text: `העסק של החבר נסגר. את ${fmtM(f.amount)} כנראה לא תראה שוב.`, cash: 0 }); }
@@ -865,7 +896,7 @@ function monthlyBusiness(st, out) {
 function addBusiness(st, typeId, seed, overrides) {
   const A = BIZ.ARCHETYPES[typeId];
   const b = BIZ.create(typeId, { month: st.month, overrides });
-  const a = { id: st.nextId++, k: 'biz', n: A.short || A.name, cost: b.purchasePrice, down: b.purchasePrice, debt: 0, value: b.purchasePrice, cf: 0, month: st.month, ups: 0, biz: b, bizNet: 0, bizDraw: 0 };
+  const a = { id: st.nextId++, k: 'biz', n: A.short || A.name, cost: b.purchasePrice, down: b.purchasePrice, debt: 0, value: b.purchasePrice, cf: 0, month: st.month, ups: 0, cpi: round6(st.life.cpi), biz: b, bizNet: 0, bizDraw: 0 };
   st.assets.push(a); st.bizRng['a' + a.id] = seed >>> 0 || 1;
   // start with the module's smart default (draw / marketing / stock)
   const sg = BIZ.suggest(a.biz); if (Object.keys(sg.decisions).length) { const r = BIZ.applyDecisions(a.biz, sg.decisions); if (r.ok && !r.cashNeeded) a.biz = r.business; }
@@ -901,7 +932,7 @@ function createBusinessEvent(st) {
 
 function studyDone(st, out) {
   const L = st.life;
-  L.study.done = true; setGross(st, 1 + LIFE_CFG.studyRaise); L.happiness = clamp(L.happiness + 6, 0, 100);
+  L.study.done = true; L.study.doneMonth = st.month; setGross(st, 1 + LIFE_CFG.studyRaise); L.happiness = clamp(L.happiness + 6, 0, 100);
   if (L.plan === 'study') L.plan = 'work';
   out.news.push({ kind: 'studyDone', text: mentorLine(st, 'studyDone', { pct: Math.round(LIFE_CFG.studyRaise * 100) + '%' }) });
   lesson(st, out, 'human_capital'); lesson(st, out, 'credit_points');
@@ -921,13 +952,13 @@ function yearlyPrices(st, out) {
       if (a.noi != null) { if (a.noi > 0) a.noi = r10(a.noi * (1 + infl * k)); } else if (a.cf > 0) a.cf = r10(a.cf * (1 + infl * k));
     }
     st.salary = baseNet(st);
-    out.news.push({ kind: 'inflation', text: mentorLine(st, 'inflationYear', { infl: pct(infl * 100, 1), wage: pct(infl * C.salaryCpi * 100, 1) }), inflation: round2(infl * 100) });
+    out.news.push({ kind: 'inflation', text: mentorLine(st, 'inflationYear', { infl: pct(infl * 100, 1), wage: pct(infl * C.salaryCpi * 100, 1) }), inflation: round2(infl * 100), reality: '⚠ במשחק השכר תמיד מפגר. 🌍 בישראל לאורך שנים השכר הריאלי בממוצע דווקא עלה; בשנים של אינפלציה פתאומית הוא נשחק.' });
     lesson(st, out, 'inflation'); lesson(st, out, 'wage_lag');
     if (st.cash > 3 * Math.max(1, expensesOf(st))) lesson(st, out, 'real_vs_nominal');
   }
-  if (L.sideTaxDue > 0) { // undeclared side income: the tax authority bills it at year end, +10% penalty
+  if (L.sideTaxDue > 0) { // side income without advance payments: billed at year end, +10% penalty
     const bill = Math.round(L.sideTaxDue * 1.1); st.cash -= bill; st.taxes.side += bill; L.sideTaxDue = 0; cashFx(out, -bill);
-    out.news.push({ kind: 'tax', text: `מס הכנסה: חוב על העסק הצדדי שלא דווח — ${fmtM(bill)} (כולל קנס של 10%).`, tax: bill });
+    out.news.push({ kind: 'tax', text: `מס הכנסה: חשבון שנתי על העסק הצדדי — ${fmtM(bill)} (כולל קנס של 10%). 🌍 במציאות פותחים תיק ומשלמים מקדמות כל חודש, ואז אין קנס.`, tax: bill });
     lesson(st, out, 'side_tax');
   }
   newInflationYear(st);
@@ -946,6 +977,7 @@ function monthlyIndex(st, out) {
   st.prices.IDX = Math.max(1, round2(p0 * (1 + r)));
   (L.idxHist ||= []).push(st.prices.IDX); if (L.idxHist.length > 60) L.idxHist.shift();
   const div = (W(st).historyDiv ?? X.div);
+  { const h = st.holdings.IDX; if (h && h.qty > 0) addLuck(st, 'index', h.qty * p0 * (r - 0.0033)); } // vs the expected monthly price move
   L.pension = Math.round(L.pension * (1 + r + div));
   L.severance = Math.round(L.severance * (1 + r + div));
   if (r <= -0.08) { L.lastCrash = st.month; out.news.push({ kind: 'indexDrop', text: `המדד צנח ${pct(-r * 100, 1)} החודש. גם הפנסיה שלך ירדה — על הנייר.`, change: round2(r * 100) }); }
@@ -1010,7 +1042,7 @@ export function summaryForServer(st) {
   return { v: SAVE_VERSION, worldId: st.worldId, charId: st.charId, mode: st.mode, seed: st.seed, months: st.month, turns: st.turn, status: st.over || 'playing', reason: r.reason || null, stars: r.stars || 0,
     netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, impact: Math.floor(st.world.impact || 0), progress: round2(m.goalProgress), stats: { ...st.stats }, leaks: leaksOf(st), log: st.log.slice(-40),
     life: { age: round2(L.age), happiness: Math.round(L.happiness), energy: Math.round(L.energy), creditScore: L.creditScore, pension: Math.round(L.pension), burnouts: L.burnouts, plan: L.plan, planMonths: { ...L.planMonths }, kids: L.family.kids, events: L.events.length },
-    scenarioId: st.history ? st.history.scenarioId : null, lessons: st.lessons.slice(),
+    scenarioId: st.history ? st.history.scenarioId : null, lessons: st.lessons.slice(), learning: (({ decisionQuality, decisions, luck, verdicts }) => ({ decisionQuality, decisions, luck, verdicts }))(learningOf(st)),
     config: replayConfig(st), actions: st.actions || [] };
 }
 
@@ -1082,6 +1114,7 @@ function setRate(st, r) {
 function revealAngel(st, x, out) {
   const cash = Math.round(x.amount * x.mult);
   x.status = x.mult > 0 ? 'exited' : 'failed'; x.cashOut = cash; x.paper = 0;
+  addLuck(st, 'angels', cash - x.amount * (x.ev ?? 1));
   st.cash += cash;
   out.despawn.push('v' + x.id);
   const big = x.mult >= 10;
@@ -1097,8 +1130,8 @@ function revealAngel(st, x, out) {
   if (big) out.effects.push({ type: 'sparkle', at: 'v' + x.id });
   out.mentor = x.mult === 0 ? mentorLine(st, 'angelFail', {}) : big ? mentorLine(st, 'angelBig', { mult: x.mult }) : mentorLine(st, 'angelSmall', {});
   lesson(st, out, 'power_law');
-  if (x.mult > 1) { const t = gainTax(st, cash - x.amount, out); st.cash -= t; if (t) out.news.push({ kind: 'tax', text: `מס רווח הון על האקזיט: ${fmtM(t)}.`, tax: t }); }
-  else if (x.mult < 1) gainTax(st, cash - x.amount, out); // a loss carries forward
+  if (x.mult > 1) { const t = gainTax(st, x.amount, cash, x.cpi, out); st.cash -= t; if (t) out.news.push({ kind: 'tax', text: `מס רווח הון על האקזיט: ${fmtM(t)}.`, tax: t }); }
+  else if (x.mult < 1) gainTax(st, x.amount, cash, x.cpi, out); // a loss carries forward
   ach(st, out, 'exit', { mult: x.mult, cash });
 }
 
@@ -1278,6 +1311,7 @@ function describe(st) {
   const pick = ev.noPrimary ? null : marked[0] || ev.options.find((o) => o.enabled && SAFE_IDS.includes(o.id)) || ev.options.find((o) => o.enabled) || null;
   for (const o of ev.options) o.primary = o === pick;
   delete ev.noPrimary;
+  ev.mentor = gz(st, ev.mentor); ev.text = gz(st, ev.text);
   return ev;
 }
 const SAFE_IDS = ['ok', 'done', 'pass', 'skip'];
@@ -1292,6 +1326,16 @@ function loanFor(st, amount) {
 }
 
 /* ---------------------------------------------------------------- v3 describe helpers */
+/** "⚠ במשחק / 🌍 במציאות" line for a deal card (the game exaggerates on purpose — label it). */
+function dealReality(st, c, d) {
+  const w = W(st); const kind = (w.kinds[c.k] || {});
+  const parts = [];
+  if (kind.rent) parts.push(`⚠ מספרי משחק: ${d.roi}% בשנה על ההון. 🌍 בישראל דירה להשקעה מניבה בערך 2.5%–4% בשנה על המחיר לפני הוצאות, משקיע צריך הון עצמי של 50% לפחות ועוד מס רכישה של כ־8%.`);
+  else if (c.k === 'biz' || kind.label === 'עסק') parts.push('⚠ במשחק לעסק תזרים קבוע. 🌍 בעסק אמיתי הכנסות ≠ רווח: שכירות, שכר, מע״מ ומלאי — ורוב העסקים הקטנים לא מחזירים את ההשקעה מהר.');
+  if (c.noi != null && d.debt > 0) parts.push('⚠ במשחק משלמים רק ריבית והחוב לא קטן. 🌍 במשכנתא אמיתית (שפיצר) משלמים כל חודש גם חלק מהקרן — החוב יורד, וזה בעצם חיסכון.');
+  if (d.loanNeeded) parts.push('🌍 במציאות בנק לא מממן את ההון העצמי של משכנתא — אותו חוסכים.');
+  return parts.join(' ') || null;
+}
 const lifeS = (st) => Math.max(baseNet(st), 3000);
 /** How much to move into the emergency fund now: up to 3 months of expenses, keeping 1 month of expenses in cash. */
 function saveSuggestion(st) { const e = expensesOf(st); const want = 3 * e - st.savings; const free = st.cash - e; return want > 0 && free > 0 ? r100(Math.min(want, free)) : 0; }
@@ -1381,7 +1425,8 @@ const DESCRIBE = {
     ev.data = { refund, bill, net: refund - bill, taxes: { ...T }, paidTotal: Math.round(paid), effectiveRate: round2(paid / grossIn * 100), ...shortfallInfo(st, Math.max(0, bill - refund)) };
     const label = refund && bill ? `לקבל החזר ${fmtM(refund)} ולשלם ${fmtM(bill)}` : refund ? `לקבל החזר ${fmtM(refund)}` : bill ? `לשלם ${fmtM(bill)}` : 'המשך';
     ev.options = [opt('ok', label, true, { primary: true })];
-    if (!refund && !bill) { ev.auto = true; ev.toastText = mentorLine(st, 'taxNone', { paid: fmtM(paid), rate: pct(ev.data.effectiveRate, 1) }) || 'אין חוב ואין החזר מס.'; }
+    if (!L.sideReport && (L.plan === 'side' || L.side.total > 0)) ev.options.push(opt('report', 'לפתוח תיק ולשלם מקדמות על העסק הצדדי', true, { kind: 'report' }));
+    if (!refund && !bill && ev.options.length === 1) { ev.auto = true; ev.toastText = mentorLine(st, 'taxNone', { paid: fmtM(paid), rate: pct(ev.data.effectiveRate, 1) }) || 'אין חוב ואין החזר מס.'; }
   },
 
   business(st, p, ev) {
@@ -1426,9 +1471,13 @@ const DESCRIBE = {
       const L = loanFor(st, Math.max(0, -eff.cash));
       return opt(o.id, o.label, true, { kind: 'life', effects: eff, loanAmount: L.need, loanMonthly: L.monthly, chance: o.chance });
     });
-    let pick = ev.options.find((o) => o.id === E.primary);
-    if (pick && pick.loanAmount) pick = ev.options.filter((o) => !o.loanAmount).sort((a, b) => b.effects.cash - a.effects.cash)[0] || pick;
-    if (pick) pick.primary = true;
+    if (E.personal && ev.options.length > 1) ev.noPrimary = true; // a life choice has no "right answer" button (§6.8)
+    else {
+      let pick = ev.options.find((o) => o.id === E.primary);
+      if (pick && pick.loanAmount) pick = ev.options.filter((o) => !o.loanAmount).sort((a, b) => b.effects.cash - a.effects.cash)[0] || pick;
+      if (pick) pick.primary = true;
+    }
+    ev.data.personal = !!E.personal;
     ev.sound = 'card';
   },
 
@@ -1485,7 +1534,12 @@ const DESCRIBE = {
       : `תשואה ${Math.round(roi)}% בשנה, בלי הלוואה`;
     // smart default: buy only when it adds money every month (and, in net-worth worlds, is not overpriced / declining)
     const nwOk = w.goal.type === 'passive' || ((value - c.cost) + (c.grow || 0) * value * 24 >= 0 && (value >= c.cost || cf * 24 >= c.cost - value));
-    if (best && best.net > 0 && nwOk) {
+    const cushionAfter = (st.cash + (st.savings || 0) - c.down + (best ? best.loanAmount : 0)) / Math.max(1, expensesOf(st));
+    d.cushionAfter = round2(cushionAfter);
+    if (best && cushionAfter < 1) d.warning = 'אחרי הקנייה יישאר לך פחות מחודש הוצאות. משבר אחד — והבנק יחליט בשבילך.';
+    // smart default: recommend buying only with ≥ ½ month of expenses left — or when the deal itself quickly rebuilds the cushion
+    const cushionOk = cushionAfter >= 0.5 || (best && best.net >= 0.15 * expensesOf(st));
+    if (best && best.net > 0 && nwOk && cushionOk) {
       let pick = best;
       if (w.mechanic === 'fx' && c.sens) { const hedgeNow = (c.sens < 0 && st.world.usd <= w.fx.ref) || (c.sens > 0 && st.world.usd >= w.fx.ref); const oh = ev.options.find((o) => o.id === 'buyHedge'); if (hedgeNow && oh.enabled && oh.net > 0) pick = oh; else pick = ev.options.find((o) => o.id === 'buy' && o.enabled) || best; }
       pick.primary = true;
@@ -1497,6 +1551,7 @@ const DESCRIBE = {
       ev.options.splice(ev.options.length - 1, 0, ...offers);
     }
     if (c.usdLinked) d.usdLinked = true;
+    d.reality = dealReality(st, c, d);
     ev.sound = p.golden ? 'golden' : 'card';
   },
 
@@ -1513,8 +1568,11 @@ const DESCRIBE = {
       avg: h.qty ? h.basis / h.qty : 0, cash: st.cash, maxBuy: dead ? 0 : maxBuy, maxSell: h.qty, div: t.div || 0, step: t.step || [10, 100],
       model: t.model || null, lastResult: st.flags['tr_' + p.id] || null,
       taxRate: TAX.capGains, unrealizedGain: Math.round(h.qty * price - h.basis), lossCarry: Math.round(st.life.lossCarry),
+      unrealizedTax: h.qty ? IV.capitalGainsTax({ cost: Math.round(h.basis), proceeds: Math.round(h.qty * price), cpiBuy: h.cpi || 1, cpiSell: st.life.cpi, mode: 'real', lossCarry: st.life.lossCarry }).tax : 0,
     };
-    if (p.tk === 'IDX') Object.assign(ev.data, { pension: Math.round(st.life.pension), autoInvest: st.life.autoInvest, history: (st.life.idxHist || []).slice(-24), index: true });
+    if (p.tk === 'IDX') Object.assign(ev.data, { pension: Math.round(st.life.pension), autoInvest: st.life.autoInvest, history: (st.life.idxHist || []).slice(-24), index: true, projection: indexProjection(st),
+      reality: '⚠ במשחק הקרן מחלקת כסף כל חודש. 🌍 רוב קרנות המדד בישראל צוברות את הדיבידנדים בתוך הקרן; תשואת דיבידנד של מדד רחב היא כ־1.5%–3% בשנה. תחזית בלבד — אין תשואה מובטחת.' });
+    else ev.data.reality = t.kind === 'gold' ? '⚠ במשחק זהב תמיד עולה במשבר. 🌍 לרוב הוא מתנהג אחרת ממניות, אבל לא תמיד (ב־2008 הוא צנח בכ־30%).' : '⚠ במשחק אין עמלות קנייה ומכירה. 🌍 בבורסה משלמים עמלה בכל פעולה (כ־0.1%, מינימום כמה שקלים) — מסחר תכוף עולה כסף.';
     if (cn) { ev.data.coinAlive = !dead; if (p.wiped) ev.data.wiped = p.wiped; }
     if (cn && p.wiped && !st.flags['tm_' + p.id]) ev.mentor = tpl(W(st).crypto.texts.wipedMentor, { qty: groups(p.wiped.qty), old: p.wiped.oldName, coin: cn });
     else if (dead && !st.flags['tm_' + p.id]) ev.mentor = mentorLine(st, 'cryptoDead', {}) || ev.mentor;
@@ -1536,10 +1594,13 @@ const DESCRIBE = {
     const need = !!c.need;
     ev.tag = need ? (w.needTag || 'הוצאה הכרחית') : ev.tag;
     ev.title = c.n; ev.text = c.d || (need ? 'אין ברירה — את זה חייבים לשלם.' : 'אף אחד לא מכריח אותך.'); ev.mentor = c.q || mentorLine(st, need ? 'needAsk' : 'doodadAsk', {});
-    ev.data = { amount: c.a, need, cash: st.cash, installment: c.inst ? Math.round(c.a * w.creditPct / 100) : null, sub: c.sub || null, ...shortfallInfo(st, c.a) };
+    const inst3 = c.inst ? BK.installments({ price: c.a, count: 3 }) : null;
+    ev.data = { amount: c.a, need, cash: st.cash, installment: c.inst ? lineInterest(c.a, w.creditPct) : null, installments3: inst3 ? { amounts: inst3.amounts, total: inst3.total, interest: inst3.interest } : null, sub: c.sub || null, ...shortfallInfo(st, c.a),
+      reality: c.inst ? `⚠ "אשראי מתגלגל" במשחק: ${w.creditPct}% לחודש. 🌍 ${realWorldRates(st).credit.text}; עד 3 תשלומים בכרטיס הם בדרך כלל בלי ריבית.` : null };
     ev.options = [opt('pay', ev.data.shortfall ? `לשלם ${fmtM(c.a)} (הלוואה ${fmtM(ev.data.loanAmount)})` : `לשלם ${fmtM(c.a)}`, true, { primary: need })];
-    if (c.inst) ev.options.push(opt('credit', `בתשלומים (${fmtM(ev.data.installment)} בחודש, ${w.creditPct}% ריבית)`));
-    if (c.sub) ev.options.push(opt('sub', `מנוי: ${fmtM(c.sub)} בחודש, לתמיד`));
+    if (c.inst) ev.options.push(opt('inst3', `3 תשלומים בלי ריבית (${fmtM(inst3.amounts[0])} בחודש)`, true, { kind: 'installments', amounts: inst3.amounts }));
+    if (c.inst) ev.options.push(opt('credit', `באשראי מתגלגל (${fmtM(ev.data.installment)} ריבית בחודש · ${w.creditPct}% לחודש — החוב עצמו לא קטן)`));
+    if (c.sub) ev.options.push(opt('sub', `מנוי: ${fmtM(c.sub)} בחודש, כל עוד הוא פעיל`));
     if (!need) ev.options.push(opt('skip', 'לוותר', true, { primary: true }));
     ev.sound = need ? 'loss' : 'card';
   },
@@ -1551,10 +1612,11 @@ const DESCRIBE = {
     if (c.k === 'sell') {
       const own = st.assets.filter((a) => (Array.isArray(c.type) ? c.type.includes(a.k) : a.k === c.type));
       // offers follow today's value and cashflow: a money-losing asset never gets a premium
-      d.offers = own.map((a) => { if (a.biz) { const v = BIZ.valuation(a.biz); const offer = Math.round(v.price * c.mult) + v.cash + v.receivables; const tax = IV.capitalGainsTax({ cost: a.biz.invested, proceeds: offer, mode: 'nominal' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: 0, tax, netAfterTax: offer - tax, net: offer - tax, profit: offer - tax - a.biz.invested, cf: a.bizDraw || 0, managed: true }; }
-        const acf = assetCf(st, a); const offer = Math.round(assetValue(st, a) * (acf > 0 ? c.mult : Math.min(c.mult, 1) * 0.85)); const tax = IV.capitalGainsTax({ cost: a.cost, proceeds: offer, mode: 'nominal' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: a.debt, tax, netAfterTax: offer - a.debt - tax, net: offer - a.debt - tax, profit: offer - a.debt - tax - a.down, cf: acf }; });
+      d.offers = own.map((a) => { if (a.biz) { const v = BIZ.valuation(a.biz); const offer = Math.round(v.price * c.mult) + v.cash + v.receivables; const tax = IV.capitalGainsTax({ cost: a.biz.invested, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: 0, tax, netAfterTax: offer - tax, net: offer - tax, profit: offer - tax - a.biz.invested, cf: a.bizDraw || 0, managed: true }; }
+        const acf = assetCf(st, a); const offer = Math.round(assetValue(st, a) * (acf > 0 ? c.mult : Math.min(c.mult, 1) * 0.85)); const tax = IV.capitalGainsTax({ cost: a.cost, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: a.debt, tax, netAfterTax: offer - a.debt - tax, net: offer - a.debt - tax, profit: offer - a.debt - tax - a.down, cf: acf }; });
       ev.options = [...d.offers.map((o) => opt('sell:' + o.assetId.slice(1), `למכור את ${o.name} · ${sgn(o.net)}`, o.net >= 0 || st.cash + o.net >= 0, { kind: 'sell', reason: o.net >= 0 || st.cash + o.net >= 0 ? undefined : 'החוב גדול מההצעה' })), opt('done', 'סיום', true, { primary: true })];
       ev.mentor = own.length ? mentorLine(st, 'sellAsk', {}) : mentorLine(st, 'sellNone', {});
+      d.reality = '🌍 מס שבח במציאות: 25% מהרווח הריאלי אחרי הוצאות (שיפוץ, עו״ד, תיווך); דירת מגורים יחידה לרוב פטורה, בתנאים.';
       if (!own.length) { ev.auto = true; ev.toastText = `${c.n} — אין לך נכסים מהסוג הזה למכור.`; }
     } else if (c.k === 'repair') {
       const n = st.assets.filter((a) => a.k === c.type).length; d.count = n; d.amount = -n * c.amt; Object.assign(d, shortfallInfo(st, n * c.amt));
@@ -1639,7 +1701,7 @@ const DESCRIBE = {
     ev.options = [opt('ok', 'המשך', true, { primary: true })];
     if (c.kind === 'cash') { ev.data.amount = mysteryCash(st, c); Object.assign(ev.data, shortfallInfo(st, -ev.data.amount)); ev.sound = ev.data.amount >= 0 ? 'coin' : 'loss'; ev.options[0].label = ev.data.amount >= 0 ? `לקחת ${fmtM(ev.data.amount)}` : `לשלם ${fmtM(-ev.data.amount)}`; }
     if (c.kind === 'quiz') {
-      ev.tag = 'שאלת אבא עשיר'; ev.data.reward = c.reward; ev.data.question = c.text;
+      ev.tag = 'שאלת אבא עשיר'; ev.data.reward = 'lesson'; ev.data.lesson = c.lesson || null; ev.data.question = c.text;
       ev.options = c.answers.map((a, i) => opt('a' + i, a)); ev.noPrimary = true;
       ev.mentor = c.q || 'תחשוב רגע לפני שאתה עונה. התשובה הנכונה שווה כסף.';
     }
@@ -1738,7 +1800,7 @@ const DESCRIBE = {
     const w = W(st); const c = p.card;
     ev.title = c.n; ev.text = c.d; ev.mentor = c.q || mentorLine(st, 'pitchAsk', {});
     const checks = w.angel.checks.map((x) => r100(x * (c.size || 1)));
-    ev.data = { sector: c.sector, team: c.team, traction: c.traction, hype: c.hype, checks, revealHint: `${w.angel.revealMin}–${w.angel.revealMax} חודשים`, active: st.angels.filter((x) => x.status === 'active').length, odds: w.angel.oddsText };
+    ev.data = { sector: c.sector, team: c.team, traction: c.traction, hype: c.hype, checks, revealHint: `${w.angel.revealMin}–${w.angel.revealMax} חודשים במשחק (בעולם האמיתי: 5–10 שנים)`, reality: '🌍 תיקי אנג׳לים מחזירים בממוצע בערך את הכסף עד פי 2–2.5 לאורך שנים, עם פיזור עצום — ואצל רוב המשקיעים הבודדים פחות. רק מכסף שמוכנים להפסיד.', active: st.angels.filter((x) => x.status === 'active').length, odds: w.angel.oddsText };
     ev.options = [...checks.map((amt, i) => { const L = loanFor(st, amt); return opt('inv:' + i, `${['צ\'ק קטן', 'צ\'ק בינוני', 'צ\'ק גדול'][i]}: ${fmtM(amt)}${L.need ? ` (הלוואה ${fmtM(L.need)})` : ''}`, L.ok, { kind: 'buy', loanAmount: L.need, loanMonthly: L.monthly, reason: L.ok ? undefined : CAP_REASON }); }), opt('pass', 'לוותר')];
     // smart default: a small check on a quiet, solid team — only from cash you can spare
     const small = ev.options[0];
@@ -1829,8 +1891,11 @@ export function choose(st, event, optionId, params = {}) {
   const out = newOut();
   if (!o.enabled) return { ...out, ok: false, error: o.reason || 'האפשרות לא זמינה כרגע', event: ev, done: false, end: null };
   const cash0 = st.cash;
+  const dq = decisionRecord(st, ev, o, params);
   const close = CHOOSE[p.type](st, p, o, params, out);
   if (out.ok === false) return { ...out, event: describe(st), done: false, end: null };
+  if (dq) recordDecision(st, dq, out);
+  out.mentor = gz(st, out.mentor);
   act(st, params && params.qty != null ? ['c', optionId, Math.floor(Number(params.qty)) || 0] : ['c', optionId]);
   if (!ev.auto && !(p.type === 'payday' && o.id === 'ok') && !(o.id === 'done' && p.type === 'trade')) {
     logDecision(st, ev.title, p.type === 'trade' ? `${o.id === 'buy' ? 'קנה' : o.id === 'sell' ? 'מכר' : 'הוראת קבע'} ${Math.floor(Number(params.qty)) || ''}`.trim() : o.label.replace(/\s*\(.*\)$/, ''), decisionValue(st, p, o, out, cash0));
@@ -1893,11 +1958,128 @@ function buyAsset(st, p, out, o) {
   ach(st, out, 'buy', { asset: a, cf, golden: p.golden, loan: L.need });
 }
 
+/* ============================================================ §8 understanding vs luck: decision quality */
+// Every real choice is scored 0–100 from what the player could SEE at that moment (public numbers, odds, cushion, debt),
+// never from sealed outcomes. Options within half a month of expenses of the best one all score 100 (no artificial
+// "one right answer"). Luck = what actually happened minus what was expected, measured separately. Money is unaffected.
+const DQ_PRINC = { deal: ['cashflow'], doodad: ['opportunity_cost'], trade: ['risk_size'], market: ['cashflow'], bank: ['rate_risk'], upgrade: ['cashflow'], fx: ['diversification'],
+  pitch: ['risk_size', 'diversification'], giving: [], life: ['cushion', 'opportunity_cost'], payday: ['time'], edu: ['time'], business: ['cashflow', 'risk_size'], mystery: ['knowledge'], tax: ['fees_tax'], shipping: ['cushion'] };
+const DQ_WHY = { noCushion: 'השאיר אותך בלי כרית', dsr: 'החזרי החובות עברו 40% מההכנסה', gamble: 'הימור עם תוחלת שלילית', panicSell: 'מכירה בהפסד אחרי ירידה', concentrated: 'הרבה כסף במקום אחד', burnout: 'סכנת שחיקה', debt: 'חוב יקר', best: 'הכי משתלם לפי מה שראית', near: 'כמה אפשרויות סבירות — כולן בסדר' };
+function pitchEV(st, card) {
+  const A = W(st).angel; if (!A) return 1;
+  const q = card.team + card.traction;
+  const t = A.outcomes.map((x) => ({ m: x.m, w: Math.max(0.001, x.w + (x.q || 0) * (q - 4) + (x.h || 0) * (card.hype - 2)) }));
+  const tot = t.reduce((a, x) => a + x.w, 0);
+  return t.reduce((a, x) => a + x.m * x.w / tot, 0) * A.hypeMult[card.hype - 1];
+}
+/** Utility of one option in months of expenses (+ risk flags), from public information only. */
+function optionU(st, ev, o, params, E) {
+  const d = ev.data || {}; const flags = []; let money = 0, hap = 0;
+  const cashAfter = (x) => (st.cash + (st.savings || 0) + x) / E;
+  switch (ev.type) {
+    case 'deal':
+      if (o.kind === 'buy') { money = o.net * 24 + (d.discount || 0) + (d.grow || 0) * (d.value || 0) * 24; if (cashAfter(-d.down + (o.loanAmount || 0)) < 1) flags.push('noCushion'); if (o.loanAmount) flags.push('debt'); if ((d.debt || 0) > 3 * Math.max(1, d.down) && o.net <= 0) flags.push('concentrated'); }
+      else if (o.kind === 'offer') { const buy = ev.options.filter((x) => x.kind === 'buy' && x.enabled).map((x) => x.net * 24 + (d.discount || 0)).sort((a, b) => b - a)[0] || 0; money = o.chance * (buy + o.saved) - (1 - o.chance) * 0 + (1 - o.chance) * Math.min(0, buy); if (buy > 0) money -= (1 - o.chance) * buy; }
+      break;
+    case 'doodad':
+      if (o.id === 'pay' || o.id === 'inst3') { money = -d.amount; if (!d.need) hap = Math.min(16, Math.max(4, d.amount / E * 8)); }
+      if (o.id === 'credit') { money = -d.amount - (d.installment || 0) * 24; flags.push('debt'); if (!d.need) hap = Math.min(16, Math.max(4, d.amount / E * 8)); }
+      if (o.id === 'sub') { money = -(d.sub || 0) * 24; hap = 4; }
+      if (o.id === 'pay' && d.shortfall) flags.push('noCushion');
+      break;
+    case 'trade': {
+      const qty = Math.floor(Number(params && params.qty)) || 0; const cost = qty * (d.price || 0);
+      if (o.id === 'buy' && d.kind === 'crypto') { money = -0.124 * cost; flags.push('gamble'); if (cost > 0.1 * Math.max(1, netWorthOf(st))) flags.push('concentrated'); }
+      if (o.id === 'buy' && cashAfter(-cost) < 1) flags.push('noCushion');
+      if (o.id === 'sell' && d.ticker === 'IDX' && d.avg > d.price && st.prices.IDX <= (st.life.idxPeak || st.prices.IDX) * 0.92) flags.push('panicSell');
+      if (o.id === 'auto:on') money = 0.5 * E;
+      break; }
+    case 'market':
+      if (o.kind === 'sell') { const off = (d.offers || []).find((x) => 'sell:' + x.assetId.slice(1) === o.id); const a = off && st.assets.find((x) => 'a' + x.id === off.assetId); if (off && a) money = off.net - (assetValue(st, a) - a.debt) - Math.max(0, off.cf) * 48; }
+      break;
+    case 'bank': if (o.id === 'refi') money = ((W(st).rate.lockBelow || d.fixedRate) - d.fixedRate) * (d.variableDebt || 0) / 1200 * 24 - (d.refiFee || 0); if (o.id === 'prepay' && cashAfter(-50000) < 1) flags.push('noCushion'); break;
+    case 'upgrade': if (o.kind === 'buy') { money = (o.net || 0) * 24 - (o.payback ? o.payback * Math.max(1, o.net) : 0) + (o.net || 0) * 0; const cost = o.payback ? o.payback * Math.max(1, o.net) : 0; money = (o.net || 0) * 24 - cost; } break;
+    case 'pitch': if (o.id.startsWith('inv:')) { const amt = d.checks[+o.id.split(':')[1]]; const ev1 = pitchEV(st, { team: d.team, traction: d.traction, hype: d.hype }); const nw = Math.max(1, netWorthOf(st)); money = amt * (ev1 - 1) - 0.6 * amt * Math.min(1, 5 * amt / nw); if (amt > 0.15 * nw) flags.push('concentrated'); if (ev1 < 1) flags.push('gamble'); } break;
+    case 'life': { const e = o.effects || {}; money = (e.cash || 0) - (e.monthly || 0) * (e.months || 24) + (e.salary || 0) * (e.months || 24); hap = e.happiness || 0; if (o.loanAmount) flags.push('noCushion'); break; }
+    case 'payday': case 'edu':
+      if (o.kind === 'plan') {
+        const e = o.effects || {}; money = e.netDelta || 0; hap = e.happiness || 0;
+        if (st.life.energy + (e.energy || 0) < 25) flags.push('burnout');
+        money += (e.energy || 0) * E * (st.life.energy < 60 ? 0.02 : 0.005); // energy is worth more when you are tired
+        if (o.plan === 'study' && !st.life.study.done) money += LIFE_CFG.studyRaise * baseNet(st) * 24 / st.life.study.need; // human capital
+      }
+      if (o.id === 'raise') money = (o.chance || 0) * baseNet(st) * 0.06 * 24 - (1 - (o.chance || 0)) * 0.15 * E;
+      if (o.id === 'save') money = emergencyOf(st, E).months < 3 ? E : 0;
+      if (o.id === 'course') money = 0.5 * E;
+      break;
+    case 'business':
+      if (o.id === 'start') { money = (o.net || 0) * 24 - 0.6 * d.startCapital * Math.min(1, 5 * d.startCapital / Math.max(1, netWorthOf(st))); if (o.loanAmount) flags.push('debt'); }
+      else if (o.kind === 'biz' && o.effects) money = (o.effects.delta3 || 0) * 8;
+      break;
+    case 'tax': if (o.id === 'report') money = 0.5 * E; break;
+    case 'mystery': if (d.kind === 'quiz') money = o.id === 'a' + ((W(st).mystery.find((x) => x.kind === 'quiz' && x.text === d.question) || {}).correct) ? E : 0; break;
+    default: break;
+  }
+  const pen = { noCushion: 4, dsr: 3, gamble: 3, panicSell: 3, concentrated: 2, burnout: 3, debt: 0 };
+  const U = money / E + hap * 0.05 - flags.reduce((a, f) => a + (pen[f] || 0), 0);
+  return { U, flags };
+}
+function decisionRecord(st, ev, o, params) {
+  if (!st.life || ev.auto) return null;
+  const en = ev.options.filter((x) => x.enabled);
+  if (en.length < 2 || (ev.type === 'trade' && o.id === 'done') || (ev.type === 'business' && o.id === 'ok') || ev.type === 'crisis' || ev.type === 'giving' || ev.type === 'shipping' || (ev.type === 'market' && !ev.options.some((x) => x.kind === 'sell'))) return null;
+  const E = Math.max(1, expensesOf(st));
+  const qtyFor = (x) => (x.id === o.id ? params : x.needsQty ? { qty: 1 } : undefined);
+  // the monthly plan is compared with the other plans only; saving / asking for a raise / a course are good habits on their own
+  const pool = (ev.type === 'payday' || ev.type === 'edu') ? (o.kind === 'plan' ? en.filter((x) => x.kind === 'plan') : [o]) : en;
+  const us = pool.map((x) => ({ id: x.id, ...optionU(st, ev, x, qtyFor(x), E) }));
+  const mine = us.find((x) => x.id === o.id) || { U: 0, flags: [] };
+  const best = us.reduce((a, b) => (b.U > a.U ? b : a)); const worst = us.reduce((a, b) => (b.U < a.U ? b : a));
+  const personal = ev.type === 'life' && ev.data.personal; // life choices (kids, wedding, family, friends): no "right answer" — only risk flags count
+  let score = personal || best.U - worst.U < 0.5 || best.U - mine.U < 0.5 ? 100 : Math.round(100 * clamp((mine.U - worst.U) / (best.U - worst.U), 0, 1));
+  if (personal && mine.flags.length) score = 50;
+  const verdict = mine.flags.some((f) => f !== 'debt') ? 'risky' : score >= 85 ? 'strong' : score >= 60 ? 'ok' : score < 40 ? 'costly' : 'mixed';
+  const why = mine.flags.find((f) => f !== 'debt') ? DQ_WHY[mine.flags.find((f) => f !== 'debt')] : best.U - worst.U < 0.5 ? DQ_WHY.near : mine === best ? DQ_WHY.best : `היה עדיף: ${(ev.options.find((x) => x.id === best.id) || {}).label || ''}`.slice(0, 60);
+  const pr = [...(DQ_PRINC[ev.type] || [])];
+  if (mine.flags.includes('noCushion')) pr.push('cushion');
+  if (mine.flags.includes('debt') || o.loanAmount) pr.push('debt_cost');
+  if (mine.flags.includes('panicSell') || (ev.type === 'trade' && ev.data.ticker === 'IDX')) pr.push('time_in_market');
+  if (ev.type === 'bank' || o.id === 'buyVar' || o.id === 'buyFix') pr.push('rate_risk');
+  return { t: st.turn, m: st.month, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U) };
+}
+function recordDecision(st, r, out) {
+  const D = (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0 } });
+  D.decisions.push(r); if (D.decisions.length > 120) D.decisions.shift();
+  D.sum += r.s; D.n++;
+  for (const p of r.p) { const m = D.mastery[p] || { v: 0.5, n: 0 }; m.v = round2(m.n ? m.v * 0.7 + 0.3 * r.s / 100 : r.s / 100); m.n++; D.mastery[p] = m; }
+  out.decision = { score: r.s, verdict: r.v, why: r.why, principles: r.p };
+}
+const dqOf = (st) => (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0 } });
+function addLuck(st, part, amount) { const D = dqOf(st); D.luck[part] = Math.round((D.luck[part] || 0) + amount); }
+/** checkEnd's learning block: decision quality, luck, mastery per principle. */
+function learningOf(st) {
+  const D = dqOf(st);
+  const q = D.n ? Math.round(D.sum / D.n) : null;
+  const luck = { total: Object.values(D.luck).reduce((a, b) => a + b, 0), parts: { ...D.luck } };
+  const counts = {}; for (const r of D.decisions) counts[r.v] = (counts[r.v] || 0) + 1;
+  const principles = {}; for (const [k, m] of Object.entries(D.mastery)) principles[k] = { mastery: m.v, n: m.n, shown: m.n >= 3 };
+  const top = D.decisions.slice().sort((a, b) => b.gap - a.gap || a.s - b.s).slice(0, 3).map((r) => ({ c: r.c, o: r.o, score: r.s, verdict: r.v, why: r.why }));
+  const sentence = q == null ? null : q >= 75 && luck.total < 0 ? 'ההחלטות שלך היו טובות — המזל פחות. במשחק הבא עם אותן החלטות, סביר שתצא מהר יותר.'
+    : q >= 75 ? 'החלטות טובות — וגם המזל לא הפריע. ככה בונים הצלחה שחוזרת על עצמה.'
+    : luck.total > 0 ? 'המזל עזר לך יותר מההחלטות. בפעם הבאה: לבדוק תזרים, כרית וחוב לפני כל קנייה.'
+    : 'יש מקום לשפר את ההחלטות: תסתכל על הכרית, על עלות החוב ועל מה שכל נכס מכניס באמת.';
+  return { decisionQuality: q, decisions: D.n, verdicts: counts, principles, luck, top, sentence: gz(st, sentence) };
+}
+
 /* ---------------------------------------------------------------- v3 choose helpers */
+/** Money-weighted CPI of a holding's cost basis (for the real capital-gains tax). */
+function cpiMix(h, cost, st) { const b = h.basis || 0; const c0 = h.cpi || 1; return b + cost > 0 ? round6((c0 * b + st.life.cpi * cost) / (b + cost)) : st.life.cpi; }
+const round6 = (x) => Math.round(x * 1e6) / 1e6;
 /** 25% capital-gains tax on a realised gain, with loss carry-forward. Returns the tax (whole ₪). */
-function gainTax(st, gain, out) {
-  const L = st.life;
-  const r = IV.capitalGainsTax({ cost: 0, proceeds: gain, mode: 'nominal', lossCarry: L.lossCarry }); // invest.js: 25% + loss carry-forward
+function gainTax(st, cost, proceeds, cpiBuy, out) {
+  const L = st.life; const gain = proceeds - cost;
+  // invest.js: 25% of the REAL gain (the part that only kept up with the CPI is exempt) + loss carry-forward
+  const r = IV.capitalGainsTax({ cost, proceeds, cpiBuy: cpiBuy || 1, cpiSell: L.cpi || 1, mode: 'real', lossCarry: L.lossCarry });
   if (gain > 0 && r.lossCarryOut < L.lossCarry) lesson(st, out, 'loss_offset');
   L.lossCarry = r.lossCarryOut;
   if (r.tax > 0) { st.taxes.capGains += r.tax; lesson(st, out, 'capital_gains'); }
@@ -1914,6 +2096,7 @@ function applyPlan(st, id, out) {
 function askRaise(st, p, out) {
   const L = st.life; const ch = raiseChance(st);
   L.raiseAsks++; lesson(st, out, 'ask_raise');
+  { const gainYear = baseNet(st) * LIFE_CFG.raiseMult * 12; addLuck(st, 'raise', (p.raiseR ?? 1) < ch ? gainYear * (1 - ch) : -gainYear * ch); }
   if ((p.raiseR ?? 1) < ch) {
     setGross(st, 1 + LIFE_CFG.raiseMult); L.raises++; L.lastRaise = st.month; L.happiness = clamp(L.happiness + 3, 0, 100);
     out.raise = { accepted: true, gross: grossBase(st) }; sound(out, 'coin');
@@ -1927,6 +2110,7 @@ function askRaise(st, p, out) {
 function negotiate(st, p, k, o, out) {
   const L = st.life; const c = p.card; const accepted = p.negR < o.chance;
   L.peek = false;
+  addLuck(st, 'negotiation', accepted ? o.saved * (1 - o.chance) : -o.saved * o.chance);
   lesson(st, out, 'negotiation');
   if (!accepted) {
     L.negLosses++; out.negotiation = { accepted: false, pct: k };
@@ -2004,6 +2188,7 @@ const CHOOSE = {
   },
 
   tax(st, p, o, params, out) {
+    if (o.id === 'report') { st.life.sideReport = true; lesson(st, out, 'side_tax'); out.mentor = 'פתחת תיק במס הכנסה: מעכשיו משלמים מקדמות כל חודש, ואין קנס בסוף השנה.'; return false; }
     const L = st.life; const refund = Math.round(L.taxRefund), bill = Math.round(L.sideTaxDue);
     const net = refund - bill;
     if (net) { st.cash += net; cashFx(out, net); sound(out, net > 0 ? 'coin' : 'loss'); }
@@ -2077,7 +2262,7 @@ const CHOOSE = {
     if (o.id === 'buy') {
       const cost = Math.round(qty * price);
       if (!(qty >= 1) || cost > st.cash) { out.ok = false; out.error = 'כמות לא חוקית'; return false; }
-      st.cash -= cost; h.qty += qty; h.basis += cost;
+      h.cpi = cpiMix(h, cost, st); st.cash -= cost; h.qty += qty; h.basis += cost;
       h.lowBuy = h.lowBuy == null ? price : Math.min(h.lowBuy, price);
       if (p.tk === 'IDX') { const L = st.life; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month; lesson(st, out, 'index_fund'); if (st.month - L.lastCrash <= 3) lesson(st, out, 'buy_the_dip'); }
       sound(out, 'buy'); cashFx(out, -cost, null);
@@ -2087,10 +2272,11 @@ const CHOOSE = {
     } else if (o.id === 'sell') {
       if (!(qty >= 1) || qty > h.qty) { out.ok = false; out.error = 'כמות לא חוקית'; return false; }
       const avg = h.basis / h.qty; const proceeds = Math.round(qty * price); const cut = Math.round(avg * qty); const gain = proceeds - cut;
-      const tax = gainTax(st, gain, out);
+      const tax = gainTax(st, cut, proceeds, h.cpi, out);
       st.cash += proceeds - tax; h.basis = Math.max(0, h.basis - cut); h.qty -= qty;
       const low = h.lowBuy; if (!h.qty) { h.lowBuy = null; h.basis = 0; }
       st.stats.tradeProfit += gain - tax;
+      if (t.kind === 'crypto') addLuck(st, 'crypto', gain + 0.124 * cut);
       if (p.tk === 'IDX' && gain < 0) { st.life.idxSold++; st.life.idxSoldLoss += -gain; lesson(st, out, 'panic_selling'); }
       sound(out, gain >= 0 ? 'sell' : 'loss'); cashFx(out, proceeds - tax, null);
       out.tax = tax;
@@ -2119,8 +2305,14 @@ const CHOOSE = {
     if (c.need) st.stats.needsSpent += c.a; else { st.stats.toysSpent += c.a; addGlow(st, clamp(c.a / lifeS(st) * 4, 2, 8)); lesson(st, out, 'hedonic'); }
     if (o.id === 'credit') lesson(st, out, 'credit_card_debt');
     if (o.id === 'sub') lesson(st, out, 'lifestyle_creep');
-    if (o.id !== 'pay') st.flags.usedCredit = true;
-    if (o.id === 'credit') { st.credit += c.a; out.mentor = mentorLine(st, 'doodadCredit', { amount: fmtM(c.a), pay: fmtM(Math.round(c.a * w.creditPct / 100)) }); sound(out, 'card'); }
+    if (o.id === 'credit' || o.id === 'sub') st.flags.usedCredit = true;
+    if (o.id === 'credit') { st.credit += c.a; out.mentor = mentorLine(st, 'doodadCredit', { amount: fmtM(c.a), pay: fmtM(lineInterest(c.a, w.creditPct)) }); sound(out, 'card'); }
+    else if (o.id === 'inst3') { // the price spread over 3 months (first now), no interest
+      const am = o.amounts; st.cash -= am[0]; cashFx(out, -am[0]);
+      st.expenses.push({ id: 'i' + st.nextId++, label: `תשלומים: ${c.n}`, amount: am[1], trim: false, cut: false, until: st.month, from: st.month });
+      st.expenses.push({ id: 'i' + st.nextId++, label: `תשלומים: ${c.n}`, amount: am[2], trim: false, cut: false, until: st.month + 1, from: st.month + 1 });
+      out.mentor = mentorLine(st, 'doodadInst', { pay: fmtM(am[1]) }); sound(out, 'card'); ensureCash(st, out, 'doodad');
+    }
     else if (o.id === 'sub') { st.subs.push({ id: 's' + st.nextId++, label: c.subLabel || c.n, amount: c.sub }); out.mentor = mentorLine(st, 'doodadSub', { sub: fmtM(c.sub) }); sound(out, 'card'); }
     else { st.cash -= c.a; cashFx(out, -c.a); sound(out, 'loss'); out.mentor = mentorLine(st, c.need ? 'needPaid' : 'doodadPaid', {}); ensureCash(st, out, 'doodad'); }
     ach(st, out, 'doodad', { how: o.id, amount: c.a });
@@ -2175,7 +2367,7 @@ const CHOOSE = {
     out.effects.push({ type: 'shake' });
     if (o.id === 'okSellGold') {
       const h = st.holdings.GOLD; const before = holdingKeys(st); const price = st.prices.GOLD; const proceeds = Math.round(h.qty * price); const gain = proceeds - Math.round(h.basis);
-      const tax = gainTax(st, gain, out);
+      const tax = gainTax(st, Math.round(h.basis), proceeds, h.cpi, out);
       st.cash += proceeds - tax; st.stats.tradeProfit += gain - tax; cashFx(out, proceeds - tax, '+' + fmtM(proceeds - tax));
       h.qty = 0; h.basis = 0; h.lowBuy = null; holdingModelDiff(st, before, out); sound(out, 'sell');
       ach(st, out, 'tradeSell', { tk: 'GOLD', gain, crisis: true });
@@ -2191,8 +2383,11 @@ const CHOOSE = {
     const c = p.card; const ev = describe(st); const d = ev.data;
     if (c.kind === 'quiz') {
       const i = +o.id.slice(1);
-      if (i === c.correct) { st.cash += c.reward; st.stats.quizRight++; cashFx(out, c.reward); sound(out, 'coin'); out.mentor = '✔ ' + c.explain; ach(st, out, 'quiz', { right: true }); }
-      else { st.stats.quizWrong++; sound(out, 'loss'); out.mentor = 'לא הפעם. ' + c.explain; }
+      // reward = understanding, not money (the lobby may add a small ⚡ for reward:'lesson')
+      out.reward = { kind: 'lesson', lesson: c.lesson || null, right: i === c.correct };
+      if (c.lesson) lesson(st, out, c.lesson);
+      if (i === c.correct) { st.stats.quizRight++; sound(out, 'coin'); out.mentor = '✔ ' + c.explain; ach(st, out, 'quiz', { right: true }); }
+      else { st.stats.quizWrong++; sound(out, 'card'); out.mentor = 'כמעט. ' + c.explain; }
       return true;
     }
     if (c.kind === 'cash') { st.cash += d.amount; cashFx(out, d.amount); sound(out, d.amount >= 0 ? 'coin' : 'loss'); if (d.amount < 0) ensureCash(st, out, 'mystery'); }
@@ -2288,7 +2483,7 @@ const CHOOSE = {
     const L = loanFor(st, amt); if (L.need) { st.loans += L.need; st.cash += L.need; }
     st.cash -= amt;
     const h = p.hidden;
-    const x = { id: st.nextId++, n: p.card.n, sector: p.card.sector, amount: amt, paper: amt, mult: h.mult, revealAt: st.month + h.revealIn, signalAt: st.month + h.signalIn, signalMult: h.signalMult, status: 'active', month: st.month };
+    const x = { id: st.nextId++, n: p.card.n, sector: p.card.sector, amount: amt, paper: amt, mult: h.mult, revealAt: st.month + h.revealIn, signalAt: st.month + h.signalIn, signalMult: h.signalMult, status: 'active', month: st.month, cpi: st.life.cpi, ev: round2(pitchEV(st, p.card)) };
     st.angels.push(x); st.stats.angels++;
     out.spawn.push({ assetId: 'v' + x.id, key: 'v' + x.id, model: w.models.angel, label: x.n, color: 'blue' });
     cashFx(out, -amt); sound(out, 'buy');
@@ -2387,6 +2582,14 @@ export function moveSavings(st, amount) {
   if (a > 0) { lesson(st, out, 'emergency_fund'); out.mentor = mentorLine(st, 'savingsIn', { months: String(emergencyOf(st, expensesOf(st)).months) }); }
   return { ...out, event: currentEvent(st), end: null };
 }
+/** v3: report the side hustle to the tax authority (open a file, pay monthly advances — no year-end penalty). */
+export function setSideReport(st, on) {
+  if (st.over) throw new Error('game over');
+  const out = newOut(); const v = !!on;
+  if (st.life.sideReport !== v) { act(st, ['T', v ? 1 : 0]); st.life.sideReport = v; if (v) lesson(st, out, 'side_tax'); }
+  out.mentor = v ? 'פתחת תיק במס הכנסה: מעכשיו משלמים מקדמות כל חודש, ואין הפתעות בסוף השנה.' : null;
+  return { ...out, event: currentEvent(st), end: null };
+}
 /** v3: monthly standing order into the index fund (₪ per month, 0 = off). */
 export function setAutoInvest(st, amount) {
   if (st.over) throw new Error('game over');
@@ -2404,14 +2607,14 @@ export function invest(st, side, qty) {
     const cost = Math.round(qty * price);
     if (!(qty >= 1) || cost > st.cash) return { ...out, ok: false, error: 'כמות לא חוקית', event: null };
     act(st, ['I', 'buy', qty]);
-    st.cash -= cost; h.qty += qty; h.basis += cost; const L = st.life; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month;
+    h.cpi = cpiMix(h, cost, st); st.cash -= cost; h.qty += qty; h.basis += cost; const L = st.life; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month;
     lesson(st, out, 'index_fund'); if (st.month - L.lastCrash <= 3) lesson(st, out, 'buy_the_dip');
     cashFx(out, -cost); sound(out, 'buy'); logDecision(st, 'קרן מדד', 'קנה ' + qty, 0);
   } else if (side === 'sell') {
     if (!(qty >= 1) || qty > h.qty) return { ...out, ok: false, error: 'כמות לא חוקית', event: null };
     act(st, ['I', 'sell', qty]);
     const avg = h.basis / h.qty; const proceeds = Math.round(qty * price); const cutB = Math.round(avg * qty); const gain = proceeds - cutB;
-    const tax = gainTax(st, gain, out);
+    const tax = gainTax(st, cutB, proceeds, h.cpi, out);
     st.cash += proceeds - tax; h.basis = Math.max(0, h.basis - cutB); h.qty -= qty; if (!h.qty) { h.basis = 0; h.lowBuy = null; }
     st.stats.tradeProfit += gain - tax; out.tax = tax;
     if (gain < 0) { st.life.idxSold++; st.life.idxSoldLoss += -gain; lesson(st, out, 'panic_selling'); out.mentor = mentorLine(st, 'indexSellLoss', {}); }
@@ -2441,6 +2644,7 @@ export function replay(cfg, actions) {
         case 'A': r = setAutoInvest(st, a[1]); break;
         case 'I': r = invest(st, a[1], a[2]); break;
         case 'S': r = moveSavings(st, a[1]); break;
+        case 'T': r = setSideReport(st, a[1]); break;
         default: throw new Error('unknown action');
       }
     } catch (e) { throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${e.message}`); }
@@ -2473,7 +2677,7 @@ export function starsFor(world, months, maxMonths, charId) {
 export function starThresholds(world, charId) {
   const w = typeof world === 'string' ? getWorld(world) : world;
   const ch = w.characters.find((c) => c.id === charId);
-  return { maxMonths: (ch && ch.maxMonths) || w.maxMonths, happy: LIFE_CFG.happyStar, ...w.stars, ...((ch && ch.stars) || {}) };
+  return { maxMonths: (ch && ch.maxMonths) || w.maxMonths, happy: LIFE_CFG.happyStar, fundMonths: 3, ...w.stars, ...((ch && ch.stars) || {}) };
 }
 
 /** null while playing; otherwise the final result (pure — choose()/rollDice also store it in state.result). */
@@ -2488,21 +2692,23 @@ export function checkEnd(st) {
   if (!won && !timeUp && !bankrupt) return null;
   const months = st.month;
   const happy = Math.round(st.life.happiness);
-  let stars = 0, starsBlockedByHappiness = false;
+  let stars = 0, starsBlockedByHappiness = false, starsBlockedByFund = false;
   if (g.type === 'benchmark') {
     if (!bankrupt) stars = (m.life.realNetWorth > st.history.startNW ? 1 : 0) + (won ? 1 : 0) + (won && happy >= LIFE_CFG.happyStar ? 1 : 0);
     starsBlockedByHappiness = won && happy < LIFE_CFG.happyStar;
   } else if (won) {
     stars = starsFor(w, months, st.maxMonths, st.charId);
     if (stars >= 3 && happy < starThresholds(w, st.charId).happy) { stars = 2; starsBlockedByHappiness = true; }
+    if (stars >= 3 && m.emergency.months < starThresholds(w, st.charId).fundMonths) { stars = 2; starsBlockedByFund = true; } // freedom that survives a crisis
   }
-  const res = { status: won ? 'won' : 'lost', reason: won ? (g.type === 'benchmark' ? 'benchmark' : 'goal') : bankrupt ? 'bankrupt' : 'time', months, turns: st.turn, stars, starsBlockedByHappiness, netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, cashflow: m.cashflow, impact: Math.floor(st.world.impact || 0), progress: m.goalProgress, stats: { ...st.stats }, lesson: w.lesson, worldId: w.id, charId: st.charId, nearMiss: null, tip: null };
+  const res = { status: won ? 'won' : 'lost', reason: won ? (g.type === 'benchmark' ? 'benchmark' : 'goal') : bankrupt ? 'bankrupt' : 'time', months, turns: st.turn, stars, starsBlockedByHappiness, starsBlockedByFund, netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, cashflow: m.cashflow, impact: Math.floor(st.world.impact || 0), progress: m.goalProgress, stats: { ...st.stats }, lesson: w.lesson, worldId: w.id, charId: st.charId, nearMiss: null, tip: null };
   if (g.type === 'benchmark') res.benchmark = benchmarkResult(st, m);
   res.nearMiss = nearMiss(st, w, m, res);
   res.leaks = leaksOf(st);
   res.tip = tipFor(st, res);
   res.log = st.log.slice(-80);
   res.lifeSummary = lifeSummary(st, m, res);
+  res.learning = learningOf(st);
   res.lessons = st.lessons.slice();
   res.happiness = happy;
   return res;
@@ -2567,7 +2773,7 @@ function tipFor(st, res) {
   const s = st.stats; const w = W(st);
   // advice comes from the biggest leak that was a CHOICE — forced expenses (needs, crises) are never blamed
   const TIPS = {
-    interest: 'בפעם הבאה: פחות חובות. כל שקל ריבית הוא שקל שלא קנה נכס — ואשראי הוא החוב הכי יקר.',
+    interest: 'בפעם הבאה: פחות חובות. כל שקל ריבית הוא שקל שלא קנה נכס — ואשראי מתגלגל הוא מהחובות היקרים שיש.',
     toys: 'בפעם הבאה: לוותר על יותר פיתויים. כל צעצוע מהמשכורת דוחה את היציאה.',
     badAssets: 'בפעם הבאה: תבדוק את השורה התחתונה. נכס שמוציא כסף כל חודש הוא התחייבות.',
     subs: 'בפעם הבאה: פחות מנויים. מנוי קטן מזיז את קו הסיום — לתמיד.',

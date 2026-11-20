@@ -14,7 +14,7 @@ export const BIZ_VERSION = 1;
 export const VAT_PCT = 18;          // מע"מ 18% (from 2025)
 export const CORP_TAX = 0.23;       // מס חברות 23% on profit (with loss carry-forward)
 export const DIV_TAX = 0.30;        // מס דיבידנד 30% (בעל מניות מהותי) on what the owner draws out of the company
-export const CAP_GAINS = 0.25;      // capital-gains tax on selling the business (same rate as life.js TAX.capGains)
+export const CAP_GAINS = 0.30;      // capital-gains tax on selling the business: the owner holds 100% ⇒ בעל מניות מהותי 30% (like DIV_TAX)
 export const RNG_DRAWS = 3;         // draws per simulated month: [demand noise, event?, which event]
 export const HIST_MAX = 24;         // months of history kept in the state
 
@@ -165,7 +165,7 @@ export const BIZ_LESSONS = [
   { id: 'biz_owner_job', cat: 'business', title: 'עסק או משרה?', text: 'אם העסק עובד רק כשאתה שם — קנית לעצמך משרה. עסק אמיתי ממשיך להרוויח כשאתה לא שם, וזה גם מה שקונה משלם עליו.' },
   { id: 'biz_capacity', cat: 'business', title: 'קיבולת', text: 'אם אין מספיק ידיים או מכונות, לקוחות הולכים. אבל עובד נוסף כדאי רק אם הוא מכניס יותר ממה שהוא עולה.' },
   { id: 'biz_elasticity', cat: 'business', title: 'מחיר וביקוש', text: 'מחיר גבוה יותר מביא פחות לקוחות. השאלה היא אם הרווח מכל לקוח שנשאר מכסה על אלה שהלכו.' },
-  { id: 'biz_burn', cat: 'business', title: 'קצב שריפה ומסלול', text: 'סטארט־אפ מפסיד כל חודש עד שההכנסות מכסות. קצב השריפה חלקי המזומן בקופה = כמה חודשים נשארו לך לשרוד.' },
+  { id: 'biz_burn', cat: 'business', title: 'קצב שריפה ומסלול', text: 'סטארט־אפ מפסיד כסף כל חודש עד שההכנסות מכסות את ההוצאות. המזומן בקופה חלקי קצב השריפה החודשי = כמה חודשים נשארו לך לשרוד (המסלול).' },
   { id: 'biz_ltv_cac', cat: 'business', title: 'שווי לקוח מול עלות השגתו', text: 'אם הבאת מנוי ב־₪100 פרסום והוא משאיר לך ₪300 עד שהוא עוזב — שווה. אם הוא משאיר ₪50 — כל לקוח חדש מעמיק את ההפסד.' },
   { id: 'biz_depreciation', cat: 'business', title: 'פחת ציוד', text: 'המכונה שקנית מתבלה כל חודש. זו הוצאה ברווח והפסד, גם אם לא יצא אף שקל מהקופה.' },
   { id: 'biz_draw', cat: 'tax', title: 'משיכה מהעסק', text: 'בחברה בע"מ משלמים מס חברות על הרווח, ועוד מס דיבידנד כשמושכים אותו לכיס. רווח שנשאר בעסק ומושקע מחדש — עוד לא ממוסה פעמיים.' },
@@ -469,7 +469,7 @@ export function simulate(b0, decisions, rng, opts = {}) {
     report.sub = { ...sub, users: b.users, mrr: revenue, arr: revenue * 12,
       cac: sub.fromMkt > 0 ? rnd(marketing / sub.fromMkt) : null,
       ltv: rnd(arpuNet / Math.max(sub.churnRate, 0.005)),
-      burn, runway: burn > 0 ? Math.floor(Math.max(0, b.cash) / burn) : null };
+      burn, runway: burn > 0 ? Math.floor(Math.max(0, b.cash) / burn) : null }; // runway = cash ÷ monthly burn
   }
   report.lines = plLines(report);
   teach(b, report, prev);
@@ -500,7 +500,7 @@ export function margins(r) { return { gross: r.revenue ? pct1(r.grossProfit / r.
  * What a buyer would pay now. Profit-based: normalised yearly profit (avg EBT + one-offs of the last ≤12 months, minus a manager's
  * wage if the owner runs it himself, after corporate tax) × multiple; subscriptions may sell on revenue (ARR × revMultiple
  * if growing ≥ 3%/month). Floor = 60% of equipment book value + 70% of inventory at cost.
- * The owner also keeps the business cash and receivables. Capital-gains tax 25% on (proceeds − total invested).
+ * The owner also keeps the business cash and receivables. Capital-gains tax 30% (substantial shareholder) on (proceeds − total invested).
  */
 export function valuation(b) {
   const p = b.p; const h = b.hist.slice(-12);

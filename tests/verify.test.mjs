@@ -119,5 +119,15 @@ await test('request validation (identity, uuid, action log shape and size)', asy
   assert.equal(clientEngine('Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'), 'v8');
 });
 
+await test('every action code the engine replays is accepted (S = savings, T = side-income report)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export function replay('));
+  const codes = [...body.slice(0, 4000).matchAll(/case '([A-Za-z])':/g)].map((m) => m[1]);
+  assert.ok(codes.length >= 11, 'found the replay switch: ' + codes.join(''));
+  for (const c of codes) assert.ok(validateActions([[c, 'x']]), c);
+  assert.ok(validateActions([['S', 1500], ['S', -500], ['T', true], ['T', false]]));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

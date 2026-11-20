@@ -4,7 +4,7 @@
 export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actions; generous cap keeps replay < 1 s CPU
 export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
-const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I']);
+const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T']); // = the cases of engine.js replay()
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class VerifyError extends Error { constructor(code, status = 400) { super(code); this.code = code; this.status = status; } }
