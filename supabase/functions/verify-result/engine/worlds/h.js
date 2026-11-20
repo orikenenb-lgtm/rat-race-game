@@ -10,7 +10,7 @@ export default {
   id: 'h', order: 99, name: 'מכונת הזמן', mechanic: 'history', hidden: true,
   tagline: 'שוק אמיתי, חודש אחרי חודש. תנצח משקיע שרק קנה והחזיק?',
   goalLabel: 'לסיים עם שווי גבוה משל משקיע "קנה והחזק"',
-  lesson: 'רוב המשקיעים לא מנצחים קרן מדד פשוטה. מי שמוכר בפאניקה בתחתית — מפסיד הכי הרבה. מי שנשאר מושקע וממשיך להפקיד — קוטף את ההתאוששות.',
+  lesson: 'רוב המשקיעים לא מנצחים קרן מדד פשוטה. מי שמוכר בפאניקה בתחתית — מפסיד הכי הרבה. מי שנשאר מושקע וממשיך להפקיד — קוטף את ההתאוששות. בתרחישים כאן השוק חזר; בהיסטוריה היו גם שווקים, כמו יפן אחרי 1990, שלקח להם עשרות שנים.',
   theme: { ...w1.theme, sky: ['#d9e2f2', '#9fb3d1'], fog: '#cfd8e6', board: '#efe9dc', center: '#e7dfcc', accent: '#c8a24a', decor: 'trees' },
   board,
   tiles: tilesFor(board, { M: { name: 'כותרות', color: '#334155' }, X: { name: 'משבר' } }),
@@ -28,9 +28,9 @@ export default {
   tickers: { IDX: { ...INDEX_TICKER, name: 'קרן מחקה מדד (נתונים אמיתיים)', model: 'stock' } },
   historyDiv: 0.0015, // monthly distribution of the index fund (before 25% tax)
   characters: [
-    { id: 'h1', name: 'שכירה צעירה', icon: 'book', age: 27, family: { partner: 'together', kids: 0 }, desc: 'משכורת ממוצעת, חיסכון ראשון בבנק. מה עושים איתו כשהעולם משתגע?', salary: 11000, cash: 120000,
+    { id: 'h1', gender: 'f', name: 'שכירה צעירה', icon: 'book', age: 27, family: { partner: 'together', kids: 0 }, desc: 'משכורת ממוצעת, חיסכון ראשון בבנק. מה עושים איתו כשהעולם משתגע?', salary: 11000, cash: 120000,
       expenses: [['שכירות', 4200], ['רכב', 1100], ['אוכל ושוטף', 3000], ['ביטוחים ושונות', 1100]] },
-    { id: 'h2', name: 'זוג עם ילד', icon: 'heart', age: 33, family: { partner: 'married', kids: 1 }, desc: 'שתי משכורות, ילד בגן, ו־₪250 אלף בצד. מחכים לדירה — או משקיעים?', salary: 19000, cash: 250000,
+    { id: 'h2', gender: 'f', name: 'זוג עם ילד', icon: 'heart', age: 33, family: { partner: 'married', kids: 1 }, desc: 'שתי משכורות, ילד בגן, ו־₪250 אלף בצד. מחכים לדירה — או משקיעים?', salary: 19000, cash: 250000,
       expenses: [['שכירות', 5800], ['רכב', 1800], ['אוכל ושוטף', 4500], ['גן', 2600], ['ביטוחים ושונות', 1500]] },
   ],
   deals: w1.deals.filter((c) => !c.tk && !c.crypto),
