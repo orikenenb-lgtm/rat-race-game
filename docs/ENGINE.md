@@ -390,3 +390,105 @@ Mechanic ablations (smart player, one rule switched): w2 lock-when-low 27 mo / 9
 * 2026-11-19 (before any UI code): stars and month limits are **per character** → use `starThresholds(worldId, charId)`; gifts' impact vests over 10 months (`worldIndicators.impactPending`).
 * v2.1 — see "Changes v2.1" above (debt rates & caps, primary defaults, auto cards, wants/needs, crypto, bail-out, leaks, log, ranking-safe goalProgress, daily 24 months, w4 goal ₪10M).
 * API otherwise frozen; numbers in js/worlds/*.js may still be tuned.
+
+---------------------------------------------------------------------------------------------------
+
+## Changes v3 — "החיים האמיתיים" (engine lead) — FINAL CONTRACT
+Everything from v2.1 still holds (primary flags, `net`/`netLabel`, `auto` cards, bail-out, leaks, `summaryForServer`, determinism, tutorial, daily = 24 months).
+New engine files: `js/life.js` (payslip/tax, plans, credit bands, life events, LESSONS — pure data + helpers), `js/history.js` (real-data access for מכונת הזמן; loads `js/data/real.js` lazily with top-level `await import`, never required by the 4 worlds), `js/worlds/h.js` (history world, `getWorld('h')`, not in `WORLDS`).
+
+### 1. Board & dice (owner addition)
+* **Two dice.** `rollDice()` → `{dice:[a,b], die:a+b (2..12), double:{kind:'energy'|'peek', text}|null, burnout:{medical,text}|null, lessons?, …v2 fields}`. Both dice are drawn every roll (also in the tutorial, whose first roll is still steered onto a deal). `st.lastRoll = {die, dice, double, from, to, steps}`.
+* **Doubles**: first die odd ⇒ `energy` (+8 energy, +2 happiness); even ⇒ `peek` (`st.life.peek`: +10% acceptance on the next negotiation). Also a `news` item `{kind:'double', bonus, text}`. No extra turn.
+* **40 tiles** (11×11 ring), paydays on corners **0/10/20/30** (passing or landing ⇒ payday, as before). New tile types in `TILE_TYPES`: `L` life (`icon:'life'`), `E` education & career (`'school'`), `T` tax office (`'tax'`), `I` index fund & pension (`'piggy'`). Each world keeps its own mix (w1 more deals; w2 bank/upgrade; w3 fx/shipping; w4 pitch/giving).
+* `boardInfo(worldId|state)` → array of `{index, i, ch, type, name, color, ink, icon}` (length 40) with extra props `.corners = [0,10,20,30]`, `.size`. Draw any length from it.
+* Tempo: ≈1.4 rolls per month (v2: ≈1.7) — month thresholds were re-calibrated (see balance report).
+
+### 2. New state (read via `metrics()`; never write)
+```js
+st.life = { age, startAge, energy 0..100, happiness 0..100 (base), glow:[{amt}] (toy happiness, halves monthly),
+  plan:'work'|'overtime'|'study'|'side'|'rest', planMonths:{…}, study:{months, need:8, done}, side:{months, level, total},
+  family:{partner:'none'|'together'|'married', wedding, kids}, kidsBorn:[month], workLoad,
+  creditScore 300..850 (start 680), gross / grossUsd (base GROSS salary), pension, severance, cpi, cpiAdj, inflationYear, infl:[%],
+  burnouts, raises, lastRaise, raiseR, jobless:{until}|null, events:[{m,id,o}], autoInvest, friend, taxRefund, sideTaxDue, lossCarry,
+  idxHist, idxPeak, lastCrash, idxSold, idxSoldLoss, negWins, negLosses, negSaved, peek }
+st.lessons = ['gross_net', …]                       // unlocked lesson ids (this game)
+st.taxes   = {income, bl, capGains, rental, betterment, side}   // ₪ paid so far (whole shekels)
+st.actions = [['r'], ['l'], ['c','buy',3], …]        // replay log (see §9)
+st.history = {scenarioId, name, index, startYm, ym, months, base, bench, headline, idxHist, startCash, startNW}   // history mode only
+st.salary  = base take-home (legacy field, kept in sync)
+```
+
+### 3. Payslip — salary is GROSS, cashflow uses NET
+* Israeli 2026 parameters from `js/data/real.js` `TAX_IL` (identical defaults in `life.js`; `setTaxTable` applies the data file): brackets 10/14/20/31/35/47/50%, 2.25 credit points × ₪242 (+1 per child, +1 after a degree), Bituah Leumi 1.04%/7% + health 3.23%/5.17% (threshold ₪7,703, ceiling ₪51,910), pension employee 6%, employer 6.5% + severance 6% → `life.pension`.
+* **₪15,000 gross → ₪11,312 net** (tested). `net = round(gross − exact deductions)`; the income-tax line absorbs rounding so lines always add up.
+* Characters keep their v2 take-home: `gross = grossFromNet(v2 salary)` (±₪10). `characterCard()` adds `gross, net, age, family`.
+* `metrics().payslip = {gross, base, overtime, incomeTax, bl, bituahLeumi, health, pensionEmployee, net, employerPension, severanceDeposit, pensionDeposit, effectiveTaxRate, marginalRate, sideIncome, studyCost, jobless?, lines:[{label, amount}]}`.
+* `m.salary` = **net** take-home this month (plan-adjusted). `m.sideIncome` (expected side-hustle income), `m.cashflow = salary + sideIncome + passive − expenses`. `incomeLines[0].id = 'salary'` ("משכורת נטו"); side line id `'side'`; rent tax line id `'rentTax'` (negative). Study tuition is an expense line id `'study'`; temporary life costs are expense lines with "(עד חודש N)".
+
+### 4. Metrics additions
+```js
+m.life = { age, ageText, energy, happiness (incl. glow), happinessBase, plan, planLabel, plans:[{id,label,desc,enabled,current}],
+  creditScore, creditBand:'מצוין'|'טוב'|'בינוני'|'חלש'|'גרוע', creditBandId, loanPctAdj, pension, severance, cpi, inflationYear,
+  realCash, realNetWorth, studyProgress 0..1, studyDone, sideLevel, sideMonths, family:{partner,kids,wedding,text}, freeTimeMonths,
+  burnouts, jobless, burnoutRisk 0..1, autoInvest, raiseEligible, raiseChance }
+m.payslip (above) · m.taxes · m.index = {ticker:'IDX', price, qty, value, avg, history:[≤24], autoInvest, divPerUnit}
+m.pension · m.netWorthTotal = netWorth + pension
+```
+**`m.netWorth` is unchanged (liquid, excludes the pension)** — goals and rankings use it; the pension is shown separately (`netWorthTotal`).
+
+### 5. Time, energy, happiness
+* **Monthly plan** applied at every payday (passed or landed); change it with `setPlan(st, id)` any time between rolls or on the payday / `E` cards. Plans (`PLANS` export): `work` (+4 energy) · `overtime` (+25% gross, taxed at your top bracket, −12 energy, −2 happiness) · `study` (tuition 12% of net, −6 energy; after 8 study months: **+20% gross for good**, +1 credit point, plan returns to work) · `side` (side income 8% of net × level 1–3 × pre-drawn 0.6–1.4, −8 energy; after 15 months it becomes a real business asset `k:'side'` with cf 30% of net) · `rest` (−15% gross, +18 energy, +4 happiness).
+* **Burnout**: energy < 25 ⇒ chance 0.2 + (25−energy)/40 (pre-drawn every payday). Effect: that month no salary + medical cost 30% of net, happiness −15, energy → 45, plan → rest. `rollDice().burnout`, `news {kind:'burnout'}`.
+* **Happiness**: plan deltas, life events, family set point (55 + married 5 / together 2 + 3 per child (max 2) + 2 after a degree), 10%/month adaptation to the set point, −2/month for debt stress (bank+credit > 6× income), negative cashflow, or energy < 30. Toys add `glow` (+2…+8) that halves monthly (hedonic adaptation) — **stars use the base happiness, not the glow**.
+* **★★★ = escape by T3 AND final happiness ≥ `starThresholds().happy` (60)**. Otherwise ★★ and `result.starsBlockedByHappiness = true`.
+* **Raise request** (payday card option `raise`, `chance` shown): eligible with energy ≥ 65 and ≥ 10 months since the last raise; chance 0.3 + (energy−65)/70 (+0.2 after a degree, +0.1 after 20 months), 0.1..0.85, pre-drawn at the payday. Yes ⇒ +8% gross; no ⇒ −3 happiness and wait 6 months. Result `out.raise = {accepted, gross?}`.
+
+### 6. Inflation, index fund, pension, investment taxes
+* CPI: monthly index `life.cpi`; prices adjust **once a year** (every 12 paydays): living costs × CPI, gross salary × 80% of it, rents (`kinds[k].rent`) × 70%, other businesses × 50%. Yearly inflation pre-drawn: 2–4% (10%: a 6–8% spike year). History mode uses the real CPI. News `{kind:'inflation', inflation}`.
+* **Index fund `IDX`** in every world's `tickers` (`kind:'index'`, start ₪100): monthly return pre-drawn (≈ +5.8%/yr price, σ 4%/month, 1%/month crash −15%, every crisis tile −8%) + distribution 0.25%/month after 25% tax (= passive income). Trade it in any IDX trade window (tile `I`, history `M` tiles) or any time with `invest(st, 'buy'|'sell', qty)`; standing order `setAutoInvest(st, ₪)` (bought after each payday if cash allows; options `auto:on`/`auto:off` in IDX windows).
+* Pension grows with the same monthly return (+ distribution). It is not cash.
+* **Capital-gains tax 25%** on every realised trading gain (stocks, crypto, IDX, gold, USD, angel exits) with loss carry-forward (`life.lossCarry`). Trade results carry `tax`; trade data `taxRate, unrealizedGain, lossCarry`. **Asset sales**: 25% on (offer − purchase price) → `offers[].tax`, `offers[].netAfterTax` (= `net`).
+* **Rent tax** (simplified Israeli rule, real 2026 numbers): residential rent (`kinds.rent`: w1 re, w2 tower/mall, w4 campus) is tax-free up to ₪5,654/month in total; above it 10% → income line `rentTax`; deal data `rentTax` = the extra tax this deal would add.
+* Tax office (tile `T`, type `tax`): pays out `life.taxRefund` (≈3% over-withholding, unused credit points in jobless months, 35% donation credit in w4) and collects `life.sideTaxDue` (undeclared side income × marginal rate). If you never visit, the side tax is billed automatically at year end **+10% penalty** (refunds wait for you). Data: `{refund, bill, net, taxes, paidTotal, effectiveRate}`; nothing to settle ⇒ `auto` toast.
+
+### 7. Credit score (דירוג אשראי)
+Start 680. Forced loan −25 · open credit-card debt at a payday −4 · clean month +2 · repay a loan unit +6 · pay off the card +10 · (bail-out keeps v2 rules). Bands (`creditBand`): ≥760 מצוין −0.25 pp/month on bank loans · 680–759 טוב 0 · 600–679 בינוני +0.25 · 520–599 חלש +0.5 and half the loan cap · <520 גרוע +0.75 and **no voluntary loans** (forced loans still happen). Disabled loan options use the reason `דירוג האשראי שלך … — הבנק מגביל הלוואות חדשות`.
+
+### 8. New / changed events
+* `payday` (landed): options `ok` ("להמשיך: <plan>"), `plan:<id>` for the other plans, `raise` (when eligible). Plan options have `kind:'plan', plan, effects:{net, netDelta, gross, incomeTax, energy, happiness, note}`. Primary = the smart default (rest when tired, study early, else work — never overtime/side). Data adds `plan, planLabel, payslip, energy, happiness, burnout, creditScore, raiseChance?`.
+* `edu` (tile E): the same plan options + `course` (short evening course: 50% of net, +2 study months).
+* `tax` (tile T): see §6.
+* `life` (tile L): `data:{eventId, kind}`; every option `{kind:'life', effects:{cash, monthly, months (0 = permanent), happiness, energy, glow, note, salary?, risk?, study?}, loanAmount, loanMonthly, chance?}`; primary = the balanced choice (cheapest one if the balanced one needs a loan). Events (`LIFE_EVENTS`, amounts scale with net salary): `wedding` (modest / big / registry), `baby`, `moving`, `parent`, `car` (fix / lease / bus & bike = −60% car costs for good), `friend` (lend: repaid after 6 months with 60% / guarantee: 35% you pay 1.5× net / no), `reserve` (מילואים, +grant), `jobOffer` (take +25% gross & +4 energy cost/month / counter +10% with 60% / stay), `layoff` (2 months on 60% benefit; withdraw severance or keep it in the pension), `health`, `vacation`, `course`. Outcomes are pre-drawn with the card (`p.r`), reported later as `news {kind:'lifeNews'}`.
+* `deal`: + `offer:5|10|15` options (`kind:'offer', chance, saved`, never primary) when you could buy. The seller's answer is **sealed when the card is drawn** (`pending.negR`, ranked-fair). Accepted ⇒ the same event re-renders cheaper (`data.negotiated = {pct, saved}`, offers gone, `out.negotiation = {accepted:true, pct, saved}`); rejected ⇒ the card closes (`out.negotiation.accepted = false`). Chance 80/55/30%, ×0.4 on golden deals, +10% after a "peek" double.
+* `trade` on `IDX` (tile I: `source:'index'`; history M tiles: `source:'market'` with the real headline as title): data adds `index:true, pension, autoInvest, history`; options add `auto:on` / `auto:off`.
+* `crisis` (worlds): the index fund drops 8% on landing.
+
+### 9. Server = source of truth: replay
+* Every state-changing call is appended to `st.actions` (compact): `['r']` roll · `['l']` landing that drew a card · `['c', optionId, qty?]` choose · `['L', amount]` takeLoan · `['R', amount]` repayLoan · `['C']` payCredit · `['P', plan]` setPlan · `['A', ₪]` setAutoInvest · `['I', side, qty]` invest. Failed calls are not logged.
+* `replay(cfg, actions) → state` (pure; no Date/Math.random) re-runs the game; `replayConfig(st)` gives `{worldId, charId, seed, mode, maxMonths, scenarioId, bailout, tutorial}`. An impossible action throws `replay_mismatch at i (…)`. Tested: replay reproduces the byte-identical state in every world, ranked + free + history.
+* `summaryForServer(st)` now also has `life{…}`, `scenarioId`, `lessons`, **`config` and `actions`** (log trimmed to the last 40; whole summary ≈ 5–9 KB). The Edge Function: `replay(summary.config, summary.actions)` then compare `checkEnd(state)` with the claim.
+
+### 10. Money precision
+All money is **whole shekels (integers)**: trades round `qty × price` once (`Math.round`), basis is stored in whole ₪, pension/taxes/payslip are integers, interest/fees were already rounded. Prices (share prices, index) may have agorot; cash never does. Tested over random games in all worlds. Known-value tests: ₪15,000 gross → ₪11,312 net; `compound(10000, 0.5%, 12) = 10,617`; ₪5,000 bank loan at 3%/month = ₪150/month; `inflate(10000, '2021-06', '2023-06')` = exact CPI ratio from real.js.
+
+### 11. History mode — "מכונת הזמן"
+* `scenarioList()` → `[{id, name, start, months, blurb, lesson, index}]` from real.js (dotcom 2000, gfc 2007, covid 2019, inflation22 2021, housingIL 2008–2021).
+* `createGame({mode:'history', scenarioId, charId?:'h1'|'h2', seed})` → `worldId:'h'`, `maxMonths = scenario.months`. Throws `'history data not loaded'` if real.js is missing.
+* Each payday = one real month: IDX follows the scenario index (sp500 default; price index + 0.167%/month distribution ≈ 2%/yr dividends), bank rate = BoI rate (loans cost (BoI + 4.5)/12 % a month), CPI real, home values follow `homeIL`, headlines arrive as `news {kind:'headline', ym, ymText, text}` and on M tiles. `metrics().worldIndicators = {ym, ymText, index, indexHist, rate, rateHist, cpi, home, usd, headline, benchmark, scenario}`; `goalType:'benchmark'`.
+* End (only when the months run out): `won` if your liquid net worth ≥ the buy-and-hold investor (all starting cash into the fund + the same monthly saving, dividends reinvested). `result.benchmark = {netWorth, cashOnly, text, whatIf:[you, hold, cash, panic?], panicLoss, from, to}`. Stars: ★ real net worth grew · ★★ beat the benchmark · ★★★ beat it with happiness ≥ 60.
+
+### 12. End — "סיפור החיים שלך"
+`result.lifeSummary = {age, ageText, startAge, years, headline:'בגיל 41 יצאת מהמירוץ', netWorth, realNetWorth, passive, pension, freeTimeMonths, planMonths, family, kids, wedding, happiness, avgHappiness, energy, burnouts, creditScore, taxesPaid, studied, raises, lifeEvents, topDecisions:[{t,c,o,v}] (≤5, by ₪ impact), leaks, sentence}`; also `result.lessons` (all unlocked) and `result.happiness`. Decision-log entries carry `v` (₪ impact) when relevant.
+
+### 13. Lessons library
+`LESSONS` / `lessonsList()` (engine export, also `life.js`): **59 lessons** `{id, cat, title, text}` (cats: money, debt, invest, tax, time, life, world, history). Every result (`rollDice`, `choose`, actions) may carry `lessons:[{id,title,text}]` newly unlocked this step; `st.lessons` = all unlocked this game.
+
+### 14. Other API
+`setPlan` · `setAutoInvest` · `invest` · `replay` · `replayConfig` · `scenarioList` · `lessonsList` / `LESSONS` · `PLANS` · `payslipFor(gross)` · `inflate(amount, fromYm, toYm)` · `rollCost(st)` (1 free/history, 0 ranked — the ⚡ limit itself lives in the lobby lead's `js/energy.js`) · `registerRealData(mod)` (tests). New achievements: `balanced`, `negotiator`, `scholar`, `steady_hand` (history).
+
+### 15. Saves
+`SAVE_VERSION = 3`. `deserialize()` migrates v2 saves (`st.v === 1`): board position mapped 24→40 (never onto a payday), new RNG streams appended (`life`, `index`; old streams untouched), IDX added, life/taxes/lessons defaults (take-home preserved). Anything else throws `Error('save_incompatible')` → UI: "המשחק השמור מגרסה ישנה — מתחילים מחדש".
+
+### 16. Hooks for `js/finance/bank.js` & `js/finance/business.js` (being written separately)
+Not imported yet (files do not exist). The engine keeps one seam per concern so they can be plugged in without touching the rest: bank-loan cost = `loanPct()` / `loanPay()` / `loanFor()` / `ensureCash()`; mortgages = `assetCfRaw()` (noi − debt × rate) and `addAsset()`; business profit = the per-asset `cf` / `noi` (+ yearly CPI step in `yearlyPrices()`). When the modules land, the engine will call them from these functions only, keeping integer ₪ and the RNG order (any randomness they need must be pre-drawn by the engine).
