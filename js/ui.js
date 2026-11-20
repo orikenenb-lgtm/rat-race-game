@@ -33,7 +33,9 @@ export function fmtC(n) {
   return fmt(n);
 }
 const compact = () => innerWidth < 600;
-const money = (n) => (compact() ? fmtC(n) : fmtM(n));
+const tiny = () => innerWidth < 420;
+/** HUD money: exact on desktop, ₪16.6K on phones (₪1.6K on the narrowest ones). */
+const money = (n) => (tiny() && Math.abs(n) >= 1000 ? (n < 0 ? '−' : '') + '₪' + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : (Math.round(Math.abs(n) / 100) / 10) + 'K') : compact() ? fmtC(n) : fmtM(n));
 const moneyS = (n) => (Math.round(n) > 0 ? '+' : '') + money(n);
 
 /* ============================================================ icons */
@@ -207,7 +209,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   renderLife(m, ctx);
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
-  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : 'יעד העולם';
+  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : 'יעד העולם';
   const parts = m.goalParts || [];
   const pc = shownPct(m);
   const sig = m.goalType + parts.length;
@@ -225,7 +227,8 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const pend = p.key === 'impact' && wi.impactPending ? Math.min(100, ((p.value + wi.impactPending) / Math.max(1, p.target)) * 100) : 0;
     b.querySelector('s').style.width = pend + '%';
   });
-  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${N(p.value)}/${N(p.target)}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : `${money(p.value)} / ${money(p.target)}`).join(' · ');
+  const gh = m.goalHold && m.goalType !== 'benchmark' && m.goalHold.streak > 0 && m.goalHold.streak < m.goalHold.need ? ` · ⏳ מחזיק ${m.goalHold.streak}/${m.goalHold.need}` : '';
+  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${N(p.value)}/${N(p.target)}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : `${money(p.value)} / ${money(p.target)}`).join(' · ') + gh;
   g.setAttribute('aria-label', `${label}: ${pc}%`);
   g.classList.toggle('done', pc >= 100);
 }
@@ -249,21 +252,23 @@ function renderLife(m, ctx) {
   const hpe = hp >= 75 ? '😄' : hp >= 60 ? '🙂' : hp >= 40 ? '😐' : hp >= 25 ? '🙁' : '😣';
   const infl = L.inflationYear != null ? Math.round(L.inflationYear * 10) / 10 : null;
   box.innerHTML = `<button class="lc age" data-life="age" title="גיל"><span>🎂</span><b class="num">${Math.floor(L.age)}</b></button>
-    <button class="lc en ${enc}" data-life="energy" title="אנרגיה (${en}/100)"><span>🔋</span><i class="mb"><i style="width:${Math.max(3, en)}%"></i></i><b class="num">${en}</b></button>
+    <button class="lc en ${enc}" data-life="energy" title="כוח (${en}/100)"><span>🔋</span><i class="mb"><i style="width:${Math.max(3, en)}%"></i></i><b class="num">${en}</b></button>
     <button class="lc hp" data-life="happy" title="אושר (${hp}/100)"><span>${hpe}</span><b class="num">${hp}</b></button>
     <button class="lc cr ${BAND_CLS[L.creditBand] ?? ''}" data-life="credit" title="דירוג אשראי: ${esc(L.creditBand || '')}"><span>🏦</span><b class="num">${L.creditScore ?? '—'}</b></button>
     ${infl != null ? `<button class="lc cpi" data-life="cpi" title="אינפלציה שנתית"><span>🛒</span><b class="num">${infl}%</b></button>` : ''}
+    ${m.emergency ? `<button class="lc fund ${m.emergency.covered ? 'pos' : ''}" data-life="fund" title="קרן חירום: ${m.emergency.months} חודשי הוצאות"><span>🛟</span><b class="num">${m.emergency.months}</b></button>` : ''}
     <button class="lc plan" data-life="plan" title="התוכנית החודשית — לשנות"><span>${PLAN_ICON[L.plan] || '📅'}</span><b>${esc(L.planLabel || '')}</b></button>`;
 }
 /** Details popover for a life chip (tap). */
-export function lifeDetails(kind, m) {
-  const L = m.life || {}; const p = m.payslip || {};
+export function lifeDetails(kind, m, extra = {}) {
+  const L = m.life || {}; const p = m.payslip || {}; const e = m.emergency || {};
   const T = {
     age: ['הגיל שלך', `${esc(L.ageText || Math.floor(L.age))}. כל חודש במשחק הוא חודש בחיים.${L.freeTimeMonths ? ` עד עכשיו היו לך ${L.freeTimeMonths} חודשים של זמן חופשי.` : ''}`],
-    energy: ['אנרגיה', `${Math.round(L.energy)}/100. שעות נוספות, לימודים ועסק צדדי שוחקים; מנוחה ומשפחה ממלאות. מתחת ל־25 — סכנת שחיקה: חודש בלי משכורת.`],
+    energy: ['🔋 כוח', `${Math.round(L.energy)}/100 (זה לא ⚡ — ⚡ היא אנרגיה להטלות). שעות נוספות, לימודים ועסק צדדי שוחקים; מנוחה ומשפחה ממלאות. מתחת ל־25 — סכנת שחיקה: חודש בלי משכורת.`],
     happy: ['אושר', `${Math.round(L.happiness)}/100${L.happinessBase != null && Math.round(L.happinessBase) !== Math.round(L.happiness) ? ` (מתוכם ${Math.round(L.happiness - L.happinessBase)} מ"צעצועים" — וזה דועך)` : ''}. ל־★★★ צריך גם לצאת מהר וגם אושר של לפחות 60.`],
     credit: ['דירוג אשראי', `${L.creditScore} — ${esc(L.creditBand || '')}. הלוואות כפויות ואשראי לא משולם מורידים; החזר בזמן מעלה. הדירוג קובע את הריבית שלך${L.loanPctAdj ? ` (כרגע ${iso((L.loanPctAdj > 0 ? '+' : '') + L.loanPctAdj + '%')})` : ''}.`],
-    cpi: ['אינפלציה', `השנה המחירים עולים ב־${iso(L.inflationYear + '%')}. המזומן שלך שווה היום ${iso(fmtM(L.realCash ?? m.cash))} במחירים של תחילת המשחק. כסף שלא עובד — מתכווץ.`],
+    cpi: ['אינפלציה', `השנה המחירים עולים ב־${iso(L.inflationYear + '%')}. המזומן שלך שווה היום ${iso(fmtM(L.realCash ?? m.cash))} במחירים של תחילת המשחק. כסף שלא עובד — מתכווץ.${extra.inflReality ? `<br><span class="reality">${escI(extra.inflReality)}</span>` : ''}`],
+    fund: ['🛟 קרן חירום', `${esc(e.text || '')} (${iso(fmtM(e.balance || 0))}). כשנגמר המזומן, הקרן משלמת לפני שהבנק נותן הלוואה כפויה — ומשבר שמכוסה לא פוגע באושר. ל־★★★ צריך לפחות ${e.target || 3} חודשים. להפקיד: ביום המשכורת, או ב"הדוח שלי".`],
   }[kind];
   return T;
 }
@@ -282,11 +287,38 @@ function payslipHtml(m, ctx) {
   return `<details class="slip" open><summary><span>🧾 התלוש שלך</span><b class="num">${fmtM(p.net)} נטו</b></summary>
     <div class="slipb">${lines.map((x) => row(escI(x.label), (x.amount > 0 && x !== lines[0] ? '+' : '') + fmtM(x.amount), x.amount < 0 ? 'neg' : '')).join('')}
     <div class="row net"><b>נטו לחשבון</b><b class="num pos">${fmtM(p.net)}</b></div>
-    ${eff != null ? `<p class="note">מס אפקטיבי ${iso(Math.round(eff * 1000) / 10 + '%')} · מדרגת המס שלך ${iso(Math.round((marg || 0) * 100) + '%')} — מכל שקל נוסף בברוטו נכנסים לכיס בערך ${iso(Math.round((1 - (marg || 0) - 0.12) * 100) + '%')}.</p>` : ''}
-    ${p.employerPension || p.pensionDeposit ? `<p class="note">המעסיק מפקיד עוד ${num(fmtM((p.employerPension || 0) + (p.severanceDeposit || 0)))} לפנסיה שלך — זה הכסף שלך, גם אם לא רואים אותו בעו"ש.</p>` : ''}</div></details>
+    ${eff != null ? `<p class="note">מס אפקטיבי ${iso(Math.round(eff * 1000) / 10 + '%')} · מדרגת המס שלך ${iso(Math.round((marg || 0) * 100) + '%')} — מכל שקל נוסף בברוטו, זה החלק שהולך למס הכנסה (ועוד ביטוח לאומי ופנסיה).</p>` : ''}
+    ${p.employerPension ? `<p class="note">המעסיק מפקיד עוד ${num(fmtM(p.employerPension))} לפנסיה${p.severanceDeposit ? ` ו־${num(fmtM(p.severanceDeposit))} לפיצויים` : ''} — זה הכסף שלך, גם אם לא רואים אותו בעו"ש.</p>` : ''}
+    ${realityLine(p)}</div></details>
     ${L.pension != null ? `<div class="wbox pens"><div class="wl"><span>🏝️ קרן הפנסיה שלך</span><b class="num">${fmtM(L.pension)}</b></div>${hist.length > 1 ? spark(hist, { color: 'var(--green)', w: 300, h: 34 }) : ''}<p class="note">גדלה כל חודש מהפקדות ומהתשואה — ריבית דריבית. לא מזומן, אבל נספרת בשווי הנקי.</p></div>` : ''}
     ${L.realCash != null ? `<div class="wbox"><div class="wl"><span>🛒 אינפלציה ${iso((L.inflationYear ?? 0) + '%')} בשנה</span><b class="num">מדד ${(L.cpi ?? 1).toFixed(3)}</b></div>
       ${row('מזומן (נומינלי)', fmtM(m.cash))}${row('מזומן בכסף של היום הראשון (ריאלי)', fmtM(L.realCash), L.realCash < m.cash ? 'neg' : '')}${L.realNetWorth != null ? row('שווי נקי ריאלי', fmtM(L.realNetWorth)) : ''}</div>` : ''}`;
+}
+/** 🛟 emergency fund (m.emergency — engine numbers only) + move money in / out (E.moveSavings via data-act) */
+function fundHtml(m) {
+  const e = m.emergency; if (!e) return '';
+  const tgt = e.target || 3; const p = Math.min(100, (e.months / tgt) * 100);
+  return `<div class="wbox fund ${e.covered ? 'ok' : ''}"><div class="wl"><span>🛟 קרן חירום</span><b class="num">${num(String(e.months))} <small>מתוך ${tgt} חודשי הוצאות</small></b></div>
+    <div class="track"><i style="width:${Math.max(1, p)}%"></i></div>
+    <p class="note">${fmtM(e.balance || 0)} בצד${e.rate ? ` · ריבית ${iso(e.rate + '%')} בשנה` : ''}. כשנגמר המזומן — הקרן משלמת לפני שהבנק נותן הלוואה כפויה. ${e.covered ? 'יש לך כרית — ★★★ אפשרי.' : `ל־★★★ צריך לפחות ${tgt} חודשי הוצאות בצד.`}</p>
+    <div class="loans"><button data-act="save" ${m.cash > 0 ? '' : 'disabled'}>להפקיד לקרן</button><button data-act="unsave" ${e.balance > 0 ? '' : 'disabled'}>למשוך מהקרן</button></div></div>`;
+}
+/** side hustle: reported to the tax authority? (st.life.sideReport, read-only) */
+function sideHtml(m, st) {
+  const L = st && st.life; if (!L || !(L.plan === 'side' || (L.side && L.side.total > 0))) return '';
+  if (L.sideReport) return '<p class="note">🧾 העסק הצדדי מדווח: מקדמות מס יורדות כל חודש, בלי קנס בסוף השנה.</p>';
+  return `<div class="wbox"><div class="wl"><span>🧾 העסק הצדדי לא מדווח</span></div><p class="note">המס מצטבר לסוף השנה${L.sideTaxDue ? ` (כרגע ${iso(fmtM(L.sideTaxDue))})` : ''}, ואם לא מסדרים במשבצת מס הכנסה — עוד 10% קנס.</p><div class="loans"><button data-act="report">לפתוח תיק ולשלם מקדמות</button></div></div>`;
+}
+/** compact projection range (m.index.projection): never a promised return */
+function projLine(P) {
+  if (!P || !P.p50) return '';
+  return `<p class="note">${num(fmtM(P.monthly))} בחודש למשך ${P.years} שנה: בין ${num(fmtC(P.p10))} ל־${num(fmtC(P.p90))} (באמצע ${num(fmtC(P.p50))}; שמת ${num(fmtC(P.contributed))}). ${escI(P.note || '')}</p>`;
+}
+/** "freedom must hold": goal met on GOAL_HOLD consecutive paydays (m.goalHold) */
+function holdLine(m) {
+  const g = m.goalHold; if (!g || !g.need) return '';
+  if (g.streak > 0 && g.streak < g.need) return `<p class="hold">⏳ היעד מתקיים! הוא צריך להחזיק ${g.need} ימי משכורת ברצף: ${g.streak}/${g.need}</p>`;
+  return '';
 }
 function spark(hist, { color = 'currentColor', w = 120, h = 30 } = {}) {
   if (!hist || hist.length < 2) return '';
@@ -302,7 +334,8 @@ export function renderSheet(m, ctx) {
   const w = ctx.world, st = ctx.st, wi = m.worldIndicators || {};
   const top = el.scrollTop;
   const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד העולם';
-  const goalHelp = m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה שאתה חייב.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`;
+  const hold = m.goalType !== 'benchmark' && m.goalHold && m.goalHold.need > 1 ? ` היעד צריך להחזיק ${m.goalHold.need} ימי משכורת ברצף.` : '';
+  const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה שאתה חייב.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
   let world = '';
   if (w.mechanic === 'rate') {
     world = `<div class="wbox"><div class="wl"><span>ריבית במשק</span><b class="num">${pctTxt(wi.rate)}</b></div>${spark(wi.rateHist, { color: 'var(--accent)' })}
@@ -317,6 +350,11 @@ export function renderSheet(m, ctx) {
       <div class="track"><i style="width:${Math.min(100, (wi.impact / Math.max(1, wi.impactTarget)) * 100)}%"></i></div>
       <p class="note">${wi.impactPerMonth ? `+${wi.impactPerMonth} בחודש` : 'עוד אין השפעה חודשית'}${wi.impactPending ? ` · עוד ${wi.impactPending} בדרך` : ''}. ${wi.angelsActive ? `${wi.angelsActive} סטארט־אפים פעילים, שווי על הנייר ${fmtM(wi.angelPaper)}.` : 'עוד לא השקעת בסטארט־אפים.'}</p></div>`;
   }
+  else if (wi.ymText) {
+    world = `<div class="wbox"><div class="wl"><span>🗞️ ${esc(wi.ymText)}</span>${wi.index != null ? `<b class="num">מדד ${Math.round(wi.index)}</b>` : ''}</div>${spark(wi.indexHist, { color: 'var(--accent)' })}
+      ${wi.benchmark != null ? row('המשקיע שקנה מדד והחזיק', fmtM(wi.benchmark)) : ''}${wi.rate != null ? row('ריבית בנק ישראל', iso(wi.rate + '%')) : ''}
+      ${wi.reality ? `<p class="reality">${escI(wi.reality)}</p>` : ''}</div>`;
+  }
   const assetRows = m.assets.map((a) => {
     const badges = [];
     if (a.golden) badges.push('<em class="b gold">זהב</em>');
@@ -325,34 +363,40 @@ export function renderSheet(m, ctx) {
     if (a.hedgedUntil) badges.push(`<em class="b ok">מגודר עד ${a.hedgedUntil}</em>`);
     if (a.upgrades) badges.push(`<em class="b">שודרג ×${a.upgrades}</em>`);
     if (a.impact) badges.push(`<em class="b pink">+${a.impact} השפעה</em>`);
+    if (a.business) badges.push(a.business.manager || a.business.incomeKind === 'passive' ? '<em class="b ok">עם מנהל · פסיבי</em>' : '<em class="b warn">אתה עובד בו · אקטיבי</em>');
     return `<div class="arow"><div><span>${esc(a.name)}</span>${badges.join('')}</div><div class="av2">${num(fmtM(a.value))}<small class="${cls(a.cf)}">${num(sgn(a.cf))} לחודש</small></div></div>`;
   }).join('');
   const holdRows = m.holdings.map((h) => `<div class="arow"><div><span>${N(h.qty)} ${esc(h.unit)} ${esc(h.ticker)}</span><small class="note">${fmtP(h.price)} ליחידה</small></div><div class="av2">${num(fmtM(h.value))}${h.div ? `<small class="pos">${num(sgn(h.qty * h.div))} לחודש</small>` : ''}</div></div>`).join('');
   const angelRows = m.angels.filter((x) => x.status === 'active').map((x) => `<div class="arow"><div><span>${esc(x.name)}</span><small class="note">${x.news ? escI(x.news) : `תוצאה עד חודש ${x.revealAt}`}</small></div><div class="av2">${num(fmtM(x.paper))}<small>על הנייר</small></div></div>`).join('');
-  const totA = m.cash + m.assets.reduce((t, a) => t + a.value, 0) + m.holdings.reduce((t, h) => t + h.value, 0) + m.angels.filter((x) => x.status === 'active').reduce((t, x) => t + x.paper, 0);
-  const totL = m.liabilities.reduce((t, x) => t + x.amount, 0);
+  const totA = m.totalAssets ?? null, totL = m.totalLiabilities ?? null; // engine sums (audit D3) — the UI only displays
   const done = m.angels.filter((x) => x.status !== 'active');
   const angelDone = done.length ? `<p class="note">${done.length} השקעות נסגרו: ${done.map((x) => `${esc(x.name)} ${x.mult ? '×' + x.mult : '✗'}`).join(' · ')}</p>` : '';
   el.innerHTML = `<div class="sh-head"><div><h2>הדוח הכספי</h2><p class="sub">${esc(st.charName)} · ${esc(w.name)} · חודש ${m.month}${m.mode !== 'free' ? '/' + m.maxMonths : ''}</p></div><button class="ibtn sh-close" data-act="close" aria-label="סגירת הדוח">${ICON.close}</button></div>
   <div class="freedom"><div class="fl"><span>${esc(goalTitle)}</span><span class="num">${shownPct(m)}%</span></div>
    ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
-   <p>${goalHelp}</p></div>
+   ${holdLine(m)}<p>${goalHelp}</p></div>
   ${world}
   ${payslipHtml(m, ctx)}
   ${m.index ? `<div class="wbox idx"><div class="wl"><span>📈 קרן מחקה מדד</span><b class="num">${fmtM(m.index.value || 0)}</b></div>
     ${m.index.history && m.index.history.length > 1 ? spark(m.index.history, { color: 'var(--green)', w: 300, h: 30 }) : ''}
-    <p class="note">${m.index.qty ? `${N(m.index.qty)} יחידות · ${iso(fmtP(m.index.price))} ליחידה` : 'עוד לא השקעת. משעמם, זול, ועובד לאורך זמן.'}${m.index.autoInvest ? ` · הוראת קבע ${iso(fmtM(m.index.autoInvest))} בחודש` : ''}</p>
+    <p class="note">${m.index.qty ? `${N(m.index.qty)} יחידות · ${iso(fmtP(m.index.price))} ליחידה` : 'עוד לא השקעת. משעמם, זול, ועובד לאורך זמן.'}${m.index.autoInvest ? ` · הוראת קבע ${iso(fmtM(m.index.autoInvest))} בחודש` : ''}${m.index.maxBuy ? ` · אפשר לקנות עד ${N(m.index.maxBuy)} יחידות` : ''}</p>
+    ${projLine(m.index.projection)}
     <div class="loans"><button data-act="invest">להשקיע / למכור</button></div></div>` : ''}
-  ${m.taxes ? (() => { const t = m.taxes; const tot = (t.income || 0) + (t.bl || 0) + (t.capGains || 0) + (t.rental || 0) + (t.betterment || 0); return tot ? `<details class="slip"><summary><span>🏛️ מסים ששילמת עד עכשיו</span><b class="num">${fmtM(tot)}</b></summary><div class="slipb">${row('מס הכנסה', fmtM(t.income || 0))}${row('ביטוח לאומי ובריאות', fmtM(t.bl || 0))}${t.capGains ? row('מס רווחי הון (25%)', fmtM(t.capGains)) : ''}${t.rental ? row('מס על שכירות (10%)', fmtM(t.rental)) : ''}${t.betterment ? row('מס שבח', fmtM(t.betterment)) : ''}</div></details>` : ''; })() : ''}
+  ${fundHtml(m)}
+  ${m.taxes && m.taxes.total ? (() => { const t = m.taxes; return `<details class="slip"><summary><span>🏛️ מסים ששילמת עד עכשיו</span><b class="num">${fmtM(t.total)}</b></summary><div class="slipb">${t.income ? row('מס הכנסה', fmtM(t.income)) : ''}${t.bl ? row('ביטוח לאומי ובריאות', fmtM(t.bl)) : ''}${t.capGains ? row('מס רווחי הון', fmtM(t.capGains)) : ''}${t.rental ? row('מס על שכירות', fmtM(t.rental)) : ''}${t.betterment ? row('מס שבח', fmtM(t.betterment)) : ''}${t.side ? row('מס על העסק הצדדי', fmtM(t.side)) : ''}${t.business ? row('מס חברות ודיבידנד מהעסק', fmtM(t.business)) : ''}${t.savings ? row('מס על ריבית החיסכון', fmtM(t.savings)) : ''}</div></details>`; })() : ''}
+  ${sideHtml(m, st)}
   <h3>הכנסות בחודש</h3>${m.incomeLines.map((x) => row(escI(x.label), sgn(x.amount), cls(x.amount))).join('')}
   <h3>הוצאות בחודש</h3>${m.expenseLines.map((x) => row(escI(x.label), fmtM(x.amount))).join('')}
   <div class="total"><span>תזרים חודשי</span>${num(sgn(m.cashflow), cls(m.cashflow))}</div>
-  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}
-  ${row('<b>סה"כ נכסים</b>', fmtM(totA))}
-  <h3>התחייבויות</h3>${m.liabilities.length ? m.liabilities.map((x) => row(escI(x.label), fmtM(x.amount))).join('') + row('<b>סה"כ התחייבויות</b>', fmtM(totL)) : '<p class="empty">אין חובות.</p>'}
+  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${m.savings ? `<div class="arow cashrow"><div><span>🛟 קרן חירום (חיסכון)</span>${m.emergency ? `<small class="note">${num(String(m.emergency.months))} חודשי הוצאות${m.emergency.rate ? ` · ${num(m.emergency.rate + '%')} בשנה` : ''}</small>` : ''}</div><div class="av2">${num(fmtM(m.savings))}</div></div>` : ''}${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}
+  ${totA != null ? row('<b>סה"כ נכסים</b>', fmtM(totA)) : ''}
+  <h3>התחייבויות</h3>${m.liabilities.length ? m.liabilities.map(liabRow).join('') + (totL != null ? row('<b>סה"כ התחייבויות</b>', fmtM(totL)) : '') : '<p class="empty">אין חובות.</p>'}
   <div class="total nw"><span>שווי נקי</span>${num(fmtM(m.netWorth), cls(m.netWorth))}</div>
+  ${m.netWorthTotal != null && m.netWorthTotal !== m.netWorth ? `<div class="row nwt"><span>כולל קרן הפנסיה (לא נספרת ליעד — אי אפשר למשוך אותה עכשיו)</span>${num(fmtM(m.netWorthTotal))}</div>` : ''}
   <div class="loans"><button data-act="loan" ${m.canBorrow === false ? 'disabled title="הבנק בודק שתוכל להחזיר — כרגע הוא לא ילווה לך עוד"' : ''}>לקחת הלוואה ${fmtM(m.loanUnit)}</button><button data-act="repay" ${m.canRepay ? '' : 'disabled'}>להחזיר ${fmtM(m.loanUnit)}</button>${m.credit ? `<button data-act="credit" ${m.canPayCredit ? '' : 'disabled'}>לסגור חוב אשראי</button>` : ''}</div>
-  <p class="note">כל ${num(fmtM(m.loanUnit))} הלוואה עולים ${num(fmtM(m.loanUnitCost))} בחודש${m.creditPct != null ? ` · חוב אשראי: ${iso(m.creditPct + '%')} בחודש` : ''}.${m.loanRoom != null ? (m.canBorrow === false ? ' הבנק בודק שתוכל להחזיר — כרגע הוא לא ילווה לך עוד.' : ` הבנק ילווה לך עוד עד ${num(fmtM(m.loanRoom))}.`) : ''}</p>`;
+  <p class="note">כל ${num(fmtM(m.loanUnit))} הלוואה עולים ${num(fmtM(m.loanUnitCost))} בחודש${m.creditPct != null ? ` · חוב אשראי: ${iso(m.creditPct + '%')} בחודש` : ''}.${m.loanRoom != null ? (m.canBorrow === false ? ' הבנק בודק שתוכל להחזיר — כרגע הוא לא ילווה לך עוד.' : ` הבנק ילווה לך עוד עד ${num(fmtM(m.loanRoom))}.`) : ''}</p>
+  ${m.realWorldRates && m.realWorldRates.bankLoan && m.realWorldRates.bankLoan.text ? `<p class="reality">${m.liabilities.some((x) => x.realText || x.realWorldRate != null) ? '' : `🌍 הלוואה: ${escI(m.realWorldRates.bankLoan.text)}. `}⚠ הריביות במשחק מוגזמות בכוונה — כדי שתרגיש אותן.</p>` : ''}
+  <p class="disclaimer">סימולציה חינוכית — לא ייעוץ השקעות. המספרים מפושטים; לפני החלטה בכסף אמיתי בודקים מקורות רשמיים ומתייעצים עם בעל רישיון.</p>`;
   el.scrollTop = top;
 }
 export function toggleSheet(force) {
@@ -544,15 +588,18 @@ function onCardClick(e) {
 }
 
 const PAREN_MONEY = /\s*\((?:[+−-]\u2060?)?[₪$][\d,.]+(?:\s*מיליון)?\)\s*$/;
-function optLabel(o) {
+/** "label (long explanation)" → the label on the button and the explanation as a small second line (doodad credit, tax). */
+const SPLIT_PAREN = /^(.{4,}?)\s*\(([^()]{12,})\)\s*$/;
+function optLabel(o, split = false) {
+  if (split && !o.netLabel) { const m = SPLIT_PAREN.exec(o.label); if (m) return `<span>${escI(m[1])}</span><small class="net sub">${escI(m[2])}</small>`; }
   const base = o.netLabel ? o.label.replace(` (${o.netLabel})`, '').replace(`(${o.netLabel})`, '').replace(PAREN_MONEY, '').trim() : o.label;
   const net = o.netLabel ? `<small class="net ${cls(o.net)}">${escI(o.netLabel)}</small>` : '';
   return `<span>${escI(base)}</span>${net}`;
 }
-function optButtons(ev, filter = () => true, extraCls = '') {
+function optButtons(ev, filter = () => true, extraCls = '', split = false) {
   const opts = ev.options.filter(filter);
   const long = opts.some((o) => o.label.length > 26 || o.netLabel) || opts.length > 3;
-  return `<div class="acts ${long ? 'col' : ''} ${extraCls}">${opts.map((o, i) => `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} ${o.kind === 'sell' ? 'sell' : ''} ${o.netLabel ? 'hasnet' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>${optLabel(o)}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
+  return `<div class="acts ${long ? 'col' : ''} ${extraCls}">${opts.map((o, i) => { const sp = split && SPLIT_PAREN.test(o.label); return `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} ${o.kind === 'sell' ? 'sell' : ''} ${o.netLabel || sp ? 'hasnet' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>${optLabel(o, split)}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`; }).join('')}</div>`;
 }
 const PLAN_ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
 /** Effect chips: ₪ now · ₪/month × months · 😊 · 🔋 */
@@ -572,23 +619,26 @@ function planPicker(ev) {
   const cur = ev.options.find((o) => o.id === 'ok');
   const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
   const raise = ev.options.find((o) => o.id === 'raise');
-  const rest = ev.options.filter((o) => !o.id.startsWith('plan:') && o.id !== 'ok' && o.id !== 'raise');
+  const save = ev.options.find((o) => o.id === 'save');
+  const rest = ev.options.filter((o) => !o.id.startsWith('plan:') && o.id !== 'ok' && o.id !== 'raise' && o.id !== 'save');
   const tile = (o) => {
     const id = o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5));
     const lbl = o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label;
     const e0 = o.effects || {}; const e = { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
     return `<button class="plan ${o.id === 'ok' ? 'cur' : ''} ${o.primary ? 'rec' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}>
-      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(lbl)}</b>${o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מומלץ</small>' : ''}
+      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(lbl)}</b>${o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מתאים לכוח שלך עכשיו</small>' : ''}
       <span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
   };
   return `<div class="plans">${plans.map(tile).join('')}</div>` +
+    (save ? `<button class="raise save ${save.primary ? 'primary' : ''}" data-o="save" ${save.enabled ? '' : 'disabled'}><span>🛟 ${escI(save.label)}</span><small>${save.effects && save.effects.months != null ? `אחרי זה: ${iso(String(save.effects.months))} חודשי הוצאות בצד (היעד: 3) · ` : ''}התוכנית נשארת ${escI(ev.data.planLabel || '')}</small></button>` : '') +
     (raise ? `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>` : '') +
     (rest.length ? optButtons({ ...ev, options: rest }) : '') + (cur ? '' : '');
 }
 /** Life-event dilemmas: each option is a card with its money / energy / happiness consequences. */
 function effectChoices(ev) {
-  return `<div class="choices">${ev.options.map((o, i) => `<div class="opt"><button class="choice ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>
-    <b>${escI(o.label)}</b><span class="fxs">${effectChips(o.effects)}</span>${o.effects && o.effects.note ? `<small class="pn">${escI(o.effects.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
+  const personal = !ev.options.some((o) => o.primary);
+  return (personal && ev.type === 'life' ? '<p class="chipline"><em class="b">החלטה אישית — אין כאן תשובה נכונה אחת</em></p>' : '') + `<div class="choices">${ev.options.map((o, i) => `<div class="opt"><button class="choice ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>
+    <b>${escI(o.label)}</b>${o.primary && ev.options.length > 1 ? '<small class="tagc rec">הבחירה של המנטור</small>' : ''}<span class="fxs">${effectChips(o.effects)}</span>${o.effects && o.effects.note ? `<small class="pn">${escI(o.effects.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
 }
 /** Negotiation: offer −5/−10/−15% with the acceptance chance (and the risk of losing the deal). */
 function offerRow(offers) {
@@ -619,8 +669,15 @@ function head(ev) {
 }
 /** ROI equation as an LTR math line (words outside it): ₪450 × 12 ÷ ₪5,000 = 108% בשנה */
 function roiEq(d) {
-  const roi = d.down ? Math.round((d.cf * 12 / d.down) * 100) : 0;
+  const roi = d.roi ?? 0; // the engine owns the number (audit D4)
   return `<bdi dir="ltr" class="eq"><span class="${cls(d.cf)}">${fmtM(d.cf)}</span> × 12 ÷ ${fmtM(d.down)} = <b class="${cls(roi)}">${roi}%</b></bdi> בשנה`;
+}
+/** "⚠ במשחק / 🌍 במציאות" — the engine's honesty line (data.reality); the UI only shows it. */
+function realityLine(d) { return d && d.reality ? `<p class="reality">${escI(d.reality)}</p>` : ''; }
+/** a liability row + the real-world rate next to it (engine: realWorldRate / realText) */
+function liabRow(x) {
+  const rw = x.realText ? x.realText : x.realWorldRate != null ? `בעולם האמיתי ≈ ${x.realWorldRate}% בשנה` : '';
+  return `<div class="row"><span>${escI(x.label)}${rw ? `<small class="rw">${x.gameRate != null ? `במשחק ${iso(Math.round(x.gameRate * 10) / 10 + '%')} בשנה · ` : ''}${escI(rw)}</small>` : ''}</span><span class="num">${fmtM(x.amount)}</span></div>`;
 }
 const grid = (rows) => `<div class="grid">${rows.filter(Boolean).join('')}</div>`;
 const big = (n, c) => `<b class="big num ${c ?? cls(n)}">${sgn(n)}</b>`;
@@ -637,10 +694,12 @@ function renderEvent(first) {
   const offers = ev.options.filter((o) => /^offer:/.test(o.id));
   const actions = ev.type === 'mystery' && ev.data.kind === 'quiz' ? optButtons(quizView(ev), () => true, 'quiz')
     : ev.type === 'market' && ev.data.kind === 'sell' && ev.data.offers.length ? optButtons(ev, (o) => o.kind !== 'sell') // sales are buttons inside the list
+    : ev.type === 'business' && ev.data.mode === 'manage' ? bizActions(ev)
     : hasPlans ? planPicker(ev)
     : hasEffects ? effectChoices(ev)
-    : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id));
-  c.innerHTML = head(ev) + body + shortfallLine(ev.data) + '<p class="err" role="alert"></p>' + actions;
+    : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id), '', ev.type === 'doodad' || ev.type === 'tax');
+  const bizM = ev.type === 'business' && ev.data.mode === 'manage';
+  c.innerHTML = head(ev) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + '<p class="err" role="alert"></p>' + actions;
   if (first) c.scrollTop = 0;
 }
 
@@ -649,7 +708,8 @@ const BODY = {
   payday(ev) {
     const d = { ...ev.data }; const plans = ev.options.some((o) => o.id.startsWith('plan:'));
     if (d.payslip) { d.gross = d.payslip.gross; d.net = d.payslip.net; }
-    const rows = [d.gross ? row('ברוטו', sgn(d.gross)) : null, d.gross ? row('מסים, ביטוח לאומי ופנסיה', fmtM(-(d.gross - (d.net ?? d.salary))), 'neg') : null,
+    const ps = d.payslip;
+    const rows = [d.gross ? row('ברוטו', sgn(d.gross)) : null, ps && ps.incomeTax ? row('מס הכנסה', fmtM(-ps.incomeTax), 'neg') : null, ps && ps.bl ? row('ביטוח לאומי ובריאות', fmtM(-ps.bl), 'neg') : null, ps && ps.pensionEmployee ? row('פנסיה (שלך)', fmtM(-ps.pensionEmployee), 'neg') : null,
       row(d.gross ? 'משכורת נטו' : 'משכורת', sgn(d.net ?? d.salary), 'pos'), row('הכנסה פסיבית', sgn(d.passive), cls(d.passive)), row('הוצאות', fmtM(-d.expenses), 'neg'), `<div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div>`];
     return grid(rows) + (plans ? '<h3 class="ph">איך תעביר את החודש הבא?</h3>' : '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>');
   },
@@ -690,8 +750,9 @@ const BODY = {
     const d = ev.data; const canSkip = ev.options.some((o) => o.id === 'skip');
     const kind = d.need === true ? '<p class="chipline"><em class="b warn">הוצאה הכרחית — אי אפשר לוותר</em></p>' : canSkip ? '<p class="chipline"><em class="b ok">פיתוי — מותר לוותר</em></p>' : '';
     return kind + grid([`<div class="row"><span>מחיר</span><b class="big num neg">${fmtM(d.amount)}</b></div>`,
-      d.installment ? row('בתשלומים', `${fmtM(d.installment)} בחודש, עד שתסגור`, 'neg') : '',
-      d.sub ? row('כמנוי', `${fmtM(d.sub)} בחודש — לתמיד`, 'neg') : '']) +
+      d.installments3 ? (() => { const a = d.installments3.amounts || []; return row('3 תשלומים בלי ריבית', a.every((x) => x === a[0]) ? `${a.length} × ${fmtM(a[0])}` : a.map((x) => fmtM(x)).join(' + ')); })() : '',
+      d.installment ? `<div class="row"><span>באשראי מתגלגל<small class="rw">עד שתסגור את כל החוב — החוב עצמו לא קטן</small></span>${num(`${fmtM(d.installment)} ריבית בחודש`, 'neg')}</div>` : '',
+      d.sub ? `<div class="row"><span>כמנוי<small class="rw">כל עוד הוא פעיל (במשחק אי אפשר לבטל)</small></span>${num(`${fmtM(d.sub)} בחודש`, 'neg')}</div>` : '']) +
       `<p class="note">יש לך ${num(fmtM(d.cash))} במזומן.${d.shortfall == null && d.amount > d.cash ? ' אין מספיק — אם תשלם, הבנק ייתן הלוואה.' : ''}</p>`;
   },
   market(ev) {
@@ -716,7 +777,7 @@ const BODY = {
   },
   mystery(ev) {
     const d = ev.data;
-    if (d.kind === 'quiz') return `<div class="quizq"><b>${escI(d.question)}</b><p class="note">תשובה נכונה = ${num(fmtM(d.reward), 'pos')}</p></div>`;
+    if (d.kind === 'quiz') return `<div class="quizq"><b>${escI(d.question)}</b><p class="note">${typeof d.reward === 'number' ? `תשובה נכונה = ${num(fmtM(d.reward), 'pos')}` : 'תשובה נכונה = שיעור חדש בספרייה + ⚡1. אין פרס כספי — רק הבנה.'}</p></div>`;
     if (d.kind === 'cash') return grid([`<div class="row"><span>${d.amount >= 0 ? 'נכנס לך' : 'יוצא לך'}</span>${big(d.amount)}</div>`]);
     if (d.kind === 'raise') return grid([row('המשכורת עולה', `${sgn(d.amount)} בחודש`, 'pos')]);
     if (d.kind === 'expense') return grid([row('ההוצאות משתנות', `${sgn(d.amount)} בחודש`, d.amount > 0 ? 'neg' : 'pos')]);
@@ -767,7 +828,112 @@ const BODY = {
       grid([row('יעילות המטרה', `×${d.eff}`, d.eff >= 1 ? 'pos' : 'neg')]) +
       `<p class="note">${d.eff < 1 ? 'שים לב: חלק גדול מהכסף לא מגיע למטרה עצמה.' : 'תרומה נותנת קצת השפעה עכשיו, והשאר מגיע לאורך החודשים הבאים — וממשיך לגדול.'}${d.pledge ? ` הוראת קבע: ${num(fmtM(d.pledge.amount))} בחודש ← ${num('+' + d.pledge.impact)} השפעה כל חודש.` : ''}</p>`;
   },
+  /* v3.1 K tile: a managed business (offer → manage). Owner-run = active income; with a manager = passive. */
+  business(ev) {
+    const d = ev.data || {};
+    if (d.mode === 'offer') {
+      const L = (d.forecast3 && d.forecast3.lines) || []; const ln = (k) => L.find((x) => x.k === k);
+      const rev = ln('revenue'), gp = ln('gp'), np = ln('np');
+      const A = d.archetype || {};
+      return `<p class="chipline"><em class="b">${BIZ_ICON[A.icon] || '🏪'} ${esc(A.short || A.name || 'עסק')}</em>${A.price ? `<em class="b">מחיר ל${esc(unitOne(A.unit))}: ${num(fmtP(A.price))}</em>` : ''}</p>` +
+        grid([`<div class="row"><span>הון לפתיחה</span><b class="num">${fmtM(d.startCapital)}</b></div>`,
+          rev ? row('הכנסות ב־3 החודשים הראשונים (בלי מע"מ)', fmtM(rev.amount)) : '',
+          gp ? row(`רווח גולמי${gp.pct != null ? ` (${gp.pct}%)` : ''}`, fmtM(gp.amount), cls(gp.amount)) : '',
+          np ? `<div class="row"><span>רווח נקי צפוי ב־3 חודשים</span>${big(np.amount)}</div>` : '']) +
+        (d.breakEven && d.breakEven.text ? `<p class="note">⚖️ ${escI(d.breakEven.text)}</p>` : '') +
+        `<div class="bizkind"><p><b>אתה עובד בו</b> = הכנסה <b>אקטיבית</b> (משרה נוספת) · 🔋 ${nrg(-(d.ownerEnergy || 0))} בחודש.</p><p><b>עם מנהל</b> = הכנסה <b>פסיבית</b> שנספרת ליעד · 🔋 ${nrg(-(d.managerEnergy || 0))} — אבל משלמים לו משכורת.</p></div>` +
+        '<p class="note">תחזית בלבד: לקוחות, מחירים והפתעות משנים את התוצאה כל חודש.</p>';
+    }
+    const s = d.summary || {}; const h = s.hist || []; const last = h[h.length - 1];
+    const passive = s.incomeKind === 'passive' || s.manager;
+    return `<p class="chipline"><em class="b ${passive ? 'ok' : 'warn'}">${passive ? 'עם מנהל — הכנסה פסיבית (נספרת ליעד)' : 'אתה עובד בו — הכנסה אקטיבית (לא נספרת ליעד)'}</em><em class="b">🔋 ${nrg(-(s.ownerEnergy || 0))} בחודש</em></p>` +
+      grid([last ? `<div class="row"><span>רווח נקי בחודש האחרון</span>${big(last.np)}</div>` : '',
+        row('מחיר', fmtP(s.price ?? 0)), row('עובדים', String(s.staff ?? 0) + (s.manager ? ' + מנהל' : '')),
+        row('שיווק בחודש', fmtM(s.marketing || 0)), row('משיכה לכיס שלך בחודש', fmtM(s.draw || 0)),
+        row('בקופת העסק', fmtM(s.cash || 0), cls(s.cash || 0)),
+        s.valuation ? row('שווי אם תמכור', fmtM(s.valuation.price || 0)) : '']) +
+      (h.length > 1 ? `<div class="mini"><p class="mh">רווח נקי לפי חודש</p>${spark(h.map((x) => x.np), { color: (last && last.np >= 0) ? 'var(--green)' : 'var(--red)', w: 300, h: 34 })}</div>` : '') +
+      (s.breakEven && s.breakEven.text ? `<p class="note">⚖️ ${escI(s.breakEven.text)}</p>` : '') +
+      (d.forecast3 != null ? `<p class="note">אם לא משנים כלום — תחזית ל־3 חודשים: ${num(sgn(d.forecast3), cls(d.forecast3))} רווח נקי.</p>` : '');
+  },
+  tax(ev) {
+    const d = ev.data || {};
+    const canReport = ev.options.some((o) => o.id === 'report');
+    return grid([d.refund ? row('החזר מס (שילמת יותר מדי במשכורת)', sgn(d.refund), 'pos') : '',
+      d.bill ? row('מס על העסק הצדדי שלא דווח', fmtM(-d.bill), 'neg') : '',
+      (d.refund && d.bill) ? `<div class="row"><b>סה"כ</b>${big(d.net)}</div>` : '',
+      d.paidTotal ? row('מס הכנסה וביטוח לאומי ששילמת עד עכשיו', fmtM(d.paidTotal)) : '',
+      d.effectiveRate ? row('מס אפקטיבי מהברוטו', iso(d.effectiveRate + '%')) : '']) +
+      (canReport ? '<p class="note">🧾 עסק צדדי בלי תיק = חוב מס שמחכה לסוף השנה, ואם לא מגיעים לכאן — עוד 10% קנס. פתיחת תיק = מקדמות קטנות כל חודש, בלי הפתעות.</p>' : '');
+  },
+  edu(ev) {
+    const d = ev.data || {}; const p = Math.round((d.studyProgress || 0) * 100);
+    return `<div class="wbox"><div class="wl"><span>🎓 התקדמות בלימודים</span><b class="num">${p}%</b></div><div class="track"><i style="width:${Math.max(1, p)}%"></i></div>
+      <p class="note">${p >= 100 ? 'סיימת ללמוד — ההעלאה כבר בתלוש.' : 'בסוף הלימודים: העלאה קבועה בברוטו. עד אז — שכר לימוד ופחות כוח.'}</p></div>`;
+  },
 };
+/** signed small number as an LTR isolate (−12 / +4) */
+const nrg = (n) => `<span class="num">${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Math.round(n))}</span>`;
+const BIZ_ICON = { coffee: '☕', washer: '🧺', pizza: '🍕', rocket: '📱', box: '📦' };
+const unitOne = (u) => ({ 'כוסות': 'כוס', 'כביסות': 'כביסה', 'פיצות': 'פיצה', 'הזמנות': 'הזמנה', 'מנויים': 'מנוי' }[u] || 'יחידה');
+const BIZ_DONE = { 'biz:suggest': 'ההמלצה בוצעה', 'biz:manager': 'עדכנת את המנהל', 'biz:price:up': 'המחיר עלה', 'biz:price:down': 'המחיר ירד', 'biz:mkt:up': 'יותר שיווק', 'biz:mkt:down': 'פחות שיווק', 'biz:hire': 'גייסת עובד', 'biz:fire': 'פיטרת עובד', 'biz:draw:up': 'תמשוך יותר לכיס', 'biz:draw:down': 'תמשוך פחות', 'biz:order': 'הזמנת מלאי', 'biz:expand': 'העסק מתרחב' };
+/** Business decisions: each one with its 3-month effect on net profit, 🔋 cost and cash you must inject. Stays open until "המשך". */
+function bizActions(ev) {
+  const biz = ev.options.filter((o) => o.kind === 'biz');
+  const sell = ev.options.find((o) => o.id === 'biz:sell');
+  const rest = ev.options.filter((o) => o.kind !== 'biz' && o.id !== 'biz:sell');
+  const tile = (o, i) => {
+    const e = o.effects || {}; const dl = e.delta3 || 0;
+    const chips = [o.enabled ? `<em class="fx ${cls(dl)}">${dl ? `${iso(sgn(dl))} ב־3 חודשים` : 'בלי שינוי ברווח'}</em>` : '',
+      o.enabled && e.energy ? `<em class="fx">🔋 ${nrg(-Math.abs(e.energy))} בחודש</em>` : '',
+      o.cashNeeded > 0 ? `<em class="fx neg">הזרמה מכיסך ${iso(fmtM(o.cashNeeded))}</em>` : ''].join('');
+    return `<div class="opt"><button class="choice biz ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="bwhy${i}"`}><b>${escI(o.label)}</b><span class="fxs">${chips}</span></button>${!o.enabled && o.reason ? `<small class="why" id="bwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
+  };
+  const sl = sell && sell.sale ? `<div class="sellrow biz"><div><b>למכור את העסק</b><p class="note">נכנס לך <b class="num pos">${fmtM(sell.sale.net)}</b>${sell.sale.tax ? ` <small>(אחרי מס ${num(fmtM(sell.sale.tax))})</small>` : ''}${sell.sale.text ? `<br>${escI(sell.sale.text)}` : ''}</p></div><button data-o="biz:sell" class="sell" ${sell.enabled ? '' : 'disabled'}>למכור</button></div>` : '';
+  const lr = ev.data && ev.data.lastResult;
+  const done = lr ? `<p class="okmsg">✔ ${escI(BIZ_DONE[lr.action] || 'ההחלטה נקלטה')} — נכנס לתוקף מהחודש הבא.</p>` : '';
+  return `${done}${vlineHtml(evState && evState.verdict)}<h3 class="ph">מה עושים החודש?</h3><div class="choices bizgrid">${biz.map(tile).join('')}</div>${sl}` + optButtons({ ...ev, options: rest });
+}
+
+/* ============================================================ v3.2: decision verdict (choose().decision) */
+const VERDICT = { strong: ['החלטה חזקה', 'pos'], ok: ['החלטה סבירה', 'ok'], mixed: ['יש מה לשפר', 'mid'], risky: ['החלטה מסוכנת', 'neg'], costly: ['החלטה יקרה', 'neg'] };
+export const PRINCIPLE = { cashflow: 'תזרים', cushion: 'כרית ביטחון', debt_cost: 'מחיר החוב', leverage: 'מינוף', rate_risk: 'סיכון ריבית', diversification: 'פיזור', time_in_market: 'זמן בשוק', opportunity_cost: 'מחיר הוויתור', risk_size: 'גודל הסיכון', fees_tax: 'מסים ועמלות', time: 'זמן וכוח', knowledge: 'ידע' };
+function verdictParts(d) {
+  const [label, c] = VERDICT[d.verdict] || ['ההחלטה שלך', 'mid'];
+  let why = String(d.why || '');
+  if (d.score >= 85 && /^היה עדיף:/.test(why)) why = why.replace(/^היה עדיף:\s*/, 'קרוב מאוד לטוב ביותר. טיפה עדיף: ');
+  const pr = (d.principles || []).map((p) => PRINCIPLE[p]).filter(Boolean)[0];
+  return { label, c, why, pr };
+}
+/** a one-line verdict inside an open card (trade window / business decisions) */
+function vlineHtml(d) {
+  if (!d) return '';
+  const v = verdictParts(d);
+  return `<p class="vline ${v.c}" role="status"><b class="num">${Math.round(d.score)}</b><span><b>${esc(v.label)}</b> · ${escI(v.why)}</span></p>`;
+}
+let vdT = 0;
+/** Small, non-blocking verdict pill above the mentor bar after a decision (tap to hide). */
+export function verdict(d, { inCard = false } = {}) {
+  if (!d || d.score == null) return;
+  if (inCard && evState) {
+    evState.verdict = d;
+    const c = $('#evCard'); if (!c) return;
+    c.querySelector('.vline')?.remove();
+    const ph = c.querySelector('.bizgrid') && c.querySelector('h3.ph');
+    if (ph) ph.insertAdjacentHTML('beforebegin', vlineHtml(d)); else { const h = c.querySelector('#evTitle'); if (h) h.insertAdjacentHTML('afterend', vlineHtml(d)); }
+    return;
+  }
+  let el = $('#verdict');
+  if (!el) { el = document.createElement('div'); el.id = 'verdict'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+  el.onclick = () => { el.className = ''; };
+  const v = verdictParts(d);
+  el.innerHTML = `<b class="vs num">${Math.round(d.score)}</b><div><small>${esc(v.label)}${v.pr ? ` · ${esc(v.pr)}` : ''}</small><span>${escI(v.why)}</span></div>`;
+  const bar = $('#bar')?.getBoundingClientRect();
+  if (bar) { el.style.bottom = Math.round(innerHeight - bar.top + 8) + 'px'; el.style.left = Math.round(bar.left + bar.width / 2) + 'px'; }
+  el.className = 'on ' + v.c;
+  clearTimeout(vdT);
+  vdT = setTimeout(() => { el.className = v.c; }, Math.min(6000, 2600 + v.why.length * 35) * Math.max(0.7, speed));
+}
 const cnt = (n, one, many) => (n === 0 ? `אין ${many}` : n === 1 ? `${one} אחד` : `${n} ${many}`);
 const FEM = new Set(['הריבית', 'ההשפעה']);
 /** "X עלה/ירד/לא זז" with gender agreement (הריבית עלתה, הדולר עלה). */
@@ -777,24 +943,31 @@ function fromTo(a, b, f, what, goodDir) {
   return `<div class="fromto"><span class="num">${f(a)}</span><i class="${good > 0 ? 'pos' : good < 0 ? 'neg' : ''}">${dir > 0 ? ICON.up : dir < 0 ? ICON.down : '='}</i><b class="num ${good > 0 ? 'pos' : good < 0 ? 'neg' : ''}">${f(b)}</b><small>${moved(what, dir)}</small></div>`;
 }
 
-/** Index fund: price path so far + "what time in the market does" (₪1,000/month at ~7% a year). */
+/** Index fund: price path so far + the engine's projection RANGE (p10/p50/p90, invest.js projectRange) — never a promised return. */
+/** the compounding box for any index-fund view (game.js index modal) — engine data only */
+export function indexBox(ix) { return ix && ix.projection ? compoundBox(ix) : ''; }
 function compoundBox(d) {
   const hist = (d.history && d.history.length > 1 ? d.history : null);
-  const fv = (pm, yrs, r = 0.07) => { const i = r / 12; return pm * ((Math.pow(1 + i, yrs * 12) - 1) / i); };
-  const bars = [5, 10, 20, 30].map((y) => ({ y, v: fv(1000, y), put: 1000 * 12 * y }));
-  const mx = bars[bars.length - 1].v;
-  return `<div class="comp"><p class="mh">📈 קרן מחקה מדד — כוחה של ריבית דריבית</p>${hist ? spark(hist, { color: 'var(--green)', w: 300, h: 40 }) : ''}
-    <div class="cbars">${bars.map((b) => `<div><i style="height:${Math.max(6, (b.v / mx) * 70)}px"><s style="height:${(b.put / b.v) * 100}%"></s></i><small>${b.y} שנים</small><b class="num">${fmtC(b.v)}</b></div>`).join('')}</div>
-    <p class="note">₪1,000 בחודש, בערך 7% בשנה. החלק הכהה = מה ששמת; כל השאר = הריבית שעבדה בשבילך. הזמן בשוק חשוב יותר מתזמון השוק.</p></div>`;
+  const P = d.projection;
+  let range = '';
+  if (P && P.p50) {
+    const mx = Math.max(P.p90 || 0, 1);
+    const bar = (lbl, v, c) => `<div><i class="${c}" style="height:${Math.max(6, (v / mx) * 70)}px"><s style="height:${Math.min(100, (P.contributed / Math.max(1, v)) * 100)}%"></s></i><small>${lbl}</small><b class="num">${fmtC(v)}</b></div>`;
+    range = `<p class="note c">${num(fmtM(P.monthly))} בחודש במשך ${P.years} שנה (שמת ${num(fmtC(P.contributed))}) — לאן זה יכול להגיע:</p>
+      <div class="cbars">${bar('תרחיש רע', P.p10, 'lo')}${bar('תרחיש אמצעי', P.p50, 'mid')}${bar('תרחיש טוב', P.p90, 'hi')}</div>
+      ${P.lossChance != null ? `<p class="note c">סיכוי לסיים מתחת למה ששמת: ${num(Math.round(P.lossChance * 100) + '%')}</p>` : ''}
+      <p class="note">${escI(P.text || P.note || '')} החלק הכהה = מה ששמת; השאר = תשואה על תשואה.</p>`;
+  }
+  return `<div class="comp"><p class="mh">📈 קרן מחקה מדד — ריבית דריבית (בלי הבטחות)</p>${hist ? spark(hist, { color: 'var(--green)', w: 300, h: 40 }) : ''}${range}</div>`;
 }
 
 /* ---------- trade window (v1.1: slider dir=ltr, clamp, ±steps, max/all/reset, repeated buy/sell, 'סיום') */
 function tradeHtml(ev) {
   const d = ev.data; const [s1, s2] = d.step || [10, 100]; const u = esc(d.unit);
-  return `${head(ev)}<div class="grid"><div class="row"><span>${esc(d.name)}</span><b class="big num" id="qprice">${fmtP(d.price)}</b></div>
+  return `${head(ev)}${vlineHtml(evState && evState.verdict)}<div class="grid"><div class="row"><span>${esc(d.name)}</span><b class="big num" id="qprice">${fmtP(d.price)}</b></div>
     <div class="row"><span>יש לך</span><span class="num rtl" id="qhold"></span></div><div class="row" id="qgainRow" hidden><span>אם תמכור הכל עכשיו</span><b class="num" id="qgain"></b></div><div class="row"><span>מזומן</span><span class="num" id="qcash"></span></div>
     ${d.div ? `<div class="row"><span>תשלום חודשי ליחידה</span><span class="num pos">${fmtP(d.div)}</span></div>` : ''}</div>
-    ${d.ticker === 'IDX' || d.kind === 'index' ? compoundBox(d) : ''}
+    ${d.ticker === 'IDX' || d.kind === 'index' || d.index ? compoundBox(d) : ''}${realityLine(d)}
     ${d.wiped && d.wiped.qty ? `<p class="warn">המטבע הקודם (${esc(d.wiped.oldName)}) מת: ${N(d.wiped.qty)} יחידות ששוות היו ${num(fmtM(d.wiped.value))} — נמחקו.</p>` : ''}
     <label class="sr" for="qs">כמות ${u}</label><input type="range" id="qs" dir="ltr" min="0" step="1" value="0">
     <div class="qty" dir="ltr"><button data-q="${-s2}" aria-label="פחות ${s2}">−${N(s2)}</button><button data-q="${-s1}" aria-label="פחות ${s1}">−${N(s1)}</button><output id="qv" aria-live="polite">0</output><button data-q="${s1}" aria-label="עוד ${s1}">+${N(s1)}</button><button data-q="${s2}" aria-label="עוד ${s2}">+${N(s2)}</button></div>
@@ -818,11 +991,11 @@ function tradeUpd(fromEvent = false) {
   $('#qprice').textContent = fmtP(d.price);
   $('#qhold').textContent = `${N(d.qty)} ${d.unit} · ${fmtM(d.holdingValue)}${d.qty ? ` · קנית בממוצע ${fmtP(d.avg)}` : ''}`;
   $('#qcash').textContent = fmtM(d.cash);
-  const gain = d.qty ? Math.round((d.price - d.avg) * d.qty) : 0;
   $('#qgainRow').hidden = !d.qty;
   if (d.qty) {
-    const g = $('#qgain'); const ug = d.unrealizedGain ?? gain; const tax = d.taxRate && ug > 0 ? Math.round(ug * d.taxRate) : 0;
-    g.innerHTML = `${(ug > 0 ? '+' : '') + fmtM(ug)}${tax ? ` <small class="mut">(מס רווחי הון ${Math.round(d.taxRate * 100)}%: ${fmtM(-tax)})</small>` : ''}`; g.className = 'num rtl ' + cls(ug);
+    const g = $('#qgain'); const ug = d.unrealizedGain ?? 0; // engine numbers only (audit D3/D4)
+    const taxTxt = ug > 0 && d.unrealizedTax ? ` <small class="mut">(מס רווחי הון: ${fmtM(-d.unrealizedTax)})</small>` : ug > 0 && d.taxRate ? ` <small class="mut">(על הרווח משלמים מס רווחי הון ${Math.round(d.taxRate * 100)}%)</small>` : '';
+    g.innerHTML = `${(ug > 0 ? '+' : '') + fmtM(ug)}${taxTxt}`; g.className = 'num rtl ' + cls(ug);
   }
   const lr = d.lastResult;
   const last = lr && fromEvent ? `${lr.action === 'buy' ? 'קנית' : 'מכרת'} ${N(lr.qty)} ב־${iso(fmtP(lr.price))}. ` : '';

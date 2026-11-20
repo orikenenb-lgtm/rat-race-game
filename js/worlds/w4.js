@@ -12,12 +12,12 @@
 //  • Win = net worth ≥ target AND impact ≥ goal.impact.
 import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
 
-const board = ring(['OAOGADOLA', 'MOAXG?OAL', 'OAEGOMADO', 'AXOLGMTAI']); // v3: 40 tiles, paydays on the corners
+const board = ring(['OAOGADOLA', 'KOAXG?OAL', 'OAEGOMADO', 'AXOLGMTAI']); // v3: 40 tiles, paydays on the corners
 
 export default {
   id: 'w4', order: 4, name: 'עמק העתיד', mechanic: 'angel',
   tagline: 'סטארט־אפים, חלומות וכסף גדול. כאן מנצחים רק עם שני מדדים: שווי — והשפעה.',
-  goalLabel: 'שווי נקי של ₪10 מיליון וגם 100 נקודות השפעה',
+  goalLabel: 'שווי נקי של ₪9 מיליון וגם 90 נקודות השפעה',
   lesson: 'רוב הסטארט־אפים נכשלים, ומעטים מחזירים פי 50 — זה חוק החזקה. לכן מפזרים הרבה צ\'קים קטנים ומחכים בסבלנות, ולא רודפים אחרי הייפ. ועושר אמיתי נמדד גם במה שנתת: השפעה שמתחילה מוקדם — מתגלגלת.',
   theme: {
     sky: ['#050816', '#1b1f4b'], fog: '#0b1030', board: '#e8f1ff', boardEdge: '#94a3b8', center: '#dbeafe', accent: '#22d3ee', accent2: '#a78bfa',
@@ -30,9 +30,9 @@ export default {
   }),
   loan: { unit: 25000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
-  goal: { type: 'netWorthImpact', target: 10_000_000, impact: 100 },
-  maxMonths: 54,
-  stars: { t2: 40, t3: 33 },
+  goal: { type: 'netWorthImpact', target: 9_000_000, impact: 90 },
+  maxMonths: 70,
+  stars: { t2: 45, t3: 37 },
   daily: { chars: ['founder', 'engineer'], maxMonths: 24 },
   start: { impact: 0 },
   doodadWealth: 0.012, // lifestyle of the rich scales with max(salary, net worth × this)
@@ -40,32 +40,35 @@ export default {
     checks: [100000, 300000, 800000],
     revealMin: 5, revealMax: 12, fakeHype: 0.3,
     // power-law outcome table at quality 4 / hype 2; q = per point of (team+traction−4), h = per point of (hype−2)
+    // expected multiple ≈ 1.1× at quality 4 / hype 2 (0.6× for hyped decks, ~2× for the best teams): angel investing is a
+    // high-variance bet that roughly returns the money on average — not a money machine (education review C11)
     outcomes: [
-      { m: 0, w: 0.6, q: -0.06, h: -0.02 },
-      { m: 0.5, w: 0.12 },
-      { m: 2, w: 0.11, q: 0.012 },
-      { m: 5, w: 0.08, q: 0.014, h: 0.005 },
-      { m: 25, w: 0.055, q: 0.014, h: 0.006 },
-      { m: 100, w: 0.022, q: 0.007, h: 0.003 },
+      { m: 0, w: 0.65, q: -0.04, h: -0.02 },
+      { m: 0.5, w: 0.15 },
+      { m: 2, w: 0.11, q: 0.01 },
+      { m: 5, w: 0.06, q: 0.01, h: 0.005 },
+      { m: 20, w: 0.025, q: 0.006, h: 0.004 },
+      { m: 50, w: 0.007, q: 0.002, h: 0.002 },
     ],
-    hypeMult: [1.2, 0.85, 0.4],
-    oddsText: 'בערך: 6 מכל 10 נכשלים, 2 מחזירים בערך את הכסף, 1 עושה פי 5, ואחד מכל 14 — פי 25 ומעלה (לפעמים פי 100).',
+    hypeMult: [1.0, 0.75, 0.45],
+    oddsText: 'בערך: 2 מכל 3 נכשלים, 1 מכל 7 מחזיר חצי, 1 מכל 9 מכפיל, 1 מכל 17 עושה פי 5, ובערך 1 מכל 30 — פי 20 ומעלה. בממוצע בערך מקבלים את הכסף בחזרה, עם פיזור עצום.',
   },
   // a gift gives `immediate` of its impact now and the rest spread over `vest` months; realised impact then ripples.
   giving: { unit: 20000, levels: [100000, 400000, 1500000], pledge: 15000, pledgeBoost: 1.2, ripple: 0.01, immediate: 0.3, vest: 10 },
-  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', angel: 'rocket', giving: 'foundation' },
-  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' } },
+  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', biz: 'campus', angel: 'rocket', giving: 'foundation' },
+  bizOffers: ['app', 'laundromat', 'pizza'],
+  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
   tickers: {
     IDX: { ...INDEX_TICKER, model: null },
     INDX: { name: 'INDX · מדד חדשנות עולמי', start: 100, div: 0.5, step: [100, 1000], model: null },
   },
 
   characters: [
-    { id: 'founder', age: 34, family: { partner: 'married', kids: 1 }, name: 'יזמית אחרי אקזיט', icon: 'rocket', maxMonths: 54, stars: { t2: 39, t3: 28 }, desc: 'מכרת את החברה שלך. הרבה מזומן, כמעט בלי משכורת — הכסף צריך לעבוד.', salary: 12000, cash: 3200000,
+    { id: 'founder', gender: 'f', age: 34, family: { partner: 'married', kids: 1 }, name: 'יזמית אחרי אקזיט', icon: 'rocket', maxMonths: 70, stars: { t2: 44, t3: 33 }, desc: 'מכרת את החברה שלך. הרבה מזומן, כמעט בלי משכורת — הכסף צריך לעבוד.', salary: 12000, cash: 3200000,
       expenses: [['משכנתא', 12000], ['רכב', 3500], ['אוכל ובילויים', 6000], ['ילדים וחוגים', 3500]] },
-    { id: 'engineer', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 52, stars: { t2: 40, t3: 33 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
+    { id: 'engineer', gender: 'm', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 60, stars: { t2: 45, t3: 37 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
       expenses: [['משכנתא', 12000], ['שני רכבים', 5000], ['אוכל ובילויים', 8000], ['גן ובית ספר', 7000]] },
-    { id: 'social', age: 28, family: { partner: 'together', kids: 0 }, name: 'יזם חברתי', icon: 'heart', maxMonths: 68, stars: { t2: 45, t3: 37 }, desc: 'פחות כסף, אבל כבר יש לך השפעה ורשת של אנשים טובים.', salary: 22000, cash: 1300000, impact: 20,
+    { id: 'social', gender: 'm', age: 28, family: { partner: 'together', kids: 0 }, name: 'יזם חברתי', icon: 'heart', maxMonths: 84, stars: { t2: 52, t3: 40 }, desc: 'פחות כסף, אבל כבר יש לך השפעה ורשת של אנשים טובים.', salary: 22000, cash: 1300000, impact: 20,
       expenses: [['שכירות', 7000], ['רכב', 2000], ['אוכל ושוטף', 4500], ['ביטוחים', 1500]] },
   ],
 
@@ -160,15 +163,15 @@ export default {
   ],
 
   mystery: [
-    { w: 8, kind: 'cash', amount: 150000, title: 'מענק מחקר', text: 'קרן ממשלתית אהבה את הרעיון שלך. ₪150,000.', after: 'כסף חינם הוא ההזדמנות הכי טובה לפזר עוד צ\'ק קטן.' },
+    { w: 8, kind: 'cash', amount: 150000, title: 'מענק מחקר', text: 'קרן ממשלתית אהבה את הרעיון שלך. ₪150,000.', after: 'מענק הוא רגע לעצור ולחשוב: קרן חירום? חוב לסגור? נכס יציב? או צ\'ק קטן — רק מכסף שמוכנים להפסיד.' },
     { w: 6, kind: 'cash', amount: -80000, title: 'תביעה על פטנט', text: 'מישהו טוען שהוא המציא את זה קודם. עורכי דין עולים כסף.', after: 'גם בעמק העתיד יש הוצאות לא צפויות. כרית — תמיד.' },
     { w: 3, kind: 'golden', title: 'טלפון ממשקיע ותיק' },
     { w: 5, kind: 'impact', impact: 5, title: 'הרצאה בבית ספר', text: 'סיפרת לתלמידי י"א איך בונים עסק. שלושה מהם כבר שלחו לך רעיונות.', after: 'השפעה לא תמיד עולה כסף. לפעמים רק זמן ולב.' },
     { w: 3, kind: 'raise', amount: 5000, title: 'קידום', text: 'המשכורת עולה ב־₪5,000 בחודש.', after: 'עוד מזומן כל חודש = עוד צ\'קים קטנים, או עוד נתינה.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'יש לך ₪1 מיליון להשקיע בסטארט־אפים. מה הכי חכם?', answers: ['הכל בחברה אחת שנראית מבטיחה', 'עשרה צ\'קים קטנים בחברות שונות', 'לחכות שמישהו יגיד מה ינצח'], correct: 1, reward: 100000, explain: 'רוב החברות נכשלות, מעטות עושות פי 50. עם עשרה צ\'קים — הסיכוי לתפוס את המנצחת גדל פי עשרה.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'סטארט־אפ שכולם מדברים עליו מבקש שווי ענק. מה זה אומר לך?', answers: ['שהוא בטוח יצליח', 'שגם אם יצליח, הרווח שלך יהיה קטן יותר', 'שצריך להשקיע הכי הרבה'], correct: 1, reward: 100000, explain: 'הייפ = מחיר גבוה. גם הצלחה גדולה מחזירה פחות, כי קנית ביוקר.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'למה כדאי להתחיל לתרום מוקדם ולא רק בסוף?', answers: ['כי השפעה נבנית לאט ומתגלגלת עם הזמן', 'כי בסוף לא יהיה כסף', 'אין הבדל'], correct: 0, reward: 100000, explain: 'מלגה של היום היא בוגר בעוד שנה. השפעה לוקחת זמן להיבנות — ואחר כך היא מתגלגלת, כמו ריבית דריבית.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'החברה שהשקעת בה ירדה בשווי על הנייר. מה עושים?', answers: ['מוכרים מיד בכל מחיר', 'זוכרים שזה עוד לא כסף, ובודקים את העסק עצמו', 'משקיעים הכל עוד פעם'], correct: 1, reward: 100000, explain: 'שווי על הנייר זז עם מצב הרוח של השוק. מה שקובע זה העסק עצמו — וסבלנות.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'יש לך ₪1 מיליון להשקיע בסטארט־אפים. מה הכי חכם?', answers: ['הכל בחברה אחת שנראית מבטיחה', 'עשרה צ\'קים קטנים בחברות שונות', 'לחכות שמישהו יגיד מה ינצח'], correct: 1, reward: 'lesson', lesson: 'power_law', explain: 'רוב החברות נכשלות ומעטות מצליחות בגדול. עם צ\'ק אחד, כשהסיכוי להצלחה ענקית הוא בערך 1 ל־30, כמעט בטוח שתפספס. עם עשרה צ\'קים הסיכוי לתפוס לפחות אחת עולה לבערך 30% — לא פי עשרה, אבל הרבה יותר. וגם אז: רק חלק קטן מהכסף הולך לסטארט־אפים.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'סטארט־אפ שכולם מדברים עליו מבקש שווי ענק. מה זה אומר לך?', answers: ['שהוא בטוח יצליח', 'שגם אם יצליח, הרווח שלך יהיה קטן יותר', 'שצריך להשקיע הכי הרבה'], correct: 1, reward: 'lesson', lesson: 'bubble', explain: 'הייפ = מחיר גבוה. גם הצלחה גדולה מחזירה פחות, כי קנית ביוקר.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'למה כדאי להתחיל לתרום מוקדם ולא רק בסוף?', answers: ['כי השפעה נבנית לאט ומתגלגלת עם הזמן', 'כי בסוף לא יהיה כסף', 'אין הבדל'], correct: 0, reward: 'lesson', lesson: 'giving', explain: 'מלגה של היום היא בוגר בעוד שנה. השפעה לוקחת זמן להיבנות — ואחר כך היא מתגלגלת, כמו ריבית דריבית.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'החברה שהשקעת בה ירדה בשווי על הנייר. מה עושים?', answers: ['מוכרים מיד בכל מחיר', 'זוכרים שזה עוד לא כסף, ובודקים את העסק עצמו', 'משקיעים הכל עוד פעם'], correct: 1, reward: 'lesson', lesson: 'drawdown', explain: 'שווי על הנייר זז עם מצב הרוח של השוק. מה שקובע זה העסק עצמו — וסבלנות.' },
   ],
 
   tipDoodad: 2000000,
@@ -179,7 +182,7 @@ export default {
     dealAsk: ['שלושה מספרים: תזרים, שווי מול מחיר, ומגמה. נכס טוב מנצח בשלושתם.', 'האם זה שווה יותר ממה שמבקשים? ומה יקרה לערך שלו בעוד שנה?'],
     pitchAsk: ['כמעט כל סטארט־אפ נשמע מדהים בפיץ\'. איך הצוות? יש לקוחות? וכמה הייפ אתה משלם?', 'אל תנסה לנחש את המנצח. תשאל: כמה צ\'קים קטנים צריך כדי לתפוס אחד?'],
     pitchIn: 'נכנסת! עכשיו יש לך {n} סטארט־אפים פעילים. רוב התשובות יגיעו רק בעוד כמה חודשים — סבלנות.',
-    pitchPass: 'ויתרת. לגיטימי — רק תזכור שבחוק החזקה, מי שלא משחק לא יתפוס את פי ה־50.',
+    pitchPass: 'ויתרת. לגיטימי לגמרי — רוב הסטארט־אפים נכשלים, ומשקיע טוב בוחר מעט ובזהירות.',
     angelFail: 'הסטארט־אפ נסגר. זה קורה לרובם — בגלל זה מפזרים.',
     angelSmall: 'אקזיט קטן. לא כל הצלחה היא חד־קרן — וזה בסדר.',
     angelBig: 'פי {mult}! זה חוק החזקה: אחד שמצליח בגדול מכסה את כל הכישלונות.',

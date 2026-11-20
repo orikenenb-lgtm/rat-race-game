@@ -22,6 +22,9 @@ const MONEY_RE = /[−+-]?[₪$]\d{1,3}(?:,\d{3})*(?:\.\d+)?/g;
 const iso = (t) => esc(t).replace(MONEY_RE, (m) => `<bdi dir="ltr" class="lb-num">${m}</bdi>`);
 /** Isolate a whole short LTR token (numbers, "6 / 12", percentages). */
 const num = (t) => `<bdi dir="ltr" class="lb-num">${esc(t)}</bdi>`;
+/** Server / other-player numbers → a safe integer before they touch markup (strings like "<img …>" become the fallback). */
+const int = (v, d = 0) => { const n = Math.floor(+v); return Number.isFinite(n) ? n : d; };
+const HEX_RE = /^#[0-9a-f]{3,8}$/i;
 const cardArt = (wid) => asset(`assets/${wid}/card.png`);
 const freeKey = (wid) => 'rr2-save-free-' + wid;
 const rankedKey = (rid) => 'rr2-save-' + rid;
@@ -51,7 +54,7 @@ const NEW_HERE = {
   fx: 'שער הדולר, גידור, וזהב שמציל במשבר.',
   angel: 'השקעות אנג׳ל לפי חוק החזקה — ונתינה שמשנה עולם.',
 };
-/** v3: ★★★ also needs happiness ≥ starThresholds().happy (engine default 60). */
+/** v3: ★★★ also needs happiness ≥ starThresholds().happy; v3.2: and an emergency fund of starThresholds().fundMonths months. */
 const HAPPY_RULE = true;
 const MODE_NAME = { free: 'משחק חופשי', daily: 'האתגר היומי', weekly: 'האתגר השבועי', challenge: 'אתגר קבוצתי', history: 'מכונת הזמן' };
 const PAWN_INDEX = Object.fromEntries(P.PAWNS.map((p, i) => [p.id, i]));
@@ -68,12 +71,13 @@ function starsHtml(n, cls = '') {
   n = Math.max(0, Math.min(3, n | 0));
   return `<span class="lb-stars ${cls}" role="img" aria-label="${n} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<i class="${i < n ? 'on' : ''}">★</i>`).join('')}</span>`;
 }
-const starStr = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
+const starStr = (n) => { n = Math.max(0, Math.min(3, Math.floor(+n) || 0)); return '★'.repeat(n) + '☆'.repeat(3 - n); };
 function titleIdx(total) { let k = 0; TITLES.forEach((t, i) => { if (total >= t.min) k = i; }); return k; }
 function titleBadge(total) { return `<span class="lb-title lb-t${titleIdx(total || 0)}">${esc(titleFor(total || 0))}</span>`; }
 function pawnHtml(id, color, cls = '') {
-  const i = PAWN_INDEX[id] ?? 0;
-  return `<span class="lb-pawn ${cls} ${color ? '' : 'raw'}" style="--pi:${i};${color ? `--pc:${color}` : ''}" aria-hidden="true"></span>`;
+  const i = Object.hasOwn(PAWN_INDEX, id) ? PAWN_INDEX[id] : 0;
+  const c = typeof color === 'string' && HEX_RE.test(color) ? color : null;
+  return `<span class="lb-pawn ${cls} ${c ? '' : 'raw'}" style="--pi:${i};${c ? `--pc:${c}` : ''}" aria-hidden="true"></span>`;
 }
 /** 1–3 per character, from the per-character ★★ threshold (≈ median months of good play): longer = harder. */
 function difficulty(w) {
@@ -139,8 +143,13 @@ const lobbyVisible = () => { const o = overlay(); return !!o && !o.hidden; };
 function html(markup) {
   const r = root(); if (!r) return;
   r.innerHTML = markup;
+  imgFallbacks(r);
   const o = overlay(); if (o) o.scrollTop = 0;
 }
+/** Broken art → hide/remove it. No inline onerror="…" handlers (so a CSP without 'unsafe-inline' scripts works):
+ *  a capture-phase listener on the root (install) + a sweep for images that already failed before it ran. */
+function imgFallback(img) { if (!img || !img.dataset || !img.dataset.fallback) return; if (img.dataset.fallback === 'hide') img.style.display = 'none'; else img.remove(); }
+function imgFallbacks(r) { r.querySelectorAll('img[data-fallback]').forEach((img) => { if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) imgFallback(img); }); }
 
 /* ============================================================ state */
 let view = { k: 'home' };
@@ -310,19 +319,55 @@ function pendingList() { try { const l = JSON.parse(localStorage.getItem(PKEY) |
 function setPending(l) { try { localStorage.setItem(PKEY, JSON.stringify(l)); } catch (e) { /* ignore */ } }
 function addPending(a) { setPending([...pendingList().filter((x) => x.resultId !== a.resultId), a]); }
 function dropPending(id) { setPending(pendingList().filter((x) => x.resultId !== id)); }
+/* -------- server verification (docs/VERIFY_INTEGRATION.md §3): finish → verify(resultId, actions).
+   The action log rides in the pending item, NEVER inside the finish stats (rr_finish drops stats ≥ 16 KB).
+   Retryable answers (offline, 503 engine_unavailable during a release, 5xx, 429, 409 not_finished) keep the item
+   queued as {finished:true}; anything else is final. Old saves without a log are finished and simply not verified. */
+const VERIFY_RETRY = ['offline', 'engine_unavailable', 'rate_limited', 'server_error', 'not_finished'];
+const VERIFY_MAX_TRIES = 30;                 // client-side cap (the server also caps real attempts per result)
+const VERIFY_MAX_AGE = 14 * 864e5;           // give up on very old queued verifications
+const verifyRetryable = (e) => !!e && (VERIFY_RETRY.includes(e.code) || +e.status >= 500 || /^http_5/.test(String(e.code || '')));
+/** Finish (unless already done) then verify. → {drop, verified: true|false|null, retry, error?}. Throws when finish failed retryably. */
+const verifyOutcome = new Map();          // resultId → last sendResult answer (submitResult may find flushPending got there first)
+async function sendResult(a) { const r = await sendResult0(a); verifyOutcome.set(a.resultId, r); return r; }
+async function sendResult0(a) {
+  if (!a.finished) {
+    try { await net.finish(a); }
+    catch (e) {
+      if (['result_not_found', 'unauthorized'].includes(e.code)) return { drop: true, verified: null, error: e.code };
+      if (e.code !== 'already_finished') throw e;
+    }
+    a.finished = true;
+  }
+  if (!Array.isArray(a.actions) || !a.actions.length || typeof net.verify !== 'function') return { drop: true, verified: null };
+  try {
+    const v = await net.verify(a.resultId, a.actions);
+    return { drop: true, verified: v && v.verified === true ? true : v && v.verified === false ? false : null, already: !!(v && v.already), error: v && v.error };
+  } catch (e) {
+    a.vtries = (+a.vtries || 0) + 1; a.firstAt = a.firstAt || Date.now();
+    if (e.code === 'not_finished') a.finished = false;              // the server lost the finish: send it again next time
+    if (verifyRetryable(e) && a.vtries < VERIFY_MAX_TRIES && Date.now() - a.firstAt < VERIFY_MAX_AGE) return { drop: false, verified: null, retry: true, error: e.code };
+    return { drop: true, verified: null, error: e.code };
+  }
+}
+let verifyTimer = null;
+function scheduleVerifyRetry(ms = 90000) { if (verifyTimer) return; verifyTimer = setTimeout(() => { verifyTimer = null; flushPending(); }, ms); }
 let flushing = null;
 function flushPending() {
   if (flushing) return flushing;
   flushing = (async () => {
     const me = net.me();
+    let again = false;
     for (const a of pendingList()) {
       if (!me || (a.pid && a.pid !== me.id)) continue;
-      try { await net.finish(a); dropPending(a.resultId); }
+      try { const r = await sendResult(a); if (r.drop) dropPending(a.resultId); else { addPending(a); again = true; } }
       catch (e) { if (['already_finished', 'result_not_found', 'unauthorized'].includes(e.code)) dropPending(a.resultId); }
     }
+    if (again) scheduleVerifyRetry();
   })().finally(() => { flushing = null; });
   return flushing;
 }
+if (typeof addEventListener === 'function') addEventListener('online', () => { if (pendingList().length) flushPending(); });
 
 /* ============================================================ shared fragments */
 function topBar() {
@@ -370,20 +415,23 @@ function boardHtml(rows, ctx = {}) {
   const li = rows.map((r) => {
     const done = r.status !== 'playing'; if (done) n++;
     let res;
-    const pr = Math.max(0, Math.min(1, r.status === 'won' ? 1 : r.progress != null ? +r.progress : (r.passive || 0) / Math.max(1, r.expenses || 1)));
-    const pct = Math.round(pr * 100);
+    const pr = Math.max(0, Math.min(1, r.status === 'won' ? 1 : r.progress != null ? +r.progress : (+r.passive || 0) / Math.max(1, +r.expenses || 1)));
+    const pct = Math.round(pr * 100) || 0;
     if (ctx.sprint) {
       // daily sprint: everyone is ranked by how close to freedom they got; escapees also show their month
-      if (r.status === 'won') res = `<span class="lb-rs-won">${num('100%')}</span><span class="lb-rs-st">✓ יצא בחודש ${r.months}</span>`;
+      if (r.status === 'won') res = `<span class="lb-rs-won">${num('100%')}</span><span class="lb-rs-st">✓ יצא בחודש ${int(r.months)}</span>`;
       else if (r.status === 'lost') res = `<span class="lb-rs-won">${num(pct + '%')}</span>`;
       else res = `<span class="lb-rs-play">${r.progress != null ? num(pct + '%') + ' · ' : ''}משחק עכשיו…</span>`;
     } else if (r.status === 'won') {
-      const s = safe(() => starsFor(w, r.months, ctx.maxMonths ?? undefined, ctx.charId), 0);
-      res = `<span class="lb-rs-won">חודש ${r.months}</span>${s ? `<span class="lb-rs-st">${starStr(s)}</span>` : ''}`;
+      const s = safe(() => starsFor(w, int(r.months), ctx.maxMonths ?? undefined, ctx.charId), 0);
+      res = `<span class="lb-rs-won">חודש ${int(r.months)}</span>${s ? `<span class="lb-rs-st">${starStr(s)}</span>` : ''}`;
     } else if (r.status === 'lost') {
       res = `<span class="lb-rs-lost">${num(pct + '%')} מהדרך</span>`;
     } else res = '<span class="lb-rs-play">משחק עכשיו…</span>';
-    return { me: !!r.me, h: `<li class="${r.me ? 'me' : ''} ${n <= 3 && done ? 'top' + n : ''}"><span class="rk">${done ? (n <= 3 ? ['🥇', '🥈', '🥉'][n - 1] : n) : '·'}</span>${pawnHtml(r.pawn || 'classic', null, 'xs')}<span class="nm">${esc(r.nickname)}${r.me ? ' <small>(אתה)</small>' : ''}</span>${titleBadge(r.stars || 0)}<span class="rs">${res}</span></li>` };
+    // server verification (migration B adds `verified`): ✓ replayed and matched · ⚠ rejected (dimmed, the server sorts it last)
+    const vmark = r.verified === true ? '<span class="lb-ver ok" title="תוצאה מאומתת בשרת" aria-label="מאומת">✓</span>'
+      : r.verified === false ? '<span class="lb-ver bad" title="התוצאה לא עברה אימות בשרת" aria-label="לא אומת">⚠</span>' : '';
+    return { me: !!r.me, h: `<li class="${r.me ? 'me' : ''} ${n <= 3 && done ? 'top' + n : ''} ${r.verified === false ? 'unver' : ''}"><span class="rk">${done ? (n <= 3 ? ['🥇', '🥈', '🥉'][n - 1] : n) : '·'}</span>${pawnHtml(r.pawn || 'classic', null, 'xs')}<span class="nm">${esc(r.nickname)}${vmark}${r.me ? ' <small>(אתה)</small>' : ''}</span>${titleBadge(int(r.stars))}<span class="rs">${res}</span></li>` };
   });
   let shown = li.slice(0, limit);
   const meIdx = li.findIndex((x) => x.me);
@@ -462,6 +510,28 @@ async function claimGifts() {
   } catch (e) { /* offline: try next time */ }
 }
 function refreshEnergyChips() { document.querySelectorAll('.lb-energy').forEach((b) => { b.outerHTML = energyHtml(b.classList.contains('lg') ? 'lg' : ''); }); }
+/* -------- quiz answers: reward:'lesson' (engine) = understanding, not money → +1⚡ per right answer.
+   Live: bus 'reward' (game.js forwards out.reward). Fallback at game end: stats.quizRight minus what was already credited
+   for that game (key = mode + resultId/seed, survives reloads), so nothing is paid twice and nothing is lost. */
+const QUIZ_ENERGY = 1;
+const QK = 'rr2-quiz-credit';
+const quizSig = (o) => `${(o && o.mode) || 'free'}|${(o && (o.resultId || ((+o.seed || 0) >>> 0))) || ''}`;
+function quizCredited(sig) { const q = safe(() => JSON.parse(localStorage.getItem(QK) || 'null')); return q && q.sig === sig ? int(q.n) : 0; }
+function setQuizCredited(sig, n) { safe(() => localStorage.setItem(QK, JSON.stringify({ sig, n }))); }
+function onQuizReward(p) {
+  const r = p && (p.reward || p);
+  if (!r || r.kind !== 'lesson' || r.right !== true) return;
+  const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null; if (!cfg) return;
+  const sig = quizSig(cfg); setQuizCredited(sig, quizCredited(sig) + 1);
+  if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${QUIZ_ENERGY}⚡`);
+}
+function creditQuizAtEnd(e) {
+  const st = e.stats || (e.summary && e.summary.stats) || (e.end && e.end.stats) || {};
+  const right = int(st.quizRight); const sig = quizSig(e); const had = quizCredited(sig);
+  const owe = Math.max(0, right - had);
+  setQuizCredited(sig, Math.max(right, had));
+  return owe ? EN.add(owe * QUIZ_ENERGY, 'lesson') : 0;
+}
 function grantDaily(streak) {
   const day = P.israelDate();
   let got = EN.grantOnce('daily:' + day, DAILY_ENERGY, 'daily');
@@ -480,7 +550,7 @@ function renderWelcome() {
       <ul class="wl-points">
         <li><span>📅</span><div><b>תוכנית חודשית</b><small>בכל משכורת בוחרים: עבודה רגילה, שעות נוספות, לימודים, עסק צדדי או מנוחה ומשפחה. הזמן הוא הנכס הכי יקר.</small></div></li>
         <li><span>⚡</span><div><b>אנרגיה: ${EN.MAX} הטלות</b><small>כל הטלה עולה ⚡ אחד, ומתמלא ⚡ כל 6 דקות. האתגר היומי והשבועי — בחינם. חברים יכולים לשלוח לך ⚡.</small></div></li>
-        <li><span>😊</span><div><b>כסף זה לא הכל</b><small>★★★ רק למי שיוצא מהר <em>וגם</em> נשאר מאושר.</small></div></li>
+        <li><span>😊</span><div><b>כסף זה לא הכל</b><small>★★★ רק למי שיוצא מהר, נשאר מאושר <em>וגם</em> שומר קרן חירום של 3 חודשים.</small></div></li>
         <li><span>📚</span><div><b>אוספים שיעורים</b><small>כל שיעור של אבא עשיר נכנס לספרייה שלך.</small></div></li>
       </ul>
       <button class="primary lb-big" data-act="welcome-go">יאללה, מתחילים ←</button>
@@ -527,7 +597,7 @@ function scenarios() {
   if (SCEN) return Promise.resolve(SCEN);
   if (!scenP) scenP = (async () => {
     const tries = [
-      async () => { const E = await import('./engine.js'); return typeof E.scenarioList === 'function' ? E.scenarioList() : null; },
+      async () => { const E = await import('./engine.js'); if (typeof E.loadRealData === 'function' && !(safe(() => E.scenarioList()) || []).length) await E.loadRealData(); return typeof E.scenarioList === 'function' ? E.scenarioList() : null; },
       async () => { const H = await import('./history.js'); return typeof H.scenarioList === 'function' ? H.scenarioList() : H.SCENARIOS || null; },
       async () => { const D = await import('./data/real.js'); const S = D.SCENARIOS || (D.default && D.default.SCENARIOS); return S ? (Array.isArray(S) ? S : Object.entries(S).map(([id, v]) => ({ id, ...v }))) : null; },
     ];
@@ -541,7 +611,7 @@ const ymText = (ym) => { const m = String(ym || '').match(/^(\d{4})-?(\d{2})/); 
 function historyCard(p) {
   const open = P.historyUnlocked(); const played = Object.values(p.history || {}).filter((h) => h.best).length;
   return `<button class="map-hist ${open ? '' : 'is-locked'}" data-act="history">
-    <span class="map-hist-art"><img src="${HIST_ART}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="map-hist-ic" aria-hidden="true">⏳</span></span>
+    <span class="map-hist-art"><img src="${HIST_ART}" alt="" loading="lazy" data-fallback="hide"><span class="map-hist-ic" aria-hidden="true">⏳</span></span>
     <span class="map-hist-body"><b>מכונת הזמן</b><span>שוק אמיתי, חודש אחרי חודש: 2000, 2008, 2020, 2022. תנצח משקיע שרק קנה והחזיק?</span>
     <em>${open ? (played ? `שיחקת ${played} תקופות` : 'חדש! נסה תקופה ראשונה') : '🔒 נפתח אחרי ★ בשכונה — אפשר להציץ'}</em></span></button>`;
 }
@@ -561,14 +631,14 @@ async function renderHistory() {
       const h = p.history[sc.id] || {}; const best = h.best;
       const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed })) : null;
       return `<article class="hs-card ${open ? '' : 'is-locked'}" style="--i:${i}">
-        <div class="hs-top"><span class="hs-years">${esc(ymText(sc.start))} · ${sc.months} חודשים</span>${best ? starsHtml(best.stars) : ''}</div>
+        <div class="hs-top"><span class="hs-years">${esc(ymText(sc.start))} · ${int(sc.months)} חודשים</span>${best ? starsHtml(best.stars) : ''}</div>
         <h3>${esc(sc.name)}</h3><p>${esc(sc.blurb || '')}</p>
         ${best ? `<p class="hs-best">🏁 הכי טוב שלך: ${iso(fmtM(best.netWorth))}${best.beat ? ' · ניצחת את המדד 🏆' : ''}</p>` : ''}
         <div class="hs-acts">${open ? `${sv ? `<button class="primary" data-act="history-continue" data-id="${esc(sc.id)}">▶ להמשיך · חודש ${esc(sv.month)}</button>` : ''}<button class="${sv ? '' : 'primary'}" data-act="history-go" data-id="${esc(sc.id)}">${sv ? 'מההתחלה' : 'לחזור בזמן ←'}</button>` : '<span class="lb-mini-lock">🔒 צריך ★ בשכונה</span>'}</div>
       </article>`; }).join('')}</div>`;
   html(`<div class="lb-shell lb-history">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
-    <header class="hs-head"><img src="${HIST_ART}" alt="" onerror="this.remove()"><div><span class="hs-kicker">⏳ מכונת הזמן</span><h1>להשקיע בהיסטוריה האמיתית</h1>
+    <header class="hs-head"><img src="${HIST_ART}" alt="" data-fallback="remove"><div><span class="hs-kicker">⏳ מכונת הזמן</span><h1>להשקיע בהיסטוריה האמיתית</h1>
       <p>המחירים, הריבית והאינפלציה — בדיוק כמו שהיו, חודש אחרי חודש. היריב שלך: משקיע משעמם שקנה קרן מדד ולא נגע בה. תצליח לנצח אותו?</p>
       ${open ? '' : `<p class="lb-note">🔒 נפתח אחרי ★ ראשון בשכונה. <button class="chip" data-act="world" data-id="w1">לשחק בשכונה</button></p>`}</div></header>
     ${body}
@@ -670,14 +740,14 @@ function dailyHtml(d) {
       : '<div class="lb-streak cold"><span class="fire">🔥</span><span>שחק היום ותתחיל רצף</span></div>';
   return `<div class="lb-dh" style="background-image:url('${cardArt(w.id)}')">
       <span class="lb-pill">🎲 האתגר היומי</span>${un ? '' : '<span class="lb-pill lock">🔒 עולם נעול — טעימה!</span>'}<span class="lb-timer">⏳ ${timeLeft(d.ends_at)}</span>
-      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⚡ ספרינט ${d.max_months || 24} חודשים</span></div>
+      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים</span></div>
     </div>
     <div class="lb-db">
-      ${played ? '' : `<p class="lb-sprint">⚡ ספרינט ${d.max_months || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
+      ${played ? '' : `<p class="lb-sprint">⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
       ${streakLine}
       ${cta}
       <h3 class="lb-sub">הטבלה של היום · הכי קרוב לחופש</h3>
-      ${boardHtml(d.board, { worldId: w.id, charId: c.id, maxMonths: d.max_months || 24, limit: 10, sprint: true })}
+      ${boardHtml(d.board, { worldId: w.id, charId: c.id, maxMonths: int(d.max_months, 24) || 24, limit: 10, sprint: true })}
     </div>`;
 }
 async function loadDaily(t) {
@@ -722,7 +792,7 @@ function groupsHtml(gs) {
 }
 function groupsList(gs) {
   return !gs ? '<p class="lb-note">טוען…</p>' : gs.error ? `<p class="err">${esc(gs.error)}</p>` : gs.length
-    ? `<div class="lb-glist">${gs.map((g) => `<button class="lb-gitem" data-act="group" data-id="${esc(g.id)}"><span class="lb-gav" aria-hidden="true">${esc([...g.name][0] || '?')}</span><span><b>${esc(g.name)}</b><small>${g.members === 1 ? 'רק אתה — הזמן חברים' : g.members + ' שחקנים'}${g.active ? ` · ${g.active === 1 ? 'אתגר פעיל' : g.active + ' אתגרים פעילים'}` : ''}</small></span><span class="lb-chev" aria-hidden="true">‹</span></button>`).join('')}</div>`
+    ? `<div class="lb-glist">${gs.map((g) => `<button class="lb-gitem" data-act="group" data-id="${esc(g.id)}"><span class="lb-gav" aria-hidden="true">${esc([...g.name][0] || '?')}</span><span><b>${esc(g.name)}</b><small>${int(g.members) === 1 ? 'רק אתה — הזמן חברים' : int(g.members) + ' שחקנים'}${int(g.active) ? ` · ${int(g.active) === 1 ? 'אתגר פעיל' : int(g.active) + ' אתגרים פעילים'}` : ''}</small></span><span class="lb-chev" aria-hidden="true">‹</span></button>`).join('')}</div>`
     : '<p class="lb-empty">עוד אין לך קבוצות. פתח אחת ושלח לחברים.</p>';
 }
 function groupsShell(list) {
@@ -804,7 +874,7 @@ function charCard(w, c, d) {
       <span><small>נשאר בחודש</small><b class="${cc.surplus > 0 ? 'pos' : cc.surplus < 0 ? 'neg' : ''}">${iso((cc.surplus > 0 ? '+' : '') + fmtM(cc.surplus))}</b></span>
       <span><small>מזומן</small><b>${iso(fmtM(cc.cash))}</b></span>
     </span>
-    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small>${T.happy != null || HAPPY_RULE ? `<i class="wv-happy">+ 😊 ${T.happy ?? 60}</i>` : ''}</span>
+    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small>${T.happy != null || HAPPY_RULE ? `<i class="wv-happy">+ 😊 ${int(T.happy, 60)}</i>` : ''}<i class="wv-fund" title="★★★ דורש קרן חירום">🐷 קרן חירום ${int(T.fundMonths, 3)} חודשים</i></span>
     ${extras.length ? `<span class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</span>` : ''}
     <span class="wv-go">לשחק ←</span>
   </button>`;
@@ -856,9 +926,9 @@ async function refreshGroup(id) {
 }
 const countText = (g) => (g.members.length === 1 ? 'רק אתה כאן — שלח את הקישור לחברים' : g.members.length + ' שחקנים');
 function membersHtml(g) {
-  const members = [...g.members].sort((a, b) => (b.stars || 0) - (a.stars || 0));
+  const members = [...g.members].sort((a, b) => int(b.stars) - int(a.stars));
   const gifted = new Set((feedCache[g.id] && feedCache[g.id].gifted_today) || []);
-  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(m.stars || 0)}<span class="gp-st">★ ${m.stars || 0}</span>${m.me ? '' : gifted.has(m.nickname)
+  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(int(m.stars))}<span class="gp-st">★ ${int(m.stars)}</span>${m.me ? '' : gifted.has(m.nickname)
     ? '<button class="gp-send sent" disabled title="שלחת לו ⚡ היום">✓ נשלח</button>'
     : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3⚡ (פעם ביום)">שלח ⚡</button>`}</li>`).join('');
 }
@@ -868,14 +938,14 @@ const agoText = (at) => { const ms = Date.now() - new Date(at); if (!(ms >= 0)) 
 const wName = (id) => (id === 'h' ? 'מכונת הזמן' : safe(() => getWorld(id).name, ''));
 function feedLine(f) {
   const d = f.data || {}; const who = `<b>${esc(f.nickname)}</b>${f.me ? ' <small>(אתה)</small>' : ''}`;
-  const st = d.stars ? ' ' + starStr(Math.min(3, d.stars | 0)) : '';
+  const st = int(d.stars) > 0 ? ' ' + starStr(int(d.stars)) : '';
   switch (f.kind) {
-    case 'escaped': return ['🎉', `${who} יצא מהמירוץ ${esc(P.inW(wName(d.world)))}${d.age ? ` בגיל ${Math.floor(d.age)}` : ''}${d.months ? ` · ${d.months} חודשים` : ''}${st}`];
+    case 'escaped': return ['🎉', `${who} יצא מהמירוץ ${esc(P.inW(wName(d.world)))}${int(d.age) > 0 ? ` בגיל ${int(d.age)}` : ''}${int(d.months) > 0 ? ` · ${int(d.months)} חודשים` : ''}${st}`];
     case 'world_unlocked': return ['🔓', `${who} פתח את ${esc(wName(d.world))}`];
     case 'stars3': return ['⭐', `${who} השיג ★★★ ${esc(P.inW(wName(d.world)))}`];
     case 'history_done': return ['⏳', `${who} חזר מ${esc((scenById(d.scenario) || {}).name || 'מכונת הזמן')}${d.beat ? ' — וניצח את המדד 🏆' : ''}${st}`];
-    case 'ranked_won': return ['🏁', `${who} יצא מהמירוץ ${d.title ? `ב״${esc(d.title)}״` : d.mode ? 'ב' + esc(MODE_NAME[d.mode] || '') : 'באתגר'}${d.months ? ` בחודש ${d.months}` : ''}${st}`];
-    case 'ranked_lost': { const pr = d.progress ?? (d.stats && d.stats.progress); return ['💪', `${who} סיים ${d.title ? `את ״${esc(d.title)}״` : d.mode ? 'את ' + esc(MODE_NAME[d.mode] || 'האתגר') : 'אתגר'}${pr != null ? ` עם ${num(Math.round(+pr * 100) + '%')} מהדרך` : ''}`]; }
+    case 'ranked_won': return ['🏁', `${who} יצא מהמירוץ ${d.title ? `ב״${esc(d.title)}״` : d.mode ? 'ב' + esc(MODE_NAME[d.mode] || '') : 'באתגר'}${int(d.months) > 0 ? ` בחודש ${int(d.months)}` : ''}${st}`];
+    case 'ranked_lost': { const pr = d.progress ?? (d.stats && d.stats.progress); return ['💪', `${who} סיים ${d.title ? `את ״${esc(d.title)}״` : d.mode ? 'את ' + esc(MODE_NAME[d.mode] || 'האתגר') : 'אתגר'}${pr != null && Number.isFinite(+pr) ? ` עם ${num(Math.round(Math.max(0, Math.min(1, +pr)) * 100) + '%')} מהדרך` : ''}`]; }
     case 'gift': case 'energy': return ['⚡', `${who} שלח ⚡`];
     case 'joined': return ['👋', `${who} הצטרף לקבוצה`];
     default: return ['•', `${who} ${esc(f.kind)}`];
@@ -982,6 +1052,7 @@ function renderProfile() {
     <section class="lb-card pf-worlds"><h2>כוכבים לפי עולם</h2>
       <div class="pf-wlist">${WORLDS.map((w) => { const un = P.isUnlocked(w.id); return `<button class="pf-w ${un ? '' : 'is-locked'}" data-act="world" data-id="${w.id}"><img src="${cardArt(w.id)}" alt=""><span><b>${esc(w.name)}</b><small>${un ? (p.best[w.id] ? `שיא: ${p.best[w.id]} חודשים` : 'עוד לא יצאת') : '🔒 נעול'}</small></span>${starsHtml(p.stars[w.id] || 0)}</button>`; }).join('')}</div>
     </section>
+    ${learnProfileHtml()}
     <section class="lb-card pf-pawns"><h2>הכלי שלך</h2>
       <div class="pf-pgrid">${P.PAWNS.map((x) => { const ok = P.pawnUnlocked(x.id, p); const on = p.pawn === x.id; return `<button class="pf-pc ${ok ? '' : 'is-locked'} ${on ? 'on' : ''}" data-act="pawn" data-id="${x.id}" ${ok ? '' : 'aria-disabled="true"'} aria-pressed="${on}">${pawnHtml(x.id, ok ? p.pawnColor : null, 'lg')}<b>${esc(x.name)}</b><small>${ok ? (on ? 'נבחר ✓' : 'לבחור') : `🔒 ${x.need}★`}</small></button>`; }).join('')}</div>
       <h3 class="lb-sub">צבע</h3>
@@ -998,6 +1069,26 @@ function renderProfile() {
     </section>
   </div>`);
   refreshMuted();
+}
+
+/** "מה למדתי": principle mastery across games (progress.js, local) + the decision-quality trend. */
+function learnProfileHtml() {
+  const S = P.learningSummary();
+  if (!S.games || (!S.principles.length && S.dqAvg == null)) {
+    return `<section class="lb-card pf-learn"><h2>🧠 מה למדתי</h2><p class="lb-empty">סיים משחק אחד — ונראה כאן אילו עקרונות כסף כבר שלך, ואיפה כדאי להתחזק.</p></section>`;
+  }
+  const lvl = (m) => (m >= 0.8 ? ['l3', 'שולט'] : m >= 0.6 ? ['l2', 'בדרך'] : ['l1', 'לחזק']);
+  const trend = S.dqTrend == null ? '' : S.dqTrend >= 3 ? ` <span class="pf-tr up">▲ ${num(S.dqTrend)}</span>` : S.dqTrend <= -3 ? ` <span class="pf-tr down">▼ ${num(-S.dqTrend)}</span>` : '';
+  const hist = S.dqHistory.slice(-12);
+  return `<section class="lb-card pf-learn"><h2>🧠 מה למדתי <small>${num(S.games)} ${S.games === 1 ? 'משחק' : 'משחקים'}</small></h2>
+    ${S.dqAvg != null ? `<div class="pf-dq"><div><small>איכות ההחלטות (ממוצע)</small><b>${num(S.dqAvg + '/100')}</b>${trend}</div>
+      ${hist.length > 1 ? `<div class="pf-dqh" role="img" aria-label="איכות ההחלטות במשחקים האחרונים">${hist.map((v) => `<i style="height:${Math.max(6, int(v))}%" title="${int(v)}"></i>`).join('')}</div>` : ''}</div>` : ''}
+    ${S.principles.length ? `<ul class="pf-lp">${S.principles.map((x) => { const [ic, name, hint] = prInfo(x.id); const [c, t] = lvl(x.mastery); const d = x.prev != null ? x.last - x.prev : 0;
+      return `<li class="${c}"><span class="pf-lic" aria-hidden="true">${ic}</span><span class="pf-lt"><b>${esc(name)}</b><small>${esc(hint)}</small></span>
+        <span class="pf-lbar"><span class="lr-bar"><i style="width:${Math.max(4, Math.round(x.mastery * 100))}%"></i></span><small>${num(pctTxt(x.mastery))}${d > 0.04 ? ' ▲' : d < -0.04 ? ' ▼' : ''} · ${int(x.n)} החלטות</small></span>
+        <em class="pf-lv">${t}</em></li>`; }).join('')}</ul>` : ''}
+    <p class="lb-note">המדד בודק אם ההחלטה הייתה נכונה לפי מה שידעת באותו רגע — לא אם היה לך מזל.</p>
+  </section>`;
 }
 
 /* ============================================================ END SCREEN */
@@ -1100,14 +1191,20 @@ function onGameEnd(e, delay) {
   LIB.unlock(lessonIds);
   const res = P.recordGame(e);
   res.newLessons = [...sessLessons]; sessLessons = [];
+  const learning = (e.end && e.end.learning) || (e.summary && e.summary.learning) || null;
+  res.learn = safe(() => P.recordLearning(learning, [e.resultId || '', e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
+  res.quizEnergy = creditQuizAtEnd(e);
   if (e.mode === 'daily') { res.energy = grantDaily(P.streakInfo().streak); res.energyWhy = 'על האתגר היומי — אפשר להמשיך לשחק'; }
   logMilestones(e, res);
   lastEndSig = sigOf(e);
   const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
   endCtx = { e, res, ranked, hist, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null };
   if (ranked) {
+    // the replay log goes to verify, never into rr_finish's stats (16 KB cap); prefer the longer of summary / saved state
+    const { actions: sumActions = null, ...summary } = e.summary || {};
+    const actions = [sumActions, saved && saved.actions].filter(Array.isArray).sort((a, b) => b.length - a.length)[0] || null;
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
-      stats: { ...(e.summary || { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
+      actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
   } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', seed } : freeKey(e.worldId))));
   setTimeout(() => {
     ensureCss(); install();
@@ -1160,7 +1257,7 @@ function renderEnd(animate = false) {
   }
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
-      <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" onerror="this.remove()"></div>
+      <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
       <p class="end-kicker">${kicker}</p>
       <h1 class="end-title">${title}</h1>
       <div class="end-stars" aria-label="${stars} כוכבים">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}">★</span>`).join('')}</div>
@@ -1172,6 +1269,7 @@ function renderEnd(animate = false) {
       ${happyGateHtml(e, w, stars)}
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
+      ${learnHtml(e, res)}
       ${lifeHtml(e, won)}
       <div class="end-new">${newsHtml(e, res, won ? resisted : '')}</div>
       <div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>
@@ -1182,6 +1280,60 @@ function renderEnd(animate = false) {
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
 }
 /* -------- v3 end-screen blocks */
+/* "החלטות מול מזל" (spec §8): engine end.learning = {decisionQuality 0..100, luck:{total ₪}, principles:{id:{mastery,n}}, top, sentence}.
+   Hidden when the block is missing (older engine / v2 saves). Principle names: local table, then the lesson library. */
+const PRINCIPLES = {
+  cashflow: ['💧', 'תזרים מזומנים', 'נכס טוב מכניס כל חודש יותר ממה שהוא עולה — כולל ההלוואה.'],
+  cushion: ['🛟', 'כרית ביטחון', 'כמה חודשי הוצאות נשארים בצד כשמשהו משתבש.'],
+  debt_cost: ['💳', 'עלות החוב', 'הלוואה שווה רק אם מה שהיא קונה מכניס יותר מהריבית.'],
+  opportunity_cost: ['⚖️', 'עלות אלטרנטיבית', 'כל שקל על פיתוי הוא שקל שלא קנה נכס.'],
+  risk_size: ['🎯', 'גודל הסיכון', 'לא לשים על הימור אחד יותר ממה שמותר להפסיד.'],
+  rate_risk: ['📉', 'סיכון ריבית', 'ריבית משתנה יכולה לעלות — ותזרים שנראה טוב נעלם.'],
+  diversification: ['🧺', 'פיזור', 'לא כל הביצים בסל אחד.'],
+  time: ['⏳', 'זמן ואנרגיה', 'הזמן הוא הנכס הכי יקר, ושחיקה עולה כסף.'],
+  time_in_market: ['📈', 'זמן בשוק', 'מי שנשאר מושקע לאורך זמן מנצח את מי שמנסה לתזמן.'],
+  fees_tax: ['🧾', 'מסים ועמלות', 'מה שקובע זה מה שנשאר אחרי מס.'],
+  knowledge: ['📚', 'ידע פיננסי', 'להבין את המושג לפני שהכסף על השולחן.'],
+  leverage: ['🏗️', 'מינוף', 'כסף של הבנק מגדיל את הרווח — וגם את ההפסד.'],
+};
+let lessonTitles = {};
+LIB.lessons().then((L) => { lessonTitles = Object.fromEntries((L || []).map((l) => [l.id, l.title])); }).catch(() => {});
+const prInfo = (id) => PRINCIPLES[id] || ['•', lessonTitles[id] || String(id).replace(/_/g, ' '), ''];
+const pctTxt = (x) => Math.round(Math.max(0, Math.min(1, +x || 0)) * 100) + '%';
+function dqWord(q) { return q >= 80 ? 'מצוינות' : q >= 65 ? 'טובות' : q >= 50 ? 'סבירות' : 'יש מה לשפר'; }
+function learnHtml(e, res) {
+  const L = (e.end && e.end.learning) || (e.summary && e.summary.learning) || null;
+  if (!L || L.decisionQuality == null || !Number.isFinite(+L.decisionQuality)) return '';
+  const q = Math.max(0, Math.min(100, Math.round(+L.decisionQuality)));
+  const luck = Math.round(+(L.luck && typeof L.luck === 'object' ? L.luck.total : L.luck) || 0);
+  const E = Math.max(1000, +e.expenses || +(e.end && e.end.expenses) || 0);
+  const lr = Math.tanh(luck / (6 * E));                       // ±6 months of expenses ≈ a full bar
+  const lw = Math.round(Math.abs(lr) * 50);
+  const luckTxt = Math.abs(lr) < 0.08 ? 'ניטרלי' : luck > 0 ? `+${fmtM(luck)}` : `−${fmtM(-luck)}`;
+  const luckWord = Math.abs(lr) < 0.08 ? 'המזל לא הכריע' : luck > 0 ? 'המזל עזר לך' : 'המזל היה נגדך';
+  const sentence = L.sentence || (q >= 70 && luck < 0 ? 'ההחלטות שלך היו טובות — המזל פחות. עם אותן החלטות, בפעם הבאה סביר שתצא מהר יותר.'
+    : q >= 70 ? 'החלטות טובות. ככה בונים הצלחה שחוזרת על עצמה.' : luck > 0 ? 'המזל עזר יותר מההחלטות. בפעם הבאה: תזרים, כרית וחוב לפני כל קנייה.'
+    : 'יש מקום לשפר: תסתכל על הכרית, על עלות החוב ועל מה שכל נכס מכניס באמת.');
+  const lr2 = (res && res.learn) || {};
+  const ps = P.gamePrinciples(L);
+  const improved = lr2.improved; const strongest = lr2.strongest || (ps.length ? ps.reduce((a, b) => (b.mastery > a.mastery ? b : a)) : null);
+  const missed = lr2.missed || (ps.length ? (() => { const w = ps.reduce((a, b) => (b.mastery < a.mastery ? b : a)); return w.mastery < 0.6 ? w : null; })() : null);
+  const lines = [];
+  if (improved) { const [ic, name] = prInfo(improved.id); lines.push(`<p class="lr-pr up"><i aria-hidden="true">${ic}</i><span>השתפרת ב<b>${esc(name)}</b> ${num(pctTxt(improved.from) + ' → ' + pctTxt(improved.to))}</span></p>`); }
+  else if (strongest && (!missed || strongest.id !== missed.id) && strongest.mastery >= 0.7) { const [ic, name] = prInfo(strongest.id); lines.push(`<p class="lr-pr up"><i aria-hidden="true">${ic}</i><span>הכי חזק אצלך: <b>${esc(name)}</b> ${num(pctTxt(strongest.mastery))}</span></p>`); }
+  if (missed) { const [ic, name, hint] = prInfo(missed.id); lines.push(`<p class="lr-pr miss"><i aria-hidden="true">${ic}</i><span>כדאי לחזק: <b>${esc(name)}</b>${hint ? ` — ${esc(hint)}` : ''}</span></p>`); }
+  const top = Array.isArray(L.top) ? L.top.find((t) => t && t.c && +t.score < 60) : null;
+  if (top) lines.push(`<p class="lr-pr tip"><i aria-hidden="true">💡</i><span>ההחלטה ששווה לחשוב עליה שוב: <b>${iso(String(top.c).slice(0, 40))}</b>${top.why ? ` — ${iso(String(top.why).slice(0, 80))}` : ''}</span></p>`);
+  return `<section class="end-learn" aria-label="החלטות מול מזל">
+    <h3>🧠 החלטות מול מזל</h3>
+    <div class="lr-row"><span class="lr-l">איכות ההחלטות</span><span class="lr-bar dq" role="img" aria-label="${q} מתוך 100"><i style="width:${Math.max(3, q)}%"></i></span><b>${num(q + '/100')}</b></div>
+    <small class="lr-sub">${dqWord(q)}${L.decisions ? ` · ${int(L.decisions)} החלטות` : ''}</small>
+    <div class="lr-row"><span class="lr-l">מזל</span><span class="lr-bar luck" role="img" aria-label="${esc(luckWord)}"><i class="${luck >= 0 ? 'pos' : 'neg'}" style="width:${lw}%"></i></span><b>${iso(luckTxt)}</b></div>
+    <small class="lr-sub">${luckWord}</small>
+    <p class="lr-why">${iso(sentence)}</p>
+    ${lines.join('')}
+  </section>`;
+}
 const MONTHS_HE = (n) => (n === 1 ? 'חודש' : `${n} חודשים`);
 function benchHtml(e) {
   const b = (e.end && e.end.benchmark) || null; if (!b) return '';
@@ -1191,19 +1343,28 @@ function benchHtml(e) {
     <div class="bn-row"><span>קנה והחזק</span><span class="bn-bar idx"><i style="width:${Math.max(4, Math.round((Math.max(0, them) / max) * 100))}%"></i></span><b>${iso(fmtM(them))}</b></div>
     ${b.text ? `<p>${iso(b.text)}</p>` : ''}</section>`;
 }
-/** ★ rule v3: ★★★ needs speed AND happiness — show which part was missing. */
+/** ★ rule v3.2: ★★★ needs speed AND happiness ≥ T.happy AND an emergency fund of T.fundMonths months — show which part was missing. */
+const FUND_MSG = 'חסרה קרן חירום של 3 חודשים — חופש שלא שורד משבר הוא לא חופש';
 function happyGateHtml(e, w, stars) {
   const end = e.end || {}; if (e.status !== 'won' || stars >= 3) return '';
   const ls = end.lifeSummary || {};
   const happy = end.happiness ?? ls.happiness;
-  if (happy == null) return '';
+  const byFund = !!end.starsBlockedByFund; const byHappy = !!end.starsBlockedByHappiness;
+  if (happy == null && !byFund) return '';
   const T = e.worldId === 'h' ? null : safe(() => starThresholds(w, e.charId));
-  const need = (T && T.happy) ?? 60;
-  const timeOk = T ? e.months <= T.t3 : true; const happyOk = happy >= need;
-  if (!end.starsBlockedByHappiness && happyOk) return '';
-  return `<div class="end-gate"><b>${end.starsBlockedByHappiness ? 'הכסף היה שם — האושר לא.' : 'מה חסר ל־★★★'}</b>
-    <span class="${timeOk ? 'ok' : 'no'}">⏱️ ${T ? `לצאת תוך ${T.t3} חודשים` : 'מהירות'} ${timeOk ? '✓' : `✗ (${e.months})`}</span>
-    <span class="${happyOk ? 'ok' : 'no'}">😊 אושר ${need}+ ${happyOk ? '✓' : `✗ (${Math.round(happy)})`}</span></div>`;
+  const need = int(T && T.happy, 60); const fundNeed = int(T && T.fundMonths, 3);
+  const timeOk = T ? e.months <= T.t3 : true; const happyOk = happy == null ? true : happy >= need;
+  if (!byHappy && !byFund && happyOk) return '';
+  // fund months are not always in the end payload: ✗ when the engine says so, ✓ when known, otherwise neutral
+  const fm = end.emergency && end.emergency.months != null ? +end.emergency.months : ls.emergencyMonths != null ? +ls.emergencyMonths : null;
+  const fundCls = byFund ? 'no' : fm != null ? (fm >= fundNeed ? 'ok' : 'no') : 'na';
+  const fundMark = byFund ? '✗' : fm != null ? (fm >= fundNeed ? '✓' : '✗') : '';
+  const head = byFund && !byHappy ? FUND_MSG.replace('3 חודשים', `${fundNeed} חודשים`) : byHappy ? 'הכסף היה שם — האושר לא.' : 'מה חסר ל־★★★';
+  return `<div class="end-gate ${byFund ? 'fund' : ''}"><b>${esc(head)}</b>
+    <span class="${timeOk ? 'ok' : 'no'}">⏱️ ${T ? `לצאת תוך ${int(T.t3)} חודשים` : 'מהירות'} ${timeOk ? '✓' : `✗ (${int(e.months)})`}</span>
+    ${happy != null ? `<span class="${happyOk ? 'ok' : 'no'}">😊 אושר ${need}+ ${happyOk ? '✓' : `✗ (${Math.round(happy)})`}</span>` : ''}
+    <span class="${fundCls}">🐷 קרן חירום ${fundNeed} חודשים ${fundMark}</span>
+    ${byFund && byHappy ? `<small>${esc(FUND_MSG.replace('3 חודשים', `${fundNeed} חודשים`))}</small>` : ''}</div>`;
 }
 const decText = (d) => [d.c, d.o].filter(Boolean).join(' ← ');
 function lifeHtml(e, won) {
@@ -1271,6 +1432,7 @@ function newsHtml(e, res, resisted = '') {
   if (res.titleAfter !== res.titleBefore) out.push(`<div class="end-news end-title-up"><span class="end-news-ic">🎖️</span><span><small>עלית דרגה!</small><b>${titleBadge(res.totalAfter)}</b><em>מ${esc(res.titleBefore)} ל${esc(res.titleAfter)}</em></span></div>`);
   if (res.newLessons && res.newLessons.length) out.push(`<button class="end-news end-lessons" data-act="library"><span class="end-news-ic">📚</span><span><small>הספרייה גדלה</small><b>+${res.newLessons.length} ${res.newLessons.length === 1 ? 'שיעור חדש' : 'שיעורים חדשים'}</b><em>${num(LIB.counts().have + '/' + (LIB.counts().total || '?'))} בספרייה · לחץ לקרוא</em></span></button>`);
   if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס אנרגיה</small><b>+${res.energy}⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
+  if (res.quizEnergy) out.push(`<div class="end-news"><span class="end-news-ic">🧠</span><span><small>הבנה שווה אנרגיה</small><b>+${int(res.quizEnergy)}⚡</b><em>על תשובות נכונות לשאלות של אבא עשיר</em></span></div>`);
   if (resisted) out.push(`<div class="end-news"><span class="end-news-ic">💪</span><span><small>שליטה עצמית</small><b>${iso(resisted)}</b><em>כל פיתוי שוויתרת עליו קירב אותך לחופש</em></span></div>`);
   for (const id of res.newPawns) {
     const pw = P.PAWNS.find((x) => x.id === id);
@@ -1359,27 +1521,39 @@ function rankHtml() {
   if (s.state === 'error') return `<p class="err">התוצאה לא נשמרה: ${esc(s.error)}</p><button class="primary" data-act="end-retry">לנסות שוב</button><p class="lb-note">לא נורא — ננסה שוב לבד בפעם הבאה שתפתח את המשחק.</p>`;
   const { e } = endCtx; const w = worldOf(e.worldId);
   const head = s.rank ? `<div class="end-place"><span>המקום שלך</span><b>${s.rank}</b><small>מתוך ${s.finished}</small></div>` : '<h3 class="lb-sub">הטבלה</h3>';
-  return `${head}${boardHtml(s.board, { worldId: w.id, charId: e.charId, maxMonths: s.maxMonths, limit: 5, sprint: e.mode === 'daily' })}`;
+  return `${head}${boardHtml(s.board, { worldId: w.id, charId: e.charId, maxMonths: s.maxMonths, limit: 5, sprint: e.mode === 'daily' })}${verifyNote(s.verify)}`;
 }
+const VERIFY_NOTE = {
+  ok: ['ok', '✓ התוצאה אומתה בשרת'],
+  later: ['wait', '⏳ האימות בשרת יסתיים מאוחר יותר — התוצאה שלך כבר שמורה, ננסה שוב לבד.'],
+  bad: ['bad', '⚠ התוצאה לא אומתה בשרת, ולכן היא מופיעה בסוף הטבלה.'],
+};
+function verifyNote(v) { const n = VERIFY_NOTE[v]; return n ? `<p class="end-ver ${n[0]}" data-verify="${v}">${n[1]}</p>` : ''; }
 async function submitResult() {
   const ctx = endCtx; if (!ctx || !ctx.ranked) return;
   const { e } = ctx; ctx.submit = { state: 'saving' };
   const box = () => (endCtx === ctx ? $('#endRank') : null);
   if (box()) box().innerHTML = rankHtml();
+  if (flushing) await flushing.catch(() => {});
   const args = pendingList().find((x) => x.resultId === e.resultId);
-  try { if (args) await net.finish(args); }
-  catch (err) {
-    if (err.code !== 'already_finished' && err.code !== 'result_not_found') {
+  const prev = verifyOutcome.get(e.resultId);
+  let verify = ctx.verify || (prev ? (prev.verified === true ? 'ok' : prev.verified === false ? 'bad' : prev.retry ? 'later' : null) : null);
+  if (args) {
+    let r;
+    try { r = await sendResult(args); }
+    catch (err) {
       ctx.submit = { state: 'error', error: err.message };
       if (box()) box().innerHTML = rankHtml();
       return;
     }
+    if (r.drop) dropPending(e.resultId); else { addPending(args); scheduleVerifyRetry(); }
+    verify = r.verified === true ? 'ok' : r.verified === false ? 'bad' : r.retry ? 'later' : null;
+    ctx.verify = verify;
   }
-  dropPending(e.resultId);
   game().then((g) => g && g.clearSave && safe(() => g.clearSave(rankedKey(e.resultId))));
   let board = []; let maxMonths;
   try {
-    if (e.mode === 'daily') { const d = await net.daily(); cache.daily = d; board = d.board; maxMonths = d.max_months || 24; P.setDaily({ streak: d.streak, last: P.israelDate() }); }
+    if (e.mode === 'daily') { const d = await net.daily(); cache.daily = d; board = d.board; maxMonths = int(d.max_months, 24) || 24; P.setDaily({ streak: d.streak, last: P.israelDate() }); }
     else if (e.mode === 'weekly') { const wk = await net.weekly(); cache.weekly = wk; board = wk.board; }
     else if (e.groupId) {
       const g = await net.group(e.groupId); cache.group[g.id] = g; ctx.groupCode = g.code; ctx.groupName = g.name;
@@ -1388,7 +1562,7 @@ async function submitResult() {
   } catch (err) { /* board is a bonus — the result is saved */ }
   const fin = (board || []).filter((r) => r.status !== 'playing');
   const mine = fin.findIndex((r) => r.me);
-  ctx.submit = { state: 'done', board, rank: mine >= 0 ? mine + 1 : null, finished: fin.length, maxMonths };
+  ctx.submit = { state: 'done', board, rank: mine >= 0 ? mine + 1 : null, finished: fin.length, maxMonths, verify };
   if (endCtx !== ctx) return;
   if (box()) box().innerHTML = rankHtml();
   const a = $('#endShare'); if (a) a.href = waHref(shareText());
@@ -1416,6 +1590,7 @@ function install() {
   r.addEventListener('click', onClick);
   r.addEventListener('submit', onSubmit);
   r.addEventListener('change', onChange);
+  r.addEventListener('error', (ev) => { if (ev.target && ev.target.tagName === 'IMG') imgFallback(ev.target); }, true);
   const wake = () => { if (view.k === 'group' && !document.hidden) refreshGroup(view.id); };
   document.addEventListener('visibilitychange', wake);
   addEventListener('focus', wake);
@@ -1539,5 +1714,6 @@ function onChange(ev) {
 /* ============================================================ bus wiring */
 // game.js already plays its celebration before emitting, so the end screen follows almost immediately
 bus.on('game:end', (e) => onGameEnd(e, 250));
+bus.on('reward', onQuizReward);
 bus.on('achievement', (p) => { const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); }); });
 LIB.onUnlock((ids) => { if (!lobbyVisible()) LIB.lessons().then((L) => { const l = L.find((x) => x.id === ids[0]); if (l) ui().then((u) => u.toast && u.toast(`📚 שיעור חדש בספרייה: ${l.title}`)); }); });

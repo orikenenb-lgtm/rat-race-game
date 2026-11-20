@@ -3,6 +3,7 @@
 const SB = 'https://xvqaxphyfqdzkddmoosu.supabase.co';
 const SBK = 'sb_publishable_w3ubvawN4BnqOul66NSaLg_KM6yTJhc';
 const KEY = 'rr-player';
+const FN_VERIFY = `${SB}/functions/v1/verify-result`;
 
 const ERR = {
   unauthorized: 'החשבון שלך לא מזוהה בשרת.',
@@ -24,6 +25,9 @@ const ERR = {
   already_sent_today: 'כבר שלחת לו ⚡ היום',
   player_not_found: 'השחקן לא נמצא בקבוצה',
   rate_limited: 'יותר מדי עדכונים היום',
+  no_actions: 'אין יומן מהלכים למשחק הזה',
+  not_finished: 'המשחק עוד לא נשלח לשרת',
+  engine_unavailable: 'השרת מתעדכן — ננסה שוב בעוד רגע',
   stale_checkpoint: 'יש שמירה חדשה יותר בשרת',
   state_too_big: 'השמירה גדולה מדי',
 };
@@ -90,6 +94,19 @@ export const net = {
     p_passive: Math.round(passive), p_expenses: Math.max(0, Math.round(expenses)), p_net_worth: Math.round(netWorth), p_stats: stats || {},
   }),
 
+  /** Server-side replay of a finished ranked game (Edge Function verify-result). actions = engine st.actions. Call AFTER finish().
+   *  → {ok, verified, stored, already?, error?, result:{status, months, passive, expenses, netWorth, stars, progress}} */
+  async verify(resultId, actions) {
+    const { p_id, p_secret } = auth();
+    let r;
+    try {
+      r = await fetch(FN_VERIFY, { method: 'POST', headers: { apikey: SBK, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p_id, secret: p_secret, result_id: resultId, actions }) });
+    } catch (e) { const er = new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.'); er.code = 'offline'; throw er; }
+    const j = await r.json().catch(() => null);
+    if (!r.ok) { const e = new Error(ERR[j?.error] || 'משהו השתבש בשרת. נסה שוב.'); e.code = j?.error || 'http_' + r.status; e.status = r.status; throw e; }
+    return j;
+  },
   /** Recovery code to move the player to another device (contains the secret — show it only on the profile screen). */
   recoveryCode: () => me ? btoa(unescape(encodeURIComponent(JSON.stringify([me.id, me.secret, me.nickname])))) : null,
   async restore(code) {

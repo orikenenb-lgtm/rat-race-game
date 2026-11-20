@@ -107,7 +107,7 @@ const POLICIES = {
       if (ev.type === 'trade') return tradeAction(st, ev, 'random', ctx);
       const en = ev.options.filter((o) => o.enabled && o.id !== 'done');
       if (!en.length) return ['done'];
-      if (ctx.n >= 2) return [has(ev, 'done') ? 'done' : en[0].id];
+      if (ctx.n >= 2) return [firstEnabled(ev, ['done', 'ok', 'pass']) || en[0].id];
       return [en[Math.floor(ctx.r() * en.length)].id];
     },
     between() {},
@@ -133,7 +133,8 @@ const POLICIES = {
         case 'giving': return [st.cash > d.levels[0].amount + bufferOf(st, 3) ? 'give:0' : 'pass'];
         case 'payday': case 'edu': return [planEventPick(st, ev, 'cautious')];
         case 'life': return [lifePick(st, ev, 'cautious')];
-        default: return [ev.options.find((o) => o.enabled).id];
+        case 'business': return [firstEnabled(ev, ['pass', 'ok'])];
+        default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];
       }
     },
     between(st) { betweenCommon(st, 1.5); if (!st.over) E.setPlan(st, planFor(st, 'cautious')); },
@@ -150,7 +151,9 @@ const POLICIES = {
   tapper: {
     decide(st, ev, ctx) {
       if (ev.type === 'trade') return ['done'];
-      const o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled);
+      const en = ev.options.filter((x) => x.enabled);
+      // no highlighted answer (personal life choices): a kid picks one of the options at random
+      const o = ev.options.find((x) => x.primary) || en[Math.floor(ctx.r() * en.length)];
       return [o.id, o.needsQty ? { qty: 1 } : undefined];
     },
     between() {},
@@ -177,6 +180,8 @@ const POLICIES = {
 
 function betweenCommon(st, bufMonths, smart = false) {
   const m = E.metrics(st);
+  // smart: a small emergency fund early; 3 months of expenses once freedom is in sight (★★★ needs it)
+  if (smart && !ABL.has('noFund') && !st.over) { const near = m.goalProgress >= 0.75; const want = Math.round(m.expenses * (near ? 3.1 : 1.5)) - st.savings; if (want > 500 && st.cash - want > m.expenses * (near ? 0.5 : 2)) E.moveSavings(st, want); }
   // cheap bank loans are worth keeping while cash can buy assets that earn more; repay expensive ones first
   const buf = m.expenses * (smart && m.loanPct <= 3 ? Math.max(bufMonths, 2.5) : bufMonths);
   if (st.credit && st.cash - st.credit >= buf * 0.5) E.payCredit(st);
@@ -290,6 +295,7 @@ function greedyLike(st, ev, ctx, smart) {
       return ['pass'];
     }
     case 'mystery': return [ev.options.find((o) => o.enabled).id];
+    case 'business': if (!smart) return [firstEnabled(ev, ['pass', 'ok'])]; return [(ev.options.find((x) => x.primary && x.enabled) || ev.options.find((x) => ['ok', 'pass'].includes(x.id))).id];
     case 'payday': case 'edu': return [planEventPick(st, ev, smart ? 'smart' : 'greedy')];
     case 'life': return [lifePick(st, ev, smart ? 'smart' : 'greedy')];
     default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];

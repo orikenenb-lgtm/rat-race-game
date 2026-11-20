@@ -158,7 +158,7 @@ eq([B.rnd(2.5), B.rnd(-2.5), B.rnd(0.49)], [3, -3, 0], 'rounding half away from 
   eq([vm.normMonthlyProfit, vm.price], [1000, 27700], 'managed business: same value (manager already in the numbers)');
   const s = B.sell(a);
   eq(s.sale.proceeds, 27700 + a.cash, 'proceeds = price + business cash');
-  eq(s.sale.tax, B.rnd((s.sale.proceeds - a.invested) * 0.25), '25% capital-gains tax on proceeds − invested');
+  eq(s.sale.tax, B.rnd((s.sale.proceeds - a.invested) * 0.30), '30% capital-gains tax (substantial shareholder) on proceeds − invested');
   ok(s.business.closed && s.business.cash === 0, 'sold business is closed and emptied');
   let threw = false; try { B.simulate(s.business, null, NEUTRAL); } catch { threw = true; }
   ok(threw, 'cannot simulate a sold business');
@@ -175,6 +175,18 @@ eq([B.rnd(2.5), B.rnd(-2.5), B.rnd(0.49)], [3, -3, 0], 'rounding half away from 
   eq(r.sub.users, r.sub.before - r.sub.churned + r.sub.newUsers, 'users = before − churned + new');
   ok(r.notes.some((x) => x.id === 'burn'), 'burn note');
   ok(r.sub.ltv > 0 && r.sub.cac > 0, 'LTV and CAC reported', r.sub);
+}
+
+// ---------------------------------------------------------------- runway known answer: cash ÷ monthly burn (education review C5)
+{
+  // no users, no signups, ₪10,000 rent (+₪1,800 VAT, refunded the same month) ⇒ burns exactly ₪10,000; ₪50,000 − 10,000 = ₪40,000 left
+  const b = B.create('app', { overrides: { startUsers: 0, baseNew: 0, mktMax: 0, staff: 0, rent: 10000, fixed: 0, feePct: 0, unitCost: 0,
+    equipment: 0, startCapital: 50000, events: {}, eventChance: 0 } });
+  const r = B.simulate(b, null, NEUTRAL).report;
+  eq([r.ebt, r.sub.burn, r.cash.end, r.sub.runway], [-10000, 10000, 40000, 4], 'runway = ₪40,000 cash ÷ ₪10,000 burn = 4 months (not burn ÷ cash)');
+  ok(r.notes.find((x) => x.id === 'burn').text.includes('לעוד 4 חודשים'), 'burn note says 4 months');
+  const L = B.BIZ_LESSONS.find((l) => l.id === 'biz_burn').text;
+  ok(L.indexOf('המזומן בקופה') < L.indexOf('קצב השריפה'), 'lesson text: cash ÷ burn (cash comes first)', L);
 }
 
 // ---------------------------------------------------------------- inflation raises costs, not the price

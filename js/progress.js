@@ -16,6 +16,7 @@
 //                                   titleAfter, totalBefore, totalAfter, best, prevBest, newBest, bankedLocked}
 //   setDaily({streak, best, last}) / streakInfo() → {streak, best, playedToday, alive}
 //   syncFromServer() / scheduleSync() / mergeProfile(profile) / setTutorialDone()
+//   recordLearning(end.learning, sig) → {improved, missed, strongest, dqAvgBefore} · learningSummary() · gamePrinciples(learning)
 import { net } from './net.js';
 import { WORLDS, getWorld } from './worlds/index.js';
 import { starThresholds } from './engine.js';
@@ -23,6 +24,9 @@ import { ACHIEVEMENTS, achievementById, checkMetaAchievements, titleFor, TITLES 
 
 const KEY = 'rr2-progress';
 const WIDS = WORLDS.map((w) => w.id);
+const LEARN_GAMES = 20;          // decision-quality history kept ("מה למדתי")
+const LEARN_WEIGHT_CAP = 30;     // old decisions count at most this much against a new game (recent play matters)
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 export const PAWNS = [
   { id: 'classic', name: 'קלאסי', need: 0 },
@@ -46,6 +50,7 @@ function fresh() {
     v: 1, stars: Object.fromEntries(WIDS.map((w) => [w, 0])), best: {}, achievements: [], pawn: 'classic', pawnColor: PAWN_COLORS[0].hex,
     pawnChosenAt: 0, gamesPlayed: 0, wins: 0, tutorialDone: false, lastSeenWorld: null, worldsPlayed: [],
     streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
+    learn: freshLearn(),
   };
 }
 
@@ -59,6 +64,7 @@ function load() {
   p.best = { ...(p.best || {}) };
   p.lastChar = { ...(p.lastChar || {}) };
   p.history = { ...(p.history || {}) };
+  p.learn = cleanLearn(p.learn);
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
@@ -221,6 +227,75 @@ export function recordGame(e = {}) {
   return lastResult;
 }
 
+/* ---------------- "מה למדתי" — decision quality & principle mastery across games (local only, never synced) */
+// Engine contract (ENGINE.md §8 / checkEnd): end.learning = {decisionQuality 0..100|null, decisions, verdicts, luck:{total ₪, parts},
+//   principles:{id:{mastery 0..1, n, shown}} (a bare number is accepted too), top, sentence}.
+function freshLearn() { return { games: 0, dq: [], principles: {}, lastSig: null }; }
+function cleanLearn(l) {
+  const out = freshLearn();
+  if (!l || typeof l !== 'object') return out;
+  out.games = Math.max(0, Math.floor(+l.games) || 0);
+  out.dq = (Array.isArray(l.dq) ? l.dq : []).map((x) => Math.round(+x)).filter((x) => x >= 0 && x <= 100).slice(-LEARN_GAMES);
+  for (const [id, v] of Object.entries(l.principles && typeof l.principles === 'object' ? l.principles : {})) {
+    if (!/^[a-z_]{2,32}$/.test(id) || !v || !Number.isFinite(+v.m)) continue;
+    out.principles[id] = { m: clamp01(+v.m), n: Math.max(0, Math.floor(+v.n) || 0), games: Math.max(0, Math.floor(+v.games) || 0), last: clamp01(+v.last || +v.m), prev: v.prev == null ? null : clamp01(+v.prev) };
+  }
+  out.lastSig = typeof l.lastSig === 'string' ? l.lastSig : null;
+  return out;
+}
+/** Normalised principles of one game: [{id, mastery 0..1, n}] (accepts {id: number} or {id: {mastery, n}}). */
+export function gamePrinciples(learning) {
+  const pr = learning && learning.principles; if (!pr || typeof pr !== 'object') return [];
+  const out = [];
+  for (const [id, v] of Object.entries(pr)) {
+    if (!/^[a-z_]{2,32}$/.test(id)) continue;
+    const m = typeof v === 'number' ? v : v && v.mastery;
+    if (!Number.isFinite(+m)) continue;
+    out.push({ id, mastery: clamp01(+m), n: Math.max(1, Math.floor(+(v && v.n)) || 1) });
+  }
+  return out;
+}
+/** Fold one game's learning block into the profile. Returns {improved:{id,from,to}|null, missed:{id,mastery}|null, strongest, dqAvgBefore}
+ *  or null when the block is missing. Same game twice (sig) → the first answer again. */
+let lastLearn = null;
+export function recordLearning(learning, sig = null) {
+  if (!learning || typeof learning !== 'object') return null;
+  const L = P.learn || (P.learn = freshLearn());
+  if (sig && L.lastSig === sig && lastLearn) return lastLearn;
+  const q = learning.decisionQuality;
+  const ps = gamePrinciples(learning);
+  const hasQ = q != null && q !== '' && Number.isFinite(+q);
+  if (!hasQ && !ps.length) return null;
+  const dqBefore = L.dq.length ? Math.round(L.dq.reduce((a, b) => a + b, 0) / L.dq.length) : null;
+  if (hasQ) L.dq = [...L.dq, Math.max(0, Math.min(100, Math.round(+q)))].slice(-LEARN_GAMES);
+  let improved = null; let missed = null; let strongest = null;
+  for (const g of ps) {
+    const old = L.principles[g.id];
+    const from = old ? old.m : null;
+    const w = old ? Math.min(old.n, LEARN_WEIGHT_CAP) : 0;
+    const m = old ? (old.m * w + g.mastery * g.n) / (w + g.n) : g.mastery;
+    L.principles[g.id] = { m: Math.round(m * 1000) / 1000, n: (old ? old.n : 0) + g.n, games: (old ? old.games : 0) + 1, last: g.mastery, prev: from };
+    if (from != null && g.mastery - from > 0.04 && (!improved || g.mastery - from > improved.to - improved.from)) improved = { id: g.id, from, to: g.mastery };
+    if (g.mastery < 0.6 && (!missed || g.mastery < missed.mastery || (g.mastery === missed.mastery && g.n > missed.n))) missed = { id: g.id, mastery: g.mastery, n: g.n };
+    if (g.mastery >= 0.7 && (!strongest || g.mastery > strongest.mastery || (g.mastery === strongest.mastery && g.n > strongest.n))) strongest = { id: g.id, mastery: g.mastery, n: g.n };
+  }
+  L.games += 1; L.lastSig = sig || null;
+  changed();
+  lastLearn = { improved, missed, strongest, dqAvgBefore: dqBefore, games: L.games };
+  return lastLearn;
+}
+/** Profile view: {games, dqAvg, dqLast, dqTrend (last − average of the earlier ones), principles:[{id, mastery, n, games, last, prev}] best first}. */
+export function learningSummary() {
+  const L = P.learn || freshLearn();
+  const dq = L.dq; const last = dq.length ? dq[dq.length - 1] : null;
+  const earlier = dq.slice(0, -1);
+  const avg = dq.length ? Math.round(dq.reduce((a, b) => a + b, 0) / dq.length) : null;
+  const trend = earlier.length ? last - Math.round(earlier.reduce((a, b) => a + b, 0) / earlier.length) : null;
+  const principles = Object.entries(L.principles).map(([id, v]) => ({ id, mastery: v.m, n: v.n, games: v.games, last: v.last, prev: v.prev }))
+    .sort((a, b) => b.mastery - a.mastery || b.n - a.n);
+  return { games: L.games, dqAvg: avg, dqLast: last, dqTrend: trend, dqHistory: dq.slice(), principles };
+}
+
 /* ---------------- daily streak */
 export function israelDate(d = new Date()) {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
@@ -323,5 +398,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; session = new Set(); lastSig = null; lastResult = null; changed(); }
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; changed(); }
 export { ACHIEVEMENTS, WIDS };

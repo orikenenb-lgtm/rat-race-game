@@ -174,7 +174,7 @@ Order of operations (one month = one payday):
    * `demand = round(baseDemand × priceFactor × (1 + lift) × eventMult × noise) + extra`
    * `capacity = min((manager ? managerCap : ownerCap) + staff × perStaff − newHires × perStaff/2, equipCap + expanded × expand.cap) × capMult`
    * `units = min(demand, capacity, stock if inventory)`. Lost sales are reported as `lostSales.capacity` and `lostSales.stock`.
-   * **Subscription mode:** `devs = staff + (owner working ? 1 : 0)`, `churn = base × 2/(1+devs) × priceChurnMult`, `new = (baseNew × (1 + 0.2·devs) + lift) × priceFactor × eventMult × noise`, `users = users − round(users × churn) + new`. Billing units are the users.
+   * **Subscription mode:** `devs = staff + (owner working ? 1 : 0)`, `churn = base × 2/(1+devs) × priceChurnMult`, `new = (baseNew × (1 + 0.2·devs) + lift) × priceFactor × eventMult × noise`, `users = users − round(users × churn) + new`. Billing units are the users. Monthly `burn` = operating cash lost before any owner money; **`runway = floor(cash ÷ burn)`** months (e.g. ₪40,000 ÷ ₪10,000 = 4).
 6. **P&L (accrual basis, VAT excluded)**
    * `revenueGross = units × price` · `vatOut = round(gross × 18/118)` · `revenue = gross − vatOut`
    * COGS: `none` = units × unitCost · `fresh` = units × unitCost, plus waste = (max(units, lastMonthUnits × (1+buffer)) − units) × unitCost (you buy according to last month's sales, so a drop in demand means spoilage) · `inventory` = average landed cost of the units sold, plus `deadRate` (2%/month) of the remaining stock written off · plus fulfilment per unit.
@@ -212,7 +212,7 @@ Order of operations (one month = one payday):
   * **profit-based:** `price = avg(EBT + one-offs, last ≤12 months) − manager wage (if the owner runs it) → ×12 × (1 − 23%) × multiple`. Buyers pay for profit that continues without you, which is why an owner-run coffee cart is worth little more than its equipment.
   * **subscription:** `ARR × revMultiple` if users grow ≥ 3%/month.
   * **floor:** 60% of the equipment book value + 70% of inventory at cost.
-  * **owner's proceeds:** `price + business cash + receivables`, minus 25% capital-gains tax on `(proceeds − total invested)`.
+  * **owner's proceeds:** `price + business cash + receivables`, minus 30% capital-gains tax (substantial shareholder) on `(proceeds − total invested)`.
 * `sell(b)` → `{business (closed, emptied), sale}`.
 
 ### 3.4 Simplifications vs Israeli reality (documented, deliberate)
@@ -225,7 +225,7 @@ Order of operations (one month = one payday):
 | owner draw | dividend, 30% tax (significant shareholder) | the 3% surtax and the "distributable profits" test are ignored; the draw is limited only by cash |
 | customs | 12% on goods + shipping | real toy duty varies, often 0–12% |
 | staff | one wage per employee (employer cost); hiring costs ¼ of a wage; firing costs 1 month (notice + severance, simplified); new hires work at 50% in their first month | — |
-| sale | capital-gains tax 25% on proceeds over invested capital | — |
+| sale | capital-gains tax 30% (substantial shareholder, like the dividend) on proceeds over invested capital | — |
 | equipment | straight-line depreciation; no resale except in the valuation floor | — |
 | demand | linear price response; marketing with no memory (stop spending and the lift stops) | — |
 
@@ -234,7 +234,7 @@ Order of operations (one month = one payday):
 import * as BIZ from './js/finance/business.js';
 // data
 BIZ.ARCHETYPES, BIZ.ARCHETYPE_IDS, BIZ.archetypeList(), BIZ.EVENTS, BIZ.BIZ_LESSONS (16 lessons, cat 'business'|'tax')
-BIZ.VAT_PCT (18), BIZ.CORP_TAX (0.23), BIZ.DIV_TAX (0.30), BIZ.CAP_GAINS (0.25), BIZ.RNG_DRAWS (3), BIZ.BIZ_VERSION (1)
+BIZ.VAT_PCT (18), BIZ.CORP_TAX (0.23), BIZ.DIV_TAX (0.30), BIZ.CAP_GAINS (0.30), BIZ.RNG_DRAWS (3), BIZ.BIZ_VERSION (1)
 // lifecycle
 create(typeId, {name?, overrides?, month?}) → business             // owner pays p.startCapital
 applyDecisions(b, d) → {ok, errors[], business, costs:{hiring,severance,inventory,equipment,total}, cashNeeded, changes[]}
@@ -281,7 +281,7 @@ Nothing in `engine.js` uses this yet. These are the suggested hooks. Simple `biz
    * options: `price:-10|-5|+5|+10`, `hire`, `fire`, `marketing:<preset>`, `order:<preset>`, `manager`, `draw:<preset>`, `expand`, `sell`, `ok`
    * `primary` = `suggest(b)`. Show each option's 3-month effect with `forecast(b, d, 3).netProfit`.
    * on choose: `const r = applyDecisions(b, d)`. If `!r.ok`, return the engine's usual `{ok:false, error: r.errors[0]}`. If `r.cashNeeded > 0`, the owner must inject: `d.inject = r.cashNeeded` and debit `st.cash` now.
-   * `sell`: `const {business, sale} = sell(b)`, then `st.cash += sale.net`, despawn the asset, and record `sale.tax` in `st.taxes.capGains`. **Do not apply the engine's own betterment tax again.**
+   * `sell`: `const {business, sale} = sell(b)`, then `st.cash += sale.net`, despawn the asset, and record `sale.tax` in `st.taxes.capGains` (30%: the owner is a substantial shareholder, unlike the engine's 25% for portfolio holdings). **Do not apply the engine's own betterment tax again.**
    * Decisions are quarterly by design: use `canDecide(b)`, or let the tile itself be the gate.
 6. **Engine events → business:**
    * w1 market `bonus` (type biz) → `applyShock(b, {id:'holiday', demand:1.2, months:1})` (the next simulated month only; `months` counts upcoming simulated months), instead of a free cash bonus

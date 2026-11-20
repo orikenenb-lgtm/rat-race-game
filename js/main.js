@@ -52,8 +52,14 @@ const show = () => { document.getElementById('start').hidden = false; };
 let pick = { worldId: 'w1', charId: null, tutorial: false };
 try { pick = { ...pick, ...JSON.parse(localStorage.getItem('rr2-fallback') || '{}') }; } catch (e) { /* ignore */ }
 
+let realAsked = false;
 function fallbackLobby() {
   show();
+  // history scenarios load lazily — re-draw the picker once the real-market data is in
+  if (!realAsked && typeof EN.loadRealData === 'function' && !(EN.scenarioList() || []).length) {
+    realAsked = true;
+    EN.loadRealData().then((ok) => { if (ok && fbOn && !document.getElementById('start').hidden && root().querySelector('.fb')) fallbackLobby(); }).catch(() => {});
+  }
   const worlds = worldList();
   const w = worlds.find((x) => x.id === pick.worldId) || worlds[0];
   if (!w.characters.some((c) => c.id === pick.charId)) pick.charId = w.characters[0].id;
@@ -71,7 +77,7 @@ function fallbackLobby() {
       <div class="row"><span>נשאר בחודש</span><b class="num ${c.surplus >= 0 ? 'pos' : 'neg'}">${sgn(c.surplus)}</b></div><div class="row"><span>מזומן בהתחלה</span><span class="num">${fmtM(c.cash)}</span></div>
       <div class="row"><span>★★★</span><span class="num">עד חודש ${t.t3}</span></div></button>`; }).join('')}</div>
     <label class="fbt"><input type="checkbox" id="fbTut" ${pick.tutorial ? 'checked' : ''}> משחק ראשון? הדרכה קצרה + עסקה ראשונה קלה</label>
-    ${(typeof EN.scenarioList === 'function' ? EN.scenarioList() : []).length ? `<h3 class="fbh">🕰️ מכונת הזמן — שוק אמיתי</h3><div class="fbw">${EN.scenarioList().map((x) => `<button class="fbworld hist" data-h="${esc(x.id)}" style="--s1:#efe2c4;--s2:#c9b089"><small>${esc(x.start || '')}</small><b>${esc(x.name)}</b><span>${esc(x.blurb || '')}</span></button>`).join('')}</div>` : ''}
+    ${(typeof EN.scenarioList === 'function' ? EN.scenarioList() : []).length ? `<h3 class="fbh">🕰️ מכונת הזמן — שוק אמיתי</h3><div class="fbw">${EN.scenarioList().map((x) => `<button class="fbworld histw" data-h="${esc(x.id)}" style="--s1:#efe2c4;--s2:#c9b089"><small>${esc(x.start || '')}</small><b>${esc(x.name)}</b><span>${esc(x.blurb || '')}</span></button>`).join('')}</div>` : ''}
     <button class="primary wide" id="fbGo">${sv ? 'משחק חדש' : 'יאללה, משחקים'}</button>
     <p class="note">המספרים מפושטים כדי שהמשחק יזרום — העקרונות אמיתיים.</p></div>`;
   const r = root();
@@ -98,6 +104,9 @@ function fallbackEnd(p) {
     <h1>${p.status === 'won' ? 'יצאת מהמירוץ!' : 'נשארת במירוץ'}</h1>
     <div class="stars" aria-label="${p.stars} כוכבים">${stars}</div>
     <p class="lead">${esc(e.nearMiss ? e.nearMiss.text : '')}</p>
+    ${e.starsBlockedByFund ? `<p class="warn">🛟 ★★★ נעצר בגלל קרן החירום: צריך לפחות ${starThresholds(p.worldId, p.charId).fundMonths || 3} חודשי הוצאות בצד. חופש בלי כרית נשבר במשבר הראשון.</p>` : ''}
+    ${e.starsBlockedByHappiness ? `<p class="warn">😐 ★★★ נעצר בגלל האושר: צריך לפחות ${starThresholds(p.worldId, p.charId).happy || 60}. כסף זה לא הכל.</p>` : ''}
+    ${learnHtml(e.learning)}
     <div class="grid"><div class="row"><span>חודשים</span><b class="num">${p.months}</b></div><div class="row"><span>שווי נקי</span><span class="num">${fmtM(p.netWorth)}</span></div>
     <div class="row"><span>הכנסה פסיבית</span><span class="num">${fmtM(p.passive)}</span></div><div class="row"><span>הוצאות</span><span class="num">${fmtM(p.expenses)}</span></div></div>
     ${(e.leaks || []).filter((l) => l.amount > 0).length ? `<h3 class="fbh">לאן הכסף דלף</h3><div class="grid">${e.leaks.filter((l) => l.amount > 0).slice(0, 4).map((l) => `<div class="row"><span>${esc(l.label)}</span><span class="num neg">${fmtM(l.amount)}</span></div>`).join('')}</div>` : ''}
@@ -106,6 +115,19 @@ function fallbackEnd(p) {
   root().querySelector('#fbAgain').onclick = () => G.startGame({ worldId: p.worldId, charId: p.charId, mode: 'free', seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false });
   root().querySelector('#fbBack').onclick = () => fallbackLobby();
   setTimeout(() => root().querySelector('#fbAgain').focus(), 50);
+}
+
+/** checkEnd().learning: decision quality (what you could see) vs luck (what happened) — engine numbers only */
+const VERD = { strong: 'חזקה', ok: 'סבירה', mixed: 'יש מה לשפר', risky: 'מסוכנת', costly: 'יקרה' };
+function learnHtml(L) {
+  if (!L || L.decisionQuality == null) return '';
+  const luck = L.luck && L.luck.total ? L.luck.total : 0;
+  const top = (L.top || []).filter((x) => x.score < 85).slice(0, 2);
+  return `<h3 class="fbh">איכות ההחלטות שלך</h3><div class="grid">
+    <div class="row"><span>ציון ממוצע (${L.decisions} החלטות)</span><b class="num">${L.decisionQuality}/100</b></div>
+    <div class="row"><span>מזל (מה שקרה מול מה שהיה צפוי)</span><span class="num ${luck > 0 ? 'pos' : luck < 0 ? 'neg' : ''}">${sgn(luck)}</span></div>
+    ${top.map((x) => `<div class="row"><span>${esc(x.c)} — ${esc(VERD[x.verdict] || '')}</span><small>${esc(x.why || '')}</small></div>`).join('')}</div>
+    ${L.sentence ? `<p class="note">${esc(L.sentence)}</p>` : ''}`;
 }
 
 boot();

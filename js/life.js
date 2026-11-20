@@ -1,34 +1,25 @@
 // מירוץ העכברים v3 — "החיים האמיתיים": pure data + pure helpers for the life systems.
 // No engine imports (the engine imports us). No DOM, no Math.random, no Date.
+import { TAX_IL } from './data/tax.js';
+import { ipow } from './finance/bank.js';
 //
-//  • Israeli payslip (simplified 2025 brackets): gross → income tax − credit points, Bituah Leumi + health, pension.
+//  • Israeli payslip (2026 TAX_IL): gross → income tax − credit points, Bituah Leumi + health, pension.
 //  • Monthly plans (time & energy), happiness, credit-score bands.
 //  • Life events (tile L) — real dilemmas, effects scale with the player's base net salary (S).
 //  • LESSONS — the library collection (58 lessons), unlocked by the engine by experience.
 
 /* ============================================================ tax & payslip */
-// Defaults = js/data/real.js TAX_IL (2026). setTaxTable(TAX_IL) re-applies the data lead's table when it is loaded.
-export const TAX = {
-  brackets: [[7010, 0.10], [10060, 0.14], [19000, 0.20], [25100, 0.31], [46690, 0.35], [60130, 0.47], [Infinity, 0.50]],
-  creditPoint: 242, points: 2.25, kidPoints: 1, degreePoints: 1,
-  blLow: 7703, blRateLow: 0.0104, blRateHigh: 0.07, healthRateLow: 0.0323, healthRateHigh: 0.0517, blMax: 51910,
-  pensionEmployee: 0.06, pensionEmployer: 0.065, severance: 0.06,
-  capGains: 0.25, rental: 0.10, rentExempt: 5654, idxDividendTax: 0.25,
-};
-/** Use the data lead's TAX_IL (same shape as js/data/real.js). Values only — never changes the rules mid-game. */
-export function setTaxTable(T) {
-  if (!T || !Array.isArray(T.brackets)) return;
-  TAX.brackets = T.brackets.map((b) => [b.upTo == null ? Infinity : b.upTo, b.rate]);
-  if (T.creditPointValue) TAX.creditPoint = T.creditPointValue;
-  if (T.defaultCreditPoints) TAX.points = T.defaultCreditPoints;
-  const B = T.bituachLeumi, H = T.health;
-  if (B) { TAX.blLow = B.reducedUpTo; TAX.blRateLow = B.employeeReduced; TAX.blRateHigh = B.employeeFull; TAX.blMax = B.maxInsurable; }
-  if (H) { TAX.healthRateLow = H.reduced; TAX.healthRateHigh = H.full; }
-  if (T.pension) { TAX.pensionEmployee = T.pension.employee; TAX.pensionEmployer = T.pension.employer; TAX.severance = T.pension.severance; }
-  if (T.capitalGains) TAX.capGains = T.capitalGains;
-  if (T.rentalTrack) TAX.rental = T.rentalTrack;
-  if (T.rentalExemptUpTo) TAX.rentExempt = T.rentalExemptUpTo;
-}
+// One tax source: js/data/tax.js TAX_IL (= js/data/real.js TAX_IL, tested equal). TAX is a read-only view of it in the
+// shape the formulas below use — derived once at load, never mutated.
+const T = TAX_IL;
+export const TAX = Object.freeze({
+  brackets: Object.freeze(T.brackets.map((b) => Object.freeze([b.upTo == null ? Infinity : b.upTo, b.rate]))),
+  creditPoint: T.creditPointValue, points: T.defaultCreditPoints, kidPoints: 1, degreePoints: 1,
+  blLow: T.bituachLeumi.reducedUpTo, blRateLow: T.bituachLeumi.employeeReduced, blRateHigh: T.bituachLeumi.employeeFull, blMax: T.bituachLeumi.maxInsurable,
+  healthRateLow: T.health.reduced, healthRateHigh: T.health.full,
+  pensionEmployee: T.pension.employee, pensionEmployer: T.pension.employer, severance: T.pension.severance,
+  capGains: T.capitalGains, rental: T.rentalTrack, rentExempt: T.rentalExemptUpTo,
+});
 
 function incomeTaxExact(gross, points) {
   let tax = 0, low = 0;
@@ -59,7 +50,7 @@ export function slip(gross, points = TAX.points) {
     effectiveTaxRate: gross ? Math.round(((it + blR + hlR) / gross) * 1000) / 10 : 0, marginalRate: Math.round(marginalRate(gross) * 100) };
 }
 /** Integer compound growth: amount × (1+r)^months, rounded to whole ₪ once at the end. */
-export function compound(amount, monthlyRate, months) { return Math.round(amount * (1 + monthlyRate) ** months); }
+export function compound(amount, monthlyRate, months) { return Math.round(amount * ipow(1 + monthlyRate, months)); }
 /** Smallest gross (rounded up to ₪10) whose net is ≥ `net`. */
 export function grossFromNet(net, points = TAX.points) {
   if (net <= 0) return 0;
@@ -70,11 +61,11 @@ export function grossFromNet(net, points = TAX.points) {
 
 /* ============================================================ monthly plans */
 export const PLANS = {
-  work: { id: 'work', label: 'עבודה רגילה', short: 'רגיל', desc: 'משכורת מלאה, אנרגיה מתאוששת לאט.', grossMult: 1, energy: 4, happiness: 0 },
-  overtime: { id: 'overtime', label: 'שעות נוספות', short: 'שעות נוספות', desc: '+25% ברוטו (ממוסה במדרגה הגבוהה שלך), −12 אנרגיה בחודש.', grossMult: 1.25, energy: -12, happiness: -2 },
-  study: { id: 'study', label: 'לימודים', short: 'לימודים', desc: 'שכר לימוד עכשיו, ובסוף — העלאה קבועה של 20% בברוטו.', grossMult: 1, energy: -6, happiness: -1 },
+  work: { id: 'work', label: 'עבודה רגילה', short: 'רגיל', desc: 'משכורת מלאה, הכוח מתאושש לאט.', grossMult: 1, energy: 4, happiness: 0 },
+  overtime: { id: 'overtime', label: 'שעות נוספות', short: 'שעות נוספות', desc: '+25% ברוטו (ממוסה במדרגה הגבוהה שלך), −12 🔋 כוח בחודש.', grossMult: 1.25, energy: -12, happiness: -2 },
+  study: { id: 'study', label: 'לימודים', short: 'לימודים', desc: 'שכר לימוד עכשיו, ובסוף — העלאה של 20% בברוטו (במשחק; במציאות זה תלוי בתחום, ואין הבטחה).', grossMult: 1, energy: -6, happiness: -1 },
   side: { id: 'side', label: 'עסק צדדי', short: 'עסק צדדי', desc: 'הכנסה קטנה ומשתנה בערבים. אם תתמיד — היא הופכת לעסק אמיתי.', grossMult: 1, energy: -8, happiness: 0 },
-  rest: { id: 'rest', label: 'מנוחה ומשפחה', short: 'מנוחה', desc: '−15% מהברוטו (פחות שעות), +18 אנרגיה, +אושר.', grossMult: 0.85, energy: 18, happiness: 4 },
+  rest: { id: 'rest', label: 'מנוחה ומשפחה', short: 'מנוחה', desc: '−15% מהברוטו (פחות שעות), +18 🔋 כוח, +אושר.', grossMult: 0.85, energy: 18, happiness: 4 },
 };
 export const PLAN_IDS = Object.keys(PLANS);
 export const LIFE_CFG = {
@@ -85,40 +76,42 @@ export const LIFE_CFG = {
   raiseMin: 65, raiseEvery: 10, raiseMult: 0.08,
   debtStressMult: 6, creditStart: 680,
   inflMin: 2, inflMax: 4, inflSpikeChance: 0.1, inflSpike: [6, 8], salaryCpi: 0.8, rentCpi: 0.7, bizCpi: 0.5,
-  idx: { start: 100, mu: 0.0048, sigma: 0.04, crashChance: 0.01, crash: -0.15, crisisHit: -0.08, div: 0.0025 },
+  idx: { start: 100, annual: 0.04, vol: 0.14, crashChance: 0.01, crash: -0.15, crisisHit: -0.08, div: 0.0025 }, // price median +4%/yr + 3%/yr distribution
+  realBoi: 3.25, // Bank of Israel rate today (2026-11), for "in the real world" rate hints
 };
 
 /* ============================================================ credit score */
+/** Band label + how much of the loan cap the bank still offers. The rate spread itself comes from js/finance/bank.js creditSpread. */
 export function creditBand(score) {
-  if (score >= 760) return { id: 'excellent', label: 'מצוין', adj: -0.25, capMult: 1 };
-  if (score >= 680) return { id: 'good', label: 'טוב', adj: 0, capMult: 1 };
-  if (score >= 600) return { id: 'fair', label: 'בינוני', adj: 0.25, capMult: 1 };
-  if (score >= 520) return { id: 'weak', label: 'חלש', adj: 0.5, capMult: 0.5 };
-  return { id: 'poor', label: 'גרוע', adj: 0.75, capMult: 0 };
+  if (score >= 760) return { id: 'excellent', label: 'מצוין', capMult: 1 };
+  if (score >= 680) return { id: 'good', label: 'טוב', capMult: 1 };
+  if (score >= 600) return { id: 'fair', label: 'בינוני', capMult: 1 };
+  if (score >= 520) return { id: 'weak', label: 'חלש', capMult: 0.5 };
+  return { id: 'poor', label: 'גרוע', capMult: 0 };
 }
 
 /* ============================================================ life events (tile L) */
 // Effect fields (S = base net salary): cash (×S), monthly (×S, months: 0 = permanent), label, happiness, energy, glow,
 // kid, married, grossMult, carCut, study, jobless, workLoad, friend, severance, credit. `primary` = the balanced choice.
 export const LIFE_EVENTS = [
-  { id: 'wedding', title: 'מתחתנים!', text: 'הגיע הזמן. איזו חתונה תהיה לכם? המתנות יכסו חלק מהעלות — לא הכל.', alt: 'vacation', when: (L) => L.family.partner !== 'married', primary: 'modest',
+  { id: 'wedding', personal: true, title: 'מתחתנים!', text: 'הגיע הזמן. איזו חתונה תהיה לכם? המתנות יכסו חלק מהעלות — לא הכל.', alt: 'vacation', when: (L) => L.family.partner !== 'married', primary: 'modest',
     options: [
       { id: 'modest', label: 'חתונה צנועה בגינה', cash: -1.2, happiness: 8, married: 'modest', note: 'חגיגה קטנה, בלי חוב.' },
       { id: 'big', label: 'אולם גדול, 400 מוזמנים', cash: -2.5, happiness: 9, glow: 6, married: 'big', note: 'אחרי המתנות עדיין חסר כמעט פי 2.5 ממשכורת.' },
       { id: 'registry', label: 'טקס קטן ומסיבה בבית', cash: -0.2, happiness: 5, married: 'small', note: 'הכי זול — וגם הכי שקט.' },
     ] },
-  { id: 'baby', title: 'רוצים להרחיב את המשפחה?', text: 'החלטה של החיים. ילד מביא אושר עצום — וגם הוצאה קבועה של שנים, ולילות בלי שינה.', alt: 'parent', when: (L) => L.family.kids < 3, primary: 'yes',
+  { id: 'baby', personal: true, title: 'רוצים להרחיב את המשפחה?', text: 'החלטה של החיים. ילד מביא אושר עצום — וגם הוצאה קבועה של שנים, ולילות בלי שינה.', alt: 'parent', when: (L) => L.family.kids < 3, primary: 'yes',
     options: [
       { id: 'yes', label: 'כן, עכשיו', cash: -0.5, monthly: 0.1, months: 0, label2: 'ילד/ה', happiness: 10, energy: -12, kid: 1, note: 'הוצאה חודשית קבועה, ושנה ראשונה מתישה.' },
       { id: 'later', label: 'עוד לא — בעוד שנה־שנתיים', happiness: -1, note: 'אפשר לחזור לזה כשהתזרים חזק יותר.' },
     ] },
-  { id: 'moving', title: 'מעבר דירה?', text: 'החוזה נגמר. בעל הבית רוצה להעלות שכירות — או שזה הזמן לשנות.', primary: 'stay',
+  { id: 'moving', personal: true, title: 'מעבר דירה?', text: 'החוזה נגמר. בעל הבית רוצה להעלות שכירות — או שזה הזמן לשנות.', primary: 'stay',
     options: [
       { id: 'bigger', label: 'דירה גדולה ומרווחת', cash: -0.3, monthly: 0.1, months: 0, label2: 'דירה גדולה יותר', happiness: 5, note: 'נעים — והוצאה קבועה גבוהה יותר.' },
       { id: 'stay', label: 'נשארים ומקבלים העלאה קטנה', monthly: 0.03, months: 0, label2: 'העלאת שכירות', note: 'הכי פשוט.' },
       { id: 'smaller', label: 'דירה קטנה וזולה', cash: -0.2, monthly: -0.08, months: 0, label2: 'דירה קטנה יותר', happiness: -4, note: 'פחות נוח — יותר תזרים.' },
     ] },
-  { id: 'parent', title: 'ההורים צריכים עזרה', text: 'אמא שלך צריכה טיפול ותמיכה. המשפחה מסתכלת עליך.', primary: 'monthly',
+  { id: 'parent', personal: true, title: 'ההורים צריכים עזרה', text: 'אמא שלך צריכה טיפול ותמיכה. המשפחה מסתכלת עליך.', primary: 'monthly',
     options: [
       { id: 'monthly', label: 'עזרה חודשית לשנה', monthly: 0.08, months: 12, label2: 'עזרה להורים', happiness: 4, note: 'מתחלק לאורך שנה.' },
       { id: 'once', label: 'תשלום אחד גדול', cash: -0.9, happiness: 4, note: 'סוגר עניין — ומכווץ את הכרית.' },
@@ -130,7 +123,7 @@ export const LIFE_EVENTS = [
       { id: 'new', label: 'רכב חדש בליסינג', cash: -0.3, monthly: 0.12, months: 36, label2: 'ליסינג רכב חדש', glow: 6, note: 'ריח של חדש — ותשלום ל־3 שנים.' },
       { id: 'bus', label: 'אוטובוס ואופניים', energy: -6, happiness: -3, carCut: 0.6, note: 'חוסך את רוב הוצאות הרכב, לתמיד.' },
     ] },
-  { id: 'friend', title: 'חבר טוב מבקש עזרה', text: 'חבר מילדות פותח עסק ומבקש הלוואה — או לפחות שתחתום לו ערבות בבנק.', primary: 'no',
+  { id: 'friend', personal: true, title: 'חבר טוב מבקש עזרה', text: 'חבר מילדות פותח עסק ומבקש הלוואה — או לפחות שתחתום לו ערבות בבנק.', primary: 'no',
     options: [
       { id: 'lend', label: 'להלוות לו', cash: -1, happiness: 3, friend: 'lend', note: 'אולי יחזיר בעוד חצי שנה. אולי לא.' },
       { id: 'guarantee', label: 'לחתום ערבות', happiness: 2, friend: 'guarantee', note: 'לא עולה כלום — אלא אם הוא לא ישלם.' },
@@ -138,17 +131,17 @@ export const LIFE_EVENTS = [
     ] },
   { id: 'reserve', title: 'צו 8: חודש מילואים', text: 'יוצאים למילואים. ביטוח לאומי משלם תגמול במקום המשכורת — והמדינה מוסיפה מענק.', primary: 'go',
     options: [
-      { id: 'go', label: 'יוצאים', cash: 0.3, energy: -20, happiness: -2, note: 'ההכנסה נשמרת. האנרגיה — פחות.' },
+      { id: 'go', label: 'יוצאים', cash: 0.3, energy: -20, happiness: -2, note: 'ההכנסה נשמרת. הכוח — פחות.' },
     ] },
-  { id: 'jobOffer', title: 'הצעת עבודה', text: 'חברה מתחרה רוצה אותך: 25% יותר ברוטו — אבל שעות ארוכות יותר ולחץ.', primary: 'take',
+  { id: 'jobOffer', personal: true, title: 'הצעת עבודה', text: 'חברה מתחרה רוצה אותך: 25% יותר ברוטו — אבל שעות ארוכות יותר ולחץ.', primary: 'take',
     options: [
-      { id: 'take', label: 'לקבל: +25% ברוטו, יותר שעות', grossMult: 1.25, workLoad: 1, happiness: 1, note: 'כל חודש עבודה יעלה לך עוד 4 אנרגיה.' },
+      { id: 'take', label: 'לקבל: +25% ברוטו, יותר שעות', grossMult: 1.25, workLoad: 1, happiness: 1, note: 'כל חודש עבודה יעלה לך עוד 4 🔋 כוח.' },
       { id: 'counter', label: 'להשתמש בהצעה כדי לבקש העלאה', grossMult: 1.1, chance: 0.6, note: 'אם הבוס יסכים: +10% באותן שעות.' },
       { id: 'stay', label: 'להישאר — טוב לי כאן', happiness: 2, note: 'שקט נפשי שווה משהו.' },
     ] },
-  { id: 'layoff', title: 'פיטורים', text: 'החברה מצמצמת. חודשיים בלי משכורת (דמי אבטלה מכסים 60%), עד שתמצא עבודה חדשה. ומה עם הפיצויים?', primary: 'keep',
+  { id: 'layoff', personal: true, title: 'פיטורים', text: 'החברה מצמצמת. חודשיים בלי משכורת (דמי אבטלה מכסים בערך 60%), עד שתמצא עבודה חדשה. ומה עם הפיצויים?', primary: 'keep',
     options: [
-      { id: 'withdraw', label: 'למשוך את הפיצויים מהפנסיה', jobless: 2, happiness: -5, severance: 'withdraw', note: 'כסף עכשיו — פחות פנסיה בעתיד.' },
+      { id: 'withdraw', label: 'למשוך את הפיצויים מהפנסיה', jobless: 2, happiness: -5, severance: 'withdraw', note: 'כסף עכשיו — פחות פנסיה בעתיד, ולפעמים גם מס.' },
       { id: 'keep', label: 'להשאיר אותם לצמוח בפנסיה', jobless: 2, happiness: -5, severance: 'keep', note: 'הקרן ממשיכה לצבור — אם יש לך כרית.' },
     ] },
   { id: 'health', title: 'בעיה בגב', text: 'הרופאה ממליצה על טיפול. בציבורי יש תור של חודשים; בפרטי — מחר.', primary: 'public',
@@ -156,7 +149,7 @@ export const LIFE_EVENTS = [
       { id: 'private', label: 'טיפול פרטי', cash: -0.5, energy: 12, note: 'יקר, מהיר.' },
       { id: 'public', label: 'תור בקופה', energy: -8, happiness: -2, note: 'חינם, אבל כואב עוד קצת.' },
     ] },
-  { id: 'vacation', title: 'חופשה משפחתית', text: 'כולם עייפים. אולי זה הזמן לעצור לכמה ימים?', primary: 'local',
+  { id: 'vacation', personal: true, title: 'חופשה משפחתית', text: 'כולם עייפים. אולי זה הזמן לעצור לכמה ימים?', primary: 'local',
     options: [
       { id: 'abroad', label: 'טיסה לחו״ל', cash: -1, happiness: 7, energy: 15, note: 'חוויה — וזיכרון לשנים.' },
       { id: 'local', label: 'צימר בגליל', cash: -0.3, happiness: 4, energy: 10, note: 'מנוחה אמיתית, במחיר שפוי.' },
@@ -176,13 +169,13 @@ export const LESSONS = [
   { id: 'bituah_leumi', cat: 'tax', title: 'ביטוח לאומי ומס בריאות', text: 'הם מממנים קצבאות, דמי אבטלה, תגמולי מילואים ושירותי בריאות. על חלק המשכורת הנמוך השיעור נמוך, ומעליו הוא עולה.' },
   { id: 'pension_match', cat: 'invest', title: 'הפנסיה שלך', text: 'על כל ₪6 שאתה מפריש לפנסיה, המעסיק מפריש עוד ₪12.5 (תגמולים ופיצויים). זה חלק מהשכר שלך — רק נדחה לעתיד.' },
   { id: 'tax_brackets', cat: 'tax', title: 'מדרגות מס', text: 'מס הכנסה מדורג: כל מדרגה של ההכנסה ממוסה בשיעור משלה. שקל נוסף ממוסה לפי המדרגה העליונה שלך — לא כל המשכורת.' },
-  { id: 'credit_points', cat: 'tax', title: 'נקודות זיכוי', text: 'לכל תושב יש נקודות זיכוי שמקטינות את המס (נקודה שווה כ־₪242 בחודש). ילדים ותואר אקדמי מוסיפים נקודות.' },
+  { id: 'credit_points', cat: 'tax', title: 'נקודות זיכוי', text: 'לכל תושב ישראל יש נקודות זיכוי (גבר 2.25, אישה 2.75; נקודה ≈ ₪242 בחודש). ילדים מוסיפים נקודות, ותואר ראשון מוסיף נקודה לשנה — עד 3 שנים אחרי הסיום.' },
   { id: 'asset_liability', cat: 'money', title: 'נכס או התחייבות', text: 'נכס מכניס כסף לכיס שלך כל חודש. התחייבות מוציאה ממנו. השאלה היא לא מה זה — אלא לאן הכסף זורם.' },
   { id: 'cashflow', cat: 'money', title: 'תזרים מזומנים', text: 'החשוב הוא לא כמה אתה מרוויח, אלא כמה נשאר בסוף החודש — ומה אתה עושה עם זה.' },
   { id: 'passive_income', cat: 'money', title: 'הכנסה פסיבית', text: 'הכנסה שמגיעה בלי שתעבוד: שכר דירה, דיבידנד, עסק שרץ בלעדיך. כשהיא עוברת את ההוצאות — יצאת מהמירוץ.' },
   { id: 'emergency_fund', cat: 'money', title: 'קרן חירום', text: '3–6 חודשי הוצאות בצד הופכים משבר לחודש רע. בלעדיהם — כל הפתעה הופכת לחוב.' },
   { id: 'opportunity_cost', cat: 'money', title: 'עלות אלטרנטיבית', text: 'כל שקל שהוצאת על צעצוע הוא שקל שלא קנה נכס. השאלה תמיד: מה עוד יכולתי לעשות איתו?' },
-  { id: 'credit_card_debt', cat: 'debt', title: 'חוב בכרטיס אשראי', text: 'תשלומים וחוב בכרטיס הם מהכסף היקר ביותר. ריבית של כמה אחוזים בחודש מכפילה חוב בתוך שנים ספורות.' },
+  { id: 'credit_card_debt', cat: 'debt', title: 'חוב בכרטיס אשראי', text: 'חוב בכרטיס אשראי ומינוס בעו״ש הם מהאשראי היקר ביותר בבנק: בערך 8%–16% בשנה. החוק מגביל ריבית לריבית בנק ישראל ועוד 15%, ושם בדיוק נמצאות הלוואות "מהירות" מחוץ לבנקים. 3 תשלומים בלי ריבית — בסדר. קרדיט ומינוס מתגלגל — יקר.' },
   { id: 'good_debt', cat: 'debt', title: 'חוב טוב', text: 'הלוואה טובה רק אם הנכס שהיא קונה מכניס יותר ממה שהיא עולה. אחרת זה מינוף להפסד.' },
   { id: 'forced_loan', cat: 'debt', title: 'הלוואה כפויה', text: 'כשנגמר המזומן, הבנק מחליט בשבילך — ובמחיר שלו. כרית קטנה חוסכת הרבה ריבית.' },
   { id: 'leverage', cat: 'debt', title: 'מינוף', text: 'הלוואה מגדילה רווחים — וגם הפסדים. נכס ממונף שירד בערך יכול למחוק את כל ההון ששמת בו.' },
@@ -194,25 +187,25 @@ export const LESSONS = [
   { id: 'dollar_cost', cat: 'invest', title: 'הוראת קבע להשקעה', text: 'השקעה קבועה כל חודש קונה יותר יחידות כשזול ופחות כשיקר — ופוטרת אותך מהצורך לנחש.' },
   { id: 'drawdown', cat: 'invest', title: 'ירידות הן חלק מהדרך', text: 'גם מדד טוב יורד לפעמים 30% ויותר. מי שלא מסוגל לסבול ירידה צריך פחות מניות — לא יותר אומץ.' },
   { id: 'panic_selling', cat: 'invest', title: 'מכירה בפאניקה', text: 'מי שמוכר בירידה הופך הפסד על הנייר להפסד אמיתי — ומפספס את העלייה שבאה אחריה.' },
-  { id: 'buy_the_dip', cat: 'invest', title: 'לקנות בירידה', text: 'ירידות הן הזדמנות למי שיש לו מזומן וסבלנות. קשה לעשות את זה כשכולם מפחדים — ובגלל זה זה עובד.' },
+  { id: 'buy_the_dip', cat: 'invest', title: 'לקנות בירידה', text: 'ירידות יכולות להיות הזדמנות למי שיש לו כרית, סבלנות ופיזור — בעיקר בקרן מדד רחבה. במניה בודדת ירידה יכולה גם להימשך עד אפס, ואף אחד לא יודע איפה התחתית.' },
   { id: 'time_in_market', cat: 'invest', title: 'זמן בשוק', text: 'לא צריך לתזמן את השוק. מי שנשאר מושקע לאורך שנים קוטף את הימים הטובים — שאי אפשר לנחש מראש.' },
   { id: 'inflation', cat: 'money', title: 'אינפלציה', text: 'כשהמחירים עולים, אותו שקל קונה פחות. מזומן שיושב בעו״ש מאבד ערך בשקט.' },
   { id: 'wage_lag', cat: 'money', title: 'המשכורת מפגרת', text: 'המחירים עולים כל חודש, והמשכורת מתעדכנת פעם בשנה — ולא תמיד במלוא האינפלציה.' },
   { id: 'real_vs_nominal', cat: 'money', title: 'ריאלי ונומינלי', text: '₪100,000 היום הם לא ₪100,000 בעוד עשר שנים. תמיד שואלים: כמה זה שווה במחירים של היום?' },
-  { id: 'capital_gains', cat: 'tax', title: 'מס רווח הון', text: 'על רווח ממכירת מניות, קרנות או קריפטו משלמים 25% מס — רק כשמממשים. מי שמחזיק, דוחה את המס.' },
+  { id: 'capital_gains', cat: 'tax', title: 'מס רווח הון', text: 'על רווח ממכירת מניות, קרנות או קריפטו משלמים 25% מס על הרווח הריאלי — החלק שרק שמר על ערכו מול האינפלציה פטור. משלמים רק כשמממשים: מי שמחזיק, דוחה את המס.' },
   { id: 'loss_offset', cat: 'tax', title: 'קיזוז הפסדים', text: 'הפסד ממכירה אחת מקטין את המס על רווח ממכירה אחרת. גם הפסד יכול להיות שווה משהו.' },
-  { id: 'rental_tax', cat: 'tax', title: 'מס על שכר דירה', text: 'שכר דירה ממגורים פטור ממס עד כ־₪5,650 בחודש. מעל זה יש מסלול פשוט של 10%. כדאי להכיר את המסלולים לפני שקונים.' },
-  { id: 'betterment_tax', cat: 'tax', title: 'מס שבח', text: 'כשמוכרים נכס ברווח, משלמים מס על השבח — ההפרש בין מחיר המכירה למחיר הקנייה. הרווח האמיתי הוא אחרי מס.' },
+  { id: 'rental_tax', cat: 'tax', title: 'מס על שכר דירה', text: 'שכר דירה מדירות מגורים פטור ממס עד ₪5,654 בחודש, על כל הדירות שלך יחד. מעל התקרה הפטור הולך וקטן, ומעל פי 2 ממנה אין פטור. אפשר גם לבחור במסלול של 10% מכל שכר הדירה, בלי לנכות הוצאות. במשחק: עד התקרה — פטור, מעליה — 10% מהכול.' },
+  { id: 'betterment_tax', cat: 'tax', title: 'מס שבח', text: 'כשמוכרים דירה ברווח משלמים מס שבח: בדרך כלל 25% מהרווח הריאלי (אחרי אינפלציה והוצאות כמו שיפוץ, עו״ד ותיווך). דירת מגורים יחידה — לרוב פטורה, בתנאים. במשחק: 25% מהרווח הריאלי בין ההצעה למחיר הקנייה.' },
   { id: 'tax_refund', cat: 'tax', title: 'החזר מס', text: 'הרבה שכירים זכאים להחזר מס ולא מבקשים. מי שבודק — מקבל בחזרה כסף ששילם ביותר.' },
-  { id: 'side_tax', cat: 'tax', title: 'מס על הכנסה נוספת', text: 'הכנסה מעסק צדדי חייבת בדיווח. מי שלא מדווח מקבל חשבון בסוף השנה — לפעמים עם קנס.' },
+  { id: 'side_tax', cat: 'tax', title: 'מס על הכנסה נוספת', text: 'הכנסה מעסק צדדי חייבת בדיווח: פותחים תיק במס הכנסה ומשלמים מקדמות כל חודש. מי שלא מדווח מקבל חשבון בסוף השנה — לפעמים עם קנס.' },
   { id: 'negotiation', cat: 'money', title: 'משא ומתן', text: 'המחיר הראשון הוא רק הצעה. הנחה של 10% בקנייה היא רווח מיידי — אבל מי שלוחץ יותר מדי עלול לאבד את העסקה.' },
   { id: 'negotiation_fail', cat: 'money', title: 'לפעמים אומרים לא', text: 'משא ומתן הוא סיכון: לפעמים המוכר הולך לקונה אחר. כדאי לדעת מראש כמה העסקה שווה לך.' },
   { id: 'ask_raise', cat: 'time', title: 'לבקש העלאה', text: 'העלאה מגיעה למי שמבקש — בזמן הנכון, אחרי הישגים, ועם מספרים. הכי גרוע שיגידו לא.' },
   { id: 'human_capital', cat: 'time', title: 'להשקיע בעצמך', text: 'לימודים עולים זמן וכסף עכשיו, אבל העלאה קבועה במשכורת מחזירה את ההשקעה שוב ושוב.' },
-  { id: 'time_scarce', cat: 'time', title: 'הזמן הוא המשאב הנדיר', text: 'שעות נוספות מכניסות כסף, אבל לוקחות זמן ואנרגיה. כסף אפשר להרוויח שוב — זמן לא.' },
+  { id: 'time_scarce', cat: 'time', title: 'הזמן הוא המשאב הנדיר', text: 'שעות נוספות מכניסות כסף, אבל לוקחות זמן וכוח. כסף אפשר להרוויח שוב — זמן לא.' },
   { id: 'marginal_overtime', cat: 'tax', title: 'שעות נוספות ומס', text: 'שעות נוספות ממוסות במדרגה הגבוהה שלך. מכל שקל נוסף נשאר פחות ממה שחשבת.' },
   { id: 'burnout', cat: 'time', title: 'שחיקה', text: 'מי שעובד בלי הפסקה משלם בסוף — בבריאות ובחודשים בלי הכנסה. מנוחה היא חלק מהתוכנית, לא בזבוז.' },
-  { id: 'rest_value', cat: 'time', title: 'מנוחה ומשפחה', text: 'חודש רגוע עם המשפחה מוריד קצת מההכנסה — ומוסיף אנרגיה ואושר שמחזיקים מעמד.' },
+  { id: 'rest_value', cat: 'time', title: 'מנוחה ומשפחה', text: 'חודש רגוע עם המשפחה מוריד קצת מההכנסה — ומוסיף כוח ואושר שמחזיקים מעמד.' },
   { id: 'side_hustle', cat: 'time', title: 'עסק צדדי', text: 'עסק קטן בערבים מתחיל לאט ומעייף, אבל מי שמתמיד יכול להפוך אותו לנכס שמכניס בלי משכורת.' },
   { id: 'hedonic', cat: 'life', title: 'הסתגלות הנאתנית', text: 'הריגוש מקנייה חדשה דועך תוך שבועות. חוויות וקשרים משמחים לאורך זמן יותר מחפצים.' },
   { id: 'lifestyle_creep', cat: 'life', title: 'אינפלציית סגנון חיים', text: 'כל מנוי קטן נשמע זניח, אבל יחד הם מזיזים את קו הסיום — לתמיד.' },
@@ -221,7 +214,7 @@ export const LESSONS = [
   { id: 'guarantor', cat: 'life', title: 'ערבות', text: 'לחתום ערבות זה להבטיח לשלם חוב של מישהו אחר. אם הוא לא ישלם — אתה תשלם.' },
   { id: 'friend_loan', cat: 'life', title: 'להלוות לחבר', text: 'מלווים לחבר רק סכום שמוכנים לא לראות שוב. ככה שומרים גם על הכסף וגם על החברות.' },
   { id: 'car_cost', cat: 'life', title: 'רכב', text: 'רכב חדש מאבד חלק גדול מערכו כבר בשנים הראשונות. תחבורה ציבורית ואופניים הם חיסכון רציני.' },
-  { id: 'reserve_duty', cat: 'life', title: 'מילואים', text: 'בזמן מילואים ביטוח לאומי משלם תגמול במקום המשכורת. ההכנסה נשמרת — האנרגיה פחות.' },
+  { id: 'reserve_duty', cat: 'life', title: 'מילואים', text: 'בזמן מילואים ביטוח לאומי משלם תגמול במקום המשכורת. ההכנסה נשמרת — הכוח פחות.' },
   { id: 'job_offer', cat: 'life', title: 'הצעת עבודה', text: 'משכורת גבוהה יותר שווה בדיקה: כמה שעות, כמה לחץ, ומה זה עושה לחיים שמחוץ לעבודה.' },
   { id: 'severance', cat: 'life', title: 'פיצויים', text: 'כספי הפיצויים יושבים בקופת הפנסיה. אפשר למשוך אותם בפיטורים — או להשאיר אותם לצמוח.' },
   { id: 'unemployment', cat: 'life', title: 'דמי אבטלה', text: 'דמי אבטלה מכסים רק חלק מהמשכורת ולזמן מוגבל. קרן חירום היא מה שמחזיק אותך בין עבודות.' },

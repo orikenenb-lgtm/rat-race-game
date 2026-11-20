@@ -3,40 +3,8 @@
 // Generated 2026-11-20; data through 2026-10 (homeIL through 2026-08).
 // Contract (do not rename): TAX_IL, SERIES, SCENARIOS, seriesAt(name, ym), monthlyChange(name, ym).
 
-export const TAX_IL = {
-  year: 2026,
-  // Monthly gross ₪ (employment income). Progressive: each rate applies only to the slice inside its bracket.
-  // 2026 law (published 31-03-2026, retroactive to 01-2026) widened the 20% and 31% brackets.
-  brackets: [
-    { upTo: 7010, rate: 0.10 },
-    { upTo: 10060, rate: 0.14 },
-    { upTo: 19000, rate: 0.20 },
-    { upTo: 25100, rate: 0.31 },
-    { upTo: 46690, rate: 0.35 },
-    { upTo: 60130, rate: 0.47 },
-    { upTo: null, rate: 0.50 }, // 47% + 3% surtax (מס יסף) above 60,130/month
-  ],
-  creditPointValue: 242,       // ₪/month per credit point (2,904 ₪/year), unchanged 2025-2026
-  defaultCreditPoints: 2.25,   // resident man; resident woman gets 2.75 (+ points per child, not modelled)
-  bituachLeumi: {              // employee share, Bituach Leumi (national insurance) only
-    reducedUpTo: 7703,         // ₪/month reduced-rate threshold, 2026
-    employeeReduced: 0.0104,
-    employeeFull: 0.07,
-    maxInsurable: 51910,       // ₪/month ceiling 2026: no BL/health above this
-  },
-  health: {                    // employee health tax (מס בריאות), same threshold
-    reducedUpTo: 7703,
-    reduced: 0.0323,
-    full: 0.0517,
-  },
-  pension: { employee: 0.06, employer: 0.065, severance: 0.06 }, // mandatory minimums (total 18.5%)
-  capitalGains: 0.25,          // on real (inflation-adjusted) gain from securities; game may apply on nominal for simplicity
-  rentalTrack: 0.10,           // 10% track on gross residential rent, no deductions
-  rentalExemptUpTo: 5654,      // ₪/month residential rent fully exempt (exemption track), 2026
-  notes: 'Simplified MONTHLY parameters for 2026, salaried Israeli resident. Not modelled: surtax on capital income, ' +
-    'pension tax credits/deductions, credit points for children/degree/periphery, employer BL (4.51%/7.6%), ' +
-    'betterment tax (מס שבח) details, purchase tax. Sources: docs-v3/sources.md.',
-};
+// TAX_IL lives in ./tax.js (one tax source, decision A3); re-exported here so the real.js contract is unchanged.
+export { TAX_IL } from './tax.js';
 
 export const SERIES = {
   sp500: {
@@ -256,7 +224,7 @@ export const SCENARIOS = [
     id: 'dotcom', name: 'בועת הדוט-קום', nameEn: 'Dot-com bubble', start: '2000-01', months: 60,
     focus: ['sp500', 'ta125', 'boiRate', 'usdIls'],
     blurb: 'ינואר 2000: כולם מדברים על מניות אינטרנט ו"כלכלה חדשה". אתה נכנס לשוק חודשיים לפני השיא.',
-    lesson: 'מחיר הוא לא ערך. מי שקנה ב-2000 ומכר בפאניקה הפסיד; מי שהמשיך להשקיע סכום קבוע כל חודש ופיזר — סיים את חמש השנים ברווח.',
+    lesson: 'מחיר הוא לא ערך. מי שקנה ב-2000 ומכר בפאניקה הפסיד; מי שהמשיך להשקיע סכום קבוע כל חודש סיים בערך מאוזן אחרי אינפלציה — כי קנה הרבה בזול בתחתית.',
     headlines: [
       { ym: '2000-01', text: 'AOL ו-Time Warner מכריזות על מיזוג ענק – שיא האמונה ב"כלכלה החדשה"' },
       { ym: '2000-03', text: 'הנאסד"ק חוצה את רף 5,000 הנקודות – בועת הדוט-קום בשיאה' },
@@ -281,7 +249,7 @@ export const SCENARIOS = [
     id: 'gfc', name: 'המשבר הפיננסי הגדול', nameEn: 'Global financial crisis', start: '2007-06', months: 60,
     focus: ['sp500', 'ta125', 'boiRate', 'homeIL'],
     blurb: 'קיץ 2007: הבורסות קרובות לשיא, ובארה"ב מתחילים לשמוע על "משכנתאות סאבפריים". מה תעשה כשהכול יקרוס?',
-    lesson: 'מי שמכר בפאניקה ב-2009 נעל הפסד של כמחצית; מי שהמשיך להשקיע כל חודש סיים את התקופה ברווח. ובישראל — ריבית אפס הזניקה את מחירי הדירות.',
+    lesson: 'מי שמכר בפאניקה ב-2009 נעל הפסד של כמחצית; מי שהמשיך להשקיע כל חודש סיים את התקופה ברווח. ובישראל — ריבית נמוכה מאוד (0.5% ב-2009) עזרה להזניק את מחירי הדירות.',
     headlines: [
       { ym: '2007-06', text: 'שתי קרנות גידור של בר סטרנס מסתבכות בגלל משכנתאות סאבפריים' },
       { ym: '2007-08', text: 'BNP פאריבה מקפיא משיכות מקרנות – משבר האשראי מתחיל' },
@@ -334,7 +302,7 @@ export const SCENARIOS = [
     id: 'inflation22', name: 'האינפלציה חוזרת', nameEn: 'Inflation and rate shock 2022', start: '2021-06', months: 48,
     focus: ['cpiIL', 'boiRate', 'usdIls', 'ta125'],
     blurb: 'קיץ 2021: ריבית 0.1%, משכנתאות זולות, והמחירים בסופר מתחילים לזחול למעלה. "זה זמני", מבטיחים.',
-    lesson: 'כשהאינפלציה 5% והריבית אפס, מזומן בעו"ש מאבד ערך ריאלי. כשהריבית קפצה — הלוואות בפריים התייקרו מאוד. בסוף התקופה מניות ונכסים ריאליים היכו את המזומן.',
+    lesson: 'כשהאינפלציה 5% והריבית כמעט אפס (0.1%), מזומן בעו"ש מאבד ערך ריאלי. כשהריבית קפצה — הלוואות בפריים התייקרו מאוד. בסוף התקופה מניות ונכסים ריאליים היכו את המזומן.',
     headlines: [
       { ym: '2021-06', text: 'האינפלציה בארה"ב מגיעה ל-5%; הפד מתעקש שמדובר בתופעה זמנית' },
       { ym: '2021-11', text: 'יו"ר הפד פאוול: הגיע הזמן להפסיק לכנות את האינפלציה "זמנית"' },
@@ -360,7 +328,7 @@ export const SCENARIOS = [
     id: 'housingIL', name: 'בום הדיור בישראל', nameEn: 'Israeli housing boom 2008-2020', start: '2008-01', months: 156,
     focus: ['homeIL', 'boiRate', 'cpiIL', 'ta125'],
     blurb: '2008: דירה ממוצעת עדיין "רק" כמה שנות משכורת. הריבית עומדת לצנוח לאפס, והמדינה תנסה שוב ושוב לקרר את השוק.',
-    lesson: 'מחירי הדירות עלו פי 2.4 ב-13 שנה, כשהמדד לצרכן עלה רק כ-17%: ריבית אפס ומחסור בהיצע. אבל מינוף עובד בשני הכיוונים, והמדינה משנה את חוקי המשחק בין לילה.',
+    lesson: 'מחירי הדירות עלו פי 2.4 ב-13 שנה, כשהמדד לצרכן עלה רק כ-17%: ריבית כמעט אפסית ומחסור בהיצע. אבל מינוף עובד בשני הכיוונים, והמדינה משנה את חוקי המשחק בין לילה.',
     headlines: [
       { ym: '2008-03', text: 'בנק ישראל מתחיל לקנות דולרים כדי לבלום את התחזקות השקל' },
       { ym: '2008-09', text: 'קריסת ליהמן ברדרס; העולם נכנס למשבר פיננסי' },

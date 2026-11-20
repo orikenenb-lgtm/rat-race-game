@@ -1,12 +1,19 @@
 // "מכונת הזמן" — access to real historical data (js/data/real.js, written by the data lead).
 // Contract of real.js: TAX_IL, SERIES{sp500,ta125,boiRate,cpiIL,homeIL,usdIls} = {start:'YYYY-MM', unit, values[], fidelity},
 // SCENARIOS[{id,name,start,months,blurb,lesson,headlines[{ym,text}], index?}], seriesAt(name, ym), monthlyChange(name, ym).
-// The engine never needs this file for the 4 worlds. Pure: no DOM / Math.random / Date.
+// The engine never needs real.js for the 4 worlds: it is loaded lazily (loadRealData). Pure: no DOM / Math.random / Date.
 
 let REAL = null;
-try { REAL = await import('./data/real.js'); } catch (e) { REAL = null; }
-/** TAX_IL from the data module (null when not loaded). */
-export function taxTable() { return REAL ? REAL.TAX_IL || (REAL.default && REAL.default.TAX_IL) || null : null; }
+let loading = null;
+/**
+ * Lazy-load js/data/real.js (36 KB of market series) — only history mode needs it (ARCHITECTURE A5).
+ * Resolves to true when the data is available. Call (and await) before createGame({mode:'history'}).
+ */
+export function loadRealData() {
+  if (REAL) return Promise.resolve(true);
+  if (!loading) loading = import('./data/real.js').then((m) => { REAL = REAL || m; return true; }).catch(() => { loading = null; return false; });
+  return loading;
+}
 
 /** Tests / tools: inject a real-data module (or a stub with the same shape). */
 export function registerRealData(mod) { REAL = mod || null; }
@@ -19,6 +26,7 @@ function scenariosRaw() {
   return Array.isArray(S) ? S : Object.entries(S).map(([id, v]) => ({ id, ...v }));
 }
 export function scenarioList() {
+  if (!REAL) { loadRealData(); return []; } // starts the lazy load; the lobby can retry / await loadRealData()
   return scenariosRaw().map((s) => ({ id: s.id, name: s.name || s.title || s.id, start: normYm(s.start), months: s.months, blurb: s.blurb || '', lesson: s.lesson || '', index: s.index || 'sp500' }));
 }
 export function scenarioById(id) {

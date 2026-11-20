@@ -93,6 +93,7 @@ let initDone = false, initPct = 0;
 const initWatchers = new Set();
 const initProgress = (p) => { initPct = p; for (const f of initWatchers) f(p); };
 export const gameReady = () => initDone;
+let lifeP = null;
 async function doInit() {
   initProgress(0.05);
   wireUI();
@@ -104,7 +105,6 @@ async function doInit() {
     scene.preloadWorld(w1, (p) => initProgress(0.1 + p * 0.85)),
     scene.setPawn('classic', '#e2483d'),
     scene.preloadDice(),
-    scene.preloadLife(),
   ]);
   W = w1;
   scene.buildWorld(w1); scene.placePawn(0);
@@ -112,6 +112,9 @@ async function doInit() {
   frame();
   $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
   initProgress(1);
+  // life / history models (~2.5 MB) are not needed for the lobby: fetch them after boot, off the critical path
+  // (startGame awaits the same cached promise, so they are always ready before a game begins)
+  lifeP = scene.preloadLife().catch(() => null);
   // the lobby covers the board: stop rendering while it is up (game flows simply wait underneath)
   const start = $('#start');
   const sync = () => scene.setPaused(!start.hidden);
@@ -196,6 +199,13 @@ export async function startGame(cfg = {}) {
   };
   if (cfg.seed == null) cfg.seed = (Math.floor(Math.random() * 2147483646) + 1) >>> 0;
   $('#start').hidden = true;
+  // history mode needs the real market series (lazy-loaded real.js) before createGame / save migration
+  if (cfg.mode === 'history' && typeof E.loadRealData === 'function') {
+    let ok = false;
+    try { ok = await E.loadRealData(); } catch (e) { ok = false; }
+    if (my !== gen) return;
+    if (ok === false) { busy = false; ui.toast('לא הצלחנו לטעון את נתוני השוק. בדוק את האינטרנט ונסה שוב.'); $('#start').hidden = false; return; }
+  }
   // load or create the state
   let st = null;
   const local = readSave(saveKeyFor(cfg));
@@ -235,6 +245,8 @@ export async function startGame(cfg = {}) {
     await scene.preloadWorld(W, (p) => ui.showLoading(`טוען את ${W.name}…`, 0.05 + p * 0.9));
   }
   await scene.setPawn(cfg.pawn || 'classic', cfg.pawnColor || '#e2483d');
+  if (!lifeP) lifeP = scene.preloadLife().catch(() => null);
+  await lifeP; // usually already resolved (started right after boot)
   if (my !== gen) return;
   scene.buildWorld(W);
   scene.placePawn(S.pos);
@@ -334,7 +346,7 @@ function render(animate = true) {
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
   const wi = m.worldIndicators || {};
-  ui.historyStrip(S.ui.hist, wi.ymText ? wi : null);
+  ui.historyStrip(wi.indexHist ? wi.indexHist.map((x) => ({ index: x })) : S.ui.hist, wi.ymText ? wi : null);
   syncLifeCity(m);
 }
 /** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
@@ -393,7 +405,7 @@ let noEnTimer = 0;
 function showNoEnergy(en, info = false) {
   if (info && safeCall(en, 'canRoll', true)) {
     const g0 = safeCall(en, 'get', null) || { value: 0, max: 25 };
-    ui.modal({ tag: 'אנרגיה', color: '#f2b632', title: `⚡ ${g0.value}/${g0.max}`, html: '<p class="d">כל הטלה במשחק חופשי עולה ⚡ אחת, והאנרגיה מתמלאת לבד עם הזמן. אתגרים מדורגים (יומי, שבועי, קבוצות) לא עולים אנרגיה. בונוסים: האתגר היומי, חברים שמצטרפים, ורצף ימים.</p>', actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
+    ui.modal({ tag: '⚡ אנרגיה', color: '#f2b632', title: `⚡ ${g0.value}/${g0.max}`, html: '<p class="d">כל הטלה במשחק חופשי עולה ⚡ אחת, והאנרגיה מתמלאת לבד עם הזמן. אתגרים מדורגים (יומי, שבועי, קבוצות) לא עולים אנרגיה. בונוסים: האתגר היומי, חברים שמצטרפים, ורצף ימים.</p>', actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
     return;
   }
   sfx('loss');
@@ -401,7 +413,7 @@ function showNoEnergy(en, info = false) {
   const left = () => safeCall(en, 'msUntilNext', 0);
   const g = safeCall(en, 'get', null) || { value: 0, max: 25 };
   const p = ui.modal({
-    tag: 'אנרגיה', color: '#f2b632', title: 'נגמרה האנרגיה ⚡',
+    tag: '⚡ אנרגיה', color: '#f2b632', title: 'נגמרה האנרגיה ⚡',
     html: `<div class="noen"><div class="noen-ring"><b id="noenT" class="num">${fmtMs(left())}</b><small>עד ⚡ הבאה</small></div>
       <p class="d">כל הטלה עולה ⚡ אחת. האנרגיה מתמלאת לבד — ${g.max ? `עד ${g.max}` : ''}, אחת כל כמה דקות. המשחק שלך שמור ומחכה.</p>
       <p class="note">בינתיים אפשר:</p>
@@ -438,7 +450,7 @@ async function lifeChip(kind) {
     const L = m.life || {}; const plans = L.plans || [];
     const ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
     const v = await ui.modal({ tag: 'התוכנית החודשית', color: '#0e7490', title: 'איך תעביר את החודשים הבאים?',
-      html: `<p class="d">התוכנית חלה מיום המשכורת הבא. זמן ואנרגיה הם משאב — בחר על מה לבזבז אותם.</p><div class="plans">${plans.map((p) => `<button class="plan ${p.id === L.plan ? 'cur' : ''}" data-plan="${p.id}"><span class="pi">${ICON[p.id] || '📅'}</span><b>${ui.esc(p.label)}</b>${p.id === L.plan ? '<small class="tagc">עכשיו</small>' : ''}<small class="pn">${ui.esc(p.desc || '')}</small></button>`).join('')}</div>`,
+      html: `<p class="d">התוכנית חלה מיום המשכורת הבא. זמן וכוח (🔋) הם משאב — בחר על מה לבזבז אותם.</p><div class="plans">${plans.map((p) => `<button class="plan ${p.id === L.plan ? 'cur' : ''}" data-plan="${p.id}"><span class="pi">${ICON[p.id] || '📅'}</span><b>${ui.esc(p.label)}</b>${p.id === L.plan ? '<small class="tagc">עכשיו</small>' : ''}<small class="pn">${ui.esc(p.desc || '')}</small></button>`).join('')}</div>`,
       actions: [{ label: 'ביטול', v: null }], dismissable: true,
       onExtra: (e) => { const b = e.target.closest('[data-plan]'); if (!b) return; chosenPlan = b.dataset.plan; document.querySelector('#gm .acts button').click(); } });
     void v;
@@ -450,7 +462,7 @@ async function lifeChip(kind) {
     }
     chosenPlan = null; return;
   }
-  const T = ui.lifeDetails(kind, m); if (!T) return;
+  const T = ui.lifeDetails(kind, m, { inflReality: S.ui && S.ui.inflReality }); if (!T) return;
   ui.modal({ tag: 'החיים שלך', color: '#0e7490', title: T[0], html: `<p class="d">${T[1]}</p>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
 }
 let chosenPlan = null;
@@ -553,7 +565,7 @@ async function handleLanding(my) {
       const opt = ev.auto ? ev.options[0].id : 'ok';
       const res = E.choose(S, ev, opt);
       if (ev.mentor && !ev.auto) ui.mentor(ev.mentor);
-      await applyOut(res);
+      await applyOut(res, { noVerdict: true });
       render(); persist(); checkpoint();
       if (ev.auto) await pause(900);
       if (res.end) { await endGame(res.end, my); return; }
@@ -642,6 +654,7 @@ async function applyOut(out, opts = {}) {
       case 'confetti': scene.confetti(); break;
       case 'upgrade': scene.bump(e.assetId); scene.floatLabel('שדרוג!', 'gold', e.assetId); break;
       case 'hedge': scene.shield(e.assetIds); break;
+      case 'savings': if (e.amount) scene.floatLabel(`🛟 ${E.sgn(e.amount)}`, e.amount >= 0 ? 'green' : 'gold', 'pawn'); break;
       case 'impact': scene.hearts(scene.hasKey('f') ? 'f' : 'pawn'); scene.floatLabel(`+${Math.round(e.amount * 10) / 10} השפעה`, '#db2777', scene.hasKey('f') ? 'f' : 'pawn'); break;
       case 'exit': break; // handled with despawn
       default: break;
@@ -655,11 +668,20 @@ async function applyOut(out, opts = {}) {
     bus.emit('lesson', { ids: out.lessons.map((l) => l.id), list: out.lessons });
     ui.lessonToast(out.lessons, (l) => ui.lessonCard(l));
   }
+  if (out.reward) bus.emit('reward', out.reward); // quiz: reward = understanding (+1⚡ via the lobby)
+  if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
   for (const n of out.news || []) {
     if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
+    if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
+      ui.toast(`🏪 ${n.name}: ${n.headline || ''}${n.net ? ` · לכיס שלך ${E.sgn(n.net)}` : ''}`, { kind: n.netProfit < 0 ? 'bad' : '' });
+      for (const ev2 of (n.events || []).slice(0, 1)) if (ev2.title) ui.toast(`🏪 ${ev2.title}${ev2.text ? ': ' + ev2.text : ''}`);
+      continue;
+    }
+    if (n.kind === 'inflation' && n.reality && S && S.ui) S.ui.inflReality = n.reality;
+    if (n.kind === 'goalHold') { ui.toast('⏳ ' + n.text, { kind: 'gold' }); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);
@@ -672,7 +694,7 @@ async function burnoutCard(b) {
   await ui.modal({ tag: 'שחיקה', color: '#b45309', title: b.title || 'נשרפת. חודש בבית.', html: `<div class="say static"><span class="av sm" aria-hidden="true">אע</span><span class="st">${ui.esc(b.mentor || 'הזמן והכוח שלך הם הנכס הכי יקר. כשרצים בלי עצירה — הגוף עוצר בשבילך.')}</span></div>
     <p class="d">${ui.esc(b.text || 'עבדת יותר מדי בלי מנוחה. החודש אין משכורת, יש הוצאות רפואיות, והתוכנית שלך עוברת למנוחה.')}</p>
     ${b.cost ? `<div class="grid"><div class="row"><span>עלות החודש הזה</span><b class="num neg">${E.fmtM(-Math.abs(b.cost))}</b></div></div>` : ''}
-    <p class="note">🔋 בפעם הבאה: כשהאנרגיה יורדת מתחת ל־40 — חודש של מנוחה ומשפחה זול יותר מחודש של שחיקה.</p>`, actions: [{ label: 'הבנתי, נוח קצת', cls: 'primary' }] });
+    <p class="note">🔋 בפעם הבאה: כשהכוח יורד מתחת ל־40 — חודש של מנוחה ומשפחה זול יותר מחודש של שחיקה.</p>`, actions: [{ label: 'הבנתי, נוח קצת', cls: 'primary' }] });
 }
 
 /* ============================================================ bail-out (first bankruptcy → the bank restructures; a teaching moment) */
@@ -694,6 +716,14 @@ async function bailoutCard(b) {
 function sheetAction(act) {
   if (!S || S.over || busy || ui.isEventOpen()) { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
   if (act === 'invest') { indexModal(); return; }
+  if (act === 'save' || act === 'unsave') { savingsModal(act === 'save'); return; }
+  if (act === 'report') {
+    if (typeof E.setSideReport !== 'function') return;
+    let o; try { o = E.setSideReport(S, true); } catch (e) { console.error(e); return; }
+    if (o && o.ok === false) { ui.toast(o.error || 'לא אפשרי עכשיו'); return; }
+    applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
+    return;
+  }
   let out;
   try { out = act === 'loan' ? E.takeLoan(S) : act === 'repay' ? E.repayLoan(S) : act === 'credit' ? E.payCredit(S) : null; }
   catch (e) { console.error(e); return; }
@@ -709,12 +739,13 @@ async function indexModal() {
   if (typeof E.invest !== 'function') { ui.toast('אפשר להשקיע בקרן במשבצת "קרן מדד ופנסיה"'); return; }
   const m = E.metrics(S); const ix = m.index || {}; const price = ix.price || 100;
   let qty = 0, auto = (m.index && m.index.autoInvest) || 0;
-  const maxBuy = Math.floor(Math.max(0, S.cash) / price), maxSell = ix.qty || 0;
+  const maxBuy = ix.maxBuy ?? Math.floor(Math.max(0, S.cash) / price), maxSell = ix.qty || 0; // input limit only — the engine validates
   const v = await ui.modal({ tag: 'קרן מחקה מדד', color: '#0f766e', title: 'להשקיע בקרן מדד',
     html: `<p class="d">מחיר יחידה ${ui.esc(E.fmtP(price))}. יש לך ${maxSell} יחידות. מזומן ${ui.esc(E.fmtM(S.cash))}.</p>
       <label class="note" for="ixq">כמות (+ קנייה, − מכירה)</label><input id="ixq" type="number" inputmode="numeric" dir="ltr" value="${Math.min(10, maxBuy)}" min="${-maxSell}" max="${maxBuy}">
       ${typeof E.setAutoInvest === 'function' ? `<label class="note" for="ixa" style="display:block;margin-top:10px">הוראת קבע חודשית לקרן (₪, 0 = בלי)</label><input id="ixa" type="number" inputmode="numeric" dir="ltr" step="100" min="0" value="${auto}">` : ''}
-      <p class="note">רווח במכירה ממוסה ב־25% (מס רווחי הון). הוראת קבע = השקעה אוטומטית בכל יום משכורת — הדרך הכי פשוטה לתת לריבית דריבית לעבוד.</p><p class="err" id="ixe"></p>`,
+      <p class="note">על רווח במכירה משלמים מס רווחי הון (במשחק 25% מכל הרווח; במציאות 25% מהרווח הריאלי, אחרי אינפלציה). הוראת קבע = השקעה אוטומטית בכל יום משכורת — הדרך הכי פשוטה לתת לזמן לעבוד.</p>
+      ${ui.indexBox ? ui.indexBox(ix) : ''}<p class="err" id="ixe"></p>`,
     actions: [{ label: 'לבצע', cls: 'primary', v: 'go', fn: () => { qty = Math.trunc(+document.getElementById('ixq').value || 0); const a = document.getElementById('ixa'); if (a) auto = Math.max(0, Math.round(+a.value || 0)); if (qty > maxBuy || -qty > maxSell) { document.getElementById('ixe').textContent = 'הכמות לא אפשרית'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
   if (v !== 'go') return;
   try {
@@ -722,6 +753,24 @@ async function indexModal() {
     if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = E.setAutoInvest(S, auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
   } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); }
   render(); persist(); checkpoint();
+}
+
+/* ============================================================ 🛟 emergency fund any time (E.moveSavings) */
+async function savingsModal(deposit) {
+  if (typeof E.moveSavings !== 'function') return;
+  const m = E.metrics(S); const e = m.emergency || { months: 0, target: 3, balance: 0 };
+  const max = deposit ? Math.max(0, Math.floor(S.cash)) : Math.max(0, Math.floor(m.savings || 0)); // input limit only — the engine validates
+  // suggestion: fill up to the target, keep one month of expenses in cash (the engine's own payday rule is the same idea)
+  const sug = deposit ? Math.max(0, Math.min(max, Math.round((e.target * m.expenses - (m.savings || 0)) / 100) * 100, Math.floor((S.cash - m.expenses) / 100) * 100)) : Math.min(max, Math.round(m.expenses / 100) * 100);
+  let amt = 0;
+  const v = await ui.modal({ tag: 'קרן חירום', color: '#0e7490', title: deposit ? 'להפקיד לקרן החירום' : 'למשוך מקרן החירום',
+    html: `<p class="d">${ui.esc(e.text || '')}. ${deposit ? 'כסף בקרן לא משמש לקניות — הוא שם בשביל ההפתעות.' : 'משיכה מהקרן מקטינה את הכרית שלך.'}</p>
+      <label class="note" for="svq">סכום (₪) — עד ${ui.esc(E.fmtM(max))}</label><input id="svq" type="number" inputmode="numeric" dir="ltr" step="100" min="0" max="${max}" value="${sug > 0 ? sug : Math.min(max, 1000)}"><p class="err" id="sve"></p>`,
+    actions: [{ label: deposit ? 'להפקיד' : 'למשוך', cls: 'primary', v: 'go', fn: () => { amt = Math.round(+document.getElementById('svq').value || 0); if (amt <= 0 || amt > max) { document.getElementById('sve').textContent = 'הסכום לא אפשרי'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
+  if (v !== 'go' || !amt) return;
+  let out; try { out = E.moveSavings(S, deposit ? amt : -amt); } catch (e2) { console.error(e2); ui.toast('לא אפשרי עכשיו'); return; }
+  if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); return; }
+  await applyOut(out); render(); persist(); checkpoint();
 }
 
 /* ============================================================ lobby button */
@@ -754,7 +803,7 @@ async function endGame(end, my) {
     achievements: (S.ach || []).slice(),
     summary: typeof E.summaryForServer === 'function' ? { seed: S.seed, ...E.summaryForServer(S) } : null,
     bailoutUsed: !!(S.flags && S.flags.bailoutUsed),
-    lifeSummary: end.lifeSummary || null, benchmark: end.benchmark || null, scenarioId: (S.history && S.history.scenarioId) || CFG.scenarioId || null,
+    lifeSummary: end.lifeSummary || null, benchmark: end.benchmark || null, scenarioId: (S.history && S.history.scenarioId) || CFG.scenarioId || null, seed: S.seed >>> 0,
   };
   busy = false;
   bus.emit('game:end', payload);

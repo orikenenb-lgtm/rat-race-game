@@ -77,7 +77,7 @@ export async function init(canvas) {
   renderer.setAnimationLoop((now) => {
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
     // render on demand: full speed while something moves; frozen (≤ 1 frame / 2 s) when idle; nothing under the lobby
-    const active = interacting || tweens.length > 0 || now < shakeUntil || now < activeUntil;
+    const active = interacting || camMoving || tweens.length > 0 || now < shakeUntil || now < activeUntil;
     if (paused && !dirty) return;
     if (!active && !dirty && now - lastRender < 2000) return;
     dirty = false; lastRender = now;
@@ -144,6 +144,8 @@ const camGoal = { target: new THREE.Vector3(0, 0.3, 0), dist: 30, dir: new THREE
 let overviewDist = 30, followDist = 20, followOff = { x: 0, y: 0 }, overviewOff = { x: 0, y: 0 }, camAnimUntil = 0;
 const focus = new THREE.Vector3();
 export function getCameraMode() { return camMode; }
+/** Debug/perf: draw calls, triangles and object counts of the last frame. */
+export function renderStats() { let objs = 0, meshes = 0; scene.traverse((o) => { objs++; if (o.isMesh) meshes++; }); const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles, objs, meshes, city: cityGroup.children.length, world: worldGroup.children.length, fx: fxGroup.children.length, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, px: [renderer.domElement.width, renderer.domElement.height], dpr: renderer.getPixelRatio(), shadows: renderer.shadowMap.enabled }; }
 export function cameraState() { return { mode: camMode, target: controls.target.toArray().map((x) => +x.toFixed(2)), pos: camera.position.toArray().map((x) => +x.toFixed(2)), focus: focus.toArray(), followDist, overviewDist, goal: camGoal.target.toArray() }; }
 /** 'follow' | 'overview' — smooth transition. */
 export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; applyCamGoal(true); }
@@ -152,12 +154,11 @@ export function focusOn(v) { if (v) focus.copy(v); if (camMode === 'follow') app
 function applyCamGoal(transition) {
   if (camMode === 'overview') { camGoal.target.set(0, 0.3, 0); camGoal.dist = overviewDist; }
   else { camGoal.target.set(focus.x, 0.3, focus.z); camGoal.dist = followDist; }
-  camAnimUntil = performance.now() + (transition ? 900 : 700); wake(1200);
+  camAnimUntil = performance.now() + (transition ? 900 : 700); camMoving = true; wake(1200);
 }
 /** Per-frame smoothing toward the goal; keeps the user's orbit angle, eases distance/target. */
 function camStep(dt) {
-  if (celebrating || interacting) return;
-  const now = performance.now(); if (now > camAnimUntil) return;
+  if (celebrating || interacting || !camMoving) return;
   const k = 1 - Math.exp(-dt * 5.5);
   const off = camera.position.clone().sub(controls.target);
   const len = off.length(); const dir = len > 1e-3 ? off.divideScalar(len) : camGoal.dir.clone();
@@ -168,7 +169,10 @@ function camStep(dt) {
   camera.position.copy(controls.target).addScaledVector(dir, nl);
   const o = camMode === 'overview' ? overviewOff : followOff;
   const vo = camera.view; if (vo) { vo.offsetX += (o.x - vo.offsetX) * k; vo.offsetY += (o.y - vo.offsetY) * k; camera.updateProjectionMatrix(); }
+  // keep animating until we are there (low frame rates must still converge)
+  if (controls.target.distanceTo(camGoal.target) < 0.03 && Math.abs(nl - camGoal.dist) < 0.05 && (!vo || (Math.abs(vo.offsetX - o.x) < 0.5 && Math.abs(vo.offsetY - o.y) < 0.5))) camMoving = false;
 }
+let camMoving = false;
 let camDist = 30;
 function resize() {
   if (!renderer) return;
@@ -206,7 +210,8 @@ function resize() {
   followOff = { x: W / 2 - (r.x0 + r.x1) / 2, y: H / 2 - (r.y0 + r.y1) / 2 };
   // follow distance: close enough that ~5–7 tiles fill the free area (the board feels huge); never beyond the overview
   const portraitF = fw / fh < 0.95;
-  followDist = Math.min(dist * 0.8, Math.max(12, (portraitF ? 17 : 15) * Math.max(0.85, Math.min(1.25, 900 / Math.max(fw, fh) * (portraitF ? 0.6 : 1)))));
+  const wantAcross = (portraitF ? 6.2 : 7.5) * SZ;
+  followDist = Math.min(dist * 0.8, Math.max(12, wantAcross / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * (fw / fh))));
   camGoal.dir.copy(dir);
   const o = camMode === 'overview' ? overviewOff : followOff;
   camera.setViewOffset(W, H, o.x, o.y, W, H); camera.updateProjectionMatrix();
@@ -225,6 +230,8 @@ export function resetCamera() { celebrating = false; controls.enabled = true; re
 
 /* ============================================================ models */
 export const modelUrl = (dir, name) => `assets/${dir}/${name}.glb`;
+/** the asset folder of a world: history mode ('h') re-uses world 1's city models */
+const assetDir = (w) => (w && (w.assetDir || (w.id === 'h' || w.mechanic === 'history' ? 'w1' : w.id)));
 function loadGLB(url) {
   if (!cache.has(url)) {
     cache.set(url, loader.loadAsync(url).then((g) => {
@@ -301,15 +308,15 @@ const LIFE_FALLBACK = {
     return shadowAll(g);
   },
 };
-export function worldLoaded(w) { return worldModelNames(w).every((n) => ready.has(modelUrl(w.id, n))); }
+export function worldLoaded(w) { return worldModelNames(w).every((n) => ready.has(modelUrl(assetDir(w), n))); }
 export async function preloadWorld(w, onProgress) {
   const names = worldModelNames(w);
   let done = 0;
-  await Promise.all(names.map((n) => loadGLB(modelUrl(w.id, n))
+  await Promise.all(names.map((n) => loadGLB(modelUrl(assetDir(w), n))
     .catch((e) => { console.warn('model failed', n, e); return null; })
     .finally(() => { done++; if (onProgress) onProgress(done / names.length); })));
 }
-function inst(name, dir = world && world.id) {
+function inst(name, dir = assetDir(world)) {
   if (name && name.includes('/')) [dir, name] = name.split('/');
   const g = ready.get(modelUrl(dir, name));
   if (g) return g.clone(true);
@@ -339,6 +346,7 @@ export function tilePos(i) {
   if (i <= side) { gx = side - i; gz = side; } else if (i <= 2 * side) { gx = 0; gz = side - (i - side); } else if (i <= 3 * side) { gx = i - 2 * side; gz = 0; } else { gx = side; gz = i - 3 * side; }
   return new THREE.Vector3((gx - side / 2) * SZ, 0.26, (gz - side / 2) * SZ);
 }
+// eslint-disable-next-line no-unused-vars -- kept for a future edge-facing (Monopoly-style) option
 function tileRot(i) { const side = boardN / 4; return i < side ? 0 : i < 2 * side ? -Math.PI / 2 : i < 3 * side ? Math.PI : Math.PI / 2; }
 
 /* ============================================================ canvas textures */
@@ -385,6 +393,11 @@ function drawIcon(g, icon, x, y, c) {
     case 'index': case 'fund': case 'pension': case 'chart': // growing bars with a trend
       [[-36, 10, 24], [-12, -6, 40], [12, -22, 56]].forEach(([dx, dy, h]) => g.fillRect(x + dx, y + dy + 6, 18, h)); g.lineWidth = 7;
       P(); g.moveTo(x - 46, y - 2); g.lineTo(x - 10, y - 26); g.lineTo(x + 10, y - 14); g.lineTo(x + 46, y - 44); g.stroke(); break;
+    case 'shop': case 'store': case 'business': // storefront: scalloped awning, window, door
+      g.lineWidth = 7; g.strokeRect(x - 40, y - 4, 80, 48);
+      P(); g.moveTo(x - 50, y - 36); g.lineTo(x + 50, y - 36); g.lineTo(x + 50, y - 14); g.lineTo(x - 50, y - 14); g.closePath(); g.fill();
+      for (let k = 0; k < 5; k++) { P(); g.arc(x - 40 + k * 20, y - 14, 10, 0, Math.PI); g.fill(); }
+      g.fillRect(x - 32, y + 8, 30, 20); g.fillRect(x + 10, y + 8, 20, 36); break;
     case 'news': case 'newspaper':
       g.strokeRect(x - 44, y - 34, 88, 68); g.fillRect(x - 34, y - 24, 68, 12); [0, 14, 28].forEach((d) => g.fillRect(x - 34, y - 4 + d, 30, 6)); g.fillRect(x + 4, y - 4, 30, 34); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
@@ -544,7 +557,7 @@ export function buildWorld(w) {
       const tex = tileTexture(tile, frame);
       mats[ch] = std('#ffffff', { map: tex, roughness: glass ? 0.3 : 0.7, ...(emissive ? { emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: emissive } : {}) });
     }
-    const g = new THREE.Group(); const p = tilePos(i); g.position.set(p.x, 0.18, p.z); g.rotation.y = tileRot(i);
+    const g = new THREE.Group(); const p = tilePos(i); g.position.set(p.x, 0.18, p.z); g.rotation.y = 0; // labels face the camera (it always looks from the near (+z) side), not the board edge — readable on every side
     const b = new THREE.Mesh(tGeo, tMat); b.castShadow = false; b.receiveShadow = true; g.add(b);
     const f = new THREE.Mesh(pGeo, mats[ch]); f.rotation.x = -Math.PI / 2; f.position.y = 0.084; f.receiveShadow = true; g.add(f);
     worldGroup.add(g);

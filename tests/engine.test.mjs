@@ -7,6 +7,7 @@ import { ACHIEVEMENTS, checkMetaAchievements, titleFor } from '../js/achievement
 import { readFileSync } from 'node:fs';
 
 const GAMES = +(process.argv[2] || 2000);
+await E.loadRealData(); // history mode data is lazy (js/data/real.js)
 let passed = 0, failed = 0;
 function test(name, fn) {
   const t0 = Date.now();
@@ -27,7 +28,7 @@ function randomChoice(ev, r, n) {
 function turn(st, decide) {
   const roll = E.rollDice(st);
   let ev = E.landing(st);
-  const sig = `${roll.die}|${ev.type}|${ev.title}`;
+  const sig = `${roll.die}|${ev.type}|${ev.type === 'business' ? '' : ev.title}`; // the K tile shows YOUR business (decision-dependent text, same draws)
   let n = 0, end = null;
   while (ev) {
     const [id, params] = decide(ev, n);
@@ -105,7 +106,7 @@ function scanNumbers(obj, path, bad) {
   if (obj && typeof obj === 'object') for (const [k, v] of Object.entries(obj)) scanNumbers(v, path + '.' + k, bad);
 }
 const SOUNDS = new Set(['roll', 'hop', 'coin', 'loss', 'buy', 'sell', 'card', 'win', 'lose', 'unlock', 'achievement', 'golden']);
-const EVENT_TYPES = new Set(['payday', 'deal', 'trade', 'doodad', 'market', 'crisis', 'mystery', 'bank', 'upgrade', 'fx', 'shipping', 'pitch', 'giving', 'life', 'edu', 'tax']);
+const EVENT_TYPES = new Set(['payday', 'deal', 'trade', 'doodad', 'market', 'crisis', 'mystery', 'bank', 'upgrade', 'fx', 'shipping', 'pitch', 'giving', 'life', 'edu', 'tax', 'business']);
 const typesSeen = {};
 const achSeen = new Set();
 let endings = { won: 0, lost: 0, bankrupt: 0 };
@@ -123,6 +124,7 @@ function checkEvent(st, ev, where) {
   assert.ok(ev.options.some((o) => o.enabled), where + ' no enabled option');
   const nPrim = ev.options.filter((o) => o.primary).length;
   if (ev.type === 'mystery' && ev.data.kind === 'quiz') assert.equal(nPrim, 0, where + ' quiz must not highlight an answer');
+  else if (ev.type === 'life' && ev.data.personal) assert.equal(nPrim, 0, where + ' a personal life choice has no highlighted answer');
   else assert.equal(nPrim, 1, where + ' exactly one primary');
   for (const o of ev.options) assert.equal(typeof o.primary, 'boolean', where + ' primary must be boolean');
   if (ev.auto) { assert.equal(ev.options.length, 1, where + ' auto card must have one option'); assert.ok(ev.toastText && ev.toastText.length > 0, where + ' auto card needs toastText'); }
@@ -227,9 +229,9 @@ test('auto bank loan when cash < 0, in small units, at the bank-loan rate', () =
   assert.equal(st.loans, 8000, 'forced loans are rounded to ₪1,000, not ₪5,000');
   assert.ok(st.cash >= 0 && st.cash < 1000);
   assert.ok(res.effects.some((e) => e.type === 'loan' && e.auto));
-  assert.equal(st.life.creditScore, 680 - 25, 'a forced loan costs 25 credit-score points');
-  assert.equal(E.loanPct(st), 3.25, '3% a month + 0.25 for a "fair" credit score');
-  assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 260);
+  assert.equal(st.life.creditScore, 680 - 25, 'a forced loan costs 25 credit-score points (bank.js CREDIT_DELTAS)');
+  assert.equal(E.loanPct(st), 3.06, '3% a month + bank.js creditSpread 0.75%/yr ÷ 12 for a "fair" score');
+  assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 245); // 8,000 × 3.0625%
   assert.equal(st.stats.forcedLoans, 8000);
 });
 
@@ -287,6 +289,8 @@ test('checkEnd: win / time-out / bankrupt results are complete', () => {
   // win by construction: give a w1 teacher enough passive income
   const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 5, mode: 'challenge' });
   st.assets.push({ id: 900, k: 're', n: 'בדיקה', cost: 1, down: 1, debt: 0, value: 1, cf: 99999, month: 1, ups: 0 });
+  assert.equal(E.checkEnd(st), null, 'the goal must hold for 3 paydays first');
+  st.life.goalStreak = 3;
   const end = E.checkEnd(st);
   assert.equal(end.status, 'won'); assert.ok(end.stars >= 1 && end.lesson && end.nearMiss.text);
   const st2 = E.createGame({ worldId: 'w3', seed: 5, mode: 'daily', maxMonths: 40 }); st2.month = 41;
@@ -445,6 +449,7 @@ test('all Hebrew strings are non-empty (world data, mentor lines, achievements)'
   for (const w of E.WORLDS) {
     walkStrings(w, w.id, (s, path) => {
       const key = path.split('.').pop().replace(/\[\d+\]$/, '');
+      if (key === 'lesson' && path.includes('.mystery[')) return; // a lesson id, not text
       if (TEXT_KEYS.has(key) || path.includes('.mentor.') || path.includes('.answers[')) {
         if (path.includes('.answers[')) { assert.ok(s.trim().length > 0, 'empty answer at ' + path); count++; return; }
         assert.ok(s.trim().length > 0, 'empty string at ' + path);
@@ -453,10 +458,10 @@ test('all Hebrew strings are non-empty (world data, mentor lines, achievements)'
       }
     });
     for (const [k, v] of Object.entries(w.mentor)) if (v !== null) { const arr = Array.isArray(v) ? v : [v]; for (const x of arr) { assert.ok(HEB.test(x), `${w.id}.mentor.${k}`); assert.ok(x.split(/\s+/).length <= 32, `${w.id}.mentor.${k} too long (${x.split(/\s+/).length} words)`); } }
-    for (const q of w.mystery.filter((m) => m.kind === 'quiz')) { assert.ok(q.correct >= 0 && q.correct < q.answers.length); assert.ok(q.reward > 0); }
+    for (const q of w.mystery.filter((m) => m.kind === 'quiz')) { assert.ok(q.correct >= 0 && q.correct < q.answers.length); assert.equal(q.reward, 'lesson', 'quizzes reward understanding, not money'); assert.ok(!q.lesson || E.LESSONS.some((l) => l.id === q.lesson), 'quiz lesson ' + q.lesson); }
     assert.equal(w.board.length, 40); for (const i of [0, 10, 20, 30]) assert.equal(w.board[i], 'P');
     assert.equal([...w.board].filter((c) => c === 'P').length, 4, 'paydays only on the corners');
-    for (const t of ['L', 'E', 'T', 'I']) assert.ok(w.board.includes(t), `${w.id} board has a ${t} tile`);
+    for (const t of ['L', 'E', 'T', 'I', 'K']) assert.ok(w.board.includes(t), `${w.id} board has a ${t} tile`);
     assert.ok(w.deals.length >= 15 && w.deals.length <= 25, `${w.id} deals ${w.deals.length}`);
     assert.ok(w.doodads.length >= 7 && w.market.length >= 9, `${w.id} doodads/market`);
     for (const d of w.deals) if (!d.tk && !d.crypto) assert.ok(w.models[d.k], `${w.id} deal kind ${d.k} has no model`);
@@ -494,6 +499,8 @@ test('dailyConfig is pure & rotates worlds', () => {
 /* ------------------------------------------------------------------ v3: money precision (known expected results) */
 import * as LIFE from '../js/life.js';
 import * as REAL from '../js/data/real.js';
+import * as TAXJS from '../js/data/tax.js';
+import * as BIZ from '../js/finance/business.js';
 const W1 = (o = {}) => E.createGame({ worldId: 'w1', charId: 'teacher', seed: 21, ...o });
 function playOut(st, r, maxTurns = 200) { for (let t = 0; t < maxTurns && !st.over; t++) turn(st, (ev, n) => randomChoice(ev, r, n)); return st; }
 
@@ -507,6 +514,7 @@ test('payslip: ₪15,000 gross → ₪11,312 net (2026 TAX_IL), lines add up, gr
   for (const net of [5000, 9000, 22000, 55000]) { const g = LIFE.grossFromNet(net); assert.ok(LIFE.slip(g).net >= net && LIFE.slip(g - 10).net < net, 'grossFromNet ' + net); }
   assert.ok(LIFE.marginalRate(15000) === 0.2 && LIFE.marginalRate(70000) === 0.5);
   // the engine uses the same table: take-home of every character equals its v2 salary (±₪10 rounding of the gross)
+  assert.deepEqual(TAXJS.TAX_IL, REAL.TAX_IL, 'js/data/tax.js is the same table as js/data/real.js');
   for (const w of E.WORLDS) for (const ch of w.characters) if (ch.salary) { const st = E.createGame({ worldId: w.id, charId: ch.id, seed: 1 }); const m = E.metrics(st); assert.ok(Math.abs(m.salary - ch.salary) <= 10, `${w.id}/${ch.id} net ${m.salary} vs ${ch.salary}`); assert.ok(m.payslip.gross > m.salary); }
 });
 
@@ -643,13 +651,17 @@ test('credit score: forced loans hurt, repaying helps, a poor score blocks volun
   st.life.creditScore = 800; const lowPct = E.loanPct(st);
   st.life.creditScore = 500; assert.ok(E.loanPct(st) > lowPct); assert.equal(E.loanCap(st), 0);
   const r = E.takeLoan(st); assert.equal(r.ok, false); assert.ok(/דירוג האשראי/.test(r.error));
+  const rw = E.metrics(st).realWorldRates; assert.equal(rw.bankLoan.realPerYear, null, 'no real-world loan offer for a poor score');
+  st.life.creditScore = 700; const rw2 = E.metrics(st).realWorldRates; assert.ok(rw2.bankLoan.gamePerYear === 36 && rw2.bankLoan.realPerYear > 5 && rw2.bankLoan.realPerYear < 12, JSON.stringify(rw2.bankLoan));
   st.life.creditScore = 680; E.takeLoan(st); const s0 = st.life.creditScore; E.repayLoan(st); assert.equal(st.life.creditScore, s0 + 6);
   assert.equal(E.metrics(st).life.creditBand, 'טוב');
 });
 
 test('★★★ needs money AND happiness; checkEnd carries "סיפור החיים שלך"', () => {
-  const mk = (h) => { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 5, mode: 'challenge' }); st.assets.push({ id: 900, k: 'biz', n: 'בדיקה', cost: 1, down: 1, debt: 0, value: 1, cf: 99999, month: 1, ups: 0 }); st.life.happiness = h; return E.checkEnd(st); };
-  const sad = mk(40), happy = mk(75);
+  const mk = (h) => { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 5, mode: 'challenge' }); st.assets.push({ id: 900, k: 'biz', n: 'בדיקה', cost: 1, down: 1, debt: 0, value: 1, cf: 99999, month: 1, ups: 0 }); st.life.happiness = h; st.life.goalStreak = 3; return E.checkEnd(st); };
+  const mkF = (h) => { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 5, mode: 'challenge' }); st.assets.push({ id: 900, k: 'biz', n: 'בדיקה', cost: 1, down: 1, debt: 0, value: 1, cf: 99999, month: 1, ups: 0 }); st.life.happiness = h; st.life.goalStreak = 3; st.savings = 50000; return E.checkEnd(st); };
+  const sad = mkF(40), happy = mkF(75), noFund = mk(75);
+  assert.equal(noFund.stars, 2); assert.equal(noFund.starsBlockedByFund, true, '★★★ also needs an emergency fund of 3 months');
   assert.equal(happy.stars, 3); assert.equal(sad.stars, 2); assert.equal(sad.starsBlockedByHappiness, true); assert.equal(happy.starsBlockedByHappiness, false);
   const L = happy.lifeSummary;
   for (const k of ['age', 'ageText', 'headline', 'freeTimeMonths', 'family', 'happiness', 'avgHappiness', 'topDecisions', 'sentence', 'pension', 'realNetWorth', 'taxesPaid']) assert.ok(L[k] !== undefined, 'lifeSummary.' + k);
@@ -659,7 +671,7 @@ test('★★★ needs money AND happiness; checkEnd carries "סיפור החיי
 
 /* ------------------------------------------------------------------ v3: lessons + life events */
 test('lessons: 40+ unique Hebrew lessons; unlocked by experience and reported in results', () => {
-  assert.ok(E.LESSONS.length >= 40); const ids = E.LESSONS.map((l) => l.id); assert.equal(new Set(ids).size, ids.length);
+  assert.ok(E.LESSONS.length >= 70, 'life + business lessons'); const ids = E.LESSONS.map((l) => l.id); assert.equal(new Set(ids).size, ids.length);
   for (const l of E.LESSONS) assert.ok(HEB.test(l.title) && HEB.test(l.text) && l.cat, l.id);
   const st = W1(); let got = [];
   for (let t = 0; t < 60 && !st.over; t++) { const r = E.rollDice(st); got = got.concat(r.lessons || []); let ev = E.landing(st); while (ev) { const o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled); const res = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : undefined); got = got.concat(res.lessons || []); ev = res.event; } }
@@ -672,7 +684,7 @@ test('life events: every option of every dilemma is choosable and shows money + 
   for (const w of E.WORLDS) for (const E0 of LIFE.LIFE_EVENTS) for (const o0 of E0.options) {
     const st = E.createGame({ worldId: w.id, seed: 3 });
     st.pending = { id: 1, type: 'life', tile: 'L', pos: w.board.indexOf('L'), eventId: E0.id, r: 0.5 }; st.phase = 'event';
-    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, 1);
+    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, E0.personal && E0.options.length > 1 ? 0 : 1);
     const o = ev.options.find((x) => x.id === o0.id);
     for (const k of ['cash', 'monthly', 'months', 'happiness', 'energy']) assert.ok(Number.isFinite(o.effects[k]), `${E0.id}/${o.id}.${k}`);
     const res = E.choose(st, ev, o.id); assert.ok(res.ok && res.done, `${E0.id}/${o.id}`);
@@ -714,14 +726,121 @@ test('history mode (real data): every scenario plays to the end; panic selling l
     const res = {};
     for (const strat of ['hold', 'panic']) {
       const st = E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7 });
-      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass';
-        if (ev.type === 'trade' && !ev.data.lastResult) { if (strat === 'hold' && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.floor(ev.data.maxBuy * 0.8) }; } if (strat === 'panic' && st.prices.IDX < 80 && ev.data.maxSell > 0) { id = 'sell'; p = { qty: ev.data.maxSell }; } if (strat === 'panic' && st.prices.IDX >= 95 && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.floor(ev.data.maxBuy * 0.8) }; } }
+      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass'; if (ev.type === 'business') id = ev.options.find((o) => ['pass', 'ok'].includes(o.id)).id;
+        if (ev.type === 'trade' && !ev.data.lastResult) { if (strat === 'hold' && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } if (strat === 'panic' && st.prices.IDX < 80 && ev.data.maxSell > 0) { id = 'sell'; p = { qty: ev.data.maxSell }; } if (strat === 'panic' && st.prices.IDX >= 95 && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } }
         ev = E.choose(st, ev, id, p).event; } }
       assert.ok(st.over && st.month === sc.months + 1, sc.id + ' ended at ' + st.month);
       res[strat] = E.metrics(st).netWorth;
     }
     assert.ok(res.hold >= res.panic, `${sc.id}: hold ${res.hold} < panic ${res.panic}`);
   }
+});
+
+/* ------------------------------------------------------------------ v3.1: one economic engine (finance modules) */
+test('rent tax is 10% of GROSS rent above the ₪5,654 exemption (invest.js rule); deal cards show gross vs net yield', () => {
+  const st = W1();
+  const add = (rent) => st.assets.push({ id: st.nextId++, k: 're', n: 'דירה', cost: 500000, down: 100000, debt: 400000, value: 500000, cf: 1000, rent, month: 1, ups: 0 });
+  add(3000); assert.equal(E.metrics(st).incomeLines.find((l) => l.id === 'rentTax'), undefined, 'exempt below the ceiling');
+  add(3000); assert.equal(E.metrics(st).incomeLines.find((l) => l.id === 'rentTax').amount, -600, '10% of ₪6,000 gross');
+  for (let t = 0; t < 400; t++) { const s2 = E.createGame({ worldId: 'w1', seed: t }); E.rollDice(s2); const ev = E.landing(s2); if (ev.type === 'deal' && ev.data.kind === 're' && ev.data.yield) { assert.ok(ev.data.yield.grossYield > ev.data.yield.netYield); return; } }
+  assert.fail('no real-estate deal');
+});
+
+test('emergency fund: savings earn bank.js interest, pay a crisis before any forced loan, and show in months of expenses', () => {
+  const st = W1(); st.cash = 30000;
+  assert.ok(E.moveSavings(st, 20000).ok); assert.equal(st.savings, 20000); assert.equal(st.cash, 10000);
+  const m = E.metrics(st); assert.ok(m.emergency.months > 2 && /קרן חירום/.test(m.emergency.text)); assert.equal(m.netWorth, E.metrics(st).netWorth);
+  // a payday adds interest (2%/yr − 15% tax)
+  const s0 = st.savings; st.cash = 100000; let guard = 0; while (st.stats.paydays === 0 && guard++ < 10) turn(st, (ev) => [(ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id, { qty: 1 }]);
+  assert.ok(st.savings > s0 && st.savings - s0 < 40, 'interest ' + (st.savings - s0));
+  // cash runs out → the fund pays, no loan, no credit hit
+  const st2 = W1(); st2.savings = 50000; st2.cash = -7200; st2.pending = { id: 9, type: 'doodad', tile: 'D', pos: 2, card: { ...E.getWorld('w1').doodads[0], a: 100 } }; st2.phase = 'event';
+  E.choose(st2, { id: 9 }, 'pay'); assert.equal(st2.loans, 0); assert.ok(st2.savings < 50000 && st2.cash >= 0); assert.equal(st2.life.creditScore, 680);
+  assert.equal(E.moveSavings(st2, 10 ** 9).ok, false);
+});
+
+test('freedom must hold: the goal has to be met on 2 consecutive paydays', () => {
+  const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 31, mode: 'challenge' });
+  st.assets.push({ id: 901, k: 'biz', n: 'מכונה', cost: 1, down: 1, debt: 0, value: 1, cf: 50000, month: 1, ups: 0 });
+  let paydays = 0, end = null, holdNews = 0;
+  for (let t = 0; t < 40 && !end; t++) { const r = E.rollDice(st); paydays += r.paydays.length; holdNews += r.news.filter((n) => n.kind === 'goalHold').length; let ev = E.landing(st); while (ev) { const res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled && o.kind !== 'offer')).id, { qty: 1 }); if (res.end) end = res.end; ev = res.event; } }
+  assert.ok(end && end.status === 'won' && paydays >= 2 && holdNews >= 1, `won after ${paydays} paydays`);
+  assert.equal(E.metrics(st).goalHold.need, 2);
+});
+
+test('managed business (business.js): K tile offer → open → monthly P&L, energy, owner-run is active income, a manager makes it passive', () => {
+  let done = false;
+  for (let seed = 1; seed < 600 && !done; seed++) {
+    const st = E.createGame({ worldId: 'w2', charId: 'lawyer', seed }); st.cash = 600000;
+    for (let t = 0; t < 30 && !done; t++) {
+      E.rollDice(st); let ev = E.landing(st);
+      if (ev.type === 'business' && ev.data.mode === 'offer') {
+        const r = E.choose(st, ev, 'start'); assert.ok(r.done); const a = st.assets.find((x) => x.biz); assert.ok(a && st.bizRng['a' + a.id]);
+        const m0 = E.metrics(st); assert.ok(m0.businesses.length === 1);
+        const e0 = st.life.energy; const pd0 = st.stats.paydays; let k = 0; while (st.stats.paydays < pd0 + 3 && k++ < 20) turn(st, (e) => [(e.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || e.options.find((o) => o.enabled && o.kind !== 'offer')).id, { qty: 1 }]);
+        assert.ok(st.taxes.business >= 0 && a.biz.month >= 1, 'simulated');
+        assert.equal(E.metrics(st).incomeLines.some((l) => l.active), !a.biz.manager);
+        // decisions on the K tile
+        st.pending = { id: 7777, type: 'business', tile: 'K', pos: 0, mode: 'manage', assetId: a.id }; st.phase = 'event';
+        let ev2 = E.currentEvent(st); assert.equal(ev2.options.filter((o) => o.primary).length, 1);
+        const mgr = ev2.options.find((o) => o.id === 'biz:manager'); assert.ok(mgr && mgr.enabled);
+        const r2 = E.choose(st, ev2, 'biz:manager'); assert.ok(r2.ok && !r2.done && a.biz.manager);
+        assert.ok(!E.metrics(st).incomeLines.some((l) => l.active), 'with a manager it counts as passive');
+        const sell = r2.event.options.find((o) => o.id === 'biz:sell'); const c0 = st.cash;
+        const r3 = E.choose(st, r2.event, 'biz:sell'); assert.ok(r3.done && !st.assets.includes(a) && st.cash === c0 + sell.sale.net);
+        done = true;
+      }
+      while (ev && st.pending) { const o = ev.options.find((x) => x.enabled && ['pass', 'done', 'ok', 'skip'].includes(x.id)) || ev.options.find((x) => x.enabled && x.kind !== 'offer'); ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : undefined).event; }
+    }
+  }
+  assert.ok(done, 'no business offer found');
+});
+
+test('the engine uses the finance modules (no parallel formulas) and only deterministic math', () => {
+  const src = readFileSync(new URL('../js/engine.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+  assert.ok(/BK\.checkingMonth/.test(src) && /IV\.capitalGainsTax/.test(src) && /IV\.simulateReturns/.test(src) && /BIZ\.simulate/.test(src) && /BK\.creditSpread/.test(src));
+  for (const f of ['../js/engine.js', '../js/life.js', '../js/history.js']) { const s = readFileSync(new URL(f, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''); assert.ok(!/Math\.(pow|exp|log|sin|cos)\b|\*\*/.test(s), f + ' uses non-deterministic math'); }
+  const lifeSrc = readFileSync(new URL('../js/life.js', import.meta.url), 'utf8'); assert.ok(!/setTaxTable/.test(lifeSrc), 'single tax source, no mutation');
+});
+
+/* ------------------------------------------------------------------ v3.2: education review */
+test('decision quality (§8): primary-follower scores high, risky play scores lower; deterministic; luck is separate', () => {
+  const runPol = (pol, seed, w) => { const st = E.createGame({ worldId: w, seed, mode: 'challenge' }); const r = prng(seed);
+    for (let t = 0; t < 70 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); let n = 0;
+      while (ev) { let o; if (pol === 'primary') o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled && ['done', 'ok', 'pass', 'skip'].includes(x.id)) || ev.options.find((x) => x.enabled);
+        else if (pol === 'reckless') o = n ? ev.options.find((x) => x.enabled && ['done', 'ok', 'pass'].includes(x.id)) || ev.options.find((x) => x.enabled) : (ev.options.find((x) => x.enabled && x.id === 'credit') || ev.options.find((x) => x.enabled && x.kind === 'buy') || ev.options.find((x) => x.enabled && x.id === 'pay') || ev.options.find((x) => x.enabled));
+        else { const en = ev.options.filter((x) => x.enabled); o = n >= 2 ? (en.find((x) => ['done', 'ok', 'pass'].includes(x.id)) || en[0]) : en[Math.floor(r() * en.length)]; }
+        const res = E.choose(st, ev, o.id, o.needsQty ? { qty: Math.max(1, Math.floor(o.max / 2)) } : undefined); ev = res.event; n++; } }
+    return st; };
+  const avg = (pol) => { let s = 0, k = 0; for (const w of ['w1', 'w2', 'w3', 'w4']) for (let i = 0; i < 12; i++) { const st = runPol(pol, 300 + i, w); if (st.dq.n) { s += st.dq.sum / st.dq.n; k++; } } return s / k; };
+  const P = avg('primary'), R = avg('random'), K = avg('reckless');
+  assert.ok(P >= 70, 'primary ' + P); assert.ok(R < P - 5 && K < P - 10, `random ${R} reckless ${K} primary ${P}`);
+  const a = runPol('random', 9, 'w1'), b = runPol('random', 9, 'w1'); assert.deepEqual(a.dq, b.dq);
+  const st = runPol('primary', 5, 'w1'); st.life.goalStreak = 3; const L = E.checkEnd(st) || { learning: null };
+  const learn = (st.result || E.checkEnd(st) || {}).learning;
+  if (learn) { assert.ok(learn.decisionQuality >= 0 && learn.decisionQuality <= 100 && typeof learn.luck.total === 'number' && learn.principles && learn.sentence); }
+});
+
+test('installments: 3 interest-free payments (bank.js) vs revolving credit; real capital-gains tax; side-income reporting', () => {
+  const st = W1(); st.cash = 20000; const w = E.getWorld('w1'); const toy = w.doodads.find((d) => d.inst && !d.need);
+  st.pending = { id: 41, type: 'doodad', tile: 'D', pos: 2, card: { ...toy } }; st.phase = 'event';
+  const ev = E.currentEvent(st); const i3 = ev.options.find((o) => o.id === 'inst3');
+  assert.equal(i3.amounts.reduce((a, b) => a + b, 0), toy.a); assert.ok(/לחודש/.test(ev.options.find((o) => o.id === 'credit').label));
+  const c0 = st.cash; E.choose(st, ev, 'inst3'); assert.equal(st.cash, c0 - i3.amounts[0]); assert.equal(st.credit, 0);
+  assert.equal(E.metrics(st).expenseLines.filter((l) => /תשלומים/.test(l.label)).length, 1, 'next installment shows as an expense');
+  // real capital gains: the inflation part is exempt
+  const s2 = W1(); s2.life.cpi = 1.1; s2.holdings.IDX.qty = 100; s2.holdings.IDX.basis = 10000; s2.holdings.IDX.cpi = 1; s2.prices.IDX = 150;
+  const r = E.invest(s2, 'sell', 100); assert.equal(r.tax, Math.round((15000 - 10000 - 1000) * 0.25), 'tax on the real gain only');
+  // side income: reporting = monthly advances, no year-end penalty
+  const s3 = W1(); assert.ok(E.setSideReport(s3, true).ok); assert.equal(s3.life.sideReport, true); assert.deepEqual(s3.actions.at(-1), ['T', 1]);
+});
+
+test('Hebrew gender: the mentor addresses her as "את"', () => {
+  assert.equal(E.genderize('אתה בטוח? תחשוב רגע ושים לב.', 'f'), 'את בטוח? תחשבי רגע ושימי לב.');
+  assert.equal(E.genderize('אתה בטוח?', 'm'), 'אתה בטוח?');
+  const st = E.createGame({ worldId: 'w2', charId: 'lawyer', seed: 3 }); assert.equal(st.gender, 'f');
+  for (let t = 0; t < 40; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { assert.ok(!/(^|[^א-ת])אתה(?![א-ת])/.test(ev.mentor || ''), 'masculine mentor for a woman: ' + ev.mentor); const o = ev.options.find((x) => x.enabled && ['ok', 'pass', 'done', 'skip'].includes(x.id)) || ev.options.find((x) => x.enabled && x.kind !== 'offer'); ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : undefined).event; } if (st.over) break; }
+  assert.equal(E.createGame({ worldId: 'w1', charId: 'driver', seed: 1, gender: 'f' }).gender, 'f', 'the player may choose');
 });
 
 console.log(`\n${passed} passed, ${failed} failed · event types seen: ${JSON.stringify(typesSeen)} · endings ${JSON.stringify(endings)} · achievements seen ${achSeen.size}/${ACHIEVEMENTS.length}`);
