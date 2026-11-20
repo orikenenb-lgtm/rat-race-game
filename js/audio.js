@@ -1,6 +1,6 @@
 // מירוץ העכברים 2.0 — WebAudio synth sounds. No files: every cue is built from oscillators + filtered noise.
 // API: sfx(name), setMuted(b), isMuted(), unlock()  (call unlock on the first user gesture).
-// Cues: roll, hop, coin, loss, buy, sell, card, win, lose, unlock, achievement, golden, click.
+// Cues: roll, hop, coin, loss, buy, sell, card, win, lose, unlock, achievement, golden, click, clack, rattle, tick.
 import { bus } from './bus.js';
 
 const SETTINGS = 'rr2-settings';
@@ -69,6 +69,7 @@ function bell(c, t, f, { dur = 0.6, vol = 0.25, delay = 0 } = {}) {
 
 const R = () => Math.random();
 const CUES = {
+  tick(c, t) { tone(c, t, { type: 'sine', f: 1500, dur: 0.025, vol: 0.06 }); },
   click(c, t) { tone(c, t, { type: 'square', f: 1900, dur: 0.03, vol: 0.08 }); },
   hop(c, t) { const f = 620 + R() * 140; tone(c, t, { type: 'triangle', f, f2: f * 0.72, dur: 0.07, vol: 0.22 }); noise(c, t, { dur: 0.03, vol: 0.05, type: 'highpass', f: 3000 }); },
   roll(c, t) {
@@ -96,6 +97,14 @@ const CUES = {
   sell(c, t) {
     noise(c, t, { dur: 0.07, vol: 0.12, type: 'highpass', f: 4000 });
     [1175, 880, 1319].forEach((f, i) => tone(c, t, { type: 'triangle', f, dur: 0.18, vol: 0.18, delay: 0.04 + i * 0.07 }));
+  },
+  clack(c, t) {
+    noise(c, t, { dur: 0.05, vol: 0.4, type: 'bandpass', f: 2600 + R() * 1400, q: 6 });
+    tone(c, t, { type: 'triangle', f: 380 + R() * 160, f2: 220, dur: 0.06, vol: 0.14 });
+    noise(c, t, { delay: 0.045 + R() * 0.03, dur: 0.035, vol: 0.18, type: 'bandpass', f: 3200, q: 6 });
+  },
+  rattle(c, t) {
+    for (let i = 0; i < 4; i++) noise(c, t, { delay: i * 0.05 + R() * 0.02, dur: 0.03, vol: 0.22, type: 'bandpass', f: 2000 + R() * 2200, q: 7 });
   },
   card(c, t) {
     noise(c, t, { dur: 0.16, vol: 0.12, type: 'bandpass', f: 500, f2: 2600, q: 1.2 });

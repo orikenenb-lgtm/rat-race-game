@@ -8,6 +8,7 @@ async def main():
         b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
         for name, vp, scheme in (('desk', {'width': 1300, 'height': 820}, 'light'), ('phone', {'width': 390, 'height': 800}, 'dark')):
             ctx = await b.new_context(viewport=vp, color_scheme=scheme, device_scale_factor=1)
+            await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')")  # v3: skip the one-time welcome
             pg = await ctx.new_page()
             pg.on('pageerror', lambda e: print('PAGEERR', e, flush=True))
             pg.on('console', lambda m: print('CONSOLE', m.type, m.text, flush=True) if m.type in ('error', 'warning') else None)

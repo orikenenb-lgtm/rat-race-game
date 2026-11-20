@@ -18,6 +18,7 @@ async def started(pg, action, timeout=20000):
     return await pg.evaluate('window.__lastCfg')
 async def page(b, vp, scheme, name):
     ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+    await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')")
     await ctx.grant_permissions(['clipboard-read', 'clipboard-write'])
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR', name, e))
@@ -109,7 +110,7 @@ async def main():
         await A.fill('#lbGname', 'טסט קבוצת לובי ' + TAG); await A.press('#lbGname', 'Enter')
         await A.wait_for_selector('.gp-code', timeout=20000)
         code = (await A.inner_text('.gp-code')).strip(); link = await A.input_value('.gp-link input')
-        check(len(code) == 6 and link.endswith('?join=' + code), f'group code + link {code} {link}')
+        check(len(code) == 6 and ('?join=' + code) in link and '&ref=' in link, f'group code + link {code} {link}')
         wa = await A.get_attribute('.gp-invite .lb-wa', 'href'); check(wa.startswith('https://wa.me/?text=') and code in wa, 'WhatsApp invite link')
         opts = await A.eval_on_selector_all('[data-form="newchal"] select[name="world"] option', 'os => os.map(o => o.value)')
         unl = await A.evaluate("import('./js/progress.js').then(P => P.unlockedWorlds())")

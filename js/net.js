@@ -3,6 +3,7 @@
 const SB = 'https://xvqaxphyfqdzkddmoosu.supabase.co';
 const SBK = 'sb_publishable_w3ubvawN4BnqOul66NSaLg_KM6yTJhc';
 const KEY = 'rr-player';
+const FN_VERIFY = `${SB}/functions/v1/verify-result`;
 
 const ERR = {
   unauthorized: 'החשבון שלך לא מזוהה בשרת.',
@@ -21,6 +22,12 @@ const ERR = {
   challenge_not_found: 'האתגר לא נמצא',
   already_finished: 'כבר סיימת את המשחק הזה',
   result_not_found: 'המשחק לא נמצא בשרת',
+  already_sent_today: 'כבר שלחת לו ⚡ היום',
+  player_not_found: 'השחקן לא נמצא בקבוצה',
+  rate_limited: 'יותר מדי עדכונים היום',
+  no_actions: 'אין יומן מהלכים למשחק הזה',
+  not_finished: 'המשחק עוד לא נשלח לשרת',
+  engine_unavailable: 'השרת מתעדכן — ננסה שוב בעוד רגע',
   stale_checkpoint: 'יש שמירה חדשה יותר בשרת',
   state_too_big: 'השמירה גדולה מדי',
 };
@@ -44,7 +51,18 @@ export const net = {
   /** current player or null: {id, secret, nickname} */
   me: () => me,
   hasMe: () => !!me,
-  async register(nickname) { me = await rpc('rr_register', { p_nickname: nickname }); store(); return me; },
+  /** ref = player id of the friend whose link brought you (?ref=<id>) — they get +5⚡ */
+  async register(nickname, ref = null) { me = await rpc('rr_register2', { p_nickname: nickname, p_ref: ref || null }); store(); return me; },
+  /** id to put in invite links as ?ref= */
+  refId: () => me ? me.id : null,
+  /** send 3⚡ to a friend in a shared group (once a day per friend) */
+  sendEnergy: (groupId, nickname) => rpc('rr_send_energy', { ...auth(), p_group: groupId, p_nickname: nickname }),
+  /** claim waiting gifts + referral bonuses → {total, from:[{nickname, kind:'gift'|'referral', amount}]} */
+  claimEnergy: () => rpc('rr_claim_energy', auth()),
+  /** free-play milestones for friends' feeds, e.g. logEvent('escaped', {world:'w1', age:34, months:29}) */
+  logEvent: (kind, data) => rpc('rr_log_event', { ...auth(), p_kind: kind, p_data: data || {} }),
+  /** {feed:[{nickname, kind, data, at, me}], gifted_today:[nickname]} */
+  groupFeed: (groupId) => rpc('rr_group_feed', { ...auth(), p_group: groupId }),
   async rename(nickname) { const r = await rpc('rr_rename', { ...auth(), p_nickname: nickname }); me.nickname = r.nickname; store(); return me; },
   /** {id,nickname,stars:{w1..w4},total_stars,achievements[],pawn,daily_streak,best_streak,last_daily} */
   profile: () => rpc('rr_profile', auth()),
@@ -76,6 +94,19 @@ export const net = {
     p_passive: Math.round(passive), p_expenses: Math.max(0, Math.round(expenses)), p_net_worth: Math.round(netWorth), p_stats: stats || {},
   }),
 
+  /** Server-side replay of a finished ranked game (Edge Function verify-result). actions = engine st.actions. Call AFTER finish().
+   *  → {ok, verified, stored, already?, error?, result:{status, months, passive, expenses, netWorth, stars, progress}} */
+  async verify(resultId, actions) {
+    const { p_id, p_secret } = auth();
+    let r;
+    try {
+      r = await fetch(FN_VERIFY, { method: 'POST', headers: { apikey: SBK, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p_id, secret: p_secret, result_id: resultId, actions }) });
+    } catch (e) { const er = new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.'); er.code = 'offline'; throw er; }
+    const j = await r.json().catch(() => null);
+    if (!r.ok) { const e = new Error(ERR[j?.error] || 'משהו השתבש בשרת. נסה שוב.'); e.code = j?.error || 'http_' + r.status; e.status = r.status; throw e; }
+    return j;
+  },
   /** Recovery code to move the player to another device (contains the secret — show it only on the profile screen). */
   recoveryCode: () => me ? btoa(unescape(encodeURIComponent(JSON.stringify([me.id, me.secret, me.nickname])))) : null,
   async restore(code) {

@@ -11,14 +11,14 @@
 //  • grow: monthly change of an asset's value. Growing industries rise, hyped/declining ones sink — buying the
 //    right thing (and not the shiny thing) is what builds net worth here. Shown on the deal card (data.grow).
 //  • 'S' tiles: shipping events — freight booms, lost containers (cargo insurance pays), port strikes.
-import { MENTOR, tilesFor } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
 
-const board = 'POFOSDPOMFX?POFODSPOMOMO';
+const board = ring(['OFODSOLMO', 'FOXOM?OSL', 'ODFOEMOSI', 'XOFLKMTOI']); // v3: 40 tiles, paydays on the corners
 
 export default {
   id: 'w3', order: 3, name: 'הנמל הגלובלי', mechanic: 'fx',
   tagline: 'סחורות, ספינות ודולרים. כאן לא סופרים תזרים — סופרים שווי.',
-  goalLabel: 'שווי נקי של ₪10 מיליון',
+  goalLabel: 'שווי נקי של ₪9 מיליון',
   lesson: 'כשכל הכסף שלך תלוי בדבר אחד — דולר, ספק או ספינה — מכה אחת מפילה הכל. פיזור (יבואן וגם יצואן, נכס וגם זהב) וגידור בזמן שקט הופכים סערה לסתם יום רע. ועוד דבר: כסף עושים כשקונים בזול, לא רק כשמוכרים ביוקר.',
   theme: {
     sky: ['#7dd3fc', '#e0f2fe'], fog: '#bfe6ff', board: '#e9d5a8', boardEdge: '#8b5e34', center: '#f3e3bf', accent: '#0ea5e9', water: '#0284c7',
@@ -31,28 +31,30 @@ export default {
   }),
   loan: { unit: 20000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
-  goal: { type: 'netWorth', target: 10_000_000 },
-  maxMonths: 48,
-  stars: { t2: 33, t3: 23 },
+  goal: { type: 'netWorth', target: 9_000_000 },
+  maxMonths: 60,
+  stars: { t2: 43, t3: 32 },
   daily: { chars: ['importer', 'exporter', 'captain'], maxMonths: 24 },
   start: { usd: 3.6, goldUsd: 2700, insuredUntil: 0 },
   // valueSens: how much of an FX hit to profits also hits the asset's value. hedgeCost: fee = value × |sens| × hedgeCost.
   fx: { ref: 3.6, min: 2.7, max: 4.7, drift: 0.09, revert: 0.08, valueSens: 1.0, hedgeMonths: 12, hedgeCost: 0.0025, goldDrift: 0.004 },
-  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory' },
-  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' } },
+  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory', side: 'warehouse', biz: 'warehouse' },
+  bizOffers: ['toyshop', 'laundromat'],
+  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
   tickers: {
+    IDX: { ...INDEX_TICKER, model: 'gold' },
     GOLD: { name: 'זהב · אונקייה', kind: 'gold', start: 9720, div: 0, step: [1, 10], model: 'gold', modelLabel: 'כספת זהב', unit: 'אונקיות' },
     USD: { name: 'דולרים · $1,000', kind: 'usd', start: 3600, div: 0, step: [1, 10], model: 'gold', modelLabel: 'כספת', unit: 'אלפי דולרים' },
   },
 
   characters: [
-    { id: 'importer', name: 'יבואנית צעצועים', icon: 'box', stars: { t2: 32, t3: 22 }, desc: 'יש לך עסק יבוא רווחי — שמשלם לספקים בדולרים. דולר חזק = רווח חלש.', salary: 20000, cash: 500000,
+    { id: 'importer', gender: 'f', age: 35, family: { partner: 'married', kids: 1 }, name: 'יבואנית צעצועים', icon: 'box', maxMonths: 60, stars: { t2: 43, t3: 32 }, desc: 'יש לך עסק יבוא רווחי — שמשלם לספקים בדולרים. דולר חזק = רווח חלש.', salary: 20000, cash: 500000,
       expenses: [['משכנתא', 7500], ['רכב', 2500], ['אוכל ושוטף', 4000], ['ביטוחים', 2000]],
       assets: [{ k: 'warehouse', n: 'חברת יבוא הצעצועים שלך', cost: 1200000, down: 300000, cf: 14000, sens: -3, grow: 0.009 }] },
-    { id: 'exporter', name: 'מגדל אבוקדו ליצוא', icon: 'avocado', stars: { t2: 34, t3: 24 }, desc: 'המטע מוכר לאירופה בדולרים. דולר חלש = שנה קשה.', salary: 16000, cash: 400000,
+    { id: 'exporter', gender: 'm', age: 33, family: { partner: 'married', kids: 2 }, name: 'מגדל אבוקדו ליצוא', icon: 'avocado', maxMonths: 60, stars: { t2: 43, t3: 33 }, desc: 'המטע מוכר לאירופה בדולרים. דולר חלש = שנה קשה.', salary: 16000, cash: 400000,
       expenses: [['משכנתא', 6000], ['טנדר', 2000], ['אוכל ושוטף', 3500], ['ביטוחים', 1500]],
       assets: [{ k: 'factory', n: 'מטע האבוקדו שלך', cost: 1000000, down: 300000, cf: 11000, sens: 2.5, grow: 0.011 }] },
-    { id: 'captain', name: 'קברניטית', icon: 'anchor', stars: { t2: 32, t3: 22 }, desc: 'משכורת גבוהה — בדולרים. כשהשקל מתחזק, המשכורת שלך מתכווצת.', salaryUsd: 9000, cash: 760000,
+    { id: 'captain', gender: 'f', age: 31, family: { partner: 'none', kids: 0 }, name: 'קברניטית', icon: 'anchor', maxMonths: 60, stars: { t2: 42, t3: 33 }, desc: 'משכורת גבוהה — בדולרים. כשהשקל מתחזק, המשכורת שלך מתכווצת.', salaryUsd: 9000, cash: 760000,
       expenses: [['שכירות', 8000], ['רכב', 3000], ['אוכל ושוטף', 5000], ['טיסות הביתה', 3000], ['ביטוחים', 3000]] },
   ],
 
@@ -156,10 +158,10 @@ export default {
     { w: 3, kind: 'usd', delta: 0.2, title: 'שמועה בבורסה', text: 'שמועה על הורדת ריבית בארץ — הדולר מטפס ב־20 אגורות.', after: 'שמועה אחת הזיזה את הדולר. מי שגידר — לא הרגיש כלום.' },
     { w: 3, kind: 'shares', tk: 'GOLD', qty: 3, title: 'ירושה מסבא', text: 'סבא השאיר לך 3 מטבעות זהב ישנים.', after: 'זהב לא מכניס כלום כל חודש — אבל ביום של פאניקה, הוא שווה הכי הרבה.' },
     { w: 3, kind: 'raise', amount: 3000, title: 'קידום', text: 'המשכורת עולה ב־₪3,000 בחודש.', after: 'העלאה = יותר מזומן לקנות שווי. או יותר הוצאות. אתה בוחר.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'יש לך יבואן שנפגע כשהדולר עולה. מה הכי מאזן אותו?', answers: ['עוד יבואן', 'יצואן או זהב', 'לקחת הלוואה'], correct: 1, reward: 30000, explain: 'יצואן מרוויח בדיוק כשהיבואן מפסיד. ביחד — הדולר כבר לא מפחיד. זה פיזור.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'מתי הכי כדאי לגדר יבואן?', answers: ['כשהדולר זול', 'כשהדולר כבר זינק', 'אף פעם'], correct: 0, reward: 30000, explain: 'גידור נועל שער. ליבואן — דולר זול זה השער הכי טוב לנעול.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'למה מחזיקים זהב, אם הוא לא מכניס כלום כל חודש?', answers: ['כי הוא תמיד עולה', 'כי הוא מגן כשכל השאר נופל', 'כי הוא יפה'], correct: 1, reward: 30000, explain: 'זהב הוא ביטוח: במשברים הוא עולה כשהעסקים יורדים. לא מרוויחים ממנו — נשענים עליו.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'עסק שווה ₪1.2 מיליון ומוצע לך ב־₪1 מיליון. מה קרה לשווי הנקי שלך כשקנית?', answers: ['ירד ב־₪1 מיליון', 'עלה ב־₪200 אלף', 'לא השתנה'], correct: 1, reward: 30000, explain: 'שילמת מיליון וקיבלת נכס ששווה 1.2. את הרווח עשית ביום הקנייה.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'יש לך יבואן שנפגע כשהדולר עולה. מה הכי מאזן אותו?', answers: ['עוד יבואן', 'יצואן או זהב', 'לקחת הלוואה'], correct: 1, reward: 'lesson', lesson: 'fx_risk', explain: 'יצואן מרוויח בדיוק כשהיבואן מפסיד. ביחד — הדולר כבר לא מפחיד. זה פיזור.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'מתי גידור ליבואן שווה את המחיר?', answers: ['כשהשער נוח לו ואין לו כרית לספוג זינוק בדולר', 'רק אחרי שהדולר כבר זינק', 'אף פעם'], correct: 0, reward: 'lesson', lesson: 'fx_risk', explain: 'גידור הוא ביטוח: נועל שער ועולה כסף. במשחק הדולר נוטה לחזור לממוצע, אז "זול" קל לזהות. במציאות אף אחד לא יודע מה זול — מגדרים כי אי אפשר לספוג הפתעה, לא כי מנחשים.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'למה מחזיקים זהב, אם הוא לא מכניס כלום כל חודש?', answers: ['כי הוא תמיד עולה', 'כי הרבה פעמים הוא מתנהג אחרת ממניות ומפזר את הסיכון', 'כי הוא יפה'], correct: 1, reward: 'lesson', lesson: 'diversification', explain: 'זהב לא מכניס כלום כל חודש. בהרבה משברים הוא עלה כשמניות ירדו — אבל לא תמיד: ב־2008 הוא צנח בכ־30% באמצע המשבר. מחזיקים קצת כפיזור, לא כהבטחה.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'עסק שווה ₪1.2 מיליון ומוצע לך ב־₪1 מיליון. מה קרה לשווי הנקי שלך כשקנית?', answers: ['ירד ב־₪1 מיליון', 'עלה ב־₪200 אלף', 'לא השתנה'], correct: 1, reward: 'lesson', lesson: 'negotiation', explain: 'שילמת מיליון וקיבלת נכס ששווה 1.2. את הרווח עשית ביום הקנייה.' },
   ],
 
   tipDoodad: 400000,
@@ -182,9 +184,9 @@ export default {
     revalUp: 'השווי של הנכסים שלך עלה. לא נכנס שקל לכיס — אבל השווי הנקי קפץ.',
     revalDown: 'השווי ירד. אם אתה לא מוכר עכשיו — זה הפסד על הנייר. אם כן — הוא אמיתי.',
     revalNone: 'השוק זז, והפעם זה לא נגע בך. פיזור עושה את זה.',
-    trade_GOLD: 'זהב לא מכניס כלום כל חודש. מחזיקים אותו כי במשבר — הוא עולה כשהכל יורד.',
+    trade_GOLD: 'זהב לא מכניס כלום כל חודש. במשחק הוא תמיד עולה במשבר; במציאות לרוב הוא מתנהג אחרת ממניות — אבל לא תמיד.',
     trade_USD: 'דולרים בכספת: אם הדולר עולה — הרווחת. ואם יש לך יבואן — זה גם גידור.',
-    tradeBuy_gold: 'קנית זהב. עכשיו יש לך כרית שעולה כשהעולם בבהלה.',
+    tradeBuy_gold: 'קנית זהב — פיזור שהרבה פעמים עולה כשהעולם בבהלה (לא תמיד).',
     tradeBuy_usd: 'קנית דולרים. אם הדולר יעלה — הם שווים יותר. ואם יש לך יבואן, זה מאזן אותו.',
     crisisAsk: 'משבר עולמי. עכשיו רואים מי פיזר ומי שם הכל על קלף אחד.',
     negativeCf: 'התזרים שלילי ({cf}). יבואן בדולר יקר? הלוואות? בדוק מה אפשר לגדר או למכור.',

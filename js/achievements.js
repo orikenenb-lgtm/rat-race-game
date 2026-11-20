@@ -22,7 +22,15 @@ export const ACHIEVEMENTS = [
   { id: 'no_bank_win', name: 'בלי בנק', desc: 'ניצחת בלי לקחת אף הלוואה בנקאית במשחק.', icon: 'piggy', hidden: true },
   { id: 'comeback', name: 'קאמבק', desc: 'ניצחת אחרי שהיה לך חודש עם תזרים שלילי.', icon: 'phoenix', hidden: true },
   { id: 'strong_will', name: 'כוח רצון', desc: 'ויתרת על 4 פיתויים במשחק אחד.', icon: 'shield' },
-  { id: 'no_installments', name: 'בלי תשלומים', desc: 'ניצחת בלי לקנות אף פעם בתשלומים או במנוי.', icon: 'scissors' },
+  { id: 'no_installments', name: 'בלי אשראי', desc: 'ניצחת בלי לקנות אף פעם באשראי או במנוי.', icon: 'scissors' },
+  // ---- v3 "החיים האמיתיים" (any world)
+  { id: 'balanced', name: 'עשיר ושמח', desc: 'יצאת מהמירוץ עם אושר 70 ומעלה.', icon: 'sun' },
+  { id: 'negotiator', name: 'סוחר ממולח', desc: 'שתי הצעות מחיר נמוכות התקבלו במשחק אחד.', icon: 'handshake' },
+  { id: 'scholar', name: 'השקעתי בעצמי', desc: 'סיימת ללמוד וקיבלת העלאה קבועה.', icon: 'cap' },
+  { id: 'cushion3', name: 'כרית של 3 חודשים', desc: 'יצאת מהמירוץ עם קרן חירום של 3 חודשי הוצאות לפחות.', icon: 'pillow' },
+  { id: 'good_call', name: 'החלטה טובה, מזל רע', desc: 'איכות ההחלטות שלך הייתה 75 ומעלה, גם כשהמזל היה נגדך.', icon: 'compass' },
+  { id: 'no_panic', name: 'לא מכרתי בפאניקה', desc: 'החזקת בקרן המדד גם כשהיא ירדה 20% — ולא מכרת בהפסד.', icon: 'anchor' },
+  { id: 'steady_hand', name: 'יד יציבה', desc: 'במכונת הזמן: ניצחת את "קנה והחזק" בלי למכור בהפסד.', icon: 'anchor', world: 'h' },
   // ---- w1 השכונה
   { id: 'three_apts', name: 'בעל בית', desc: 'שלוש דירות בבעלותך בבת אחת.', icon: 'house', world: 'w1' },
   { id: 'w1_fast', name: 'שועל השכונה', desc: 'יצאת מהשכונה בפחות מ־30 חודשים.', icon: 'fox', world: 'w1' },
@@ -39,7 +47,7 @@ export const ACHIEVEMENTS = [
   { id: 'insured', name: 'הביטוח שילם', desc: 'ביטוח המשלוחים חסך לך הפסד.', icon: 'anchor', world: 'w3' },
   // ---- w4 עמק העתיד
   { id: 'angel5', name: 'מלאך', desc: 'השקעת בחמישה סטארט־אפים במשחק אחד.', icon: 'wings', world: 'w4' },
-  { id: 'unicorn', name: 'חד־קרן', desc: 'אקזיט של פי 20 ומעלה.', icon: 'unicorn', world: 'w4', hidden: true },
+  { id: 'unicorn', name: 'חד־קרן', desc: 'אקזיט של פי 20 ומעלה. כן, זה בעיקר מזל — בגלל זה מפזרים.', icon: 'unicorn', world: 'w4', hidden: true },
   { id: 'impact25', name: 'עושה שינוי', desc: '25 נקודות השפעה.', icon: 'heart', world: 'w4' },
   { id: 'impact100', name: 'משנה עולם', desc: '100 נקודות השפעה.', icon: 'globe', world: 'w4' },
   { id: 'pledge', name: 'נתינה קבועה', desc: 'פתחת הוראת קבע לתרומה חודשית.', icon: 'calendar', world: 'w4' },
@@ -84,6 +92,13 @@ const TESTS = {
   impact25: (s, t, p) => s.worldId === 'w4' && (s.world.impact || 0) >= 25,
   impact100: (s, t, p) => s.worldId === 'w4' && (s.world.impact || 0) >= 100,
   pledge: (s, t, p) => t === 'give' && !!p.pledge,
+  balanced: (s, t, p) => t === 'end' && p.end.status === 'won' && !!s.life && s.life.happiness >= 70,
+  negotiator: (s) => !!s.life && s.life.negWins >= 2,
+  scholar: (s) => !!s.life && s.life.study.done,
+  cushion3: (s, t, p) => t === 'end' && p.end.status === 'won' && (s.savings || 0) >= 3 * p.m.expenses,
+  good_call: (s, t, p) => t === 'end' && !!p.end.learning && p.end.learning.decisionQuality >= 75 && p.end.learning.luck.total < 0,
+  no_panic: (s, t, p) => t === 'end' && !!s.life && s.lessons && s.lessons.includes('drawdown') && (s.holdings.IDX || {}).qty > 0 && !s.life.idxSold,
+  steady_hand: (s, t, p) => t === 'end' && p.end.status === 'won' && s.worldId === 'h' && !!s.life && !s.life.idxSold,
 };
 
 /** Newly earned in-game achievements for this event. Pure (never mutates state). */

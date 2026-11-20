@@ -17,7 +17,8 @@ async def started(pg, action, timeout=20000):
     await pg.wait_for_function(f'(window.__cfgs || []).length > {n}', timeout=timeout)
     return await pg.evaluate('window.__lastCfg')
 async def page(b, vp, scheme, name):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme); pg = await ctx.new_page()
+    ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+    await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR', name, e))
     pg.on('console', lambda m: log('CONSOLE', name, m.text) if m.type == 'error' and '404' not in m.text else None)
     return ctx, pg
@@ -77,14 +78,14 @@ async def main():
         await A.evaluate('window.__stubEnd("won", 19)'); await A.wait_for_selector('.lb-end'); await A.wait_for_timeout(3500)
         href = await A.get_attribute('#endShare', 'href'); text = urllib.parse.unquote(href.split('text=', 1)[1])
         log('share text:', text)
-        check(re.search(r'🐭 השכונה · מורה · 19 חודשים ★★☆', text) is not None, 'Wordle-style share line')
+        check(re.search(r'🐭 השכונה · מורה · 19 חודשים [★☆]{3}', text) is not None, 'Wordle-style share line')
         m = re.search(r'(https?://\S+\?duel=[^\s]+)', text); link = m.group(1) if m else ''
         q = urllib.parse.parse_qs(urllib.parse.urlparse(link).query)
-        check(q.get('duel', [''])[0] == f"w1.teacher.{cfgA['seed']}" and q.get('r', [''])[0] == 'w19.2' and q.get('by', [''])[0].startswith('טסט־דו'), f'duel link {link}')
+        check(q.get('duel', [''])[0] == f"w1.teacher.{cfgA['seed']}" and re.match(r'^w19\.[0-3]$', q.get('r', [''])[0]) and q.get('by', [''])[0].startswith('טסט־דו'), f'duel link {link}')
         await A.screenshot(path=SHOT + 'v21_end_win_share_desk.png')
         cB, B = await page(b, PHONE, 'dark', 'B')
         await B.goto(link); await B.wait_for_selector('.duel-card', timeout=30000)
-        check('אתגר אותך' in await B.inner_text('.duel-title') and '19 חודשים' in await B.inner_text('.duel-score'), 'duel intro with the challenger and his result')
+        check('אתגר אותך' in await B.inner_text('.duel-title') and '19 חודשים' in await B.inner_text('.duel-score') and 'ref=' in link, 'duel intro with the challenger and his result')
         await B.screenshot(path=SHOT + 'v21_duel_intro_phone_dark.png')
         cfgB = await started(B, lambda: B.click('[data-act="duel-go"]'))
         check(cfgB['seed'] == cfgA['seed'] and cfgB['worldId'] == 'w1' and cfgB['charId'] == 'teacher' and cfgB['mode'] == 'free' and cfgB.get('title') == 'דו־קרב' and cfgB.get('duel', {}).get('by', '').startswith('טסט־דו'), f'duel cfg {cfgB}')

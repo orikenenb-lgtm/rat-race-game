@@ -68,13 +68,46 @@ function dealScore(st, d) {
   return (d.discount || 0) * 1.5 + d.cf * 24 + (d.grow || 0) * d.value * 24 + (d.impact || 0) * 20000;
 }
 
+/* ---------- v3: monthly plan (time & energy) per policy, life dilemmas, negotiation */
+function planFor(st, pol) {
+  const L = st.life; const m = E.metrics(st);
+  if (pol === 'reckless') return L.energy > 15 ? 'overtime' : 'work';
+  if (pol === 'greedy') return L.energy >= 30 ? 'overtime' : 'work';
+  if (pol === 'cautious') return L.energy < 40 || (L.plan === 'rest' && L.energy < 70) ? 'rest' : 'work';
+  // smart: study early, rest when tired or unhappy, a little overtime when fresh
+  if (L.energy < 35 || (L.plan === 'rest' && (L.energy < 75 || L.happiness < 62))) return 'rest';
+  if (L.happiness < 57 && st.month > 6) return 'rest';
+  if (!L.study.done && st.month <= 20 && L.energy >= 45) return 'study';
+  if (L.energy >= 80 && m.cashflow > 0) return 'overtime';
+  if (L.plan === 'overtime' && L.energy >= 50) return 'overtime';
+  return 'work';
+}
+function lifePick(st, ev, pol) {
+  const en = ev.options.filter((o) => o.enabled);
+  const val = (o) => (o.effects.cash || 0) - (o.effects.monthly || 0) * (o.effects.months || 24) + (o.effects.salary || 0) * (o.effects.months || 24);
+  if (pol === 'cautious') return en.slice().sort((a, b) => val(b) - val(a))[0].id;
+  if (pol === 'reckless') return en.slice().sort((a, b) => val(a) - val(b))[0].id;
+  if (pol === 'smart') { // money + happiness: one happiness point ≈ 4% of a month's salary
+    const S = E.metrics(st).salary; const L = st.life;
+    const score = (o) => val(o) + (o.effects.happiness || 0) * S * (L.happiness < 62 ? 0.6 : 0.25) + (o.effects.energy || 0) * S * (L.energy < 40 ? 0.05 : 0.01) - (o.loanAmount ? o.loanAmount * 0.2 : 0);
+    return en.slice().sort((a, b) => score(b) - score(a))[0].id;
+  }
+  return (en.find((o) => o.primary) || en[0]).id;
+}
+function planEventPick(st, ev, pol) {
+  const want = planFor(st, pol);
+  if (pol === 'smart' && ev.options.find((o) => o.id === 'raise' && o.enabled) && ev.options.find((o) => o.id === 'raise').chance >= 0.45) return 'raise';
+  const o = ev.options.find((x) => x.enabled && x.plan === want);
+  return o ? o.id : 'ok';
+}
+
 const POLICIES = {
   random: {
     decide(st, ev, ctx) {
       if (ev.type === 'trade') return tradeAction(st, ev, 'random', ctx);
       const en = ev.options.filter((o) => o.enabled && o.id !== 'done');
       if (!en.length) return ['done'];
-      if (ctx.n >= 2) return [has(ev, 'done') ? 'done' : en[0].id];
+      if (ctx.n >= 2) return [firstEnabled(ev, ['done', 'ok', 'pass']) || en[0].id];
       return [en[Math.floor(ctx.r() * en.length)].id];
     },
     between() {},
@@ -98,24 +131,29 @@ const POLICIES = {
         case 'shipping': return [has(ev, 'insure') && st.cash > d.fee + bufferOf(st, 1) ? 'insure' : 'ok'];
         case 'pitch': return [st.cash > d.checks[0] + bufferOf(st, 3) && d.team + d.traction >= 5 ? 'inv:0' : 'pass'];
         case 'giving': return [st.cash > d.levels[0].amount + bufferOf(st, 3) ? 'give:0' : 'pass'];
-        default: return [ev.options.find((o) => o.enabled).id];
+        case 'payday': case 'edu': return [planEventPick(st, ev, 'cautious')];
+        case 'life': return [lifePick(st, ev, 'cautious')];
+        case 'business': return [firstEnabled(ev, ['pass', 'ok'])];
+        default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];
       }
     },
-    between(st) { betweenCommon(st, 1.5); },
+    between(st) { betweenCommon(st, 1.5); if (!st.over) E.setPlan(st, planFor(st, 'cautious')); },
   },
   greedy: {
     decide(st, ev, ctx) { return greedyLike(st, ev, ctx, false); },
-    between(st) { betweenCommon(st, 0.5); },
+    between(st) { betweenCommon(st, 0.5); if (!st.over) E.setPlan(st, planFor(st, 'greedy')); },
   },
   smart: {
     decide(st, ev, ctx) { return greedyLike(st, ev, ctx, true); },
-    between(st) { betweenCommon(st, 0.6, true); },
+    between(st) { betweenCommon(st, 0.6, true); if (!st.over && !ABL.has('noPlan')) E.setPlan(st, planFor(st, 'smart')); },
   },
   // a kid who just taps the highlighted button every time (and never touches the loan buttons)
   tapper: {
     decide(st, ev, ctx) {
       if (ev.type === 'trade') return ['done'];
-      const o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled);
+      const en = ev.options.filter((x) => x.enabled);
+      // no highlighted answer (personal life choices): a kid picks one of the options at random
+      const o = ev.options.find((x) => x.primary) || en[Math.floor(ctx.r() * en.length)];
       return [o.id, o.needsQty ? { qty: 1 } : undefined];
     },
     between() {},
@@ -131,15 +169,19 @@ const POLICIES = {
         case 'pitch': return [firstEnabled(ev, ['inv:2', 'inv:1', 'inv:0']) || 'pass'];
         case 'giving': return ['pass'];
         case 'upgrade': { const u = ev.options.find((o) => o.id.startsWith('up:') && o.enabled); return [u ? u.id : 'pass']; }
+        case 'payday': case 'edu': return [planEventPick(st, ev, 'reckless')];
+        case 'life': return [lifePick(st, ev, 'reckless')];
         default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];
       }
     },
-    between() {},
+    between(st) { E.setPlan(st, planFor(st, 'reckless')); },
   },
 };
 
 function betweenCommon(st, bufMonths, smart = false) {
   const m = E.metrics(st);
+  // smart: a small emergency fund early; 3 months of expenses once freedom is in sight (★★★ needs it)
+  if (smart && !ABL.has('noFund') && !st.over) { const near = m.goalProgress >= 0.75; const want = Math.round(m.expenses * (near ? 3.1 : 1.5)) - st.savings; if (want > 500 && st.cash - want > m.expenses * (near ? 0.5 : 2)) E.moveSavings(st, want); }
   // cheap bank loans are worth keeping while cash can buy assets that earn more; repay expensive ones first
   const buf = m.expenses * (smart && m.loanPct <= 3 ? Math.max(bufMonths, 2.5) : bufMonths);
   if (st.credit && st.cash - st.credit >= buf * 0.5) E.payCredit(st);
@@ -164,6 +206,7 @@ function greedyLike(st, ev, ctx, smart) {
       }
       if (!has(ev, pick)) return ['pass'];
       if (smart && ABL.has('onlyImporters') && !(d.sens < 0)) return ['pass'];
+      if (smart && !ABL.has('noNeg') && ctx.n === 0) { const off = ev.options.find((x) => x.id === 'offer:5' && x.enabled && x.chance >= 0.85); if (off && (ev.options.find((x) => x.id === pick).net || 0) > 0) return [off.id]; }
       const o = ev.options.find((x) => x.id === pick);
       const loanCost = o.loanMonthly || 0; const net = o.net;
       if (w.goal.type === 'passive') {
@@ -252,6 +295,9 @@ function greedyLike(st, ev, ctx, smart) {
       return ['pass'];
     }
     case 'mystery': return [ev.options.find((o) => o.enabled).id];
+    case 'business': if (!smart) return [firstEnabled(ev, ['pass', 'ok'])]; return [(ev.options.find((x) => x.primary && x.enabled) || ev.options.find((x) => ['ok', 'pass'].includes(x.id))).id];
+    case 'payday': case 'edu': return [planEventPick(st, ev, smart ? 'smart' : 'greedy')];
+    case 'life': return [lifePick(st, ev, smart ? 'smart' : 'greedy')];
     default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];
   }
 }
@@ -298,6 +344,7 @@ export function runWorld(worldId, n = N, pols = Object.keys(POLICIES)) {
   const rows = [];
   for (const ch of w.characters) for (const pol of pols) {
     const lim = ch.maxMonths || w.maxMonths; const cap = Math.round(lim * 1.6);
+    const happy = []; let burn = 0, blocked = 0;
     const months = [], turnsWin = [], turnsAll = []; let wins = 0, winsLim = 0, auto = 0, bankrupt = 0, bad = 0, stars = [0, 0, 0, 0], loanMax = [];
     for (let i = 0; i < n; i++) {
       const seed = 1000 + i * 7 + worldId.charCodeAt(1) * 100003;
@@ -307,18 +354,19 @@ export function runWorld(worldId, n = N, pols = Object.keys(POLICIES)) {
       if (st.stats.bad > 0) bad++;
       loanMax.push(st.stats.maxLoans);
       if (end && end.reason === 'bankrupt') bankrupt++;
-      if (end && end.status === 'won') { wins++; months.push(end.months); turnsWin.push(st.turn); if (end.months <= lim) winsLim++; stars[E.starsFor(w, end.months, lim, ch.id)]++; }
+      happy.push(Math.round(st.life.happiness)); burn += st.life.burnouts ? 1 : 0;
+      if (end && end.status === 'won') { wins++; months.push(end.months); turnsWin.push(st.turn); if (end.months <= lim) winsLim++; stars[end.stars]++; if (end.starsBlockedByHappiness) blocked++; }
       else stars[0]++;
     }
-    rows.push({ world: worldId, char: ch.id, pol, n, winLim: winsLim / n, win: wins / n, med: q(months, 0.5), p10: q(months, 0.1), p90: q(months, 0.9), months, turnsMed: q(turnsWin, 0.5), turnsAll: q(turnsAll, 0.5), auto: auto / n, bankrupt: bankrupt / n, bad: bad / n, stars, loanMed: q(loanMax, 0.5) });
+    rows.push({ world: worldId, char: ch.id, pol, n, winLim: winsLim / n, win: wins / n, med: q(months, 0.5), p10: q(months, 0.1), p90: q(months, 0.9), months, turnsMed: q(turnsWin, 0.5), turnsAll: q(turnsAll, 0.5), auto: auto / n, bankrupt: bankrupt / n, bad: bad / n, stars, loanMed: q(loanMax, 0.5), happy: q(happy, 0.5), burn: burn / n, blocked: blocked / n });
   }
   return rows;
 }
 
 function table(rows) {
-  const head = '| דמות | מדיניות | ניצחון בזמן | חציון חודשים | p10 | p90 | תורות (חציון) | הלוואת חירום | פשט רגל | עסקה רעה | ★0/1/2/3 |';
-  const sep = '|' + '---|'.repeat(11);
-  const lines = rows.map((r) => `| ${r.char} | ${r.pol} | ${pctS(r.winLim)} | ${isNaN(r.med) ? '—' : r.med} | ${isNaN(r.p10) ? '—' : r.p10} | ${isNaN(r.p90) ? '—' : r.p90} | ${isNaN(r.turnsMed) ? '—' : r.turnsMed} | ${pctS(r.auto)} | ${pctS(r.bankrupt)} | ${pctS(r.bad)} | ${r.stars.map((x) => Math.round(x / r.n * 100)).join('/')} |`);
+  const head = '| דמות | מדיניות | ניצחון בזמן | חציון חודשים | p10 | p90 | תורות (חציון) | הלוואת חירום | פשט רגל | עסקה רעה | אושר (חציון) | נשחקו | ★★★ נחסם באושר | ★0/1/2/3 |';
+  const sep = '|' + '---|'.repeat(14);
+  const lines = rows.map((r) => `| ${r.char} | ${r.pol} | ${pctS(r.winLim)} | ${isNaN(r.med) ? '—' : r.med} | ${isNaN(r.p10) ? '—' : r.p10} | ${isNaN(r.p90) ? '—' : r.p90} | ${isNaN(r.turnsMed) ? '—' : r.turnsMed} | ${pctS(r.auto)} | ${pctS(r.bankrupt)} | ${pctS(r.bad)} | ${r.happy} | ${pctS(r.burn)} | ${pctS(r.blocked)} | ${r.stars.map((x) => Math.round(x / r.n * 100)).join('/')} |`);
   return [head, sep, ...lines].join('\n');
 }
 
@@ -339,7 +387,7 @@ function summary(worldId, rows) {
     smart2: by('smart').reduce((s, r) => s + r.stars[2] + r.stars[3], 0) / Math.max(1, by('smart').reduce((s, r) => s + r.n, 0)),
     greedy3: by('greedy').reduce((s, r) => s + r.stars[3], 0) / Math.max(1, by('greedy').reduce((s, r) => s + r.n, 0)),
     winTapper: winLim('tapper'), tapper3: by('tapper').reduce((s, r) => s + r.stars[3], 0) / Math.max(1, by('tapper').reduce((s, r) => s + r.n, 0)),
-    tapperMed: q(all('tapper'), 0.5), turnsDefault: by('smart')[0].turnsMed, defaultChar: by('smart')[0].char,
+    tapperMed: q(all('tapper'), 0.5), tapperTurns: q(by('tapper').map((r) => r.turnsMed), 0.5), turnsAll: q(rows.filter((r) => r.pol === 'smart' || r.pol === 'tapper').map((r) => r.turnsMed), 0.5), turnsDefault: by('smart')[0].turnsMed, defaultChar: by('smart')[0].char,
     turnsSmart: q(turns, 0.5),
   };
 }
@@ -379,7 +427,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   const secs = Number(process.hrtime.bigint() - t0) / 1e9;
   if (MD) {
-    const head = `# דוח איזון — מירוץ העכברים 2.0\n\nGenerated by \`node tools/sim.mjs ${N} --md ${MD}\` (${secs.toFixed(0)}s). Seeds are fixed, so the report is reproducible.\n\nPolicies: **random** (uniform clicks), **cautious** (never borrows to buy, buys only positive cashflow it can pay for in cash, repays loans first, always fixes/hedges/insures, tiny angel checks), **greedy** (careless: buys any positive cashflow even with expensive loans, tiny buffer, always variable rate, never hedges, gives only at the end), **smart** (good heuristic player — the reference for stars: ROI vs loan cost, buy-low/sell-high, sells on great offers, repays expensive debt, locks low rates, upgrades/trims, hedges when the dollar is favourable, small diversified startup checks, gives on a schedule), **tapper** (a kid who always taps the highlighted \`primary\` button and never touches the loan buttons), **reckless** (buys everything incl. negative cashflow, max leverage, installments/subscriptions, never hedges).\n\n"Months" = the month counter at the moment of escape (as in v1). Games run in free mode up to 1.6× the month limit; "win in time" counts escapes within maxMonths. Stars: ★ = escaped within maxMonths, ★★ ≤ T2, ★★★ ≤ T3 (T3 ≈ top 10–15% of smart games). \*T2/T3 in the overview are world defaults; the configured per-character thresholds (used by the engine) are listed under each world.\n\n## Overview\n\n| world | maxMonths | smart median months (turns) | default char turns | smart p90 | tapper median / in time / ★★★ | greedy med | cautious med | win in time: smart / greedy / cautious / reckless / random | smart ★★★ / ★★+ |\n|---|---|---|---|---|---|---|---|---|---|\n` +
+    const head = `# דוח איזון — מירוץ העכברים v3 ("החיים האמיתיים")\n\nGenerated by \`node tools/sim.mjs ${N} --md ${MD}\` (${secs.toFixed(0)}s). Seeds are fixed, so the report is reproducible.\n\nPolicies: **random** (uniform clicks), **cautious** (never borrows to buy, buys only positive cashflow it can pay for in cash, repays loans first, always fixes/hedges/insures, tiny angel checks), **greedy** (careless: buys any positive cashflow even with expensive loans, tiny buffer, always variable rate, never hedges, gives only at the end), **smart** (good heuristic player — the reference for stars: ROI vs loan cost, buy-low/sell-high, sells on great offers, repays expensive debt, locks low rates, upgrades/trims, hedges when the dollar is favourable, small diversified startup checks, gives on a schedule), **tapper** (a kid who always taps the highlighted \`primary\` button and never touches the loan buttons), **reckless** (buys everything incl. negative cashflow, max leverage, installments/subscriptions, never hedges).\n\n"Months" = the month counter at the moment of escape (as in v1). Games run in free mode up to 1.6× the month limit; "win in time" counts escapes within maxMonths. Stars: ★ = escaped within maxMonths, ★★ ≤ T2, ★★★ ≤ T3 **and final happiness ≥ 60** (T3 calibrated so ★★★ ≈ 12–13% of smart games). v3: two dice on a 40-tile board (≈1.4 rolls per month), Israeli payslip, inflation, index fund, life events, monthly plans; policies choose plans (smart: study early, rest when tired/unhappy, a little overtime when fresh; tapper: the highlighted plan) and life dilemmas. \*T2/T3 in the overview are world defaults; the configured per-character thresholds (used by the engine) are listed under each world.\n\n## Overview\n\n| world | maxMonths | smart median months (turns) | default char turns | smart p90 | tapper median / in time / ★★★ | greedy med | cautious med | win in time: smart / greedy / cautious / reckless / random | smart ★★★ / ★★+ |\n|---|---|---|---|---|---|---|---|---|---|\n` +
       sums.map((s) => `| ${s.world} ${s.name} | ${s.maxMonths} | ${s.smartMed} (${s.turnsSmart}) | ${s.defaultChar} ${s.turnsDefault} | ${s.smartP90} | ${s.tapperMed} / ${pctS(s.winTapper)} / ${pctS(s.tapper3)} | ${s.greedyMed} | ${s.cautiousMed} | ${pctS(s.winSmart)} / ${pctS(s.winGreedy)} / ${pctS(s.winCautious)} / ${pctS(s.winReckless)} / ${pctS(s.winRandom)} | ${pctS(s.smart3)} / ${pctS(s.smart2)} |`).join('\n') + '\n';
     writeFileSync(MD, head + out.join('\n') + '\n' + ablOut.join('\n') + '\n');
     console.log('wrote', MD);

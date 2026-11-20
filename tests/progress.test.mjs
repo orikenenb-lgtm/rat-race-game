@@ -76,5 +76,26 @@ eq([P.inW('השכונה'), P.inW('עמק העתיד'), P.fromW('השכונה')],
 // persistence
 const saved = JSON.parse(store['rr2-progress']);
 eq(saved.stars.w1, 3, 'persisted to localStorage');
+// "מה למדתי" — learning across games (engine end.learning, v3.2 shape)
+P._reset();
+eq(P.recordLearning(null), null, 'learning: missing block → null');
+eq(P.recordLearning({ decisionQuality: null, principles: {} }), null, 'learning: empty block → null');
+let L1 = P.recordLearning({ decisionQuality: 72, decisions: 10, principles: { cashflow: { mastery: 0.8, n: 4, shown: true }, cushion: { mastery: 0.4, n: 3, shown: true } }, luck: { total: -5000, parts: {} } }, 'g1');
+eq([L1.improved, L1.missed && L1.missed.id, L1.strongest && L1.strongest.id], [null, 'cushion', 'cashflow'], 'learning: first game → strongest + missed, nothing improved');
+eq(P.recordLearning({ decisionQuality: 72, principles: { cashflow: 0.1 } }, 'g1'), L1, 'learning: same game twice is counted once');
+const L2 = P.recordLearning({ decisionQuality: 84, principles: { cushion: 0.75, '<img>': 1, cashflow: { mastery: 'x' } } }, 'g2');
+eq([L2.improved && L2.improved.id, L2.improved && L2.improved.from, L2.missed], ['cushion', 0.4, null], 'learning: improvement vs the stored mastery; bad ids / values ignored');
+const LS = P.learningSummary();
+eq([LS.games, LS.dqAvg, LS.dqLast, LS.dqTrend, LS.principles.map((x) => x.id)], [2, 78, 84, 12, ['cashflow', 'cushion']], 'learning summary');
+ok(Math.abs(LS.principles[1].mastery - (0.4 * 3 + 0.75) / 4) < 0.002, 'learning: mastery is decision-weighted');
+for (let i = 0; i < 30; i++) P.recordLearning({ decisionQuality: 50 + i, principles: { time: 0.5 } }, 'x' + i);
+eq(P.learningSummary().dqHistory.length, 20, 'learning: decision-quality history capped at 20 games');
+const stored = JSON.parse(store['rr2-progress']).learn;
+ok(stored && stored.principles.time && stored.games === 32, 'learning persisted');
+store['rr2-progress'] = JSON.stringify({ learn: { games: 'x', dq: [50, 'y', 900], principles: { ok_id: { m: 2, n: 3 }, 'bad id': { m: 0.5 } } } });
+const P2 = await import('../js/progress.js?reload=' + Date.now());
+const S2 = P2.learningSummary();
+eq([S2.games, S2.dqHistory, S2.principles.map((x) => [x.id, x.mastery])], [0, [50], [['ok_id', 1]]], 'learning: corrupt storage is cleaned on load');
+
 console.log(fails ? `${fails}/${n} FAILED` : `all ${n} progress tests passed`);
 process.exit(fails ? 1 : 0);

@@ -6,10 +6,12 @@ from playwright.async_api import async_playwright
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required']
 BASE = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--base=')), 'http://localhost:8770/index.html')
 SHOTS = '/tmp/rrshots'
+PFX = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--prefix=')), 'v32_')  # screenshot file prefix
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 ERRS = []
 
 def attach(pg, tag):
+    pg.set_default_timeout(90000)   # 2-core box shared with other leads' test runs: swiftshader frames can take seconds
     def con(m):
         if m.type != 'error': return
         url = (m.location or {}).get('url', '')
@@ -33,7 +35,7 @@ async def wait_idle(pg, timeout=90):
         s = await st(pg)
         if s['gm']:  # a mentor modal (bail-out): read it and continue
             log('  modal:', await pg.inner_text('#gmCard h2')); await pg.wait_for_timeout(400)
-            await pg.screenshot(path=f'{SHOTS}/modal_{int(time.time())}.png')
+            await pg.screenshot(path=f'{SHOTS}/{PFX}modal_{int(time.time())}.png')
             await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(300); continue
         if s['card'] or s['roll'] or s['start']: return s
         await pg.wait_for_timeout(250)
@@ -59,7 +61,9 @@ async def trade(pg, rnd, tag):
         await card.locator('[data-q="zero"]').click(); await pg.wait_for_timeout(150)
         assert (await pg.inner_text('#qv')) == '0', 'reset failed'
         # slider: set to ~half of max
-        await pg.evaluate("() => { const s=document.querySelector('#qs'); s.value=Math.max(1,Math.floor(+s.max/2)); s.dispatchEvent(new Event('input',{bubbles:true})); }")
+        # (slider spans max(maxBuy, maxSell), so aim at half of what you can *buy*)
+        mb = int(qmax.replace(',', '') or '1')
+        await pg.evaluate("(mb) => { const s=document.querySelector('#qs'); s.value=Math.max(1,Math.floor(mb/2)); s.dispatchEvent(new Event('input',{bubbles:true})); }", mb)
         await pg.wait_for_timeout(150)
         qh = await pg.inner_text('#qv')
         await card.locator('[data-o="buy"]').click()
@@ -93,7 +97,7 @@ async def handle_card(pg, rnd, tag, s):
     if await roi.count() and rnd.random() < 0.5:
         await roi.click(); await pg.wait_for_timeout(100)
         assert await pg.is_visible('#roiBox'), 'ROI box did not open'
-    btns = card.locator('.acts button[data-o]:not([disabled])')
+    btns = card.locator('button[data-o]:not([disabled])')
     n = await btns.count()
     if n == 0: raise Exception('card without enabled options: ' + s['title'])
     labels = [await btns.nth(i).get_attribute('data-o') for i in range(n)]
@@ -123,7 +127,7 @@ async def play(pg, turns, tag, rnd, shot_at=None):
             t = (await st(pg))['toast']
             if t:
                 log(tag, '  toast:', t); STATS['toast'] = STATS.get('toast', 0) + 1
-                if not TOASTSHOT.get(tag): TOASTSHOT[tag] = 1; await pg.screenshot(path=f'{SHOTS}/{tag}_toast.png')
+                if not TOASTSHOT.get(tag): TOASTSHOT[tag] = 1; await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_toast.png')
                 break
             if (await st(pg))['card']: break
             await pg.wait_for_timeout(250)
@@ -133,8 +137,17 @@ async def play(pg, turns, tag, rnd, shot_at=None):
         await handle_card(pg, rnd, tag, s); await pg.wait_for_timeout(250); s = await wait_idle(pg)
     return 'ok'
 
+async def top_up_energy(pg):
+    await pg.evaluate("async () => { try { const e = await import('/js/energy.js'); e.add && e.add(99, 'test'); } catch (x) {} }")
+
 async def start_world(pg, world, char_idx=0, tutorial=False):
     await pg.wait_for_selector('.fbworld', timeout=120000)
+    await top_up_energy(pg)
+    if world.startswith('h:'):
+        await pg.click(f'.fbworld[data-h="{world[2:]}"]')
+        await pg.wait_for_selector('#start', state='hidden', timeout=30000)
+        await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
+        return
     await pg.click(f'.fbworld[data-w={world}]'); await pg.wait_for_timeout(300)
     profs = pg.locator('.prof'); n = await profs.count()
     await profs.nth(char_idx % n).click()
@@ -149,16 +162,17 @@ async def run_world(b, world, turns, phone=False, hq=False):
     ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone, color_scheme='dark' if dark else 'light')
     pg = await ctx.new_page(); tag = f'{world}{"-phone" if phone else ""}{"-dark" if dark else ""}'; attach(pg, tag)
     rnd = random.Random(hash(tag) & 0xffff)
+    tag = tag.replace(':', '_')
     await pg.goto(BASE + ('?hq' if hq else ''))
-    await start_world(pg, world, char_idx={'w1': 0, 'w2': 1, 'w3': 2, 'w4': 0}[world])
+    await start_world(pg, world, char_idx={'w1': 0, 'w2': 1, 'w3': 2, 'w4': 0}.get(world, 0))
     for i in (1, 2):  # first visit to a world: 2 coach marks about its mechanic
         try: await pg.wait_for_selector('#coach:not([hidden]) .bubble', timeout=6000)
         except Exception: log(tag, 'no world coach mark', i); break
-        await pg.wait_for_timeout(500); await pg.screenshot(path=f'{SHOTS}/{tag}_coach{i}.png')
+        await pg.wait_for_timeout(500); await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_coach{i}.png')
         log(tag, 'coach:', (await pg.inner_text('#coach .bubble b')))
         await pg.click('#coach [data-c="next"]'); await pg.wait_for_timeout(400)
     await pg.wait_for_timeout(800)
-    await pg.screenshot(path=f'{SHOTS}/{tag}_start.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_start.png')
     if world == 'w1' and not phone:  # HUD toggles persist in rr2-settings
         await pg.click('#turboBtn'); await pg.click('#muteBtn')
         st_ = await pg.evaluate("() => JSON.parse(localStorage.getItem('rr2-settings'))")
@@ -171,21 +185,26 @@ async def run_world(b, world, turns, phone=False, hq=False):
         m0 = (await st(pg))['month']; await pg.keyboard.press('Space')
         await pg.wait_for_function("() => document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=10000)
         log(tag, 'Space started a roll')
-    cardshot = {'path': f'{SHOTS}/{tag}_card.png'}
+    cardshot = {'path': f'{SHOTS}/{PFX}{tag}_card.png'}
     r = await play(pg, turns, tag, rnd, shot_at=(min(3, turns - 1), cardshot))
     await pg.wait_for_timeout(1200)
-    await pg.screenshot(path=f'{SHOTS}/{tag}_after.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_after.png')
     if phone and r != 'ended':
         await pg.click('#sheetBtn'); await pg.wait_for_timeout(700)
-        await pg.screenshot(path=f'{SHOTS}/{tag}_sheet.png')
+        await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_sheet.png')
         await pg.click('#sheet [data-act="close"]'); await pg.wait_for_timeout(400)
     if r == 'ended':
         log(tag, 'game over during the run (bankrupt/won) — end screen shown, resume step skipped')
         await ctx.close(); return r
     # resume: reload mid-game and continue
     month = (await st(pg))['month']
-    await pg.reload(); await pg.wait_for_selector('#fbCont', timeout=120000)
-    await pg.click('#fbCont')
+    await pg.reload()
+    if world.startswith('h:'):
+        await pg.wait_for_selector('.fbworld', timeout=120000); await top_up_energy(pg)
+        await pg.evaluate("async (sid) => { const g = await import('/js/game.js'); const sv = g.savedGame('rr2-save-history-' + sid); await g.startGame({ ...sv.cfg, resume: true }); }", world[2:])
+    else:
+        await pg.wait_for_selector('#fbCont', timeout=120000)
+        await pg.click('#fbCont')
     await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
     m2 = (await st(pg))['month']
     log(tag, f'resume: month before {month} after {m2}')
@@ -209,7 +228,7 @@ async def test_end(b):
     await pg.click('#fbCont')
     await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
     rnd = random.Random(5)
-    for k in range(6):
+    for k in range(40):   # v3.1: the goal must hold on 2 consecutive paydays (GOAL_HOLD)
         s = await wait_idle(pg)
         if s['start']: break
         if s['card']: await handle_card(pg, rnd, 'end', s); await pg.wait_for_timeout(400); continue
@@ -221,7 +240,7 @@ async def test_end(b):
         assert key in p, 'payload missing ' + key
     assert p['status'] == 'won' and p['end']['status'] == 'won'
     await pg.wait_for_selector('#fbAgain', timeout=20000)
-    await pg.screenshot(path=f'{SHOTS}/end_fallback.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}end_fallback.png')
     saved = await pg.evaluate("() => JSON.parse(localStorage.getItem('rr2-save-free-w1')).state.over")
     assert saved == 'won', 'final state not saved'
     log('achievements emitted:', await pg.evaluate("() => JSON.stringify(window.__ach)"))
@@ -235,14 +254,14 @@ async def test_tutorial(b, phone=False):
     await start_world(pg, 'w1', 0, tutorial=True)
     await pg.wait_for_selector('#coach:not([hidden])', timeout=30000)
     await pg.wait_for_timeout(500)
-    await pg.screenshot(path=f'{SHOTS}/{tag}_coach1.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_coach1.png')
     await pg.click('#coach [data-c="next"]')
     seen = set(); rnd = random.Random(1)
     for k in range(12):
         s = await wait_idle(pg)
         if s['coach']:
             txt = await pg.inner_text('#coach .bubble small'); seen.add(txt)
-            await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{tag}_coach{len(seen)+1}.png')
+            await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_coach{len(seen)+1}.png')
             await pg.click('#coach [data-c="next"]'); await pg.wait_for_timeout(200); continue
         if s['card']:
             await pg.wait_for_timeout(900)
@@ -279,7 +298,7 @@ async def test_stub(b):
     await pg.wait_for_timeout(500)
     log('checkpoint p_turn sequence', cks)
     assert len(cks) >= 3 and all(cks[i] < cks[i + 1] for i in range(len(cks) - 1)), 'checkpoint seq must increase'
-    await pg.screenshot(path=f'{SHOTS}/stub_daily_w3.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}stub_daily_w3.png')
     has = await pg.evaluate("() => !!localStorage.getItem('rr2-save-stub-r1')"); assert has, 'ranked save key missing'
     # B1: lobby → "חזרה למשחק" (hide #start) between turns → roll enabled
     await pg.click('#homeBtn'); await pg.wait_for_selector('#stubBack', timeout=20000)
@@ -297,7 +316,7 @@ async def test_stub(b):
         await pg.click('#stubBack'); await pg.wait_for_timeout(600)
         s2 = await st(pg); log('banner resume with pending card:', t1, '→', s2['title'], s2['card'])
         assert s2['card'] and s2['title'] == t1, 'B1: pending card lost after banner resume'
-        await pg.screenshot(path=f'{SHOTS}/stub_card_after_banner.png')
+        await pg.screenshot(path=f'{SHOTS}/{PFX}stub_card_after_banner.png')
         await handle_card(pg, rnd, 'stub', s2); s3 = await wait_idle(pg)
         assert s3['roll'] or s3['card'], 'B1: stuck after answering the pending card'
     # second device: no local save, resume from the server checkpoint
@@ -319,7 +338,7 @@ async def test_stub(b):
     await pg.wait_for_function("() => document.body.dataset.world==='w2' && (!document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden)", timeout=120000)
     n0 = len(cks)
     await pg.wait_for_timeout(2500)
-    await pg.screenshot(path=f'{SHOTS}/stub_free_w2_crown.png')
+    await pg.screenshot(path=f'{SHOTS}/{PFX}stub_free_w2_crown.png')
     await play(pg, 2, 'stub-w2', rnd)
     assert len(cks) == n0, 'free games must not send checkpoints'
     log('stub achievements', await pg.evaluate('() => JSON.stringify(window.__stub.ach)'))
@@ -358,9 +377,121 @@ async def test_bailout(b, phone=False):
     if s['card']: await handle_card(pg, random.Random(1), tag, s); await wait_idle(pg)
     await pg.click('#roll')
     await pg.wait_for_selector('#gm:not([hidden])', timeout=60000); await pg.wait_for_timeout(900)
-    await pg.screenshot(path=f'{SHOTS}/{tag}_card.png'); log(tag, 'bail-out card:', await pg.inner_text('#gmCard h2'))
+    await pg.screenshot(path=f'{SHOTS}/{PFX}{tag}_card.png'); log(tag, 'bail-out card:', await pg.inner_text('#gmCard h2'))
     await pg.click('#gm .acts button.primary')
     s = await wait_idle(pg); log(tag, 'after bail-out: roll', s['roll'], 'card', s['card'])
+    await ctx.close()
+
+FORCE_JS = """(a) => { window.__forced = 'pending'; (async () => {
+  const E = await import('/js/engine.js'); const g = await import('/js/game.js');
+  const key = 'rr2-save-free-' + a.world; const sv = JSON.parse(localStorage.getItem(key)); const st = sv.state;
+  const W = E.getWorld(st.worldId);
+  st.pending = null; if (a.ch) { st.pos = W.board.indexOf(a.ch); st.phase = 'land'; } else { st.pos = a.pos; st.phase = 'roll'; }
+  if (a.ch === 'P' && !st.lastPayday) st.lastPayday = { tile: 0, step: 0, amount: 1000, salary: st.salary, passive: 0, expenses: 7000, month: st.month, landed: true };
+  for (const [path, v] of Object.entries(a.patch || {})) { const ks = path.split('.'); let o = st; for (const k of ks.slice(0, -1)) o = o[k]; o[ks[ks.length - 1]] = v; }
+  localStorage.setItem(key, JSON.stringify(sv));
+  g.startGame({ ...sv.cfg, resume: true }); window.__forced = 'started:' + a.n;
+})().catch((e) => { window.__forced = 'error: ' + e; console.error(e); }); }"""
+
+FORCED = [0]
+async def force_card(pg, world, ch, patch=None, want=None):
+    """TEST copy only: edit the save so the pawn stands on tile `ch` with no card drawn, then resume → the game draws that card."""
+    FORCED[0] += 1; n = FORCED[0]
+    await pg.evaluate(FORCE_JS, {'world': world, 'ch': ch, 'patch': patch or {}, 'n': n, 'pos': (patch or {}).pop('__pos', 0) if patch else 0})
+    await pg.wait_for_function("(n) => window.__forced === 'started:' + n || String(window.__forced).startsWith('error')", arg=n, timeout=30000)
+    assert not str(await pg.evaluate('() => window.__forced')).startswith('error'), 'force failed'
+    # startGame is running: wait until it has drawn the card (or settled on the roll button)
+    await pg.wait_for_function("() => !document.querySelector('#evm').hidden || !document.querySelector('#roll').disabled", timeout=60000)
+    await pg.wait_for_timeout(300)
+    s = await wait_idle(pg)
+    if want and s['type'] != want: log('  forced', ch, 'got', s['type'], s['title'])
+    return s
+
+async def verdict_seen(pg, tag, name):
+    try:
+        await pg.wait_for_selector('#verdict.on', timeout=8000)
+        txt = await pg.inner_text('#verdict'); log(tag, '  verdict pill:', txt.replace('\n', ' | '))
+        await pg.screenshot(path=f'{SHOTS}/{PFX}{name}.png'); STATS['verdict'] = STATS.get('verdict', 0) + 1
+        return True
+    except Exception:
+        log(tag, '  (no verdict pill)'); return False
+
+async def test_v32(b, phone=False):
+    """v3.2 cards on demand: K business (offer → manage, a decision inside the open card), doodad with 3 interest-free
+    installments, payday 'save' to the emergency fund, tax office 'report' — then the sheet with the fund box."""
+    vp = {'width': 360, 'height': 760} if phone else {'width': 1300, 'height': 820}
+    ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone)
+    pg = await ctx.new_page(); tag = 'v32' + ('-phone' if phone else ''); attach(pg, tag); sfx = '_phone' if phone else ''
+    await pg.goto(BASE); await pg.evaluate("() => localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true}))")
+    await start_world(pg, 'w1', 0)
+    rnd = random.Random(32)
+    s = await wait_idle(pg)
+    while s['card']: await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    hit = {}
+    # 1) business offer
+    s = await force_card(pg, 'w1', 'K', {'cash': 90000}, 'business')
+    assert s['type'] == 'business', 'K tile did not open a business card: ' + json.dumps(s, ensure_ascii=False)
+    await pg.wait_for_timeout(500); await pg.screenshot(path=f'{SHOTS}/{PFX}biz_offer{sfx}.png')
+    assert await pg.is_visible('#evCard .bizkind'), 'business offer: active/passive explanation missing'
+    await pg.click('#evCard [data-o="start"]'); hit['business'] = 1
+    await verdict_seen(pg, tag, f'verdict_after_biz{sfx}')
+    s = await wait_idle(pg)
+    # 2) business manage: a decision keeps the card open and shows the verdict line inside it
+    s = await force_card(pg, 'w1', 'K', None, 'business')
+    assert s['type'] == 'business'
+    await pg.wait_for_timeout(500); await pg.screenshot(path=f'{SHOTS}/{PFX}biz_manage{sfx}.png')
+    btn = pg.locator('#evCard .bizgrid button[data-o^="biz:"]:not([disabled])').first
+    lbl = await btn.get_attribute('data-o'); await btn.click()
+    await pg.wait_for_selector('#evCard .vline', timeout=20000)
+    log(tag, '  business decision', lbl, '→', (await pg.inner_text('#evCard .vline')).replace('\n', ' '))
+    assert await pg.is_visible('#evCard .okmsg'), 'business: last decision not confirmed on the card'
+    await pg.wait_for_timeout(300); await pg.screenshot(path=f'{SHOTS}/{PFX}biz_decision{sfx}.png')
+    await pg.click('#evCard .acts button[data-o="ok"]'); s = await wait_idle(pg)
+    # 3) doodad with 3 interest-free installments (+ the honest revolving-credit label)
+    for i in range(16):
+        s = await force_card(pg, 'w1', 'D', {'cash': 90000}, 'doodad')
+        if not s['card']: continue
+        if await pg.locator('#evCard [data-o="inst3"]').count():
+            await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{PFX}doodad_inst3{sfx}.png')
+            log(tag, '  doodad options:', [x.replace('\n', ' / ') for x in await pg.locator('#evCard .acts button').all_inner_texts()])
+            await pg.click('#evCard [data-o="inst3"]'); hit['inst3'] = 1
+            await verdict_seen(pg, tag, f'verdict_inst3{sfx}'); s = await wait_idle(pg); break
+        await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    # 4) payday → move money to the emergency fund
+    s = await force_card(pg, 'w1', 'P', {'cash': 60000, 'savings': 0}, 'payday')
+    assert s['type'] == 'payday', 'P tile did not open the payday card'
+    await pg.wait_for_selector('#evCard [data-o="save"]', timeout=10000)
+    await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{PFX}payday_save{sfx}.png')
+    await pg.click('#evCard [data-o="save"]'); hit['save'] = 1
+    await verdict_seen(pg, tag, f'verdict_save{sfx}'); s = await wait_idle(pg)
+    # 5) tax office → open a file for the side hustle (report), then settle
+    s = await force_card(pg, 'w1', 'T', {'life.plan': 'side', 'life.side.total': 5000, 'life.sideTaxDue': 900, 'life.sideReport': False}, 'tax')
+    assert s['type'] == 'tax', 'T tile did not open the tax card'
+    await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{PFX}tax_report{sfx}.png')
+    await pg.click('#evCard [data-o="report"]'); hit['report'] = 1
+    await pg.wait_for_timeout(900)
+    s = await st(pg)
+    if s['card']: await pg.click('#evCard .acts button[data-o="ok"]')
+    s = await wait_idle(pg)
+    while s['card']: await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    # 6) the sheet: emergency fund box (months covered) + taxes + business badge
+    if await pg.is_visible('#sheetBtn'): await pg.click('#sheetBtn')
+    await pg.wait_for_timeout(800)
+    fund = await pg.inner_text('#sheet .wbox.fund'); log(tag, '  sheet fund box:', fund.replace('\n', ' | ')[:160])
+    await pg.screenshot(path=f'{SHOTS}/{PFX}sheet_fund{sfx}.png')
+    await pg.locator('#sheet .wbox.fund').scroll_into_view_if_needed(); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}sheet_fund2{sfx}.png')
+    if phone: await pg.click('#sheet [data-act="close"]'); await pg.wait_for_timeout(400)
+    for k, v in hit.items(): STATS['v32_' + k] = STATS.get('v32_' + k, 0) + v
+    log(tag, 'v3.2 cards hit:', hit)
+    assert all(k in hit for k in ('business', 'inst3', 'save', 'report')), f'missing v3.2 cards: {hit}'
+    # tile labels must read upright from the follow camera on every side of the ring (far side = index 20..29)
+    for pos in (5, 14, 25, 35):
+        await force_card(pg, 'w1', None, {'__pos': pos})
+        await pg.wait_for_timeout(1800); await pg.screenshot(path=f'{SHOTS}/{PFX}follow_tile{pos}{sfx}.png')
+    # board tiles (new icons) from above
+    if not phone:
+        await pg.click('#camBtn'); await pg.wait_for_timeout(1500); await pg.screenshot(path=f'{SHOTS}/{PFX}board_overview.png')
     await ctx.close()
 
 async def main():
@@ -374,6 +505,7 @@ async def main():
         if '--end' in sys.argv: await test_end(b)
         if '--bail' in sys.argv: await test_bailout(b, phone)
         if '--tut' in sys.argv: await test_tutorial(b, phone)
+        if '--nov32' not in sys.argv: await test_v32(b, phone)
         if '--noplay' not in sys.argv:
             for w in worlds:
                 t0 = time.time(); r = await run_world(b, w, turns, phone, hq); log(w, 'done', r, round(time.time() - t0), 's')
