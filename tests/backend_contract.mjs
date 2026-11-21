@@ -7,6 +7,7 @@
 //   RR_LIVE=1 RR_SB_URL=https://<staging>.supabase.co RR_SB_ANON=… node tests/backend_contract.mjs --live   (staging only)
 // Output: one line per case PASS / FAIL / DIFF-ASSUMED (staging differs on an assumed S-row of T7 §2.6) / SKIP (fake-only helper).
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -14,7 +15,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const HERE = dirname(fileURLToPath(import.meta.url)); const ROOT = join(HERE, '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
 const LIVE = process.argv.includes('--live');
-const PROD_REF = 'xvqaxphyfqdzkddmoosu';
+const PROD_REF = /SB_PROD = 'https:\/\/([a-z0-9]+)\.supabase\.co'/.exec(readFileSync(join(HERE, 'fakebackend.py'), 'utf8'))[1];   // single source: the guard
 let TARGET = arg('target', null), KEY = 'fake-anon', child = null;
 if (LIVE) {
   const m = /^https:\/\/([a-z0-9]{8,40})\.supabase\.co\/?$/.exec(process.env.RR_SB_URL || '');

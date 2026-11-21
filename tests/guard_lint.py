@@ -10,6 +10,7 @@ ALLOW = {
     'stability_e2e.py': 'T1: own 503 route for every *.supabase.co URL + unrouted-request check (CR-20)',
     't4_*.py': 'T4: own route (CR-20)',
     't5_*.py': 'T5: own route (CR-20)',
+    'perf_probe.py': 'T7 §3.1: no interception by design (route overhead); --no-proxy-server + MAP * ~NOTFOUND, any non-local response fails the run',
 }
 # files allowed to contain the production ref (the guard itself, this lint, and live-only legacy files behind an env guard)
 REF_ALLOW = {'fakebackend.py': 'defines SB_PROD (the guard)', 'guard_lint.py': 'this check',

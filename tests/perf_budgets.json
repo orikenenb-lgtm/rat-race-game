@@ -1,0 +1,31 @@
+{
+  "_doc": "Gate input of tests/perf_probe.py --gate (T7 §3.8). type: H = hard count gate (every run), T = timing gate (median of the valid runs; INCONCLUSIVE when any run is noisy), R = report only. metric = path in the probe JSON summary (median for T, worst run for H). base = QA§3.2 on 706c0ff [OBSERVED under load 4.5-7.7]. A budget may only be loosened by the director, with an entry in its 'changed' list.",
+  "load_max": 2.5,
+  "budgets": [
+    {"id": "PF-1",  "cond": "desk",  "metric": "A.lobbyUsableMs",            "base": 458,     "budget": 800,   "target": 600,  "type": "T", "owner_cr": "-",           "changed": []},
+    {"id": "PF-2",  "cond": "desk",  "metric": "A.lobbyIdleLongTaskMaxMs",   "base": "13200-20100", "budget": 1000, "target": 500, "type": "T", "owner_cr": "CR-19a/b", "changed": []},
+    {"id": "PF-2b", "cond": "desk",  "metric": "A.inputClickToWorldMs",      "base": "up to ~35000", "budget": 500, "target": 300, "type": "T", "owner_cr": "CR-19a/b", "changed": []},
+    {"id": "PF-3",  "cond": "desk",  "metric": "A.navToRollMs",              "base": "23300-35800", "budget": 15000, "target": 10000, "type": "T", "owner_cr": "CR-19, CR-05", "changed": []},
+    {"id": "PF-4",  "cond": "desk",  "metric": "A.clickToRollMs",            "base": "250-1000", "budget": 8000, "target": 5000, "type": "T", "owner_cr": "CR-05", "changed": []},
+    {"id": "PF-5",  "cond": "desk",  "metric": "A.bytesBeforeRollMB",        "base": 8.59,    "budget": 5.5,   "target": 3.5,  "type": "H", "owner_cr": "CR-05, CR-06, CR-07", "changed": []},
+    {"id": "PF-6",  "cond": "desk",  "metric": ["A.bytesBeforeLobbyKB", "A.requestsBeforeLobby"], "base": [1122, 36], "budget": [1200, 38], "target": null, "type": "H", "owner_cr": "-", "changed": []},
+    {"id": "PF-7",  "cond": "desk",  "metric": "A.glbViolations",            "base": 17,      "budget": 0,     "target": null, "type": "H", "owner_cr": "CR-05", "changed": []},
+    {"id": "PF-8",  "cond": "3g",    "metric": "A.lobbyUsableMs",            "base": 8500,    "budget": 9000,  "target": 7000, "type": "T", "owner_cr": "-",           "changed": []},
+    {"id": "PF-9",  "cond": "3g",    "metric": "A.clickToRollMs",            "base": 45800,   "budget": 25000, "target": 15000, "type": "T", "owner_cr": "CR-05",      "changed": []},
+    {"id": "PF-10", "cond": "desk",  "metric": "B.nodesRange",               "base": 3222,    "budget": 150,   "target": 80,   "type": "H", "owner_cr": "CR-04",       "changed": []},
+    {"id": "PF-10b","cond": "desk",  "metric": "B.attachedRange",            "base": 25,      "budget": 60,    "target": null, "type": "H", "owner_cr": "CR-04",       "changed": []},
+    {"id": "PF-11", "cond": "desk",  "metric": "B.listenersRange",           "base": 2,       "budget": 10,    "target": null, "type": "H", "owner_cr": "-",           "changed": []},
+    {"id": "PF-12", "cond": "desk",  "metric": "B.heapGrowthMB",             "base": 1.4,     "budget": 1.0,   "target": 0.5,  "type": "H", "owner_cr": "CR-04",       "changed": []},
+    {"id": "PF-13", "cond": "desk",  "metric": ["B.glRepeat.buf", "B.glRepeat.vao", "B.glRepeat.tex", "B.glRepeat.prog"], "base": [164, 61, null, null], "budget": [10, 5, 2, 2], "target": null, "type": "H", "owner_cr": "CR-17", "changed": []},
+    {"id": "PF-14", "cond": "desk",  "metric": "B.drawsLobbyOverGame",       "base": null,    "budget": 0,     "target": null, "type": "H", "owner_cr": "T5 setPaused (new CR if it fails)", "changed": []},
+    {"id": "PF-15", "cond": "desk",  "metric": "B.drawsHidden",              "base": null,    "budget": 0,     "target": null, "type": "R", "owner_cr": "T5 A-31",     "changed": []},
+    {"id": "PF-16", "cond": "desk",  "metric": "B.framesQuiet5s",            "base": null,    "budget": 2,     "target": null, "type": "R", "owner_cr": "T5 A-30 / CR-16", "changed": []},
+    {"id": "PF-17", "cond": "desk",  "metric": ["B.homeToLobbyMs", "B.resumeToRollMs"], "base": [null, null], "budget": [500, 1000], "target": null, "type": "T", "owner_cr": "-", "changed": []},
+    {"id": "PF-18", "cond": "desk",  "metric": "B.worldSwitchToRollMs",      "base": null,    "budget": 10000, "target": 6000, "type": "T", "owner_cr": "CR-19",       "changed": []},
+    {"id": "PF-19", "cond": "desk",  "metric": "L.attachedGrowth",           "base": null,    "budget": 200,   "target": null, "type": "H", "owner_cr": "-", "note": "P1: --long not implemented in part A", "changed": []},
+    {"id": "PF-20", "cond": "desk",  "metric": "B.diceFps",                  "base": 1.4,     "budget": null,  "target": null, "type": "R", "owner_cr": "-",           "changed": []},
+    {"id": "PF-21", "cond": "phone", "metric": "A.navToRollMs",              "base": null,    "budget": null,  "target": null, "type": "R", "owner_cr": "-", "note": "budget set after R0 at <= 2x C-desk [TUNE]", "changed": []},
+    {"id": "PF-22", "cond": "3g",    "metric": ["T.clickToRollMs", "T.navToRollMs"], "base": [null, null], "budget": [5000, 15000], "target": null, "type": "T", "owner_cr": "T1 (2D mode)", "changed": []},
+    {"id": "PF-23", "cond": "*",     "metric": "pageErrors",                 "base": 0,       "budget": 0,     "target": null, "type": "H", "owner_cr": "-",           "changed": []}
+  ]
+}
