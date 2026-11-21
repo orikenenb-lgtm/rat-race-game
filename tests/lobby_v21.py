@@ -1,11 +1,14 @@
-# v2.1 lobby tests (stub game, LIVE server, טסט nicknames):
+# v2.1 lobby tests (stub game, OFFLINE fake backend by default — verify=accept; --live = staging only; טסט nicknames):
 #  1. ranked anti-replay: a daily with a server checkpoint resumes from that state on a fresh device (recovery code, no local save)
 #  2. duel link round-trip (?duel=world.char.seed) + same-board replay + share back
 #  3. loss screen: leaks, resisted toys, isolated negative numbers, collapsed achievements
-import asyncio, json, sys, random, re, urllib.parse
+import asyncio, json, os, sys, random, re, urllib.parse
 from playwright.async_api import async_playwright
-BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8771/'
-SHOT = '/tmp/lbshots/'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
+MODE = FB.mode_from_argv()
+BASE = FB.base_url('http://localhost:8771/')
+SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
+fb = FB.FakeBackend(verify='accept'); SINKS = []
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 TAG = str(random.randint(100, 999))
 results = []
@@ -17,7 +20,8 @@ async def started(pg, action, timeout=20000):
     await pg.wait_for_function(f'(window.__cfgs || []).length > {n}', timeout=timeout)
     return await pg.evaluate('window.__lastCfg')
 async def page(b, vp, scheme, name):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+    ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, color_scheme=scheme)
+    SINKS.append(await FB.install_mode(ctx, fb, MODE))
     await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR', name, e))
     pg.on('console', lambda m: log('CONSOLE', name, m.text) if m.type == 'error' and '404' not in m.text else None)
@@ -40,7 +44,8 @@ DRIVE = """async ([rid, world, charIdx, seed, maxM]) => {
 }"""
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
+        os.makedirs(SHOT, exist_ok=True); FB.banner(MODE, 'accept')
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args(MODE, ARGS))
         DESK = {'width': 1300, 'height': 820}; PHONE = {'width': 390, 'height': 800}
         # ---------- 1. checkpoint resume on a fresh device
         cX, X = await page(b, DESK, 'light', 'X')
@@ -110,6 +115,10 @@ async def main():
         cfgB2 = await started(B, lambda: B.click('[data-act="end-same"]'))
         check(cfgB2['seed'] == cfgA['seed'] and cfgB2.get('title') == 'דו־קרב', '"עוד פעם — אותו לוח" replays the same seed')
         await b.close()
+    try: [FB.assert_clean(s) for s in SINKS]; check(True, f'guard clean: no request left the fake (calls {dict(fb.calls)})')
+    except AssertionError as e: check(False, str(e))
+    fb.close()
     fails = [m for ok, m in results if not ok]
     log(f'\n{len(results) - len(fails)}/{len(results)} checks passed'); [log('  FAILED:', m) for m in fails]
+    sys.exit(1 if fails else 0)
 asyncio.run(main())

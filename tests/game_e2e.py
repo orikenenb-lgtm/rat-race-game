@@ -1,8 +1,10 @@
 # Game-screen e2e (front-end agent). Plays every world through the built-in picker (no lobby.js in the test copy),
 # answers cards with varied choices, exercises the trade window, resume and game:end; screenshots desktop + phone.
 # Usage: python3 tests/game_e2e.py [worlds=w1,w2,w3,w4] [turns=16] [--phone] [--hq]   (server: test copy on :8770)
-import asyncio, random, sys, time, json
+import asyncio, random, sys, time, json, os
 from playwright.async_api import async_playwright
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB   # T7 guard: no backend use here
+MODE = FB.mode_from_argv(); GUARDS = []
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required']
 BASE = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--base=')), 'http://localhost:8770/index.html')
 SHOTS = '/tmp/rrshots'
@@ -500,7 +502,11 @@ async def main():
     turns = int(args[1]) if len(args) > 1 else 16
     phone = '--phone' in sys.argv; hq = '--hq' in sys.argv
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args(MODE, ARGS))
+        _nc = b.new_context
+        async def guarded(**kw):   # every context gets the Supabase guard; this suite's own page routes keep priority
+            ctx = await _nc(**{**FB.new_context_kwargs(), **kw}); GUARDS.append(await FB.install(ctx, None)); return ctx
+        b.new_context = guarded
         if '--stub' in sys.argv: await test_stub(b)
         if '--end' in sys.argv: await test_end(b)
         if '--bail' in sys.argv: await test_bailout(b, phone)
@@ -511,6 +517,9 @@ async def main():
                 t0 = time.time(); r = await run_world(b, w, turns, phone, hq); log(w, 'done', r, round(time.time() - t0), 's')
         await b.close()
     log('STATS', json.dumps(STATS, ensure_ascii=False))
+    for g in GUARDS:
+        try: FB.assert_clean(g)
+        except AssertionError as e: ERRS.append('guard: ' + str(e))
     log('ERRORS', len(ERRS)); [log('  ', e) for e in ERRS]
     sys.exit(1 if ERRS else 0)
 

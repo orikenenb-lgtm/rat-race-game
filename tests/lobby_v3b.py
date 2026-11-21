@@ -1,4 +1,7 @@
-# v3b lobby tests (stub game). Usage: python3 tests/lobby_v3b.py [base_url] [--no-live]
+# v3b lobby tests (stub game). Usage: python3 tests/lobby_v3b.py [base_url] [--only=a,b] [--live]
+# OFFLINE by default (tests/fakebackend.py): 1–5 use the fake with per-RPC overrides (payload injection) and verify=scripted;
+# 6 (live_xss) runs against a stateful fake that stores the payloads verbatim, exactly like production. --no-live is accepted (no-op);
+# --live runs 6 against STAGING only (RR_LIVE=1 + RR_SB_URL/RR_SB_ANON, never production).
 #  1. XSS: every server / other-player field the lobby renders (nicknames, group names, challenge titles, feed data, board
 #     numbers, pawns, member stars, group counts) is filled with <img onerror> / attribute-breakout payloads (mocked backend)
 #     → nothing executes, no element or on* attribute is injected, the payload shows as text.
@@ -7,16 +10,18 @@
 #     verifies without a second finish, `actions` never inside finish stats, ✓ / ⚠ notes, ✓ / ⚠ board marks.
 #  4. Learning feedback: decisions-vs-luck bars, explanation, improved / missed principle, profile "מה למדתי"; hidden without data.
 #  5. Quiz reward:'lesson' → +1⚡ (live bus 'reward' + end-of-game catch-up, never twice).
-#  6. LIVE (טסט players): real server echoes injected nickname / group name / challenge title / feed data → escaped.
+#  6. live_xss (טסט players): the backend echoes injected nickname / group name / challenge title / feed data → escaped.
 # Screenshots → /tmp/lbshots/v3b_*.png (desktop 1300×820 + phone 390×800, light/dark).
-import asyncio, sys, json, random, re, hashlib, base64, time
+import asyncio, os, sys, json, random, re, hashlib, base64, time
 from playwright.async_api import async_playwright
-ARGV = [a for a in sys.argv[1:] if not a.startswith('--')]
-BASE = ARGV[0] if ARGV else 'http://localhost:8771/'
-LIVE = '--no-live' not in sys.argv
-SHOT = '/tmp/lbshots/'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
+MODE = FB.mode_from_argv()
+BASE = FB.base_url('http://localhost:8771/')
+SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
+LOBBY_DIR = os.environ.get('RR_LOBBY_DIR', '/tmp/rr2lobby')     # the served lobby copy (CSP hash of its import map)
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
-SB = 'https://xvqaxphyfqdzkddmoosu.supabase.co'
+SB = FB.SB_PROD
+SINKS = []; FAKES = []
 TAG = str(random.randint(100, 999))
 results = []
 def log(*a): print(*a, flush=True)
@@ -43,8 +48,16 @@ def rows(verified=True):
     ]
 
 class Mock:
+    """Scripted answers, served by a FakeBackend through per-RPC overrides (param sets are still checked against net.js)."""
     def __init__(s):
-        s.calls = []; s.verify_queue = []; s.finish_err = None; s.my_verified = True
+        s.finish_err = None; s.my_verified = True
+        s.fb = FB.FakeBackend(verify='scripted'); FAKES.append(s.fb)
+        for fn in FB.PARAMS: s.fb.override(fn, lambda f, b, fn=fn: s._raw(fn, b))
+    def _raw(s, fn, b):
+        d = s.answer(fn, b)
+        return FB.Raw(*d) if isinstance(d, tuple) else d
+    calls = property(lambda s: s.fb.requests)
+    verify_queue = property(lambda s: s.fb.verify_queue, lambda s, v: setattr(s.fb, 'verify_queue', list(v)))
     def profile(s):
         return {'id': ME['id'], 'nickname': ME['nickname'], 'stars': {}, 'total_stars': 0, 'achievements': [], 'pawn': 'classic', 'daily_streak': 0, 'best_streak': 0, 'last_daily': None, 'meta': {}}
     def answer(s, fn, b):
@@ -82,33 +95,14 @@ class Mock:
             return {'ok': True}
         return {'ok': True}
 
-async def install_mock(ctx, M):
-    async def rpc(route, request):
-        if request.method == 'OPTIONS':
-            return await route.fulfill(status=204, headers={'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*'})
-        fn = request.url.split('/rpc/')[1].split('?')[0]
-        b = json.loads(request.post_data or '{}')
-        M.calls.append((fn, b))
-        d = M.answer(fn, b); st = 200
-        if isinstance(d, tuple): st, d = d
-        await route.fulfill(status=st, content_type='application/json', body=json.dumps(d), headers={'access-control-allow-origin': '*'})
-    async def verify(route, request):
-        if request.method == 'OPTIONS':
-            return await route.fulfill(status=204, headers={'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*'})
-        b = json.loads(request.post_data or '{}')
-        M.calls.append(('verify', b))
-        st, d = M.verify_queue.pop(0) if M.verify_queue else (200, {'ok': True, 'verified': True, 'stored': False, 'result': {}})
-        await route.fulfill(status=st, content_type='application/json', body=json.dumps(d), headers={'access-control-allow-origin': '*'})
-    await ctx.route(SB + '/rest/v1/rpc/**', rpc)
-    await ctx.route(SB + '/functions/v1/verify-result', verify)
-
-async def page(b, vp, scheme, name, mock=None, me=True, csp=None):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+async def page(b, vp, scheme, name, mock=None, me=True, csp=None, fake=None):
+    ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, color_scheme=scheme)
+    # mocked flows always use their scripted fake; the stateful flow (fake=…) follows --live / offline
+    SINKS.append(await FB.install(ctx, mock.fb) if mock else await FB.install_mode(ctx, fake, MODE))
     init = "localStorage.setItem('rr2-onboarded','1');"
     if me: init += f"if (!localStorage.getItem('rr-player')) localStorage.setItem('rr-player', {json.dumps(json.dumps(ME))});"
     init += "document.addEventListener('securitypolicyviolation', (e) => (window.__csp ||= []).push(e.violatedDirective + ' ' + e.blockedURI + ' ' + (e.sample || '')));"
     await ctx.add_init_script(init)
-    if mock: await install_mock(ctx, mock)
     if csp:
         async def doc(route, request):
             r = await route.fetch(); body = await r.text()
@@ -193,8 +187,9 @@ async def xss_mock(b):
 
 # ------------------------------------------------------------------------------------------------ 2. CSP without unsafe-inline
 async def csp_check(b):
-    html = open('/tmp/rr2lobby/index.html', encoding='utf-8').read() if BASE.startswith('http://localhost:8771') else None
-    if html is None: log('SKIP csp (unknown test copy)'); return
+    f = os.path.join(LOBBY_DIR, 'index.html')
+    html = open(f, encoding='utf-8').read() if os.path.exists(f) else None
+    if html is None: check(False, f'csp: served lobby copy not found at {f} (set RR_LOBBY_DIR)'); return
     im = re.search(r'<script type="importmap">(.*?)</script>', html, re.S).group(1)
     h = base64.b64encode(hashlib.sha256(im.encode()).digest()).decode()
     csp = (f"default-src 'self'; script-src 'self' 'sha256-{h}'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; "
@@ -361,7 +356,8 @@ async def board_shots(b):
 
 # ------------------------------------------------------------------------------------------------ 6. LIVE server echo
 async def live_xss(b):
-    cA, A = await page(b, DESK, 'light', 'liveA', me=False)
+    LF = FB.FakeBackend(); FAKES.append(LF)     # stateful: stores every payload verbatim and echoes it back like production
+    cA, A = await page(b, DESK, 'light', 'liveA', me=False, fake=LF)
     await A.goto(BASE); await A.wait_for_selector('.lb-home')
     nick = f'טסט<img src=x>{TAG}'
     await A.fill('#lb-root-nick', nick); await A.press('#lb-root-nick', 'Enter'); await A.wait_for_selector('#lbDaily .lb-dh-txt', timeout=25000)
@@ -375,7 +371,7 @@ async def live_xss(b):
       await net.logEvent('escaped', { world: x, age: x, months: x, stars: -1 });
       await net.logEvent('ranked_won', { title: x, mode: x, months: x, stars: x });
       await net.logEvent('history_done', { scenario: x, beat: true, stars: 7 }); }""", XS)
-    cB, B = await page(b, PHONE, 'dark', 'liveB', me=False)
+    cB, B = await page(b, PHONE, 'dark', 'liveB', me=False, fake=LF)
     await B.goto(BASE + '?join=' + code); await B.wait_for_selector('.lb-invite', timeout=30000)
     await B.fill('#lb-root-nick', f'טסט<svg>{TAG}'); await B.press('#lb-root-nick', 'Enter'); await B.wait_for_selector('.gp-code', timeout=30000)
     await B.wait_for_function("document.querySelector('#gpFeed .gp-flist') && document.querySelectorAll('#gpFeed .gp-flist li').length >= 3", timeout=30000)
@@ -393,14 +389,19 @@ async def live_xss(b):
 
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
+        os.makedirs(SHOT, exist_ok=True); FB.banner(MODE, 'scripted')
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args(MODE, ARGS))
         only = next((a.split('=', 1)[1].split(',') for a in sys.argv if a.startswith('--only=')), None)
-        for fn in (xss_mock, csp_check, verify_flow, learning_flow, board_shots) + ((live_xss,) if LIVE else ()):
+        for fn in (xss_mock, csp_check, verify_flow, learning_flow, board_shots, live_xss):
             if only and fn.__name__ not in only: continue
             try: await fn(b)
             except Exception as e: check(False, f'{fn.__name__} crashed: {e!r}'[:400])
             log('done', fn.__name__)
         await b.close()
+    try: [FB.assert_clean(s) for s in SINKS]; check(True, f'guard clean: no request left the fake ({len(SINKS)} contexts)')
+    except AssertionError as e: check(False, str(e))
+    for f in FAKES: f.close()
     fails = [m for ok, m in results if not ok]
     log(f'\n{len(results) - len(fails)}/{len(results)} checks passed'); [log('  FAILED:', m) for m in fails]
+    sys.exit(1 if fails else 0)
 asyncio.run(main())

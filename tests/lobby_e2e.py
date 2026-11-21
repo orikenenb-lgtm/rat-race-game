@@ -1,9 +1,17 @@
-# End-to-end test of the lobby against the LIVE server, with the stub game (tests/stubs). Nicknames start with טסט.
-# Run: tests/make_testcopy.sh && python3 -m http.server 8771 --directory /tmp/rr2lobby &  then  python3 tests/lobby_e2e.py
-import asyncio, json, sys, random
+# End-to-end test of the lobby with the stub game (tests/stubs). OFFLINE by default: the fake backend (tests/fakebackend.py,
+# verify=accept because the stub game's action logs are not replayable) answers every rr_* call; --live only against staging
+# (RR_LIVE=1 + RR_SB_URL/RR_SB_ANON, never production). Nicknames start with טסט.
+# Run: bash tests/serve_copies.sh  then  python3 tests/lobby_e2e.py [base_url] [--live]
+# Writes the fake's final state to /tmp/lb/fake_state.json (lobby_shots.py renders it, FB-8).
+import asyncio, json, os, sys, random
 from playwright.async_api import async_playwright
-BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8771/'
-SHOT = '/tmp/lbshots/'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
+MODE = FB.mode_from_argv()
+BASE = FB.base_url('http://localhost:8771/')
+SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
+STATE = os.environ.get('RR_FAKE_STATE', '/tmp/lb/fake_state.json')
+fb = FB.FakeBackend(verify='accept'); fb.set_daily('w1', 0)   # browser and fake share the real wall clock (no rules-era gap)
+SINKS = []
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 TAG = str(random.randint(100, 999))
 results = []
@@ -17,7 +25,8 @@ async def started(pg, action, timeout=20000):
     await pg.wait_for_selector('#start', state='hidden')
     return await pg.evaluate('window.__lastCfg')
 async def page(b, vp, scheme, name):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+    ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, color_scheme=scheme)
+    SINKS.append(await FB.install_mode(ctx, fb, MODE))
     await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')")
     await ctx.grant_permissions(['clipboard-read', 'clipboard-write'])
     pg = await ctx.new_page()
@@ -26,7 +35,8 @@ async def page(b, vp, scheme, name):
     return ctx, pg
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
+        os.makedirs(SHOT, exist_ok=True); FB.banner(MODE, 'accept')
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args(MODE, ARGS))
         DESK = {'width': 1300, 'height': 820}; PHONE = {'width': 390, 'height': 800}
         cA, A = await page(b, DESK, 'light', 'A')
         await A.goto(BASE); await A.wait_for_selector('.lb-home')
@@ -177,10 +187,14 @@ async def main():
         check(await B.locator('.lb-gitem').count() == 0, 'B left the group')
         # A sees B in the group with a title
         await A.click('[data-act="group"]'); await A.wait_for_timeout(2500)
-        log('A creds for screenshot pass:', json.dumps(me))
-        open('/tmp/lb/creds.json', 'w').write(json.dumps({'A': me, 'group': await A.evaluate("location.href"), 'code': code}))
+        if MODE == 'offline':
+            fb.meta = {'A': me, 'code': code}; fb.dump(STATE); log('fake state for the screenshot pass:', STATE)
         await b.close()
+    try: [FB.assert_clean(s) for s in SINKS]; check(True, f'guard clean: no request left the fake (calls {dict(fb.calls)})')
+    except AssertionError as e: check(False, str(e))
+    fb.close()
     fails = [m for ok, m in results if not ok]
     log(f'\n{len(results) - len(fails)}/{len(results)} checks passed')
     for m in fails: log('  FAILED:', m)
+    sys.exit(1 if fails else 0)
 asyncio.run(main())
