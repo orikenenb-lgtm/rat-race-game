@@ -1467,7 +1467,8 @@ function applyMentor(st, p, ev) {
   const level = st.mentor || 'guide';
   if (level === 'guide') {
     let pick = null;
-    if (!ev.noPrimary) {
+    if (ev.forcePrimary) pick = ev.options.find((o) => o.id === ev.forcePrimary && o.enabled) || null; // a data-driven guide pick (values cards, story steps)
+    else if (!ev.noPrimary) {
       if (ev.type === 'business' && ev.data.mode === 'manage' && st.flags['bz_' + p.id]) pick = ev.options.find((o) => o.id === 'ok' && o.enabled) || null; // one decision per visit, then "המשך"
       else { const pool = scorePool(ev, null); if (pool) { const sc = scoreOptions(st, ev); if (sc.length) { const id = primaryFromScores(ev, sc); pick = ev.options.find((o) => o.id === id) || null; } } }
       if (!pick) { const marked = ev.options.filter((o) => o.primary && o.enabled); pick = marked[0] || ev.options.find((o) => o.enabled && SAFE_IDS.includes(o.id)) || ev.options.find((o) => o.enabled) || null; }
@@ -1478,7 +1479,13 @@ function applyMentor(st, p, ev) {
     ev.mentor = MN.neutralLabel(null, ev.mentor, level); ev.text = MN.neutralLabel(null, ev.text, level);
     if (ev.data && typeof ev.data.roiVsLoan === 'string') ev.data.roiVsLoan = MN.neutralLabel(null, ev.data.roiVsLoan, level);
   }
-  delete ev.noPrimary; delete ev.suggested;
+  delete ev.noPrimary; delete ev.suggested; delete ev.forcePrimary;
+}
+/** v3's highlight for a lifestyle trade-off: the card's own default, or — when it needs a loan — the no-loan option that costs least now. */
+function guideCheapPick(options, defId) {
+  let pick = options.find((o) => o.id === defId && o.enabled);
+  if (!pick || pick.loanAmount) pick = options.filter((o) => o.enabled && !o.loanAmount).sort((a, b) => (b.effects.cash || 0) - (a.effects.cash || 0))[0] || pick;
+  return pick || null;
 }
 const MAJOR_KINDS = new Set(['buy', 'sell', 'give', 'life', 'plan', 'installments']);
 const MAJOR_IDS = new Set(['credit', 'sub', 'refi', 'prepay', 'start', 'biz:sell', 'raise', 'report', 'inspect:2']);
@@ -1701,7 +1708,9 @@ const DESCRIBE = {
       const L = loanFor(st, Math.max(0, -eff.cash));
       return opt(o.id, o.label, true, { kind: 'life', effects: eff, loanAmount: L.need, loanMonthly: L.monthly, chance: o.chance });
     });
-    if ((E.personal || E.values) && ev.options.length > 1) ev.noPrimary = true; // a life choice / lifestyle trade-off has no "right answer" button (§6.8, T2 §10.3)
+    if (E.values && st.mentor === 'guide' && ev.options.length > 1) { // director (T2 gate A1): at guide, car / health / transport highlight the cheapest reasonable option, as v3 did
+      const pick = guideCheapPick(ev.options, E.primary); if (pick) ev.forcePrimary = pick.id;
+    } else if ((E.personal || E.values) && ev.options.length > 1) ev.noPrimary = true; // a life choice / lifestyle trade-off has no "right answer" button (§6.8, T2 §10.3)
     else {
       let pick = ev.options.find((o) => o.id === E.primary);
       if (pick && pick.loanAmount) pick = ev.options.filter((o) => !o.loanAmount).sort((a, b) => b.effects.cash - a.effects.cash)[0] || pick;

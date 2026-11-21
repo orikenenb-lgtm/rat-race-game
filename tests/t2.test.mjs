@@ -317,7 +317,8 @@ test('T11 evaluator: offers on a bad deal ≤ pass; values/health/car/course/gua
         const st = E.createGame({ worldId: w.id, charId: ch.id, seed: 3, mode: 'free', mentor: 'guide' }); st.cash = Math.max(st.cash, 3 * E.metrics(st).expenses); // affordable (a loan would be a real risk flag)
         st.pending = { id: 5, type: 'life', tile: 'L', pos: 4, eventId: id, r: 0.5 }; st.phase = 'event';
         const ev = E.currentEvent(st); if (!ev.options.find((o) => o.id === opt)) continue;
-        assert.equal(ev.options.filter((o) => o.primary).length, 0, 'values events have no primary'); assert.equal(ev.data.values, true);
+        // director decision (gate A1): at guide a values card highlights the cheapest reasonable option, as v3 did (its default, no loan)
+        assert.deepEqual(ev.options.filter((o) => o.primary).map((o) => o.id), [{ health: 'public', car: 'fix' }[id]], 'guide highlights the v3 default'); assert.equal(ev.data.values, true);
         const res = E.choose(st, ev, opt); assert.ok(res.decision.score >= 60, `${w.id}/${ch.id} ${id}:${opt} ${res.decision.score}`); assert.notEqual(res.decision.verdict, 'costly');
       }
     }
@@ -334,7 +335,8 @@ test('T11 evaluator: offers on a bad deal ≤ pass; values/health/car/course/gua
   const states = sampleStates(N(120), 777, (st) => st.mentor === 'guide');
   for (const json of states) {
     const st = E.deserialize(json); const ev = E.currentEvent(st); const sc2 = E.scoreOptions(st, ev); const pr = ev.options.find((o) => o.primary);
-    if (sc2.length && pr && !(ev.type === 'business' && st.flags['bz_' + st.pending.id])) { const best = Math.max(...sc2.map((x) => x.U)); const mine = sc2.find((x) => x.id === pr.id); assert.ok(mine && mine.U >= best - 0.1 - 1e-9, `${ev.type}: primary ${pr.id} ${mine && mine.U} vs best ${best}`); }
+    const dataPick = ev.type === 'life' && (ev.data.values || ev.data.chain); // director (A1) values pick / T3 story steps: data-driven guide picks
+    if (sc2.length && pr && !dataPick && !(ev.type === 'business' && st.flags['bz_' + st.pending.id])) { const best = Math.max(...sc2.map((x) => x.U)); const mine = sc2.find((x) => x.id === pr.id); assert.ok(mine && mine.U >= best - 0.1 - 1e-9, `${ev.type}: primary ${pr.id} ${mine && mine.U} vs best ${best}`); }
     if (ev.type === 'life' && ev.data.personal) for (const o of ev.options.filter((x) => x.enabled)) { const c = E.deserialize(json); const d = E.choose(c, null, o.id).decision; assert.ok(!d || d.verdict !== 'costly'); }
     // one cushion rule: the card's warning, the evaluator's flag and the impact's main risk agree
     if (ev.type === 'deal' && !ev.auto) {

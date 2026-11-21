@@ -57,6 +57,7 @@ export async function init(canvas) {
   coarse = matchMedia('(pointer:coarse)').matches;
   tier = resolveTier({ lowPower, coarse, hq }); cfg = TIER_CONFIG[tier];
   renderer = new THREE.WebGLRenderer({ canvas, antialias: cfg.antialias, alpha: true, powerPreference: 'high-performance' });
+  canvasVis();
   try {
     const gl = renderer.getContext();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
@@ -145,13 +146,18 @@ export async function init(canvas) {
 }
 
 /* ---------- render on demand */
-let activeUntil = 0, lastRender = 0, dirty = true, paused = false, interacting = false, simT = 0;
+// starts paused: game.js unpauses when the board is on screen (no frame — and no synchronous GPU readback — behind the lobby)
+let activeUntil = 0, lastRender = 0, dirty = true, paused = true, interacting = false, simT = 0;
 /** Keep animating (decor, idle pawn spin) for `ms` more milliseconds. */
 export function wake(ms = 4000) { activeUntil = Math.max(activeUntil, performance.now() + ms); }
 /** Render one frame at the next tick even when idle or paused (geometry changed, canvas resized…). */
 export function invalidate() { dirty = true; }
 /** Pause all rendering (e.g. while the lobby covers the board). Tweens resume (and jump to their end) when unpaused. */
-export function setPaused(b) { paused = !!b; if (!paused) { wake(); invalidate(); } }
+export function setPaused(b) { paused = !!b; canvasVis(); if (!paused) { wake(); invalidate(); } }
+/** While paused (the lobby covers the board) the canvas is not painted at all: on software compositing every painted WebGL
+ * canvas is read back at each commit, which blocks the main thread until the GPU process has finished ALL queued work
+ * (shader compiles, PMREM, uploads) — the 8–20 s "boot freeze" behind the lobby (T5 part B notes, CR-19a). */
+function canvasVis() { try { if (renderer) renderer.domElement.style.visibility = paused ? 'hidden' : ''; } catch (e) { /* ignore */ } }
 export const isPaused = () => paused;
 
 let skipUntil = 0;
