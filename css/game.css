@@ -894,3 +894,4 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 .arow.flash{background:light-dark(#fff3d2,#33291a);transition:background .3s}
 .alevel{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
 .alevel small{flex-basis:100%;color:var(--mut)}
+.say{min-height:var(--tap)}   /* T7 AX-T: the mentor bubble on the card is a button too */

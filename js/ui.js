@@ -1372,7 +1372,9 @@ export function renderRollEnergy(g, msNext) {
   const t = $('#hEnT');
   if (g.value < g.max && msNext > 0) { const s = Math.ceil(msNext / 1000); t.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } else t.textContent = '';
   b.title = `⚡ ${g.value}/${g.max} זריקות — כל הטלה עולה זריקה אחת`;   // T4 N15
-  b.setAttribute('aria-label', `זריקות: ${g.value} מתוך ${g.max}${t.textContent ? ` · הבאה בעוד ${t.textContent}` : ''}`);
+  // T4 N15 + T7 label-in-name: the accessible name starts with the visible "⚡25" and ends with a hidden "זריקות מתוך 25"
+  b.removeAttribute('aria-label');
+  const sr = $('#hEnSr'); if (sr) sr.textContent = ` זריקות מתוך ${g.max}`;
 }
 
 /* ============================================================ v3: lessons unlocked */
