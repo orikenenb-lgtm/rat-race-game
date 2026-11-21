@@ -1167,3 +1167,22 @@ New file `tests/t2.test.mjs` plus updates to the existing files. Fixtures for T6
 **New mentor lines (common.js)**
 - `bizAsk`: `מה הכי חשוב לעסק עכשיו: מחיר, אנשים, שיווק — או כמה כסף אתה מושך ממנו?`
 - `focusAsk`: `על מה תשים את הראש החודש? זמן וכוח הם תקציב — כמו כסף.`
+
+---------------------------------------------------------------------------------------------------
+
+## Implementation notes (engine lane, 2026-11-21)
+
+**Done as specified:** rules gate (`st.rules`, rules 3 proven equal to v3 on the 200-game golden fixture — `tests/t2.test.mjs` T7, replayed logs and the same player live), streams dd/cycle/rival/listing appended, save v4 with `migrateV2 → migrateV3` and ONE idempotent `v4Defaults(st)` run on every load (the extension point for T3/T4/T6), actions F/H/M in `replay` and `verify_core.js` (`RULES4_FROM = '2026-12-01'`, `rulesFor(row)`; `index.ts` selects `daily_key`, `weekly_start` = `to_date(weekly_key, 'IYYY-"W"IW')`, `challenge_day`), mentor levels, focus, DD, cycle, impact, publicView, evaluator fixes, dominated options, sim policies and `--matrix/--dominance/--perf/--report`. Numbers: `tools/balance-report.md`.
+
+**Deviations (each deliberate):**
+1. Evaluator weights tuned (§13.5 knob 5): 🔋 and 😊 are valued concavely (marginal 🔋 0.035/0.018/0.012/0.004 months per point below 30/55/80/above; 😊 0.06/0.04/0.015/0.005 below 50/65/80/above; a toy's joy ×0.4 — it is glow), cashflow horizon 36 months in passive-income worlds (24 in net-worth worlds), owner-run business start costs `ownerEnergy × 12 × 0.012` months and uses the one cushion rule, a refused offer costs ½ of the lost deal's value, selling an income asset in a passive world is weighed against 80 months of its cashflow. Without these the guide highlight rested half the game, sold income assets and opened loan-financed businesses (guideTapper w1 26/48 → 37/48 on the same seeds).
+2. Guide primary ties (within 0.1): closing options, then the card's own default, then the safe "continue" option (`ok/pass/done/skip`) — otherwise e.g. w2 `prepay` won a 0-vs-0 tie.
+3. DD: w1 priors/ranges harsher than the table (see the report); repair = down × (0.05 + 0.25u) instead of 0.1 + 0.4u; a hidden problem never makes a negative claimed cashflow better (`trueBase`: ×(2 − f) below zero); the cycle's cashflow multiplier is mirrored the same way. The level-1 range width is 30% of the true monthly cashflow (also for NOI cards). No inspection on golden (risk known) or starter cards; the starter card is treated as legacy (truth = claim).
+4. Focus: debt's +10 credit is once per game (`L.debtBonus`); the guide suggestion asks 🔋 ≥ 60 and ≥ 3 deal tiles within 12 steps before suggesting `scout`; `frugal` also skips leasing lines.
+5. `metrics().life.inflationYear` is now last year's figure (or the long-run expectation in year one); `inflationLastYear` added. UI lines `js/ui.js:253, :270, :294` still word it as "this year" — UI agent.
+6. No hint on quizzes (it would reveal the answer). `metrics().mentor.canHint` is decided by card type (cheap; `requestHint` is authoritative).
+7. Decision records carry `k` (index of the creating action in `st.actions`) and `b` (best option label) for T6's review/luck log.
+8. business describe memoizes business.js forecasts by business state (pure) — describe of a business card went from ~18 ms to < 1 ms; `impactFor` p95 1.2 ms.
+9. `replayConfig` also carries `gender` (a gender override previously made replay non-byte-identical).
+
+**Gates not met** (numbers and diagnostics in `tools/balance-report.md`): A1 in w1/w4, A3 in w1/w2/w4, A8 (follows from A1/A3), A5 (only `f:ops`, a sim-policy gap), A7 (study plan, w2 trims, w3 business start). A2b reported (not blocking). Met: A2, A4, A6, A6b, A9, A10.
