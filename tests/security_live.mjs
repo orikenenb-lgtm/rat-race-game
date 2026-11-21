@@ -1,14 +1,22 @@
 #!/usr/bin/env node
-// LIVE security tests against the production Supabase project (T-15 / docs/SECURITY_REVIEW.md).
+// LIVE-ONLY security tests (T-15 / docs/SECURITY_REVIEW.md) — since T7 they run only against a STAGING project:
+//   RR_LIVE=1 RR_SB_URL=https://<staging-ref>.supabase.co RR_SB_ANON=<anon key> node tests/security_live.mjs [--skip-referral]
+// Without that env (or with RR_SB_URL = production) it prints SKIPPED and exits 0 before any request. The same cases run offline
+// against the fake backend in tests/backend_contract.mjs.
 // Only creates players whose nickname starts with "טסט", one private test group ("טסט אבטחה") and one challenge in it.
 // Never touches daily/weekly boards, never deletes anything. Prints a JSON evidence log.
-// Run: node tests/security_live.mjs [--skip-referral]
 import { readFileSync } from 'node:fs';
 import { loadEngine } from '../supabase/functions/verify-result/engine_loader.js';
 import { playOut, prng } from './lib/random-player.mjs';
 
-const SB = 'https://xvqaxphyfqdzkddmoosu.supabase.co';
-const SBK = 'sb_publishable_w3ubvawN4BnqOul66NSaLg_KM6yTJhc';
+const PROD_REF = 'xvqaxphyfqdzkddmoosu';             // T7 env guard: never production
+const LIVE = /^https:\/\/([a-z0-9]{8,40})\.supabase\.co\/?$/.exec(process.env.RR_SB_URL || '');
+if (process.env.RR_LIVE !== '1' || !LIVE || LIVE[1] === PROD_REF || !process.env.RR_SB_ANON) {
+  console.log('SKIPPED (live-only; set RR_LIVE=1 and RR_SB_URL=<staging>, RR_SB_ANON=<staging anon key>; production is refused)');
+  process.exit(0);
+}
+const SB = process.env.RR_SB_URL.replace(/\/$/, '');
+const SBK = process.env.RR_SB_ANON;
 const FN = `${SB}/functions/v1/verify-result`;
 const BUNDLE = readFileSync(new URL('../supabase/functions/verify-result/engine.bundle.json', import.meta.url), 'utf8');
 const E = await loadEngine(BUNDLE); // play with the exact pinned engine (js/ may be ahead of the deployed pin)
