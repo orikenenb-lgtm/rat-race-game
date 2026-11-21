@@ -16,7 +16,10 @@ import * as MN from './systems/mentor.js';
 import * as FC from './systems/focus.js';
 import * as DD from './systems/dd.js';
 import * as CY from './systems/cycle.js';
+import { RULES4_FROM, rulesForDay, dayOf } from './systems/rules.js';
 export { MN, FC, DD, CY };
+/** CR-29: the rule set a ranked game is created (and verified) with, from its date key — shared with verify_core.js rulesFor. */
+export { RULES4_FROM, rulesForDay, dayOf as rulesDayOf };
 export const cyclePath = CY.cyclePath;
 
 /** T2 rules gate: 3 = exact v3 behaviour (in-flight ranked games, rollback), 4 = due diligence, cycle, focus, new option sets. */
@@ -64,7 +67,9 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 /* ============================================================ create / save */
 /**
  * Create a new game.
- * @param {object} o {worldId, charId, seed, mode:'free'|'daily'|'weekly'|'challenge', maxMonths?, tutorial?}
+ * @param {object} o {worldId, charId, seed, mode:'free'|'daily'|'weekly'|'challenge', maxMonths?, tutorial?, rules?, mentor?,
+ *   dateKey? — ranked modes: the day key the server stores (daily 'YYYY-MM-DD', weekly 'YYYY-Www', challenge: the Israel date of
+ *   its creation); when given it decides st.rules (CR-29, js/systems/rules.js) and wins over `rules`}
  */
 export function createGame(o = {}) {
   const history = o.mode === 'history' || o.worldId === 'h';
@@ -110,7 +115,8 @@ export function createGame(o = {}) {
   initLife(st, ch);
   if (history) initHistory(st, scen);
   // T2: rules gate, mentor level, dev-only ablation switches (sim), the economic cycle (2 'cycle' draws, rules 4 only)
-  st.rules = o.rules === 3 ? 3 : 4;
+  // CR-29: a ranked game takes its rules from its date key exactly as the verifier will (js/systems/rules.js = verify_core rulesFor)
+  st.rules = RANKED_MODES.includes(st.mode) && o.dateKey != null ? rulesForDay(o.dateKey) : (o.rules === 3 ? 3 : 4);
   st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, mentor: o.mentor, worldId: st.worldId });
   if (o._dev && (o._dev.noCycle || o._dev.noDD)) {
     if (RANKED_MODES.includes(st.mode)) throw new Error('dev flags are not allowed in ranked modes');
@@ -3578,7 +3584,7 @@ export function dailyConfig(dateStr) {
   const w = WORLDS[((dayNum % WORLDS.length) + WORLDS.length) % WORLDS.length];
   const chars = (w.daily && w.daily.chars) || w.characters.map((c) => c.id);
   const charId = chars[Math.floor(dayNum / WORLDS.length) % chars.length];
-  return { worldId: w.id, charId, seed: seedFromString('daily:' + dateStr), mode: 'daily', maxMonths: (w.daily && w.daily.maxMonths) || 24 };
+  return { worldId: w.id, charId, seed: seedFromString('daily:' + dateStr), mode: 'daily', maxMonths: (w.daily && w.daily.maxMonths) || 24, dateKey: dateStr, rules: rulesForDay(dateStr) };
 }
 /** Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's algorithm) — no Date object needed. */
 function daysFromCivil(y, m, d) {

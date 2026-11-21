@@ -5,15 +5,43 @@ export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actio
 export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
 const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M']); // = the cases of engine.js replay()
-/** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3. */
+/** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
+ *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
 export const RULES4_FROM = '2026-12-01';
-/** YYYY-MM-DD from a date-ish key ('2026-11-30', '20261130', a Date) or null. */
-function isoDay(v) {
-  if (v == null) return null;
-  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
-  const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(String(v)); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+// ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
+function daysFromCivil(y, m, d) {
+  y -= m <= 2 ? 1 : 0;
+  const era = Math.floor(y / 400); const yoe = y - era * 400;
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
 }
-/** Legacy games (daily/weekly/challenge started before RULES4_FROM) replay with the pre-T2 rules. */
+function civilFromDays(z) {
+  z += 719468; const era = Math.floor(z / 146097); const doe = z - era * 146097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  const y = yoe + era * 400; const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  const mp = Math.floor((5 * doy + 2) / 153); const d = doy - Math.floor((153 * mp + 2) / 5) + 1; const m = mp + (mp < 10 ? 3 : -9);
+  return [y + (m <= 2 ? 1 : 0), m, d];
+}
+const p2 = (n) => String(n).padStart(2, '0');
+function isoWeekStart(y, w) {
+  const jan4 = daysFromCivil(y, 1, 4); const dow = ((jan4 + 3) % 7 + 7) % 7;
+  const [Y, M, D] = civilFromDays(jan4 - dow + (w - 1) * 7);
+  return `${Y}-${p2(M)}-${p2(D)}`;
+}
+/** YYYY-MM-DD from a date-ish key ('2026-11-30', '20261130', '2026-W49' → its Monday, a Date → its UTC day) or null. */
+export function isoDay(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10);
+  const s = String(v);
+  const w = /^(\d{4})-?W(\d{1,2})$/i.exec(s.trim());
+  if (w) { const wk = +w[2]; return wk >= 1 && wk <= 53 ? isoWeekStart(+w[1], wk) : null; }
+  const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(s); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+/**
+ * Legacy games (daily/weekly/challenge started before RULES4_FROM) replay with the pre-T2 rules. ONE Israel calendar date decides:
+ * daily_key · weekly_start (Monday of the ISO week) · challenge_day (index.ts: created_at AT TIME ZONE 'Asia/Jerusalem').
+ */
 export function rulesFor(row) {
   const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
   return day && day < RULES4_FROM ? 3 : 4;

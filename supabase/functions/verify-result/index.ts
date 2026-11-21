@@ -86,7 +86,7 @@ const ROW = (tx: any, q: any) => tx`select r.status, r.world, r.profession, r.mo
     case when r.daily_key is not null then 24 end as max_months,
     r.daily_key::text as daily_key,
     case when r.weekly_key is not null then to_char(to_date(r.weekly_key, 'IYYY-"W"IW'), 'YYYY-MM-DD') end as weekly_start,
-    (select to_char(c.created_at, 'YYYY-MM-DD') from game.challenges c where c.id = r.challenge_id) as challenge_day
+    (select to_char(c.created_at at time zone 'Asia/Jerusalem', 'YYYY-MM-DD') from game.challenges c where c.id = r.challenge_id) as challenge_day
   from game.results r where r.id = ${q.resultId}::uuid and r.player_id = ${q.id}::uuid`;
 
 async function handleVerify(req: Request, body: any) {

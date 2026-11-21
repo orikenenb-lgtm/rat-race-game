@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { collect, bundleText, sha256 } from '../tools/build-edge.mjs';
 import { loadEngine } from '../supabase/functions/verify-result/engine_loader.js';
-import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM } from '../supabase/functions/verify-result/verify_core.js';
+import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM, isoDay } from '../supabase/functions/verify-result/verify_core.js';
 import * as Local from '../js/engine.js';
 import { playOut, prng } from './lib/random-player.mjs';
 
@@ -147,6 +147,46 @@ await test('T17: F/H/M are accepted codes; rulesFor maps a legacy day to rules 3
   const acts = g.st.actions.slice(); const at = acts.findIndex((a) => a[0] === 'r');
   acts.splice(at, 0, ['M', 'pro']);
   const bad = verifyGame(E, g.row, acts); assert.equal(bad.ok, false); assert.match(bad.error, /^replay:/);
+});
+
+await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier uses (js/systems/rules.js ≡ verify_core rulesFor); honest ranked games before RULES4_FROM verify with rules 3, after with rules 4', async () => {
+  assert.equal(Local.RULES4_FROM, RULES4_FROM, 'one release day');
+  // equality of the two pure functions over every day of 2025–2027, YYYYMMDD keys, ISO weeks, junk
+  const keys = [];
+  for (let d = Date.UTC(2025, 0, 1); d <= Date.UTC(2027, 11, 31); d += 86400000) { const s = new Date(d).toISOString().slice(0, 10); keys.push(s, s.replace(/-/g, '')); }
+  for (let y = 2025; y <= 2027; y++) for (let w = 1; w <= 53; w++) keys.push(`${y}-W${String(w).padStart(2, '0')}`);
+  keys.push(null, undefined, '', 'junk', '2026-W00', '2026-W60', '2026-11-30T23:30:00Z');
+  for (const k of keys) {
+    assert.equal(Local.rulesDayOf(k), isoDay(k), 'dayOf ' + k);
+    const exp = rulesFor({ daily_key: k });
+    assert.equal(Local.rulesForDay(k), exp, 'rules ' + k);
+    if (k && /W/.test(k) && isoDay(k)) assert.equal(Local.rulesForDay(k), rulesFor({ weekly_start: isoDay(k) }), 'week ' + k);
+  }
+  // ISO weeks: index.ts weekly_start = to_date(key,'IYYY-"W"IW') = the Monday
+  assert.equal(isoDay('2026-W49'), '2026-11-30'); assert.equal(isoDay('2026-W01'), '2025-12-29'); assert.equal(isoDay('2026-W53'), '2026-12-28');
+  assert.equal(Local.rulesForDay('2026-W48'), 3); assert.equal(Local.rulesForDay('2026-W49'), 3, 'week of Mon 30.11 is a legacy week'); assert.equal(Local.rulesForDay('2026-W50'), 4);
+  assert.equal(Local.rulesForDay('2026-11-30'), 3); assert.equal(Local.rulesForDay('2026-12-01'), 4); assert.equal(Local.rulesForDay(null), 4);
+  // createGame: ranked + dateKey decides st.rules (wins over `rules`); free ignores dateKey
+  assert.equal(Local.createGame({ worldId: 'w1', mode: 'daily', dateKey: '2026-11-25', rules: 4 }).rules, 3);
+  assert.equal(Local.createGame({ worldId: 'w1', mode: 'challenge', dateKey: '2026-12-05', rules: 3 }).rules, 4);
+  assert.equal(Local.createGame({ worldId: 'w1', mode: 'weekly', dateKey: '2026-W48' }).rules, 3);
+  assert.equal(Local.createGame({ worldId: 'w1', mode: 'free', dateKey: '2026-11-25' }).rules, 4);
+  assert.equal(Local.dailyConfig('2026-11-25').rules, 3); assert.equal(Local.dailyConfig('2026-12-09').rules, 4);
+  // honest games in both eras and all three modes: created by the client from the key, verified by the server from the row
+  const eras = [['2026-11-25', '2026-W48', '2026-11-20', 3], ['2026-12-09', '2026-W50', '2026-12-03', 4]];
+  for (const [day, week, chDay, rules] of eras) for (const mode of ['daily', 'weekly', 'challenge']) {
+    const w = Local.getWorld(['w1', 'w2', 'w3'][['daily', 'weekly', 'challenge'].indexOf(mode)]);
+    const seed = 900 + rules * 10 + mode.length;
+    let cfg, profession;
+    if (mode === 'daily') { cfg = { ...Local.dailyConfig(day), worldId: w.id, charId: dailyCharId(w, 1), seed }; profession = 'idx:1'; }
+    else if (mode === 'weekly') { cfg = { worldId: w.id, charId: dailyCharId(w, 2), seed, mode, dateKey: week }; profession = 'idx:2'; }
+    else { cfg = { worldId: w.id, charId: w.characters[0].id, seed, mode, dateKey: chDay }; profession = w.characters[0].id; }
+    const st = playOut(Local, cfg, prng(seed), { v4: rules === 4 });
+    assert.equal(st.rules, rules, `${mode} ${day} created with rules ${rules}`);
+    const row = { ...rowFor(Local, st, { mode, profession, seed }), daily_key: mode === 'daily' ? day : null, weekly_start: mode === 'weekly' ? isoDay(week) : null, challenge_day: mode === 'challenge' ? chDay : null };
+    const out = verifyGame(E, row, st.actions);
+    assert.ok(out.ok, `${mode} ${day}: ${out.error}`); assert.equal(out.cfg.rules, rules);
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
