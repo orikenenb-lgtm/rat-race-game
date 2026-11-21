@@ -111,13 +111,15 @@ export const BUCKET_REP = Object.freeze({ none: 0, small: REP_MIN + REP_SPAN * 0
 
 /**
  * Level-1 range around the TRUE value (its position inside the range comes from the sealed jitter draw, so the range
- * always contains the truth but does not centre on it). Widths are public config.
+ * always contains the truth but does not centre on it). Widths come from PUBLIC numbers only (review M2): the caller passes
+ * width = max(₪50, 30% of the CLAIMED monthly cashflow) and valueWidth = 6% of the CLAIMED value; the fallbacks below are
+ * for callers without a claim.
  * → {base:[lo,hi], value:[lo,hi], repair:'none'|'small'|'big'}
  */
 export function rangeOf(dd, truth) {
   const r10 = (x) => Math.round(x / 10) * 10; const j = dd.jitter;
-  const w = truth.width ?? Math.max(50, Math.abs(truth.base) * 0.3); // width: 30% of the true monthly cashflow (min ₪50)
-  const wv = Math.abs(truth.value) * 0.06;
+  const w = truth.width ?? Math.max(50, Math.abs(truth.claimedBase ?? truth.base) * 0.3);
+  const wv = truth.valueWidth ?? Math.abs(truth.claimedValue ?? truth.value) * 0.06;
   const down = Math.max(1, truth.down || 1);
   return {
     base: [r10(truth.base - w * j), r10(truth.base + w * (1 - j))],

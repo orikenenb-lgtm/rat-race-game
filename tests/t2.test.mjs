@@ -492,5 +492,17 @@ test('T15 focus: cost on activation, one per month, agenda pops at payday (disab
   const s9 = W1(); s9.cash = 0; s9.loans = E.loanCap(s9); const d9 = E.setFocus(s9, 'scout', 0).decision; assert.equal(d9.score, 60); assert.equal(d9.type, 'focus');
 });
 
+test('review M2: the level-1 inspection range widths come from the CLAIMED numbers — scrambling the sealed truth (f, vf, jitter, repair) never changes them', () => {
+  for (const w of E.WORLDS) for (const card of [{ k: Object.keys(w.kinds)[0], n: 'x', d: 'x', cost: 90000, down: 9000, cf: 800 }, { k: Object.keys(w.kinds)[0], n: 'y', d: 'y', cost: 300000, down: 30000, cf: -300, value: 320000 }]) {
+    const widths = new Set(); const vws = new Set();
+    for (const [f, vf, j] of [[0.5, 0.8, 0.1], [0.9, 1.1, 0.5], [1, 1, 0.9], [0.3, 0.7, 0.33]]) {
+      const st = dealState(w.id, card, { dd: { f, vf, jitter: j, level: 1, repair: 2000 }, cash: 200000 });
+      const ev = E.currentEvent(st); const r = ev.data.dd.range; assert.ok(r, 'level-1 range');
+      widths.add(Math.round((r.cf[1] - r.cf[0]) / 20)); vws.add(Math.round((r.value[1] - r.value[0]) / 10));
+    }
+    assert.ok(widths.size <= 2 && vws.size <= 2, `${w.id} widths ${[...widths]} / ${[...vws]} (only rounding may differ)`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

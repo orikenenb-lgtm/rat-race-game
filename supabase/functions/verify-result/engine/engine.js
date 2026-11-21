@@ -1631,8 +1631,9 @@ function ddBasis(st, p) {
     return B;
   }
   const t = ddTruthOf(c, dd);
-  const cfTrue = assetCf(st, { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd, ...(noi ? { noi: t.base } : { cf: t.base }) });
-  B.range = DD.rangeOf(dd, { base: t.base, value: t.value, repair: t.repair, down, width: Math.max(50, Math.abs(cfTrue) * 0.3) });
+  const cfClaimed = assetCf(st, { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd, ...(noi ? { noi: base0 } : { cf: base0 }) });
+  // review M2: both widths from the seller's CLAIMED numbers (public), never from the truth; only the position (jitter) is sealed
+  B.range = DD.rangeOf(dd, { base: t.base, value: t.value, repair: t.repair, down, width: Math.max(50, Math.abs(cfClaimed) * 0.3), valueWidth: Math.abs(value0) * 0.06 });
   if (dd.level === 1) { B.lo = B.range.base[0]; B.hi = B.range.base[1]; B.base = r10((B.lo + B.hi) / 2); B.value = Math.round((B.range.value[0] + B.range.value[1]) / 2); B.rep = Math.round(DD.BUCKET_REP[B.range.repair] * down); }
   else { B.base = t.base; B.value = t.value; B.rep = t.repair; }
   return B;
