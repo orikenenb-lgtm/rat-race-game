@@ -729,3 +729,68 @@ The T7 implementer owns exactly the files of §0. T7 **reviews** (but does not e
 T7 changes no app code. Rollback = revert the T7 commits. The only behaviour change outside new files is that the migrated lobby suites now default to offline. Reverting them restores the old live-by-default behaviour, which the board forbids in this wave. So the guard part (step 1 and the guard lines of step 2) should be kept even if the rest is reverted.
 
 **Definition of done:** FB-1…FB-7, PF-A…PF-E, AX-1…AX-5, BL-1, BL-3, RG-1…RG-3, RG-5, OW-1, OW-2 pass (each P1 either passes or is listed as cut with a reason). The final report contains the Tier 2 `summary.md`, `compare.md`, the a11y result (ratchet and strict), the balance table, the CR status table, and the manual-session records with their limits paragraph. Budgets and strict gates that fail because of open CRs are reported as FAIL with the CR, never as done.
+
+---
+
+## Implementation notes — part A (2026-11-21, T7 implementer)
+
+Scope delivered in part A: §2 (fake backend, guard, sidecar, contract, lint, suite migration), the probe/gate harness files of §3/§4
+(`perf_probe.py`, `perf_budgets.json`, `a11y_e2e.py`, vendored axe), the §5 `balance_gates.mjs` skeleton and §6 `run_all.sh`.
+No app file was edited. CR-05 is P0 in the rendering lane (director); CR-22/23 wait for the owner and were not touched.
+
+**Production incident (must be read first).** While writing the FB-2 negative test, one unintercepted `fetch` of
+`https://xvqaxphyfqdzkddmoosu.supabase.co/rest/v1/` (GET, no apikey, no body) was answered **401 by production**: Chrome's
+`--host-resolver-rules` do not apply when the request goes through the sandbox's HTTPS proxy (the proxy resolves the name).
+Fix: `chrome_args('offline', …)` now always adds `--no-proxy-server`; the negative test probes a non-existent, non-production ref
+(`t7-dns-probe-nonexistent.supabase.co`) and asserts both flags first. Every other request in every T7 run was intercepted by the guard.
+Consequence for other lanes: a resolver rule alone is NOT a guard behind a proxy; route interception (or `--no-proxy-server`) is.
+
+**Deviations from the spec text (and why).**
+- `install()` returns the sink (`fb`, or a `GuardOnly` when `fb=None`) so `assert_clean` works for guard-only suites. Added helpers:
+  `install_mode(ctx, fb, mode)`, `base_url()`, `clock_at(iso)` (ticking clock that starts at a given date), `Raw(status, body)` for overrides,
+  `fb.requests` (unredacted call list for test-side inspection), `fb.meta` (stored by `dump`).
+- The "unrouted" check (§2.3 item 5) uses `requestfinished` + `response.server_addr()`: a supabase response that came from a real
+  server (not `route.fulfill`) is recorded as `UNROUTED`. This keeps `game_e2e.py`'s own page route legal.
+- `rr_log_event` data ≥ 2 048 chars answers `bad_data` [ASSUMED code — the contract marks it DIFF-ASSUMED on staging].
+- Rules era: the v4 client always plays rules 4, while `verify_core.rulesFor` replays games started before RULES4_FROM (2026-12-01)
+  with rules 3. The fake passes the same date fields as `index.ts` ROW (`daily_key`, `weekly_start` = Monday of the ISO week,
+  `challenge_day` = challenge created date). `lobby_real.py` therefore runs the fake at `clock_at('2026-12-09T09:00:00Z')`;
+  `fakebackend_test.py` replays an honest daily in both eras (rules 3 on 2026-11-25, rules 4 on 2026-12-09). See CR-29.
+- Stub-game suites share the real wall clock with the browser instead of a fixed `now` (verify=accept has no era) + `set_daily('w1', 0)`.
+- `perf_probe.py` is on `guard_lint`'s allowlist: §3.1 requires no interception; it runs with `--no-proxy-server` + `MAP * ~NOTFOUND` and
+  fails the run on any response from a non-local host.
+- `lobby_shots.py` stubs fonts by default (`--real-fonts` opts into the network); `lobby_real.py` uses a 120 s default timeout.
+- `serve_copies.sh` / `make_*copy.sh` accept `SRC`, `COPY_DIR` (default `/tmp`) and `PORT_BASE` (default 8770); defaults unchanged.
+  T7 used `SRC=/tmp/t7/wt COPY_DIR=/tmp/t7 PORT_BASE=8790`.
+- `run_all.sh`: MISSING suites are listed at the top and do not change the exit code; `--live` is refused (live runs are by hand).
+- Not in part A (they print NOT IMPLEMENTED / exit 2, never PASS): perf `--long` (PF-19), `--trace` (§3.3, PF-B), `--heap` (§3.5, PF-C),
+  PF-15 hidden-tab draws; a11y screens 10/11/12/14 (engine driver / #gm opener), K-6, K-10, AX-S, AX-B, AX-L, AX-Z1; `journey_e2e.py`.
+  `balance_gates.mjs` reads today's columnar T2 output but every file is STALE (no `engineSha`, CR-21); sims were not run (engine changing).
+
+**Results** (served app code = commit 513b269, worktree ee27464/e25df0b; base = 706c0ff via /tmp/basewt 9e871e3; load 3–11 on 2 cores):
+
+| suite (offline, backend=fake) | result | live baseline (yesterday) |
+|---|---|---|
+| lobby_e2e (verify=accept) | 46/46 (45 + guard) | 45 |
+| lobby_v21 (accept) | 20/20 | 19 |
+| lobby_v3 (replay, unused) | 30/30 | 29 |
+| lobby_v3b (scripted; live_xss offline) | 59/59 | 58 |
+| lobby_real (replay) | 18/18 (13 + honest/forged ranked + board ✓ + guard); first attempt 12/13 = 30 s timeout under load 10.6 | 13 |
+| lobby_smoke | 4/4 | — |
+| lobby_shots (fake state from lobby_e2e) | 4 configs rendered, guard clean | — |
+| game_e2e w1 8 (guard only) | ERRORS 0 | — |
+| fakebackend_test / backend_contract / tier 0 | 20/20 · 100 pass 0 fail · tier 0 all PASS at be2857d | — |
+
+Before/after (one ABAB round, desk + leak, all runs noisy → timing gates cannot PASS): see `/tmp/t7perf/ab1/compare-desk.md` (in the T7 report).
+Key counts, base → branch: bytes before roll 8.58 → 8.78 MB; GLB violations 12 → 12; nodes range over 5 re-entries 2 699 → 2 713;
+GL buffers per repeat visit +202 → +202; draws while the lobby covers the game 0 → 0; page errors 0 → 0.
+a11y (axe 4.14.1, same harness): critical stays 1 per screen (#hGoal, CR-01); serious nodes drop on home/world/daily/group/HUD/sheet;
+new findings outside the QA allowlist on both copies: label-in-name on `.say`, `#endShare`, `button[data-q=±1000]` (CR-30) and
+`aria-dialog-name` on the lesson sheet `.lb-sheet-card` (CR-31). K-1/K-2/K-3/K-8 fail on both; AX-T primary 44 px fails on base, passes on branch.
+
+**New change requests** (§7.2 format: evidence · lane · verified by):
+- CR-29 (P0 before release): v4 client plays rules 4 but verify replays pre-2026-12-01 ranked games with rules 3 → honest games played
+  with the new client before that date fail (`replay_mismatch … unknown option inspect:2`). Evidence: fakebackend_test era test · engine/backend · `fakebackend_test.py replay_roundtrip`.
+- CR-30 (P1): label-content-name-mismatch on `.say`, `#endShare`, trade `button[data-q]` · in-game UI + lobby · axe gate.
+- CR-31 (P1): lesson sheet `.lb-sheet-card` dialog has no accessible name · lobby / T4 · axe gate.
+- CR-32 (P2, report): `#homeBtn` → lobby visible took 10–11.5 s on both copies after a dice roll (PF-17, noisy) · shell · perf PF-17.
