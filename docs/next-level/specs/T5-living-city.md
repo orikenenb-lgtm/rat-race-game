@@ -1085,3 +1085,92 @@ Rendered audit (12-ish screens: lobby, library, char select, HUD, first deal car
 - **CR-R1 (rendering, `js/render/board2d.js`).** `const reduced = () => …matchMedia(…)` → `import { reducedMotion as reduced } from '../motion.js'`. `COLORS` → `LABEL_COLORS` from `vocab.js` (§2.1 values; the current `#178a55/#d23b30/#2f6fdb/#a8740a` fail on the pill).
 - **CR-W1 (data, optional).** The tile colours in `js/worlds/*.js` can stay: the tag darkening is done in CSS so the 3D/2D tile faces keep today's bright colours.
 - **Fonts.** Rubik + Secular One are already loaded by `index.html`; nothing new was requested (A-35 unchanged). P2 self-hosting with `unicode-range` would also cover ₪ inside untouched engine strings.
+
+## Implementation notes — part B (rendering lane: scene.js, js/render/*, 2D board styles)
+
+Files: `js/scene.js`, `js/render/{board2d,null}.js`, new `js/render/{vocab,quality,flatten,kit3d,assetinfo}.js`, `css/stability.css` (2D board section only), `tests/render_api.test.mjs` (API list 36 → 48), new `tests/render_vocab.test.mjs`, `tests/t5_render_e2e.py`, `tests/t5_freeze_trace.py`. No GLB was added. `js/game.js`, `ui.js`, `lobby.js`, `index.html`, `game.css` were not touched: the hooks are change requests below.
+
+### Boot freeze — root cause (CR-19, measured, `tests/t5_freeze_trace.py`)
+The long tasks after the lobby appears (base 706c0ff: 9.9 s + 5.4 s, or 7.8 s + 7.4 s, longest 13–21 s in the probe) are **not JS**. The CDP trace shows the main thread blocked in `Commit > GLES2::ReadPixels > CommandBufferHelper::Finish` (6.3 s / 7.6 s / 4.6 s per task) plus `onAnimationFrame > GetProgramiv > Finish` (2.3–2.5 s over 12 programs: three's per-program shader-log check). Headless swiftshader composites in software, so every painted WebGL canvas is read back at each commit, and the read waits until the GPU process has finished **all** queued work (program links, PMREM, the first frame's raster with a PCF shadow map). The GPU process spent 14–15 s in `CommandBuffer::Flush` during the lobby. Verdict by the T7 §3.3 rule: neither JS (≤ 3 % of the longest task) nor the wrapped GL compile calls alone; it is **GPU-process work made synchronous by the canvas readback** — swiftshader-specific in its size (on a real GPU with GPU compositing there is no readback; links still cost tens of ms per program).
+Fixes (all in `scene.js`): the scene starts paused and draws **no frame and no painted canvas** while paused (lobby up) or while T1's `#loading` overlay covers the board (`visibility:hidden` on the canvas); programs are queued behind the lobby (`compileAsync` with `KHR_parallel_shader_compile`, else `compile()` — swiftshader has no such extension); `renderer.debug.checkShaderErrors` is off unless `?shaderdebug`; fewer programs and draw states (flattened models share one patched material; low tier: no shadows, no MSAA). After: lobby longest task 1.08 s at load 10.8 (trace) / 1.41 s median at load 6–7 (probe); total long tasks behind the lobby 3.8 s vs 15.7–17.6 s. The first frame's GPU cost now lands at game start (click → roll 6.5 s vs 5.1 s base under higher load), not in the lobby.
+
+### What landed (P0 then P1 of this lane)
+- **CR-05 / R-1**: `preloadLife()` requests nothing; a life model is fetched the first time the city spawns it (procedural stand-in, swapped in place when the GLB lands), the rest are prefetched one at a time at idle after the first dice throw. `preloadDice()` requests nothing; the first hold/throw starts the dice GLBs (that throw uses the procedural die/hand, later throws the GLBs; the procedural ones are then disposed). History GLBs are part of the `h` world's model set (`worldModelNames`), or fetched by `buildWorld` for `h` and swapped in (decor rebuilt, city kept). GLBs before the first roll: 17 → 5 (w1 set + pawn); bytes 8.58 → 5.31 MB.
+- **Tiers** (`quality.js`, §8.1 table): software GL → low (DPR 0.6, shadows off, no MSAA, decor 40 %, no decor updaters, no confetti, 2 labels, no sepia, blob decal under items); `?hq` → high; saved `rr2-settings.quality` wins; `setQuality()` at run time (DPR/shadows/casters now, decor by rebuilding the board with the city kept); governor (P1) steps down once per 30 s, ≤ 2 per session, never up, disabled on software GL; `window.__rrPerfInject` under `?perf=1`.
+- **Draw calls**: tile frames 1 InstancedMesh + faces 1 per tile type; GLBs flattened at load (`flatten.js`): colour, roughness/metalness and emissive (with a "lit window" flag) are vertex attributes read by ONE patched `MeshStandardMaterial` (`onBeforeCompile`, `customProgramCacheKey`) shared by every flattened model, so each opaque model is 1 call (spec said bucket by metal/roughness/emissive; per-vertex values keep the exact colours with fewer calls). Kept unmerged: textured, `PawnColor`, `water`. `?flat=0` disables. Float labels use a pool (size = tier cap). Stage-1 "lights on" = one uniform on a per-item material copy.
+- **Pause hidden** (`visibilitychange` stops the loop), **no idle re-render** (render on demand only), **dispose on world change** (other `w1–w4` dirs' models, InstancedMesh instance buffers, stand-in geometry, fx).
+- **Living city** (`kit3d.js`): every item stands on a plinth (light shade of the board centre) with a world-rim (§3 colours, emissive in w2/w4); pips = gold discs vs hollow rings; stage kit (scaffold + cone @0 ×0.8, sign @1, annex copy @2 + queue of 3 while busy, flag + glow ring @3 ×1.12 + crowd 5) and upgrade band/dome; sign/activity badges from one runtime icon atlas (no text). All repeated parts are 10 InstancedMeshes for the whole city + 1 sprite per sign/badge. `setLevel/pulse/highlight/levelOf`; trouble (stage down) = alert badge 1.5 s; ≤ 1 level animation per item per 2.5 s. Graceful degradation: a level without `n` (no T3 stage yet) → plinth only (A-16). `?fx=levels[:N]` fixture in 3D and 2D (`vocab.fixtureCity`).
+- **Tap-to-inspect**: layer-1 proxies (0 draw calls); tap = 1 pointer, < 8 px, < 350 ms; within 22.5 px of a projected centre the nearest centre wins, else the proxy raycast; hover highlight on fine pointers. Emits `onPick(cb)` callbacks and bus `'city:pick' {key, x, y, source:'3d'|'2d'}`. Data for the modal: `js/render/assetinfo.js` `assetInfo(key, E.metrics(S), {level})` (reads metrics only; rows with the T5-I2/I3 labels).
+- **Reduced motion in 3D** (`setMotion`): dice appear on their faces (150 ms, no hand), pawn teleports (80 + 120 ms) with a 300 ms glow on each passed tile, no shake/confetti/sparkle/dust/hearts (golden = static star 800 ms), spawn = scale 0.9→1 in 120 ms, labels without rise, camera switches snap, `celebrate`/`introWorld` resolve at once, damping off, idle motion frozen.
+- **Turn budget + skip**: throw 180 + 220 + 800 = 1200 ms (bounces at 50 / 72 %), hop 160 + 90; `perfStats().lastTurnMs` = sum of requested awaited durations; `skip()` finishes running tweens and, for 400 ms, the awaited dice/hop tweens that start right after.
+- **2D board**: cards are `<button>`s (`data-key/level/kind`, T5-C2 `aria-label`, pips, 🚧/archetype/★ corner, "+" annex, activity/⚠ badge, dashed / solid / double-gold borders), Enter/click → the same pick event; `LABEL_COLORS` and `cityEmoji` from `vocab.js` (CR-R1 done); world motifs (dots / neon grid / waves / stars / newsprint) on the centre; root role changed from `img` to `group` (buttons inside an `img` are hidden from AT); reduced motion via `setMotion()` override or `motion.js`.
+- `perfStats()` and `?perf=1` overlay + `perfRun()` (10 s orbit, 24-item mixed city, one level-up, one purchase). `perfBreakdown()` (debug, outside SCENE_API).
+
+### Deviations / not done in this lane
+- Kit parts appear with the item pulse (450 ms) — not the staggered 3 × 120 ms pop. People/crowd are off at low.
+- A-28 texMB at low is 16.7 (budget 10, P1): PMREM env (~6 MB as counted) + 1024² centre texture. High = 32.7 (≤ 40).
+- A-36 (ΔE between worlds) and A-45 (ΔE flatten vs `?flat=0`) were checked by eye on the screenshots, not with the automated ΔE gate.
+- `?fx=levels` is not suppressed in ranked games (the scene does not know the mode) — test-only URL param.
+- Life-model stand-ins: wedding / side_hustle / hospital have no procedural fallback, so they show the accent box until their GLB lands (first spawn only).
+- On software GL the first frame of a game (shader JIT + raster) still blocks the main thread for several seconds right after the loading overlay hides; it is no longer in the lobby.
+
+### Change requests (shell lane `js/game.js`, in-game UI `js/ui.js`, lobby)
+- **CR-B1 (G-2, game.js) syncLevels.** After `scene.syncCity(E.cityModels(S), { silent: true });` in `startInner` add `syncLevels(false);`, and at the end of `applyOut()` (after the effects loop) add `syncLevels(true);`:
+  ```js
+  const prevLevels = new Map();
+  function levelOf(entry, m) {
+    const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
+    const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
+    if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
+    if (W.upgrade && W.upgrade.kinds && W.upgrade.kinds[a.kind]) return { kind: 'upgrade', n: a.upgrades || 0, of: W.upgrade.max };
+    return null;
+  }
+  function syncLevels(animate) {
+    const m = E.metrics(S);
+    for (const e of E.cityModels(S)) {
+      const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
+      if (!changed) continue;
+      scene.setLevel?.(e.key, L, { animate: animate && prev !== undefined });
+      if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L }); sfx('unlock'); }
+      if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L });
+      prevLevels.set(e.key, L);
+    }
+  }
+  ```
+  plus in the effects `switch` of `applyOut`: `case 'bizPulse': scene.pulse?.(e.at, e.kind); break;`, and `prevLevels.clear()` at the top of `startInner`. (`case 'upgrade'` may keep `bump`; `setLevel` replaces it visually.)
+- **CR-B2 (G-1, game.js) tap-to-inspect.** `import { assetInfo } from './render/assetinfo.js';` and at the end of `initRenderer()` (after `scene = r.scene`): `scene.onPick?.(onAssetPick);` with
+  ```js
+  function onAssetPick(key) {
+    const coach = document.querySelector('#coach:not([hidden])');
+    if (busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || coach || !S) { scene.highlight?.(key); setTimeout(() => scene.highlight?.(null), 600); return; }
+    const info = assetInfo(key, E.metrics(S), { level: prevLevels.get(key) });
+    if (info) ui.assetInfo?.(key, info, { world: W, opsOpen: !!E.metrics(S).focus?.opsOpen });
+  }
+  ```
+  (UI lane: `ui.assetInfo(key, info, ctx)` renders `info.title`, `info.kindLabel`, `info.rows` (`money` → `fmtM`, `signed` → `sgn`, `energy` → `−n 🔋`), `info.levelText` + pips + `info.levelHint`, `info.activity`, actions לדוח הכספי (scroll to `[data-asset="${info.sheetRow}"]`) / סגירה.)
+- **CR-B3 (G-6, game.js) skip.** In `turnBody`, set `rolling = true` before `await scene.throwDice(` and `rolling = false` after the hop loop; in `initShell`: `for (const el of [$('#c'), $('#board2d')]) el && el.addEventListener('pointerdown', () => { if (busy && rolling) scene.skip?.(); });` and Space/Enter on `document` with the same condition.
+- **CR-B4 (G-4, game.js) quality.** `import { qualityPref, resolveTier } from './render/quality.js';` and once in `initShell`: `bus.on('quality:change', ({ tier, auto }) => { scene.setQuality?.(tier); if (auto && !qToast) { qToast = true; ui.toast('הורדנו את איכות הגרפיקה כדי שהמשחק ירוץ חלק. אפשר לשנות בהגדרות.'); } });` (the scene resolves its own tier at init; the governor already applied it before emitting). Lobby settings (L1): radios call `setQualityPref(v)` from `js/render/quality.js`; status line `עכשיו: ${TIER_LABEL[scene tier]}` (`(await import('./scene.js')).getQuality?.()`).
+- **CR-B5 (G-7/G-8, game.js).** In `startInner` after `scene.resetCamera();`: `scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK);` (`import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'`), and for the first game in a world `if (!resumed && !progressPlayed(W.id)) scene.introWorld?.();`.
+- **CR-B6 (R-2, game.js) world-1 models at boot.** `initRenderer()` still preloads and builds world 1 behind the lobby (`scene.preloadWorld(w1, …)`, `buildWorld(w1)`). Starting another world therefore requests w1's 4 GLBs first (T7 R-2 / PF-7 for non-w1 starts). Option: preload only the pawn at boot and build the world in `startInner` (the models stage already covers it).
+- **CR-B7 (G-5, audio).** Unchanged from §7.3 (`audio.suspend()/resume()` on `visibilitychange`); the renderer already stops its loop.
+
+### Measured (swiftshader, 2 shared cores; base = 706c0ff copy on :8805, branch copy on :8802; loads at run start in brackets)
+| Metric | Base | Branch |
+|---|---|---|
+| Bytes before first roll (PF-5) | 8.58 MB | 5.31 MB |
+| GLBs before first roll / R-1 violations (PF-7) | 17 / 12 | 5 / 0 |
+| Longest task, 10 s lobby idle (PF-2) | 21.4 s | 1.41 s (A/B median) · 0.28 s (re-run [7.4]) |
+| Click world card at lobby + 2 s → world view (PF-2b) | 12.2 s | 1.48 s |
+| Nav → first roll (PF-3) | 42.5 s | 15.4 s |
+| Character click → roll (PF-4) | 5.1 s | 6.5 s |
+| Nav → lobby usable (PF-1) | 625 ms [2.9–7.1] | 802 ms [5.2–7.2] |
+| Draw calls, 24-item mixed city, overview, w1 (low / high) | 304 (§1.1, hq) | 69–70 / 45–70 |
+| Triangles, same (low / high) | 112k (no kits) | 121–126k / 69–129k |
+| texMB (low / high) | — | 16.7 / 32.7 |
+| Frames over 5 s after 3 s quiet (PF-16) | 2 | 0 |
+| GL draws, lobby over paused game 3 s (PF-14) | 0 | 0 |
+| GL buffers / VAOs / textures / programs at repeat visits of the same world vs first (PF-13) | +202 / +63 / 0 / 0 | +12 / +2 / +1 / 0 before the dice-disposal fix; **0 / 0 / 0 / 0** after (re-run [7.4]) |
+| Heap growth over 5 re-entries (PF-12) | +1.29 MB | +0.83 MB / +0.94 MB (re-run) |
+| All DOM nodes range over 5 re-entries (PF-10) | 2 711 | 3 394 (branch HEAD also carries T4's lobby changes; no scene/render retainer was identified — CR-04 diagnosis is T7's) |
+
+Reports: `/tmp/t5b/perf/compare-desk.md` (A/B, 2 runs each, ABAB, loads 2.9–7.2 — every timing is INCONCLUSIVE(noisy) by T7's rule, counts are exact), `/tmp/t5b/perf/branch-leak2.json`, traces `/tmp/t5b/trace/freeze-*.json` (+ `.json.gz`). Tests: `node tests/render_vocab.test.mjs` 282/0, `node tests/render_api.test.mjs` 226/0, `python3 tests/t5_render_e2e.py` (groups boot, city, pick, hidden, turn, motion, worlds, phone, twod, shots) all pass, `tests/stability_e2e.py` 125/0, `tests/game_e2e.py w1,h:gfc` desktop and `--phone` 0 errors. Screenshots: `/tmp/t5b/shots/` (w1–w4 + h × desktop/phone with the fixture city, 2D fixture, reduced motion).
