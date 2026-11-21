@@ -18,6 +18,7 @@ export default {
   // bank loan: 3% a month, the bank lends up to cap × monthly income; forced loans are rounded to autoUnit
   loan: { unit: 5000, autoUnit: 1000, pct: 3, cap: 1.5, bankrupt: 10 },
   creditPct: 5,
+  sideReportFee: 120, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'passive' },
   maxMonths: 52,
   // ★★ ≈ median, ★★★ = by T3 AND happiness ≥ 60 AND a 3-month emergency fund ≈ top ~12% of smart games (tools/balance-report.md)

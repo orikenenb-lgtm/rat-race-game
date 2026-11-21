@@ -12,6 +12,16 @@ import { checkAchievements, achievementById } from './achievements.js';
 import * as BIZ from './finance/business.js';
 import { TAX, slip, grossFromNet, marginalRate, PLANS, PLAN_IDS, LIFE_CFG, LIFE_EVENTS, LESSONS as LIFE_LESSONS, creditBand } from './life.js';
 import { registerRealData, loadRealData, scenarioList as histScenarios, scenarioById, seriesAt, addYm, ymText, normYm, hasRealData, inflate } from './history.js';
+import * as MN from './systems/mentor.js';
+import * as FC from './systems/focus.js';
+import * as DD from './systems/dd.js';
+import * as CY from './systems/cycle.js';
+export { MN, FC, DD, CY };
+export const cyclePath = CY.cyclePath;
+
+/** T2 rules gate: 3 = exact v3 behaviour (in-flight ranked games, rollback), 4 = due diligence, cycle, focus, new option sets. */
+const R4 = (st) => (st.rules || 3) >= 4;
+const RANKED_MODES = ['daily', 'weekly', 'challenge'];
 
 /** The lessons library: life lessons + the business module's lessons (ids biz_…). */
 export const LESSONS = LIFE_LESSONS.concat(BIZ.BIZ_LESSONS);
@@ -19,7 +29,7 @@ const LESSON_BY_ID = Object.fromEntries(LESSONS.map((l) => [l.id, l]));
 export function lessonsList() { return LESSONS.map((l) => ({ ...l })); }
 export { inflate, registerRealData, loadRealData };
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export { WORLDS, getWorld, PLANS, slip as payslipFor };
 /** Scenarios for מכונת הזמן ([] until js/data/real.js is available). */
 export function scenarioList() { return histScenarios(); }
@@ -99,6 +109,43 @@ export function createGame(o = {}) {
   if (w.crypto) launchCoin(st, next(st.rng, 'deal'), true);
   initLife(st, ch);
   if (history) initHistory(st, scen);
+  // T2: rules gate, mentor level, dev-only ablation switches (sim), the economic cycle (2 'cycle' draws, rules 4 only)
+  st.rules = o.rules === 3 ? 3 : 4;
+  st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, mentor: o.mentor, worldId: st.worldId });
+  if (o._dev && (o._dev.noCycle || o._dev.noDD)) {
+    if (RANKED_MODES.includes(st.mode)) throw new Error('dev flags are not allowed in ranked modes');
+    st._dev = { noCycle: !!o._dev.noCycle, noDD: !!o._dev.noDD };
+  }
+  st.econ = null;
+  if (R4(st)) { const r1 = next(st.rng, 'cycle'), r2 = next(st.rng, 'cycle'); if (!history && !(st._dev && st._dev.noCycle)) st.econ = CY.initEcon(r1, r2, st.worldId); }
+  v4Defaults(st);
+  return st;
+}
+
+/**
+ * Every field a v4 save must have, filled only where missing (idempotent; run by createGame, migrateV3 and every load).
+ * Extend THIS function when a later task (T3 …) adds state, so one place keeps old saves loadable.
+ */
+function v4Defaults(st) {
+  const fresh = makeStreams(st.seed);
+  for (const k of STREAMS) if (st.rng[k] == null) st.rng[k] = fresh[k];
+  if (st.rules == null) st.rules = 4;
+  if (!MN.LEVELS.includes(st.mentor)) st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, worldId: st.worldId });
+  if (st.econ === undefined) st.econ = null;
+  const L = st.life;
+  if (L) {
+    if (!L.focus) L.focus = { id: 'none', m: st.month, opsOpen: false, opsUsed: false };
+    if (!Array.isArray(L.agenda)) L.agenda = [null, null];
+    if (!L.focusMonths) L.focusMonths = Object.fromEntries(FC.FOCUS_IDS.map((id) => [id, 0]));
+    if (L.debtDeal === undefined) L.debtDeal = null;
+    if (L.frugalCuts == null) L.frugalCuts = 0;
+  }
+  const D = st.dq || (st.dq = { decisions: [], sum: 0, n: 0, mastery: {}, luck: {} });
+  if (D.hints == null) D.hints = 0;
+  if (!Array.isArray(D.levelChanges)) D.levelChanges = [];
+  if (!D.luck) D.luck = {};
+  for (const k of ['index', 'angels', 'crypto', 'negotiation', 'raise', 'friend', 'dd', 'cycle']) if (D.luck[k] == null) D.luck[k] = 0;
+  for (const k of ['inspections', 'inspectSpent', 'ddRepairs', 'ddAvoided', 'ddPassed']) if (st.stats[k] == null) st.stats[k] = 0;
   return st;
 }
 
@@ -214,9 +261,30 @@ export function deserialize(json) {
   const st = typeof json === 'string' ? JSON.parse(json) : clone(json);
   if (!st || typeof st !== 'object') throw new Error('save_incompatible');
   if (st.v === 1) migrateV2(st);
+  if (st.v === 3) migrateV3(st);
   if (st.v !== SAVE_VERSION) throw new Error('save_incompatible');
-  getWorld(st.worldId);
+  try { getWorld(st.worldId); v4Defaults(st); } catch (e) { throw new Error('save_incompatible'); }
   return st;
+}
+/**
+ * v3 → v4 (T2): new streams (deterministic from the seed; old streams untouched), rules (in-flight ranked games keep rules 3
+ * so the verifier can replay them; free/history get rules 4), mentor level, focus/agenda, dq/stats keys, econ.
+ * A pending deal drawn under v3 stays a legacy card (no dd: no inspect options, claimed = true numbers).
+ */
+function migrateV3(st) {
+  try {
+    getWorld(st.worldId);
+    const fresh = makeStreams(st.seed);
+    for (const k of STREAMS) if (st.rng[k] == null) st.rng[k] = fresh[k];
+    const ranked = RANKED_MODES.includes(st.mode);
+    st.rules = ranked ? 3 : 4;
+    st.mentor = ranked ? 'hint' : (st.tutorial || st.worldId === 'w1' ? 'guide' : 'hint');
+    st.econ = null;
+    if (R4(st)) { const r1 = next(st.rng, 'cycle'), r2 = next(st.rng, 'cycle'); if (!st.history) { st.econ = CY.initEcon(r1, r2, st.worldId); st.econ.hist[0].m = st.month; st.econ.truth[0].m = st.month; } }
+    if (st.life) st.life.focus = { id: 'none', m: st.month, opsOpen: false, opsUsed: false };
+    v4Defaults(st);
+    st.v = 4;
+  } catch (e) { throw new Error('save_incompatible'); }
 }
 /** v2 → v3: 24-tile board → 40 tiles, new RNG streams, life/tax/index defaults. Money, assets and decks are kept. */
 function migrateV2(st) {
@@ -237,7 +305,7 @@ function migrateV2(st) {
     if (st.salaryUsd) st.life.grossUsd = Math.round(grossFromNet(net0, TAX.points + st.life.family.kids * TAX.kidPoints) / st.world.usd / 10) * 10;
     st.salary = baseNet(st);
     st.life.age = (ch.age || 30) + (st.month - 1) / 12;
-    st.v = SAVE_VERSION;
+    st.v = 3; // chains on to migrateV3
   } catch (e) { throw new Error('save_incompatible'); }
 }
 
@@ -246,11 +314,15 @@ const W = (st) => getWorld(st.worldId);
 const loanUnit = (st) => W(st).loan.unit;
 const autoUnit = (st) => W(st).loan.autoUnit || W(st).loan.unit;
 /** Monthly cost of bank loans in % of the balance. w2: base + rateMult × current interest rate. */
-export function loanPct(st) { const L = W(st).loan; return round2(Math.max(0.1, L.pct + (L.rateLinked ? st.world.rate * (L.rateMult ?? 1) : 0) + bandAdj(st))); }
+export function loanPct(st) { const L = W(st).loan; return round2(Math.max(0.1, L.pct + (L.rateLinked ? st.world.rate * (L.rateMult ?? 1) : 0) + bandAdj(st) + cycAdd(st) + focusAdj(st))); }
+/** T2 §8.5: the cycle's bank-loan add-on (pp/month; not in w2, whose rate cards drive the rate; econ.hard = impact's hard scenario). */
+function cycAdd(st) { if (!st.econ || !R4(st) || (W(st).loan.rateLinked && !st.econ.hard)) return 0; return CY.mult(st.econ, st.worldId, 'loanAdd'); }
+/** T2 §6: the debt focus lowers the bank-loan rate for 6 months. */
+function focusAdj(st) { const d = st.life && st.life.debtDeal; return d && R4(st) && st.month <= d.until ? d.adj : 0; }
 /** Credit-score rate add-on in monthly percentage points = bank.js creditSpread (annual) ÷ 12; refusal band ⇒ +0.125 (forced loans only). */
 function bandAdj(st) { const sp = BK.creditSpread(st.life ? st.life.creditScore : LIFE_CFG.creditStart); return sp === null ? 0.125 : sp * 100 / 12; }
 /** The bank lends (voluntarily) up to cap × monthly income (salary + passive) — "הבנק בודק שתוכל להחזיר". v3: × credit-score band. */
-export function loanCap(st) { const L = W(st).loan; return L.cap ? Math.max(0, Math.floor(L.cap * bandOf(st).capMult * Math.max(salaryNow(st) + Math.max(0, passiveOf(st)), 0) / 1000) * 1000) : Infinity; }
+export function loanCap(st) { const L = W(st).loan; return L.cap ? Math.max(0, Math.floor(L.cap * bandOf(st).capMult * (st.econ && R4(st) ? CY.mult(st.econ, st.worldId, 'loanCap') : 1) * Math.max(salaryNow(st) + Math.max(0, passiveOf(st)), 0) / 1000) * 1000) : Infinity; }
 const bandOf = (st) => { const sc = st.life ? st.life.creditScore : LIFE_CFG.creditStart; const b = creditBand(sc); return BK.creditSpread(sc) === null ? { ...b, capMult: 0 } : b; };
 const CAP_REASON_BASE = 'הבנק בודק שתוכל להחזיר — ההכנסה שלך לא מספיקה להלוואה כזו';
 let CAP_REASON = CAP_REASON_BASE;
@@ -334,12 +406,14 @@ function grossRent(st, a) {
   if (a.noi != null) return Math.max(0, Math.round(a.noi / 0.8));
   return Math.max(0, Math.round((a.cf || 0) + (a.debt || 0) * BK.BANK.mortgage.fixedRate / 12));
 }
-function assetCfRaw(st, a) {
+function assetCfRaw(st, a, neutral = false) {
   let cf;
+  const cm = !neutral && st.econ && R4(st) ? CY.mult(st.econ, st.worldId, isRent(st, a) ? 'cfRent' : 'cfOther') : 1; // T2 §8.5 (multiplier only)
+  const cyc = (x) => (cm === 1 ? x : x >= 0 ? x * cm : x * (2 - cm)); // a recession never makes a money-losing line better
   if (a.noi != null) {
     const r = a.fixedRate ?? st.world.rate;
-    cf = a.noi - (a.debt * r) / 1200;
-  } else cf = a.cf;
+    cf = cyc(a.noi) - (a.debt * r) / 1200;
+  } else cf = cyc(a.cf);
   if (a.sens) cf = cf * (1 + a.sens * (usdFor(st, a) / a.ref - 1));
   if (a.idle && a.idle >= st.month) cf = Math.min(cf, 0); // temporarily closed (crisis)
   return r10(cf);
@@ -512,7 +586,7 @@ export function metrics(st) {
     age: round2(L.age), ageText: ageText(L.age), energy: Math.round(L.energy), happiness: Math.round(happyNow(st)), happinessBase: Math.round(L.happiness),
     plan: L.plan, planLabel: PLANS[L.plan].label, plans: PLAN_IDS.map((id) => ({ id, label: PLANS[id].label, desc: PLANS[id].desc, enabled: planAllowed(st, id), current: id === L.plan })),
     creditScore: Math.round(L.creditScore), creditBand: band.label, creditBandId: band.id, loanPctAdj: round2(bandAdj(st)),
-    pension: Math.round(L.pension), severance: Math.round(L.severance), cpi: round2(L.cpi), inflationYear: L.inflationYear,
+    pension: Math.round(L.pension), severance: Math.round(L.severance), cpi: round2(L.cpi), inflationYear: inflKnown(st), inflationLastYear: L.infl.length ? L.infl[L.infl.length - 1] : null,
     realCash: Math.round(st.cash / L.cpi), realNetWorth: Math.round(netWorth / L.cpi),
     studyProgress: L.study.done ? 1 : round2(L.study.months / L.study.need), studyDone: L.study.done, sideLevel: L.plan === 'side' || L.side.months ? sideLevel(L) : 0, sideMonths: L.side.months,
     family: { ...L.family, text: familyText(L.family) }, freeTimeMonths: L.planMonths.rest, burnouts: L.burnouts, jobless: !!(L.jobless && L.jobless.until >= st.month),
@@ -535,8 +609,14 @@ export function metrics(st) {
     loanUnit: loanUnit(st), loanUnitCost: Math.round((loanUnit(st) * loanPct(st)) / 100),
     loanPct: loanPct(st), creditPct: W(st).creditPct, loanCap: Number.isFinite(loanCap(st)) ? loanCap(st) : null,
     loanRoom: Number.isFinite(loanCap(st)) ? Math.max(0, loanCap(st) - st.loans) : null, canBorrow: st.loans + loanUnit(st) <= loanCap(st),
+    mentor: mentorBlock(st), focus: focusBlock(st), econ: R4(st) ? CY.econPublic(st.econ, st.month) : null, rules: st.rules || 3,
   };
 }
+/**
+ * The yearly inflation a player can know (T2 §12.1 leak fix): last year's published figure, or the long-run expectation in
+ * year one — never the coming year's pre-drawn value (which stays inside the engine and drives the CPI).
+ */
+function inflKnown(st) { const L = st.life; if (L.infl.length) return L.infl[L.infl.length - 1]; if (st.history) return 0; const C = LIFE_CFG; return round2((1 - C.inflSpikeChance) * (C.inflMin + C.inflMax) / 2 + C.inflSpikeChance * (C.inflSpike[0] + C.inflSpike[1]) / 2); }
 
 /** Compounding preview for the UI (C9): invest.js projectRange — a p10/p50/p90 RANGE with the no-guarantee note. */
 const PROJ_CACHE = new Map(); // pure function of `monthly` — memoized (projectRange is the hot path of metrics())
@@ -725,7 +805,7 @@ function payday(st, out, step, landed) {
     L.pension += ps.pensionDeposit; L.pensionIn += ps.pensionDeposit; L.severance += ps.severanceDeposit;
     if (sideAct > 0) {
       const due = Math.round(sideAct * marginalRate(ps.gross || grossBase(st))); L.side.total += sideAct;
-      if (L.sideReport) { cf -= due; st.taxes.side += due; } // reported: monthly advance payments (מקדמות), no year-end penalty
+      if (L.sideReport) { cf -= due; st.taxes.side += due; if (R4(st)) cf -= sideReportFee(st); } // reported: monthly advance payments (מקדמות) + the accountant (T2), no year-end penalty
       else L.sideTaxDue += due;
     }
   }
@@ -751,6 +831,7 @@ function payday(st, out, step, landed) {
   monthlyLife(st, out, { burnout, cf });
   monthlyIndex(st, out);
   monthlyWorld(st, out);
+  if (R4(st)) { econStep(st, out); focusRollover(st, out); } // T2: 2 'cycle' draws every payday (rules 4), then the monthly focus
   ensureCash(st, out, 'payday');
   if (st.cash > 0 && L.autoInvest > 0 && st.prices.IDX > 0) {
     const amt = Math.min(L.autoInvest, st.cash); const q = Math.floor(amt / st.prices.IDX);
@@ -787,15 +868,46 @@ function payday(st, out, step, landed) {
   ach(st, out, 'payday', { cf });
 }
 
+/* ---------------------------------------------------------------- T2: economic cycle step + monthly focus rollover (inside payday) */
+/** Side-income report: the accountant's monthly fee (rules 4; shown in the report option's label). */
+function sideReportFee(st) { return W(st).sideReportFee ?? 200; }
+/** 2 cycle draws (always, every rules-4 game, history and the noCycle ablation included — values ignored there). */
+function econStep(st, out) {
+  const rT = next(st.rng, 'cycle'), rN = next(st.rng, 'cycle');
+  const e = st.econ; if (!e) return;
+  const neutralCf = st.assets.reduce((x, a) => x + (a.biz ? 0 : assetCfRaw(st, a, true)), 0);
+  const nowCf = st.assets.reduce((x, a) => x + (a.biz ? 0 : assetCfRaw(st, a)), 0);
+  addLuck(st, 'cycle', (nowCf - neutralCf) - cycAdd(st) * st.loans / 100); // last month's cycle effect on your cashflow (the index part is in luck.index)
+  const r = CY.stepEcon(e, rT, rN, st.worldId, st.month);
+  if (r.changed && (r.to === 'rec' || r.to === 'exp')) {
+    const amp = CY.cycleCfg(st.worldId).amp;
+    for (const a of managedOf(st)) a.biz = BIZ.applyShock(a.biz, r.to === 'rec' ? { id: 'cycle_rec', demand: 1 - CY.MULT.bizShock.rec * amp, months: 4 } : { id: 'cycle_exp', demand: 1 + CY.MULT.bizShock.exp * amp, months: 6 });
+  }
+  if (r.labelChanged || st.stats.paydays % 3 === 0) out.news.push({ kind: 'econ', text: CY.headline(e.label, st.month), label: e.label, signal: e.signal });
+  if (r.labelChanged && (e.label === 'מיתון' || e.label === 'צמיחה')) lesson(st, out, 'business_cycle');
+}
+/** The month's focus ends at payday: `none` gives +3 🔋; the agenda pops and its first entry is activated (paid) if possible. */
+function focusRollover(st, out) {
+  const L = st.life; const C = FC.focusCfg(st.worldId);
+  if (L.focus.id === 'none') { L.energy = clamp(L.energy + C.noneEnergy, 0, 100); L.focusMonths.none++; }
+  const next1 = L.agenda[0] || null; L.agenda = [L.agenda[1] || null, null];
+  L.focus = { id: 'none', m: st.month, opsOpen: false, opsUsed: false };
+  if (!next1 || next1 === 'none') return;
+  const why = focusDisabled(st, next1, { agenda: true });
+  if (why) { out.news.push({ kind: 'focus', id: next1, text: `המוקד שתכננת (${FC.FOCUS[next1].label}) לא יצא לפועל: ${why}` }); return; }
+  activateFocus(st, next1, out, { fromAgenda: true });
+  out.news.push({ kind: 'focus', id: next1, text: `המוקד לחודש הזה: ${FC.FOCUS[next1].label}` });
+}
+
 /* ---------------------------------------------------------------- v3 monthly life update (inside payday, after cash) */
 function burnoutChance(energy) { const C = LIFE_CFG; return energy >= C.burnoutBelow ? 0 : clamp(C.burnoutBase + (C.burnoutBelow - energy) * C.burnoutSlope, 0, 0.95); }
 function creditScore(st, d) { const L = st.life; L.creditScore = clamp(Math.round(L.creditScore + d), 300, 850); }
 function happyNow(st) { const L = st.life; return clamp(L.happiness + L.glow.reduce((s, g) => s + g.amt, 0), 0, 100); }
 function addGlow(st, amt) { if (amt > 0) st.life.glow.push({ amt: round2(amt) }); }
-function setpoint(L) { return LIFE_CFG.setpoint + (L.family.partner === 'married' ? 5 : L.family.partner === 'together' ? 2 : 0) + Math.min(L.family.kids, 2) * 3 + (L.study.done ? 2 : 0); }
+function setpoint(L) { return LIFE_CFG.setpoint + (L.family.partner === 'married' ? 5 : L.family.partner === 'together' ? 2 : 0) + Math.min(L.family.kids, 2) * 3 + (L.study.done ? 2 : 0) - Math.min(4, L.frugalCuts || 0); }
 function planAllowed(st, id) { return id === 'study' ? !st.life.study.done : true; }
 function raiseEligible(st) { const L = st.life; return !L.jobless && L.energy >= LIFE_CFG.raiseMin && st.month - L.lastRaise >= LIFE_CFG.raiseEvery; }
-function raiseChance(st) { const L = st.life; return clamp(0.3 + (L.energy - LIFE_CFG.raiseMin) / 70 + (L.study.done ? 0.2 : 0) + (st.month - L.lastRaise >= 20 ? 0.1 : 0), 0.1, 0.85); }
+function raiseChance(st) { const L = st.life; const c = clamp(0.3 + (L.energy - LIFE_CFG.raiseMin) / 70 + (L.study.done ? 0.2 : 0) + (st.month - L.lastRaise >= 20 ? 0.1 : 0), 0.1, 0.85); return focusOn(st, 'network') ? Math.min(0.95, c + FC.focusCfg(st.worldId).networkRaise) : c; }
 function familyText(f) {
   const p = f.partner === 'married' ? 'נשוי/אה' : f.partner === 'together' ? 'בזוגיות' : 'רווק/ה';
   return f.kids ? `${p} + ${f.kids === 1 ? 'ילד/ה' : f.kids + ' ילדים'}` : p;
@@ -902,9 +1014,12 @@ function addBusiness(st, typeId, seed, overrides) {
   const sg = BIZ.suggest(a.biz); if (Object.keys(sg.decisions).length) { const r = BIZ.applyDecisions(a.biz, sg.decisions); if (r.ok && !r.cashNeeded) a.biz = r.business; }
   return a;
 }
+/** business.js forecasts are pure but slow (3-month simulations): describe() memoizes the numbers it shows, keyed by the business state. */
+const BIZ_MEMO = new Map();
+function bizMemo(key, f) { let v = BIZ_MEMO.get(key); if (v === undefined) { v = f(); if (BIZ_MEMO.size > 400) BIZ_MEMO.clear(); BIZ_MEMO.set(key, v); } return v; }
 /** Decision presets for the K tile → business.js applyDecisions input. */
-function bizDecision(b, id) {
-  const o = BIZ.decisionOptions(b); const p = b.p;
+function bizDecision(b, id, o = BIZ.decisionOptions(b)) {
+  const p = b.p;
   const step = (list, cur, dir) => { const xs = [...new Set(list)].sort((x, y) => x - y); const i = xs.findIndex((x) => x > cur); return dir > 0 ? (i >= 0 ? xs[i] : null) : ([...xs].reverse().find((x) => x < cur) ?? null); };
   switch (id) {
     case 'suggest': return o.suggest.decisions;
@@ -967,7 +1082,10 @@ function yearlyPrices(st, out) {
 function monthlyIndex(st, out) {
   const L = st.life; const X = LIFE_CFG.idx;
   // invest.js simulateReturns: exactly 2 draws per month (return + crash check), deterministic math (server replay)
-  const r0 = IV.simulateReturns({ months: 1, annualReturn: X.annual, vol: X.vol, crashChance: X.crashChance, crash: X.crash, rand: () => next(st.rng, 'index') })[0];
+  const ec = st.econ && R4(st) ? st.econ : null; // T2 §8.5: the month that just passed sets the drift and the crash odds (same 2 draws)
+  const annual = ec ? X.annual + (CY.mult(ec, st.worldId, 'idxAnnual') - CY.mult(null, st.worldId, 'idxAnnual')) : X.annual;
+  const crashChance = ec ? X.crashChance * CY.mult(ec, st.worldId, 'idxCrash') : X.crashChance;
+  const r0 = IV.simulateReturns({ months: 1, annualReturn: annual, vol: X.vol, crashChance, crash: X.crash, rand: () => next(st.rng, 'index') })[0];
   const p0 = st.prices.IDX; let r = r0;
   if (st.history) {
     const H = st.history; const ym = addYm(H.ym, 1);
@@ -1042,7 +1160,8 @@ export function summaryForServer(st) {
   return { v: SAVE_VERSION, worldId: st.worldId, charId: st.charId, mode: st.mode, seed: st.seed, months: st.month, turns: st.turn, status: st.over || 'playing', reason: r.reason || null, stars: r.stars || 0,
     netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, impact: Math.floor(st.world.impact || 0), progress: round2(m.goalProgress), stats: { ...st.stats }, leaks: leaksOf(st), log: st.log.slice(-40),
     life: { age: round2(L.age), happiness: Math.round(L.happiness), energy: Math.round(L.energy), creditScore: L.creditScore, pension: Math.round(L.pension), burnouts: L.burnouts, plan: L.plan, planMonths: { ...L.planMonths }, kids: L.family.kids, events: L.events.length },
-    scenarioId: st.history ? st.history.scenarioId : null, lessons: st.lessons.slice(), learning: (({ decisionQuality, decisions, luck, verdicts }) => ({ decisionQuality, decisions, luck, verdicts }))(learningOf(st)),
+    scenarioId: st.history ? st.history.scenarioId : null, lessons: st.lessons.slice(), learning: (({ decisionQuality, decisions, luck, verdicts, hints }) => ({ decisionQuality, decisions, luck, verdicts, hints }))(learningOf(st)),
+    mentor: startLevel(st), rules: st.rules || 3, hints: (st.dq && st.dq.hints) || 0,
     config: replayConfig(st), actions: st.actions || [] };
 }
 
@@ -1188,20 +1307,35 @@ function createDeal(st, forceGolden = null) {
   const gRoll = next(st.rng, 'deal');
   const gIdx = w.golden && w.golden.length ? int(st.rng, 'deal', 0, w.golden.length - 1) : (next(st.rng, 'deal'), 0);
   const negR = next(st.rng, 'deal'); // v3: the seller's answer to a lower offer is sealed with the card
-  let card = base; let golden = false;
+  const rs = ddDraws(st); // T2: exactly 6 'dd' draws on every deal landing (rules 4), whatever the card turns out to be
+  let card = base; let golden = false; let starter = false;
   if (st.tutorial && !st.flags.tutorialDone && w.starterDeal) {
-    card = clone(w.starterDeal); st.flags.tutorialDone = true;
+    card = clone(w.starterDeal); st.flags.tutorialDone = true; starter = true;
     if (st.cash < card.down) card.down = Math.max(0, Math.floor(st.cash / 100) * 100); // never needs a loan
   }
   else if (forceGolden || (w.golden && w.golden.length && gRoll < w.goldenChance)) { card = w.golden[gIdx]; golden = true; }
-  const p = dealPending(st, card, golden, 'deal'); p.negR = negR;
+  const p = dealPending(st, card, golden, 'deal', starter); p.negR = negR;
+  attachDD(st, p, rs, { golden, starter });
   return p;
+}
+/** The 6 dd draws (rules 4 only; rules 3 never touches the stream). */
+function ddDraws(st) { if (!R4(st)) return null; const rs = []; for (let i = 0; i < DD.DD_DRAWS; i++) rs.push(next(st.rng, 'dd')); return rs; }
+/** Seal the due-diligence truth on an asset-deal pending (no-op for trades/crypto, rules 3 and the noDD ablation). */
+function attachDD(st, p, rs, o) {
+  if (!rs || p.type !== 'deal' || (st._dev && st._dev.noDD)) return;
+  const c = p.card; const rent = !!(W(st).kinds[c.k] || {}).rent;
+  p.dd = DD.drawDD(rs, c, st.worldId, { rent, noi: c.noi != null, golden: o.golden, starter: o.starter, down: c.down });
 }
 /** Tile L: a life dilemma. Deck from the life stream + one outcome draw (always). Ineligible cards swap to their alt. */
 function createLife(st) {
   let card = drawCard(st, 'life', LIFE_EVENTS, 'life');
   const r = next(st.rng, 'life');
   if (card.when && !card.when(st.life)) card = LIFE_EVENTS.find((e) => e.id === card.alt) || LIFE_EVENTS.find((e) => e.id === 'vacation');
+  // T2 §8.5: the cycle swaps job news (no draw; off in w1): a boom turns a layoff into an offer, a recession the reverse
+  if (st.econ && R4(st) && CY.cycleCfg(st.worldId).swaps) {
+    const to = st.econ.phase === 'exp' && card.id === 'layoff' ? 'jobOffer' : st.econ.phase === 'rec' && card.id === 'jobOffer' ? 'layoff' : null;
+    const sw = to && LIFE_EVENTS.find((e) => e.id === to); if (sw && (!sw.when || sw.when(st.life))) card = sw;
+  }
   return { type: 'life', eventId: card.id, r };
 }
 /** History-mode market tile: the latest real headline + a trade window on the index fund at the real price. */
@@ -1209,10 +1343,16 @@ function historyMarket(st) {
   const H = st.history; const h = H.headline;
   return tradePending(st, 'IDX', null, h ? h.text : `${ymText(H.ym)} בשוק`, h ? `${ymText(h.ym)} · המדד עומד על ${fmtP(st.prices.IDX)} (100 = תחילת התקופה).` : `המדד עומד על ${fmtP(st.prices.IDX)} (100 = תחילת התקופה).`, 'market');
 }
-function dealPending(st, card, golden, source) {
+function dealPending(st, card, golden, source, starter = false) {
   if (card.crypto) return cryptoPending(st, card, source === 'mystery' ? 'mystery' : 'deal', source);
   if (card.tk) return tradePending(st, card.tk, card.p, card.n, card.d, source, golden);
-  return { type: 'deal', card: clone(card), golden, source };
+  const c = clone(card);
+  // T2 §8.5: the cycle moves deal prices at the draw (value keeps its pre-cycle level → buying in a recession is buying below value)
+  if (R4(st) && st.econ && !starter) {
+    const m = CY.mult(st.econ, st.worldId, 'dealCost');
+    if (m !== 1) { c.value = c.value ?? c.cost; const cost = r100(c.cost * m); c.down = c.cost > 0 ? Math.min(cost, r100(c.down * m)) : c.down; c.cost = cost; }
+  }
+  return { type: 'deal', card: c, golden, source };
 }
 function tradePending(st, tk, price, title, text, source, golden = false) {
   const w = W(st); const t = w.tickers[tk];
@@ -1248,7 +1388,8 @@ function createMystery(st) {
   const card = clone(weighted(st.rng, 'mystery', w.mystery));
   const gIdx = int(st.rng, 'mystery', 0, Math.max(0, (w.golden || []).length - 1));
   const negR = next(st.rng, 'mystery');
-  if (card.kind === 'golden' && w.golden && w.golden.length) { const p = dealPending(st, w.golden[gIdx], true, 'mystery'); p.mysteryTitle = card.title; p.negR = negR; return p; }
+  const rs = ddDraws(st); // T2: 6 'dd' draws on every mystery landing too (used only if it turns into an asset deal)
+  if (card.kind === 'golden' && w.golden && w.golden.length) { const p = dealPending(st, w.golden[gIdx], true, 'mystery'); p.mysteryTitle = card.title; p.negR = negR; attachDD(st, p, rs, { golden: true }); return p; }
   return { type: 'mystery', card };
 }
 function createBank(st) {
@@ -1306,13 +1447,42 @@ function describe(st) {
     ev.toastText = ev.toastText || ev.title;
     delete ev.options[0].reason;
   }
-  // exactly one primary option (the smart default); quiz answers get none so Enter can't leak the answer
-  const marked = ev.options.filter((o) => o.primary && o.enabled);
-  const pick = ev.noPrimary ? null : marked[0] || ev.options.find((o) => o.enabled && SAFE_IDS.includes(o.id)) || ev.options.find((o) => o.enabled) || null;
-  for (const o of ev.options) o.primary = o === pick;
-  delete ev.noPrimary;
+  applyMentor(st, p, ev);
+  markMajor(st, ev);
   ev.mentor = gz(st, ev.mentor); ev.text = gz(st, ev.text);
   return ev;
+}
+/**
+ * T2 §5 mentor levels (presentation only — both rule sets). guide: exactly one primary = the evaluator's top option for scored
+ * decisions (the card's own default for unscored types; none on quiz / personal / values cards). hint & pro: no primary, and
+ * no verdict wording before the decision.
+ */
+function applyMentor(st, p, ev) {
+  const level = st.mentor || 'guide';
+  if (level === 'guide') {
+    let pick = null;
+    if (!ev.noPrimary) {
+      if (ev.type === 'business' && ev.data.mode === 'manage' && st.flags['bz_' + p.id]) pick = ev.options.find((o) => o.id === 'ok' && o.enabled) || null; // one decision per visit, then "המשך"
+      else { const pool = scorePool(ev, null); if (pool) { const sc = scoreOptions(st, ev); if (sc.length) { const id = primaryFromScores(ev, sc); pick = ev.options.find((o) => o.id === id) || null; } } }
+      if (!pick) { const marked = ev.options.filter((o) => o.primary && o.enabled); pick = marked[0] || ev.options.find((o) => o.enabled && SAFE_IDS.includes(o.id)) || ev.options.find((o) => o.enabled) || null; }
+    }
+    for (const o of ev.options) o.primary = o === pick;
+  } else {
+    for (const o of ev.options) { o.primary = false; o.label = MN.neutralLabel(o.id, o.label, level); }
+    ev.mentor = MN.neutralLabel(null, ev.mentor, level); ev.text = MN.neutralLabel(null, ev.text, level);
+    if (ev.data && typeof ev.data.roiVsLoan === 'string') ev.data.roiVsLoan = MN.neutralLabel(null, ev.data.roiVsLoan, level);
+  }
+  delete ev.noPrimary; delete ev.suggested;
+}
+const MAJOR_KINDS = new Set(['buy', 'sell', 'give', 'life', 'plan', 'installments']);
+const MAJOR_IDS = new Set(['credit', 'sub', 'refi', 'prepay', 'start', 'biz:sell', 'raise', 'report', 'inspect:2']);
+/** §9.1: options that get an impact panel (computed on demand by impactFor, never here). */
+function markMajor(st, ev) {
+  if (ev.auto) return;
+  const E = Math.max(1, expensesOf(st));
+  for (const o of ev.options) {
+    if (MAJOR_KINDS.has(o.kind) || MAJOR_IDS.has(o.id) || /^offer:/.test(o.id) || (o.effects && Math.abs(o.effects.cash || 0) >= 0.5 * E)) o.major = true;
+  }
 }
 const SAFE_IDS = ['ok', 'done', 'pass', 'skip'];
 const netLabel = (n) => (n > 0 ? `${sgn(n)} בחודש` : `בסוף החודש: ${fmtM(n)}`);
@@ -1364,7 +1534,8 @@ function suggestPlan(st) {
 }
 function negChance(st, p, k) {
   const base = { 5: 0.8, 10: 0.55, 15: 0.3 }[k] || 0.3;
-  return clamp(base * (p.golden ? 0.4 : 1) + (st.life.peek ? 0.1 : 0), 0.05, 0.95);
+  const t2 = (R4(st) && p.dd && !p.dd.golden && p.dd.flags.includes('rush') ? 0.1 : 0) + (focusOn(st, 'network') ? FC.focusCfg(st.worldId).networkNeg : 0); // a seller in a hurry · the network focus
+  return clamp(base * (p.golden ? 0.4 : 1) + (st.life.peek ? 0.1 : 0) + t2, 0.05, 0.95);
 }
 function autoAmount(st) { const m = metrics(st); return Math.max(0, r100(Math.min(m.cashflow, m.salary * 0.1))); }
 function carLine(st) { return st.expenses.find((x) => /רכב|ליסינג|טנדר/.test(x.label)); }
@@ -1381,6 +1552,48 @@ function lifeEffects(st, E, o) {
   if (o.study) e.study = o.study;
   return e;
 }
+
+/* ---------------------------------------------------------------- T2 due diligence helpers (§7) */
+/** The sealed truth of a dd card's income line, value and repair (impact's shadow may pin base/val to the public expectation). */
+function ddTruthOf(c, dd) {
+  const base0 = c.noi != null ? c.noi : c.cf;
+  return { base: dd.base ?? DD.trueBase(base0, dd.f), value: dd.val ?? Math.round((c.value ?? c.cost) * dd.vf), repair: dd.repair };
+}
+/**
+ * What the player knows about a dd card right now (§7.2): the public flags and the basis the buy options are valued at —
+ * level 0 the posterior expectation (+ per-risk scenarios), level 1 the range (its midpoint), level 2 the verified truth.
+ * Only the range (level ≥ 1) and the verified numbers (level 2) are derived from sealed values. null = legacy card.
+ */
+function ddBasis(st, p) {
+  const dd = p.dd; if (!R4(st) || !dd || dd.starter) return null;
+  const c = p.card; const noi = c.noi != null; const base0 = noi ? c.noi : c.cf; const value0 = c.value ?? c.cost; const down = Math.max(0, c.down);
+  const flags = dd.golden ? [{ ...DD.GOLDEN_FLAG }] : dd.flags.map((id) => ({ id, text: DD.flagText(id), kind: 'warn' }));
+  const B = { level: dd.level, flags, warn: dd.golden ? 0 : dd.flags.length };
+  if (dd.level === 0) {
+    const ex = DD.expectFactors(st.worldId, B.warn);
+    const rs = dd.golden ? [ex.byRisk[0]].map((x) => ({ ...x, p: 1 })) : ex.byRisk;
+    B.r = rs.map((x) => ({ p: x.p, base: DD.trueBase(base0, noi ? x.fNoi : x.f), value: Math.round(value0 * x.vf), rep: Math.round(x.rep * down) }));
+    B.base = r10(B.r.reduce((a, x) => a + x.p * x.base, 0)); B.value = Math.round(B.r.reduce((a, x) => a + x.p * x.value, 0)); B.rep = Math.round(B.r.reduce((a, x) => a + x.p * x.rep, 0));
+    if (dd.golden) delete B.r;
+    return B;
+  }
+  const t = ddTruthOf(c, dd);
+  const cfTrue = assetCf(st, { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd, ...(noi ? { noi: t.base } : { cf: t.base }) });
+  B.range = DD.rangeOf(dd, { base: t.base, value: t.value, repair: t.repair, down, width: Math.max(50, Math.abs(cfTrue) * 0.3) });
+  if (dd.level === 1) { B.lo = B.range.base[0]; B.hi = B.range.base[1]; B.base = r10((B.lo + B.hi) / 2); B.value = Math.round((B.range.value[0] + B.range.value[1]) / 2); B.rep = Math.round(DD.BUCKET_REP[B.range.repair] * down); }
+  else { B.base = t.base; B.value = t.value; B.rep = t.repair; }
+  return B;
+}
+/** inspect:1 energy and inspect:2 fee (the scout focus makes the first free and the second half price) + the expert's label. */
+function inspectInfo(st, p, scout) {
+  const C = DD.ddCfg(st.worldId); const c = p.card; const k = c.k;
+  const fee0 = Math.max(C.minFee, r100(C.inspect2Pct * c.cost));
+  const label = isRent(st, { k }) ? 'בדק בית ושמאי' : k === 'ship' ? 'סוקר ימי בודק' : 'רואה חשבון בודק את הספרים';
+  return { energy: scout ? 0 : C.inspect1Energy, fee: scout ? r100(fee0 * 0.5) : fee0, label };
+}
+const pubCtxLite = (st) => ({ cash: st.cash, savings: st.savings || 0, E: Math.max(1, expensesOf(st)) });
+const scoutOn = (st) => !!(R4(st) && st.life.focus && st.life.focus.id === 'scout' && st.life.focus.m === st.month);
+const focusOn = (st, id) => !!(R4(st) && st.life && st.life.focus && st.life.focus.id === id);
 
 const DESCRIBE = {
   payday(st, p, ev) {
@@ -1403,6 +1616,7 @@ const DESCRIBE = {
     if (raiseEligible(st)) { const ch = raiseChance(st); ev.options.push(opt('raise', `לבקש העלאה (סיכוי ${Math.round(ch * 100)}%)`, true, { kind: 'raise', chance: round2(ch) })); ev.data.raiseChance = round2(ch); }
     if (pd.burnout) ev.mentor = mentorLine(st, 'burnout', {}) || ev.mentor;
     else if (L.energy < 35 || st.stats.paydays % 3 === 1) ev.mentor = mentorLine(st, 'planAsk', {}) || ev.mentor;
+    if (R4(st)) ev.data.focus = focusBlock(st); // T2: the payday card hosts the focus picker (the UI calls setFocus → action F)
     ev.sound = pd.burnout ? 'loss' : 'coin';
   },
 
@@ -1413,6 +1627,7 @@ const DESCRIBE = {
     const cost = r100(0.5 * S);
     ev.data = { plan: L.plan, energy: Math.round(L.energy), studyProgress: L.study.done ? 1 : round2(L.study.months / L.study.need), courseCost: cost, ...shortfallInfo(st, cost) };
     ev.options = planOptions(st);
+    if (R4(st)) ev.data.focus = focusBlock(st);
     if (!L.study.done) ev.options.splice(ev.options.length, 0, opt('course', `קורס ערב קצר: ${fmtM(cost)} (+2 חודשי לימוד)`, true, { kind: 'course', effects: { cash: -cost, energy: -4, happiness: 0, note: 'מקרב את סוף הלימודים בלי לשנות תוכנית.' } }));
   },
 
@@ -1425,7 +1640,12 @@ const DESCRIBE = {
     ev.data = { refund, bill, net: refund - bill, taxes: { ...T }, paidTotal: Math.round(paid), effectiveRate: round2(paid / grossIn * 100), ...shortfallInfo(st, Math.max(0, bill - refund)) };
     const label = refund && bill ? `לקבל החזר ${fmtM(refund)} ולשלם ${fmtM(bill)}` : refund ? `לקבל החזר ${fmtM(refund)}` : bill ? `לשלם ${fmtM(bill)}` : 'המשך';
     ev.options = [opt('ok', label, true, { primary: true })];
-    if (!L.sideReport && (L.plan === 'side' || L.side.total > 0)) ev.options.push(opt('report', 'לפתוח תיק ולשלם מקדמות על העסק הצדדי', true, { kind: 'report' }));
+    if (!L.sideReport && (L.plan === 'side' || L.side.total > 0)) {
+      const fee = R4(st) ? sideReportFee(st) : 0; // T2 §11.1 #2: reporting has a cost (the accountant), so it is not always better
+      const sideM = L.plan === 'side' ? payslipOf(st).sideIncome : Math.round(L.side.total / Math.max(1, L.side.months || 12));
+      const saving = Math.round(0.1 * sideM * marginalRate(grossBase(st)) * 12);
+      ev.options.push(opt('report', fee ? `לפתוח תיק ולשלם מקדמות על העסק הצדדי (עלות רו״ח ${fmtM(fee)} בחודש)` : 'לפתוח תיק ולשלם מקדמות על העסק הצדדי', true, { kind: 'report', fee, saving }));
+    }
     if (!refund && !bill && ev.options.length === 1) { ev.auto = true; ev.toastText = mentorLine(st, 'taxNone', { paid: fmtM(paid), rate: pct(ev.data.effectiveRate, 1) }) || 'אין חוב ואין החזר מס.'; }
   },
 
@@ -1443,11 +1663,15 @@ const DESCRIBE = {
       return;
     }
     const a = st.assets.find((x) => x.id === p.assetId); const b = a.biz;
-    const o = BIZ.decisionOptions(b); const sm = BIZ.summary(b);
-    ev.title = `העסק שלך: ${a.n}`; ev.text = a.bizHeadline || 'זמן להחליט: מחיר, עובדים, שיווק, משיכה — או למכור.'; ev.mentor = o.suggest.why[0];
-    const base3 = BIZ.forecast(b, null, 3).netProfit;
-    ev.data = { mode: 'manage', assetId: 'a' + a.id, summary: sm, options: { ...o, suggest: undefined }, why: o.suggest.why, forecast3: base3, lastResult: st.flags['bz_' + p.id] || null };
-    const mk = (id, label) => { const d = bizDecision(b, id); if (!d || !Object.keys(d).length) return null; const r = BIZ.applyDecisions(b, d); if (!r.ok) return opt('biz:' + id, label, false, { kind: 'biz', reason: r.errors[0] }); const f = BIZ.forecast(r.business, null, 3).netProfit; return opt('biz:' + id, label, true, { kind: 'biz', decisions: d, cashNeeded: r.cashNeeded, effects: { netProfit3: f, delta3: f - base3, energy: -BIZ.ownerEnergy(r.business), note: '' } }); };
+    const bKey = JSON.stringify(b);
+    const o = bizMemo(bKey + '|opts', () => BIZ.decisionOptions(b)); const sm = bizMemo(bKey + '|sum', () => BIZ.summary(b));
+    ev.title = `העסק שלך: ${a.n}`; ev.text = a.bizHeadline || 'זמן להחליט: מחיר, עובדים, שיווק, משיכה — או למכור.'; ev.mentor = st.mentor === 'guide' ? o.suggest.why[0] : (mentorLine(st, 'bizAsk', {}) || o.suggest.why[0]);
+    if (!ev.tag) ev.tag = 'העסק שלך';
+    const base3 = bizMemo(bKey + '|base', () => BIZ.forecast(b, null, 3).netProfit);
+    ev.data = { mode: 'manage', assetId: 'a' + a.id, summary: clone(sm), options: clone({ ...o, suggest: undefined }), why: o.suggest.why.slice(), forecast3: base3, lastResult: st.flags['bz_' + p.id] || null };
+    const mk = (id, label) => { const d = bizDecision(b, id, o); if (!d || !Object.keys(d).length) return null;
+      const r = bizMemo(bKey + '|' + JSON.stringify(d), () => { const x = BIZ.applyDecisions(b, d); return x.ok ? { ok: true, cashNeeded: x.cashNeeded, f: BIZ.forecast(x.business, null, 3).netProfit, energy: BIZ.ownerEnergy(x.business) } : { ok: false, error: x.errors[0] }; });
+      if (!r.ok) return opt('biz:' + id, label, false, { kind: 'biz', reason: r.error }); return opt('biz:' + id, label, true, { kind: 'biz', decisions: d, cashNeeded: r.cashNeeded, effects: { netProfit3: r.f, delta3: r.f - base3, energy: -r.energy, note: '' } }); };
     const wage = fmtM(o.manager.wage);
     ev.options = [
       mk('suggest', `ההמלצה: ${o.suggest.why[0]}`),
@@ -1471,13 +1695,13 @@ const DESCRIBE = {
       const L = loanFor(st, Math.max(0, -eff.cash));
       return opt(o.id, o.label, true, { kind: 'life', effects: eff, loanAmount: L.need, loanMonthly: L.monthly, chance: o.chance });
     });
-    if (E.personal && ev.options.length > 1) ev.noPrimary = true; // a life choice has no "right answer" button (§6.8)
+    if ((E.personal || E.values) && ev.options.length > 1) ev.noPrimary = true; // a life choice / lifestyle trade-off has no "right answer" button (§6.8, T2 §10.3)
     else {
       let pick = ev.options.find((o) => o.id === E.primary);
       if (pick && pick.loanAmount) pick = ev.options.filter((o) => !o.loanAmount).sort((a, b) => b.effects.cash - a.effects.cash)[0] || pick;
       if (pick) pick.primary = true;
     }
-    ev.data.personal = !!E.personal;
+    ev.data.personal = !!E.personal; ev.data.values = !!E.values;
     ev.sound = 'card';
   },
 
@@ -1485,32 +1709,41 @@ const DESCRIBE = {
     const w = W(st); const c = p.card; const kind = w.kinds[c.k] || {};
     const debt = c.cost - c.down; const value = c.value ?? c.cost;
     const proto = { k: c.k, noi: c.noi, cf: c.cf, debt, sens: c.sens, ref: st.world.usd };
-    const cf = assetCf(st, proto);
-    const roi = c.down ? (cf * 12 / c.down) * 100 : 0;
+    const B = ddBasis(st, p); // T2 due diligence: null on legacy / rules-3 / starter cards (claimed numbers are the truth)
+    const atBase = (pr, base) => (B ? assetCf(st, c.noi != null ? { ...pr, noi: base } : { ...pr, cf: base }) : assetCf(st, pr));
+    const cf = assetCf(st, proto); // claimed ("לפי המוכר")
+    const cfShown = B && B.level === 2 ? atBase(proto, B.base) : cf;
+    const roi = c.down ? (cfShown * 12 / c.down) * 100 : 0;
     ev.tag = 'הזדמנות · ' + (kind.label || '');
     ev.title = c.n; ev.text = c.d;
-    ev.mentor = c.q || mentorLine(st, 'dealAsk', {});
+    ev.mentor = (st.mentor === 'guide' && c.q) ? c.q : mentorLine(st, 'dealAsk', {}); // a trap question would leak the answer at hint/pro (§7.5)
     const loanYearlyPct = Math.round(loanPct(st) * 12);
     const d = ev.data = {
       kind: c.k, kindLabel: kind.label, debtLabel: kind.debtLabel || 'משכנתא', model: modelFor(st, c.k),
-      name: c.n, cost: c.cost, down: c.down, debt, value, discount: value - c.cost, cf, roi: Math.round(roi), cash: st.cash,
-      roiText: c.down ? `${fmtM(cf)} × 12 ÷ ${fmtM(c.down)} = ${Math.round(roi)}% בשנה` : '',
+      name: c.n, cost: c.cost, down: c.down, debt, value, discount: value - c.cost, cf: cfShown, roi: Math.round(roi), cash: st.cash,
+      roiText: c.down ? `${fmtM(cfShown)} × 12 ÷ ${fmtM(c.down)} = ${Math.round(roi)}% בשנה` : '',
       impact: c.impact || 0, golden: !!p.golden, grow: c.grow || 0, loanYearlyPct,
       rentTax: isRent(st, proto) ? rentTaxOf(st, grossRent(st, proto)) - rentTaxOf(st) : 0, negotiated: p.negotiated || null,
       yield: isRent(st, proto) && c.cost > 0 ? reYield(st, c, proto) : null,
     };
-    // a buy option: label + the ONE number that matters (cashflow after the cost of any loan it needs)
-    const buyOpt = (id, text, amount, optCf) => {
-      const L = loanFor(st, amount); const net = optCf - L.monthly;
+    const prefix = !B ? '' : B.level === 0 ? 'לפי המוכר: ' : B.level === 1 ? 'לפי הבדיקה: ' : 'נבדק: ';
+    // a buy option: label + the ONE number that matters (cashflow after the cost of any loan it needs); o.net = the EXPECTED net
+    const buyOpt = (id, text, amount, pr) => {
+      const L = loanFor(st, amount); const cfC = assetCf(st, pr); const cfE = atBase(pr, B ? B.base : null); const net = cfE - L.monthly;
+      const shown = !B ? netLabel(net) : B.level === 0 ? prefix + netLabel(cfC - L.monthly) : B.level === 1 ? `${prefix}${fmtM(atBase(pr, B.lo) - L.monthly)} עד ${fmtM(atBase(pr, B.hi) - L.monthly)} בחודש` : prefix + netLabel(net);
       const label = L.need ? `הלוואה ${fmtM(L.need)} ו${text}` : (id === 'buy' && w.mechanic !== 'fx' ? `לקנות ב־${fmtM(amount)}` : `${text} ב־${fmtM(amount)}`);
-      return opt(id, label, L.ok, { kind: 'buy', net, netLabel: netLabel(net), loanAmount: L.need, loanMonthly: L.monthly, reason: L.ok ? undefined : CAP_REASON });
+      const basis = { cf: cfE, vf: B ? B.value / Math.max(1, value) : 1, rep: B ? B.rep : 0 };
+      if (B && B.r) basis.r = B.r.map((x) => ({ p: x.p, cf: atBase(pr, x.base), vf: x.value / Math.max(1, value), rep: x.rep }));
+      if (B && B.level === 1) { basis.lo = atBase(pr, B.lo); basis.hi = atBase(pr, B.hi); }
+      return opt(id, label, L.ok, { kind: 'buy', net, netLabel: shown, loanAmount: L.need, loanMonthly: L.monthly, reason: L.ok ? undefined : CAP_REASON, basis });
     };
     if (w.mechanic === 'rate' && c.noi != null && debt > 0) {
       const fr = round2(st.world.rate + w.rate.fixedPremium);
-      const cfFix = assetCf(st, { ...proto, fixedRate: fr });
-      Object.assign(d, { rate: st.world.rate, fixedRate: fr, cfVar: cf, cfFix, cfAt: [2, 4, 6, 8].map((r) => ({ rate: r, cf: assetCf(st, { ...proto, fixedRate: r }) })), roiFix: Math.round((cfFix * 12 / c.down) * 100) });
-      const ov = buyOpt('buyVar', `ריבית משתנה ${pct(st.world.rate, 2)}`, c.down, cf);
-      const of = buyOpt('buyFix', `ריבית קבועה ${pct(fr, 2)}`, c.down, cfFix);
+      const prFix = { ...proto, fixedRate: fr };
+      const cfFix = B && B.level === 2 ? atBase(prFix, B.base) : assetCf(st, prFix);
+      Object.assign(d, { rate: st.world.rate, fixedRate: fr, cfVar: cfShown, cfFix, cfAt: [2, 4, 6, 8].map((r) => ({ rate: r, cf: atBase({ ...proto, fixedRate: r }, B ? B.base : null) })), roiFix: Math.round((cfFix * 12 / c.down) * 100) });
+      const ov = buyOpt('buyVar', `ריבית משתנה ${pct(st.world.rate, 2)}`, c.down, proto);
+      const of = buyOpt('buyFix', `ריבית קבועה ${pct(fr, 2)}`, c.down, prFix);
       ov.label = `${ov.loanAmount ? 'הלוואה ' + fmtM(ov.loanAmount) + ' + ' : ''}ריבית משתנה ${pct(st.world.rate, 2)} (${ov.netLabel})`;
       of.label = `${of.loanAmount ? 'הלוואה ' + fmtM(of.loanAmount) + ' + ' : ''}ריבית קבועה ${pct(fr, 2)} (${of.netLabel})`;
       d.netVar = ov.net; d.netFix = of.net;
@@ -1519,32 +1752,51 @@ const DESCRIBE = {
       const fee = hedgeFee(st, { value: c.value ?? c.cost, sens: c.sens });
       const val = c.value ?? c.cost;
       Object.assign(d, { sens: c.sens, usd: st.world.usd, hedgeFee: fee, hedgeMonths: w.fx.hedgeMonths, usdLinked: !!c.usdLinked,
-        cfAtUsd: [-0.5, 0, 0.5].map((dx) => ({ usd: round2(st.world.usd + dx), cf: r10(cf * (1 + c.sens * (dx / st.world.usd))), value: Math.round(c.usdLinked ? val * (st.world.usd + dx) / st.world.usd : val * (1 + c.sens * w.fx.valueSens * dx / st.world.usd)) })) });
-      const ob = buyOpt('buy', 'קנייה', c.down, cf); const oh = buyOpt('buyHedge', 'קנייה עם גידור', c.down + fee, cf);
+        cfAtUsd: [-0.5, 0, 0.5].map((dx) => ({ usd: round2(st.world.usd + dx), cf: r10(cfShown * (1 + c.sens * (dx / st.world.usd))), value: Math.round(c.usdLinked ? val * (st.world.usd + dx) / st.world.usd : val * (1 + c.sens * w.fx.valueSens * dx / st.world.usd)) })) });
+      const ob = buyOpt('buy', 'קנייה', c.down, proto); const oh = buyOpt('buyHedge', 'קנייה עם גידור', c.down + fee, proto);
       oh.label += ` (גידור ${fmtM(fee)})`;
       ev.options = [ob, oh, opt('pass', 'לוותר')];
     } else {
-      ev.options = [buyOpt('buy', 'קנייה', c.down, cf), opt('pass', 'לוותר')];
+      ev.options = [buyOpt('buy', 'קנייה', c.down, proto), opt('pass', 'לוותר')];
     }
     const best = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((a, b) => b.net - a.net)[0];
     const first = ev.options.find((o) => o.kind === 'buy');
     d.loanNeeded = first.loanAmount; d.loanMonthly = first.loanMonthly; d.net = first.net; d.netLabel = first.netLabel;
-    d.roiVsLoan = first.loanAmount
-      ? `תשואה ${Math.round(roi)}% בשנה מול הלוואה שעולה ${loanYearlyPct}% בשנה — ${roi > loanYearlyPct ? 'ההלוואה משתלמת' : 'ההלוואה עולה יותר ממה שהנכס מכניס'}`
-      : `תשואה ${Math.round(roi)}% בשנה, בלי הלוואה`;
-    // smart default: buy only when it adds money every month (and, in net-worth worlds, is not overpriced / declining)
-    const nwOk = w.goal.type === 'passive' || ((value - c.cost) + (c.grow || 0) * value * 24 >= 0 && (value >= c.cost || cf * 24 >= c.cost - value));
-    const cushionAfter = (st.cash + (st.savings || 0) - c.down + (best ? best.loanAmount : 0)) / Math.max(1, expensesOf(st));
-    d.cushionAfter = round2(cushionAfter);
-    if (best && cushionAfter < 1) d.warning = 'אחרי הקנייה יישאר לך פחות מחודש הוצאות. משבר אחד — והבנק יחליט בשבילך.';
-    // smart default: recommend buying only with ≥ ½ month of expenses left — or when the deal itself quickly rebuilds the cushion
-    const cushionOk = cushionAfter >= 0.5 || (best && best.net >= 0.15 * expensesOf(st));
-    if (best && best.net > 0 && nwOk && cushionOk) {
+    const roiE = c.down ? Math.round((first.net + first.loanMonthly) * 12 / c.down * 100) : 0;
+    d.roiVsLoan = st.mentor !== 'guide'
+      ? (first.loanAmount ? `תשואה ${roiE}% בשנה · הלוואה ${loanYearlyPct}% בשנה` : `תשואה ${roiE}% בשנה, בלי הלוואה`)
+      : first.loanAmount
+        ? `תשואה ${roiE}% בשנה מול הלוואה שעולה ${loanYearlyPct}% בשנה — ${roiE > loanYearlyPct ? 'ההלוואה משתלמת' : 'ההלוואה עולה יותר ממה שהנכס מכניס'}`
+        : `תשואה ${roiE}% בשנה, בלי הלוואה`;
+    // the card's own default (the guide primary uses the evaluator; this is its tie-break): buy only when it adds money
+    // every month (and, in net-worth worlds, is not overpriced / declining) and the one cushion rule (§10.2) is met
+    const nwOk = w.goal.type === 'passive' || ((value - c.cost) + (c.grow || 0) * value * 24 >= 0 && (value >= c.cost || cfShown * 24 >= c.cost - value));
+    const cush = cushionCheck(pubCtxLite(st), -c.down, best ? best.loanAmount : 0, best ? best.net : 0);
+    d.cushionAfter = round2(cush.after);
+    if (best && cush.flagged) d.warning = 'אחרי הקנייה יישאר לך פחות מחודש הוצאות. משבר אחד — והבנק יחליט בשבילך.';
+    if (best && best.net > 0 && nwOk && !cush.flagged) {
       let pick = best;
       if (w.mechanic === 'fx' && c.sens) { const hedgeNow = (c.sens < 0 && st.world.usd <= w.fx.ref) || (c.sens > 0 && st.world.usd >= w.fx.ref); const oh = ev.options.find((o) => o.id === 'buyHedge'); if (hedgeNow && oh.enabled && oh.net > 0) pick = oh; else pick = ev.options.find((o) => o.id === 'buy' && o.enabled) || best; }
       pick.primary = true;
     } else ev.options.find((o) => o.id === 'pass').primary = true;
     if (!best) { ev.auto = true; ev.toastText = `${c.n}: עוד אין לך מספיק הון, והבנק לא מממן עסקה כזו.`; }
+    // T2 due diligence: the public block + inspection options (non-closing), inserted before the buy options
+    if (B) {
+      const scout = !!(st.life.focus && st.life.focus.id === 'scout' && st.life.focus.m === st.month);
+      const ins = inspectInfo(st, p, scout);
+      d.dd = { level: B.level, flags: B.flags, claimed: { cf, value, label: 'לפי המוכר' },
+        range: B.level >= 1 ? { cf: [atBase(proto, B.lo ?? B.range.base[0]), atBase(proto, B.hi ?? B.range.base[1])], value: B.range.value.slice(), repair: B.range.repair } : null,
+        verified: B.level === 2 ? { cf: atBase(proto, B.base), value: B.value, repair: B.rep } : null,
+        basis: ['claimed', 'range', 'verified'][B.level], expected: { cf: first.net + first.loanMonthly, value: B.value, repair: B.rep },
+        inspect1: { energy: ins.energy, free: scout }, inspect2: { fee: ins.fee, half: scout } };
+      if (best && !p.dd.golden) {
+        const io = [];
+        if (B.level === 0) io.push(opt('inspect:1', scout ? 'לבדוק בעצמי (חינם החודש)' : `לבדוק בעצמי (−${ins.energy} 🔋)`, st.life.energy >= DD.ddCfg(st.worldId).inspect1Min, { kind: 'inspect', cost: { energy: ins.energy, cash: 0 }, reason: st.life.energy >= DD.ddCfg(st.worldId).inspect1Min ? undefined : 'אין לך כוח לבדוק עכשיו' }));
+        if (B.level < 2) io.push(opt('inspect:2', `${ins.label} (${fmtM(ins.fee)})`, st.cash >= ins.fee, { kind: 'inspect', cost: { energy: 0, cash: ins.fee }, reason: st.cash >= ins.fee ? undefined : 'אין מספיק מזומן לבדיקה' }));
+        const at = ev.options.findIndex((o) => o.kind === 'buy');
+        ev.options.splice(at, 0, ...io);
+      }
+    }
     // v3 negotiation: offer less; the seller's answer was sealed when the card was drawn (p.negR)
     if (best && !p.negotiated && p.negR != null && c.cost > 0) {
       const offers = [5, 10, 15].map((k) => { const ch = negChance(st, p, k); const saved = r100(c.cost * k / 100); return opt('offer:' + k, `להציע ${k}% פחות (${fmtM(saved)}) · סיכוי ${Math.round(ch * 100)}%`, true, { kind: 'offer', chance: round2(ch), saved }); });
@@ -1598,8 +1850,10 @@ const DESCRIBE = {
     ev.data = { amount: c.a, need, cash: st.cash, installment: c.inst ? lineInterest(c.a, w.creditPct) : null, installments3: inst3 ? { amounts: inst3.amounts, total: inst3.total, interest: inst3.interest } : null, sub: c.sub || null, ...shortfallInfo(st, c.a),
       reality: c.inst ? `⚠ "אשראי מתגלגל" במשחק: ${w.creditPct}% לחודש. 🌍 ${realWorldRates(st).credit.text}; עד 3 תשלומים בכרטיס הם בדרך כלל בלי ריבית.` : null };
     ev.options = [opt('pay', ev.data.shortfall ? `לשלם ${fmtM(c.a)} (הלוואה ${fmtM(ev.data.loanAmount)})` : `לשלם ${fmtM(c.a)}`, true, { primary: need })];
-    if (c.inst) ev.options.push(opt('inst3', `3 תשלומים בלי ריבית (${fmtM(inst3.amounts[0])} בחודש)`, true, { kind: 'installments', amounts: inst3.amounts }));
-    if (c.inst) ev.options.push(opt('credit', `באשראי מתגלגל (${fmtM(ev.data.installment)} ריבית בחודש · ${w.creditPct}% לחודש — החוב עצמו לא קטן)`));
+    // T2 §11.1 #1: the store checks your score for interest-free installments; revolving credit is the fallback for a low score only
+    const inst3ok = !R4(st) || st.life.creditScore >= 600;
+    if (c.inst && inst3ok) ev.options.push(opt('inst3', `3 תשלומים בלי ריבית (${fmtM(inst3.amounts[0])} בחודש)`, true, { kind: 'installments', amounts: inst3.amounts }));
+    if (c.inst && (!R4(st) || !inst3ok)) ev.options.push(opt('credit', `באשראי מתגלגל (${fmtM(ev.data.installment)} ריבית בחודש · ${w.creditPct}% לחודש — החוב עצמו לא קטן)`));
     if (c.sub) ev.options.push(opt('sub', `מנוי: ${fmtM(c.sub)} בחודש, כל עוד הוא פעיל`));
     if (!need) ev.options.push(opt('skip', 'לוותר', true, { primary: true }));
     ev.sound = need ? 'loss' : 'card';
@@ -1612,8 +1866,8 @@ const DESCRIBE = {
     if (c.k === 'sell') {
       const own = st.assets.filter((a) => (Array.isArray(c.type) ? c.type.includes(a.k) : a.k === c.type));
       // offers follow today's value and cashflow: a money-losing asset never gets a premium
-      d.offers = own.map((a) => { if (a.biz) { const v = BIZ.valuation(a.biz); const offer = Math.round(v.price * c.mult) + v.cash + v.receivables; const tax = IV.capitalGainsTax({ cost: a.biz.invested, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: 0, tax, netAfterTax: offer - tax, net: offer - tax, profit: offer - tax - a.biz.invested, cf: a.bizDraw || 0, managed: true }; }
-        const acf = assetCf(st, a); const offer = Math.round(assetValue(st, a) * (acf > 0 ? c.mult : Math.min(c.mult, 1) * 0.85)); const tax = IV.capitalGainsTax({ cost: a.cost, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: a.debt, tax, netAfterTax: offer - a.debt - tax, net: offer - a.debt - tax, profit: offer - a.debt - tax - a.down, cf: acf }; });
+      d.offers = own.map((a) => { if (a.biz) { const v = BIZ.valuation(a.biz); const offer = Math.round(v.price * c.mult) + v.cash + v.receivables; const tax = IV.capitalGainsTax({ cost: a.biz.invested, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: 0, tax, netAfterTax: offer - tax, net: offer - tax, profit: offer - tax - a.biz.invested, cf: a.bizDraw || 0, managed: true, equity: v.price + v.cash + v.receivables }; }
+        const acf = assetCf(st, a); const offer = Math.round(assetValue(st, a) * (acf > 0 ? c.mult : Math.min(c.mult, 1) * 0.85)); const tax = IV.capitalGainsTax({ cost: a.cost, proceeds: offer, cpiBuy: a.cpi || 1, cpiSell: st.life.cpi, mode: 'real' }).tax; return { assetId: 'a' + a.id, name: a.n, offer, debt: a.debt, tax, netAfterTax: offer - a.debt - tax, net: offer - a.debt - tax, profit: offer - a.debt - tax - a.down, cf: acf, equity: assetValue(st, a) - a.debt }; });
       ev.options = [...d.offers.map((o) => opt('sell:' + o.assetId.slice(1), `למכור את ${o.name} · ${sgn(o.net)}`, o.net >= 0 || st.cash + o.net >= 0, { kind: 'sell', reason: o.net >= 0 || st.cash + o.net >= 0 ? undefined : 'החוב גדול מההצעה' })), opt('done', 'סיום', true, { primary: true })];
       ev.mentor = own.length ? mentorLine(st, 'sellAsk', {}) : mentorLine(st, 'sellNone', {});
       d.reality = '🌍 מס שבח במציאות: 25% מהרווח הריאלי אחרי הוצאות (שיפוץ, עו״ד, תיווך); דירת מגורים יחידה לרוב פטורה, בתנאים.';
@@ -1919,10 +2173,33 @@ function finalize(st, end, out) {
   out.mentor = end.status === 'won' ? mentorLine(st, 'won', {}) : end.reason === 'bankrupt' ? mentorLine(st, 'bankrupt', {}) : mentorLine(st, 'lostTime', { pct: Math.round(end.progress * 100) + '%' });
 }
 
+/** T2 §7.3: an inspection opens more information on the same card (non-closing). No draw: the truth was sealed with the card. */
+function inspect(st, p, o, out) {
+  const ins = inspectInfo(st, p, scoutOn(st)); const L = st.life;
+  if (o.id === 'inspect:1') { L.energy = clamp(L.energy - ins.energy, 0, 100); p.dd.level = 1; }
+  else { st.cash -= ins.fee; st.stats.inspectSpent += ins.fee; p.dd.level = 2; cashFx(out, -ins.fee, `בדיקה ${fmtM(ins.fee)}`); }
+  st.stats.inspections++;
+  const B = ddBasis(st, p); const c = p.card; const pr = { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd, noi: c.noi, cf: c.cf };
+  const cfAt = (base) => assetCf(st, c.noi != null ? { ...pr, noi: base } : { ...pr, cf: base });
+  const rep = { none: 'אין', small: 'קטנים', big: 'גדולים' };
+  out.mentor = B.level === 1 ? `בדקת בעצמך: התזרים כנראה בין ${fmtM(cfAt(B.lo))} ל־${fmtM(cfAt(B.hi))} בחודש. תיקונים צפויים: ${rep[B.range.repair]}.`
+    : `הבדיקה המקצועית: ${fmtM(cfAt(B.base))} בחודש, שווי ${fmtM(B.value)}, תיקונים ${B.rep ? fmtM(B.rep) : 'אין'}.`;
+  sound(out, 'card'); lesson(st, out, 'due_diligence');
+}
 function buyAsset(st, p, out, o) {
   const w = W(st); const c = p.card;
+  // T2: a dd card is bought at its TRUE numbers (sealed when it was drawn); luck = actual − what the basis expected
   let fee = 0;
   if (o.id === 'buyHedge') fee = hedgeFee(st, { value: c.value ?? c.cost, sens: c.sens });
+  const ddOn = R4(st) && p.dd && !p.dd.starter; let ddInfo = null;
+  if (ddOn) {
+    const B = ddBasis(st, p); const t = ddTruthOf(c, p.dd);
+    const pr = { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd, noi: c.noi, cf: c.cf, fixedRate: o.id === 'buyFix' ? round2(st.world.rate + w.rate.fixedPremium) : undefined };
+    const cfAt = (base) => assetCf(st, c.noi != null ? { ...pr, noi: base } : { ...pr, cf: base });
+    ddInfo = { claimedCf: cfAt(c.noi != null ? c.noi : c.cf), claimedValue: c.value ?? c.cost, cfExp: cfAt(B.base), valueExp: B.value, repExp: B.rep, level: p.dd.level, repair: t.repair };
+    if (c.noi != null) c.noi = t.base; else c.cf = t.base;
+    c.value = t.value;
+  }
   const L = loanFor(st, c.down + fee);
   if (L.need) { st.loans += L.need; st.cash += L.need; st.stats.loansTaken += L.need; }
   st.cash -= c.down + fee;
@@ -1936,6 +2213,12 @@ function buyAsset(st, p, out, o) {
   sound(out, p.golden ? 'golden' : 'buy');
   if (p.golden) out.effects.push({ type: 'sparkle', at: 'a' + a.id });
   cashFx(out, -(c.down + fee), null);
+  if (ddInfo) {
+    const D = ddInfo; const nwW = w.goal.type === 'passive' ? 0.25 : 1;
+    a.dd = { claimedCf: D.claimedCf, claimedValue: D.claimedValue, level: D.level, repair: D.repair };
+    if (D.repair) { st.cash -= D.repair; st.stats.ddRepairs += D.repair; cashFx(out, -D.repair, `תיקון ${fmtM(D.repair)}`); out.news.push({ kind: 'dd', text: D.level === 2 ? `התיקון שהבדיקה מצאה: ${fmtM(D.repair)}.` : `הפתעה: ${fmtM(D.repair)} תיקונים שלא ידעת עליהם.`, amount: -D.repair }); }
+    addLuck(st, 'dd', (cf - D.cfExp) * 24 + nwW * (a.value - D.valueExp) - (D.repair - D.repExp));
+  }
   const roi = c.down ? Math.round(cf * 12 / c.down * 100) : 0;
   const v = { cf: fmtM(cf), roi: roi + '%', loan: fmtM(L.need), loanCost: fmtM(L.monthly), rate: pct(a.fixedRate ?? st.world.rate ?? 0, 2), gain: fmtM((c.value ?? c.cost) - c.cost) };
   let line;
@@ -1947,7 +2230,9 @@ function buyAsset(st, p, out, o) {
   if (w.mechanic === 'rate' && a.noi != null && a.debt > 0) line = mentorLine(st, o.id === 'buyFix' ? 'buyFixed' : 'buyVariable', v) + ' ' + line;
   if (w.mechanic === 'fx' && c.sens) line = mentorLine(st, o.id === 'buyHedge' ? 'buyHedged' : c.sens < 0 ? 'buyImporter' : 'buyExporter', v);
   if (w.mechanic === 'fx' && (c.value ?? c.cost) > c.cost) line = mentorLine(st, 'buyDiscount', v) + ' ' + line;
+  if (ddInfo && Math.abs(ddInfo.claimedCf - cf) >= 10) line += ` מוצהר ${fmtM(ddInfo.claimedCf)} · בפועל ${fmtM(cf)}.`;
   out.mentor = line.trim();
+  if (ddInfo) { const m0 = out.mentor; ensureCash(st, out, 'deal'); if (out.mentor !== m0) out.mentor = m0 + ' ' + out.mentor; }
   lesson(st, out, 'asset_liability');
   if (L.need && cf - L.monthly > 0) lesson(st, out, 'good_debt');
   if (a.debt > 3 * Math.max(1, c.down)) lesson(st, out, 'leverage');
@@ -1958,103 +2243,242 @@ function buyAsset(st, p, out, o) {
   ach(st, out, 'buy', { asset: a, cf, golden: p.golden, loan: L.need });
 }
 
-/* ============================================================ §8 understanding vs luck: decision quality */
+/* ============================================================ §8 understanding vs luck: decision quality (T2 §10) */
 // Every real choice is scored 0–100 from what the player could SEE at that moment (public numbers, odds, cushion, debt),
-// never from sealed outcomes. Options within half a month of expenses of the best one all score 100 (no artificial
-// "one right answer"). Luck = what actually happened minus what was expected, measured separately. Money is unaffected.
+// never from sealed outcomes: optionU reads only the public context pubCtx(st) and the described event. Options within
+// half a month of expenses of the best one all score 100 (no artificial "one right answer"). Luck = what actually happened
+// minus what was expected, measured separately. Money is unaffected. The same scorer picks the guide-level primary option
+// and answers requestHint (scoreOptions), so the highlight never contradicts the evaluator.
 const DQ_PRINC = { deal: ['cashflow'], doodad: ['opportunity_cost'], trade: ['risk_size'], market: ['cashflow'], bank: ['rate_risk'], upgrade: ['cashflow'], fx: ['diversification'],
-  pitch: ['risk_size', 'diversification'], giving: [], life: ['cushion', 'opportunity_cost'], payday: ['time'], edu: ['time'], business: ['cashflow', 'risk_size'], mystery: ['knowledge'], tax: ['fees_tax'], shipping: ['cushion'] };
-const DQ_WHY = { noCushion: 'השאיר אותך בלי כרית', dsr: 'החזרי החובות עברו 40% מההכנסה', gamble: 'הימור עם תוחלת שלילית', panicSell: 'מכירה בהפסד אחרי ירידה', concentrated: 'הרבה כסף במקום אחד', burnout: 'סכנת שחיקה', debt: 'חוב יקר', best: 'הכי משתלם לפי מה שראית', near: 'כמה אפשרויות סבירות — כולן בסדר' };
-function pitchEV(st, card) {
-  const A = W(st).angel; if (!A) return 1;
+  pitch: ['risk_size', 'diversification'], giving: [], life: ['cushion', 'opportunity_cost'], payday: ['time'], edu: ['time'], business: ['cashflow', 'risk_size'], mystery: ['knowledge'], tax: ['fees_tax'], shipping: ['cushion'], focus: ['time'] };
+const DQ_WHY = { noCushion: 'השאיר אותך בלי כרית', dsr: 'החזרי החובות עברו 40% מההכנסה', gamble: 'הימור עם תוחלת שלילית', panicSell: 'מכירה בהפסד אחרי ירידה', concentrated: 'הרבה כסף במקום אחד', burnout: 'סכנת שחיקה', debt: 'חוב יקר', best: 'הכי משתלם לפי מה שראית', near: 'כמה אפשרויות סבירות — כולן בסדר',
+  values: 'טרייד־אוף של סגנון חיים — אין כאן תשובה אחת', noUse: 'המוקד הזה לא ינוצל החודש', inspectFirst: 'היה עדיף: לבדוק קודם' };
+function pitchEV(worldId, card) {
+  const A = getWorld(worldId).angel; if (!A) return 1;
   const q = card.team + card.traction;
   const t = A.outcomes.map((x) => ({ m: x.m, w: Math.max(0.001, x.w + (x.q || 0) * (q - 4) + (x.h || 0) * (card.hype - 2)) }));
   const tot = t.reduce((a, x) => a + x.w, 0);
   return t.reduce((a, x) => a + x.m * x.w / tot, 0) * A.hypeMult[card.hype - 1];
 }
-/** Utility of one option in months of expenses (+ risk flags), from public information only. */
-function optionU(st, ev, o, params, E) {
-  const d = ev.data || {}; const flags = []; let money = 0, hap = 0;
-  const cashAfter = (x) => (st.cash + (st.savings || 0) + x) / E;
+/** The public context of a decision (§10.0): only what the player can see. optionU never touches st. */
+function pubCtx(st) {
+  const L = st.life; const E = Math.max(1, expensesOf(st)); const g = W(st).goal.type;
+  return { cash: st.cash, savings: st.savings || 0, E, energy: L.energy, happiness: happyNow(st), happyBase: L.happiness, loans: st.loans, credit: st.credit,
+    netWorth: netWorthOf(st), baseNet: baseNet(st), goalType: g, nwWeight: g === 'passive' ? 0.25 : 1,
+    study: { done: L.study.done, months: L.study.months, need: L.study.need }, idxPeak: L.idxPeak || st.prices.IDX, idxPrice: st.prices.IDX,
+    worldId: st.worldId, econ: CY.econPublic(st.econ, st.month), loanPct: loanPct(st), creditPct: W(st).creditPct, month: st.month, monthsLeft: st.maxMonths - st.month,
+    fundMonths: (st.savings || 0) / E };
+}
+/** One cushion rule (§10.2): months of expenses left in cash + fund after an action; a deal that quickly rebuilds it is OK. */
+function cushionCheck(ctx, cashDelta, loan, net) {
+  const after = (ctx.cash + ctx.savings + cashDelta + (loan || 0)) / ctx.E;
+  const flagged = after < 1 && !(net >= 0.15 * ctx.E && after >= 0.5);
+  return { after, flagged };
+}
+/**
+ * The value of a 🔋 change, in months of expenses: concave — a point is worth a lot near burnout, little when you are fresh.
+ * Marginal value per point: < 30 → 0.035, 30–55 → 0.018, 55–80 → 0.012, ≥ 80 → 0.004.
+ */
+function energyValue(e0, d) {
+  const w = (x) => (x < 30 ? 0.035 : x < 55 ? 0.018 : x < 80 ? 0.012 : 0.004); // ≈ the price of buying 🔋 back with a rest month, steeper near burnout
+  const a = clamp(Math.min(e0, e0 + d), 0, 100), b = clamp(Math.max(e0, e0 + d), 0, 100);
+  let v = 0; for (const [lo, hi] of [[0, 30], [30, 55], [55, 80], [80, 100]]) { const o = Math.max(0, Math.min(b, hi) - Math.max(a, lo)); v += o * w(lo); }
+  return d >= 0 ? v : -v;
+}
+/** The value of a 😊 change (months of expenses per point): matters most below the ★★★ gate (60), little when already happy. */
+function happinessValue(h0, d) {
+  const w = (x) => (x < 50 ? 0.06 : x < 65 ? 0.04 : x < 80 ? 0.015 : 0.005);
+  const a = clamp(Math.min(h0, h0 + d), 0, 100), b = clamp(Math.max(h0, h0 + d), 0, 100);
+  let v = 0; for (const [lo, hi] of [[0, 50], [50, 65], [65, 80], [80, 100]]) { const o = Math.max(0, Math.min(b, hi) - Math.max(a, lo)); v += o * w(lo); }
+  return d >= 0 ? v : -v;
+}
+const enCost = (ctx, energy) => -energyValue(ctx.energy, -energy); // the cost of spending `energy` points now
+const R = (key, text, w) => ({ key, text, w });
+/**
+ * A deal buy option's value (§10.4): ((cf − loan) × 24 + nwWeight × (value − cost) + grow × value × 24 − repair) / E − penalties,
+ * at the public basis (claimed → posterior expectation, level-1 midpoint, verified), plus the value of information.
+ * cut = negotiated discount in % (0 = as offered).
+ */
+function dealBuy(ctx, ev, o, cut = 0) {
+  const d = ev.data; const b = o.basis || { cf: o.net + (o.loanMonthly || 0) }; const dd = d.dd;
+  const k = cut / 100; const downCut = Math.round(d.down * k / 100) * 100; const debtCut = Math.round((d.cost - d.down) * k / 100) * 100;
+  const cost = d.cost - downCut - debtCut; const cfAdd = debtCut ? Math.round(debtCut * 0.005 / 10) * 10 : 0;
+  const loanM = Math.max(0, (o.loanMonthly || 0) - Math.round(downCut * ctx.loanPct / 100));
+  const value0 = d.value ?? d.cost; const grow = (d.grow || 0) * value0 * 24;
+  const H = ctx.goalType === 'passive' ? 36 : 24; // in a passive-income world a cashflow asset is the goal itself: a longer horizon
+  const money = (cf, vf, rep) => (cf + cfAdd - loanM) * H + ctx.nwWeight * (value0 * vf - cost) + grow - rep;
+  const flags = []; const cush = cushionCheck(ctx, -(d.down - downCut), o.loanAmount, o.net + cfAdd);
+  if (cush.flagged) flags.push('noCushion');
+  if (o.loanAmount) flags.push('debt');
+  if ((d.debt || 0) > 3 * Math.max(1, d.down) && o.net <= 0) flags.push('concentrated');
+  const pen = flags.reduce((a, f) => a + (DQ_PEN[f] || 0), 0);
+  const vfE = b.vf ?? 1; const repE = b.rep ?? 0;
+  const U = money(b.cf, vfE, repE) / ctx.E - pen;
+  let evi2 = 0;
+  if (dd && dd.level === 0 && b.r) evi2 = b.r.reduce((a, x) => a + x.p * Math.max(0, money(x.cf, x.vf, x.rep) / ctx.E - pen), 0) - Math.max(0, U);
+  else if (dd && dd.level === 1 && b.lo != null) evi2 = 0.5 * Math.max(0, money(b.lo, vfE, repE) / ctx.E - pen) + 0.5 * Math.max(0, money(b.hi, vfE, repE) / ctx.E - pen) - Math.max(0, U);
+  const reasons = [R('net', `לפי מה שידוע: בערך ${fmtM(o.net + cfAdd)} בחודש אחרי עלות ההלוואה`, (o.net + cfAdd) * 24 / ctx.E),
+    R('cushion', `אחרי זה תישאר כרית של ${round2(Math.max(0, cush.after)).toFixed(1)} חודשים`, cush.flagged ? -4 : cush.after < 2 ? -0.3 : 0.05)];
+  if (dd && dd.level === 0 && dd.flags.filter((f) => f.kind === 'warn').length) reasons.push(R('flags', `יש ${dd.flags.filter((f) => f.kind === 'warn').length} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, Math.max(0.2, evi2)));
+  if (value0 !== cost && ctx.nwWeight >= 1) reasons.push(R('price', `המחיר ${value0 > cost ? 'מתחת' : 'מעל'} השווי ב־${fmtM(Math.abs(value0 - cost))}`, ctx.nwWeight * (value0 - cost) / ctx.E));
+  if (o.loanAmount) reasons.push(R('debt', `הלוואה ב־${round2(ctx.loanPct)}% בחודש`, -(o.loanMonthly || 0) * 24 / ctx.E));
+  if (ctx.econ && (ctx.econ.label === 'מיתון' || ctx.econ.label === 'האטה')) reasons.push(R('signal', `מד הכלכלה מראה ${ctx.econ.label} — כרית גדולה יותר נותנת מרחב`, 0.05));
+  return { U, flags, reasons, evi2: Math.max(0, evi2) };
+}
+const DQ_PEN = { noCushion: 4, dsr: 3, gamble: 3, panicSell: 3, concentrated: 2, burnout: 3, debt: 0, noUse: 0 };
+/** Utility of one option in months of expenses (+ risk flags + reasons), from public information only (ctx, ev). */
+function optionU(ctx, ev, o, params) {
+  const d = ev.data || {}; const flags = []; const reasons = []; let money = 0, hap = 0, hapW = 1; const E = ctx.E;
+  const cashAfter = (x) => (ctx.cash + ctx.savings + x) / E;
   switch (ev.type) {
-    case 'deal':
-      if (o.kind === 'buy') { money = o.net * 24 + (d.discount || 0) + (d.grow || 0) * (d.value || 0) * 24; if (cashAfter(-d.down + (o.loanAmount || 0)) < 1) flags.push('noCushion'); if (o.loanAmount) flags.push('debt'); if ((d.debt || 0) > 3 * Math.max(1, d.down) && o.net <= 0) flags.push('concentrated'); }
-      else if (o.kind === 'offer') { const buy = ev.options.filter((x) => x.kind === 'buy' && x.enabled).map((x) => x.net * 24 + (d.discount || 0)).sort((a, b) => b - a)[0] || 0; money = o.chance * (buy + o.saved) - (1 - o.chance) * 0 + (1 - o.chance) * Math.min(0, buy); if (buy > 0) money -= (1 - o.chance) * buy; }
-      break;
+    case 'deal': {
+      const buys = ev.options.filter((x) => x.kind === 'buy' && x.enabled);
+      if (o.kind === 'buy') { const r = dealBuy(ctx, ev, o); return { U: r.U, flags: r.flags, reasons: r.reasons }; }
+      const best = buys.map((x) => dealBuy(ctx, ev, x)).sort((a, b) => b.U - a.U)[0];
+      if (o.kind === 'offer') {
+        const k = +o.id.split(':')[1];
+        const disc = buys.map((x) => dealBuy(ctx, ev, x, k)).sort((a, b) => b.U - a.U)[0] || { U: 0 };
+        const U = o.chance * Math.max(0, disc.U) - (1 - o.chance) * 0.5 * Math.max(0, best ? best.U : 0); // a refused offer loses a scarce good deal (tuned, knob 5)
+        return { U, flags: [], reasons: [R('risk', `סיכוי ${Math.round((1 - o.chance) * 100)}% שהמוכר יסרב — ואז העסקה אבודה`, -(1 - o.chance) * Math.max(0, best ? best.U : 0)), R('price', `אם יסכים: ${fmtM(o.saved)} פחות`, o.chance * Math.max(0, disc.U))] };
+      }
+      if (o.id === 'inspect:1' || o.id === 'inspect:2') {
+        const base = Math.max(0, best ? best.U : 0); const evi2 = best ? best.evi2 : 0;
+        const U = o.id === 'inspect:1' ? base + 0.7 * evi2 - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : base + evi2 - (o.cost ? o.cost.cash || 0 : 0) / E;
+        const k = d.dd ? d.dd.flags.filter((f) => f.kind === 'warn').length : 0;
+        reasons.push(R('evi', evi2 > 0.3 ? 'העסקה גבולית: בדיקה שווה יותר ממה שהיא עולה' : 'הבדיקה כנראה לא תשנה את ההחלטה', evi2 - 0.1));
+        if (k) reasons.push(R('flags', `יש ${k} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
+        return { U, flags: [], reasons };
+      }
+      return { U: 0, flags: [], reasons: [R('net', best && best.U > 0 ? 'לוותר זה לוותר גם על התזרים שהעסקה מביאה' : 'העסקה לא מוסיפה כסף לפי מה שידוע — לוותר לא עולה כלום', best && best.U > 0 ? -best.U : 0.3)] };
+    }
     case 'doodad':
-      if (o.id === 'pay' || o.id === 'inst3') { money = -d.amount; if (!d.need) hap = Math.min(16, Math.max(4, d.amount / E * 8)); }
-      if (o.id === 'credit') { money = -d.amount - (d.installment || 0) * 24; flags.push('debt'); if (!d.need) hap = Math.min(16, Math.max(4, d.amount / E * 8)); }
-      if (o.id === 'sub') { money = -(d.sub || 0) * 24; hap = 4; }
+      if (o.id === 'pay' || o.id === 'inst3') { money = -d.amount; if (!d.need) { hap = Math.min(16, Math.max(4, d.amount / E * 8)); hapW = 0.4; } } // a toy's joy is glow: it fades
+      if (o.id === 'credit') { money = -d.amount - (d.installment || 0) * 24; flags.push('debt'); if (!d.need) { hap = Math.min(16, Math.max(4, d.amount / E * 8)); hapW = 0.4; } reasons.push(R('debt', `ריבית ${ctx.creditPct}% בחודש — והחוב עצמו לא קטן`, -(d.installment || 0) * 24 / E)); }
+      if (o.id === 'sub') { money = -(d.sub || 0) * 24; hap = 4; reasons.push(R('net', `${fmtM(d.sub || 0)} בחודש, כל עוד המנוי פעיל`, -(d.sub || 0) * 24 / E)); }
+      if (o.id === 'skip') reasons.push(R('net', `לוותר שומר ${fmtM(d.amount)} — כסף לנכס הבא`, d.amount / E));
       if (o.id === 'pay' && d.shortfall) flags.push('noCushion');
+      if (o.id === 'pay' || o.id === 'inst3') reasons.push(R('cushion', `אחרי זה תישאר כרית של ${round2(Math.max(0, cashAfter(-d.amount))).toFixed(1)} חודשים`, cashAfter(-d.amount) < 1 ? -1 : 0.05));
       break;
     case 'trade': {
       const qty = Math.floor(Number(params && params.qty)) || 0; const cost = qty * (d.price || 0);
-      if (o.id === 'buy' && d.kind === 'crypto') { money = -0.124 * cost; flags.push('gamble'); if (cost > 0.1 * Math.max(1, netWorthOf(st))) flags.push('concentrated'); }
+      if (o.id === 'buy' && d.kind === 'crypto') { money = -0.124 * cost; flags.push('gamble'); if (cost > 0.1 * Math.max(1, ctx.netWorth)) flags.push('concentrated'); }
       if (o.id === 'buy' && cashAfter(-cost) < 1) flags.push('noCushion');
-      if (o.id === 'sell' && d.ticker === 'IDX' && d.avg > d.price && st.prices.IDX <= (st.life.idxPeak || st.prices.IDX) * 0.92) flags.push('panicSell');
+      if (o.id === 'sell' && d.ticker === 'IDX' && d.avg > d.price && ctx.idxPrice <= (ctx.idxPeak || ctx.idxPrice) * 0.92) flags.push('panicSell');
       if (o.id === 'auto:on') money = 0.5 * E;
       break; }
     case 'market':
-      if (o.kind === 'sell') { const off = (d.offers || []).find((x) => 'sell:' + x.assetId.slice(1) === o.id); const a = off && st.assets.find((x) => 'a' + x.id === off.assetId); if (off && a) money = off.net - (assetValue(st, a) - a.debt) - Math.max(0, off.cf) * 48; }
+      if (o.kind === 'sell') { const off = (d.offers || []).find((x) => 'sell:' + x.assetId.slice(1) === o.id); if (off) money = off.net - (off.equity ?? off.net) - Math.max(0, off.cf) * (ctx.goalType === 'passive' ? 80 : 48); } // in a passive-income world the lost cashflow IS the goal
       break;
-    case 'bank': if (o.id === 'refi') money = ((W(st).rate.lockBelow || d.fixedRate) - d.fixedRate) * (d.variableDebt || 0) / 1200 * 24 - (d.refiFee || 0); if (o.id === 'prepay' && cashAfter(-50000) < 1) flags.push('noCushion'); break;
-    case 'upgrade': if (o.kind === 'buy') { money = (o.net || 0) * 24 - (o.payback ? o.payback * Math.max(1, o.net) : 0) + (o.net || 0) * 0; const cost = o.payback ? o.payback * Math.max(1, o.net) : 0; money = (o.net || 0) * 24 - cost; } break;
-    case 'pitch': if (o.id.startsWith('inv:')) { const amt = d.checks[+o.id.split(':')[1]]; const ev1 = pitchEV(st, { team: d.team, traction: d.traction, hype: d.hype }); const nw = Math.max(1, netWorthOf(st)); money = amt * (ev1 - 1) - 0.6 * amt * Math.min(1, 5 * amt / nw); if (amt > 0.15 * nw) flags.push('concentrated'); if (ev1 < 1) flags.push('gamble'); } break;
-    case 'life': { const e = o.effects || {}; money = (e.cash || 0) - (e.monthly || 0) * (e.months || 24) + (e.salary || 0) * (e.months || 24); hap = e.happiness || 0; if (o.loanAmount) flags.push('noCushion'); break; }
+    case 'bank': if (o.id === 'refi') money = ((getWorld(ctx.worldId).rate.lockBelow || d.fixedRate) - d.fixedRate) * (d.variableDebt || 0) / 1200 * 24 - (d.refiFee || 0); if (o.id === 'prepay' && cashAfter(-50000) < 1) flags.push('noCushion'); break;
+    case 'upgrade': if (o.kind === 'buy') { const cost = o.payback ? o.payback * Math.max(1, o.net) : 0; money = (o.net || 0) * 24 - cost; } break;
+    case 'pitch': if (o.id.startsWith('inv:')) { const amt = d.checks[+o.id.split(':')[1]]; const ev1 = pitchEV(ctx.worldId, { team: d.team, traction: d.traction, hype: d.hype }); const nw = Math.max(1, ctx.netWorth); money = amt * (ev1 - 1) - 0.6 * amt * Math.min(1, 5 * amt / nw); if (amt > 0.15 * nw) flags.push('concentrated'); if (ev1 < 1) flags.push('gamble'); } break;
+    case 'life': {
+      const e = o.effects || {}; const months = e.months || 24;
+      money = (e.cash || 0) - (e.monthly || 0) * months + (e.salary || 0) * months - 0.35 * (e.risk || 0);
+      money += energyValue(ctx.energy, e.energy || 0) * E;
+      if (e.study && !ctx.study.done) money += LIFE_CFG.studyRaise * ctx.baseNet * 24 / ctx.study.need * e.study;
+      hap = e.happiness || 0;
+      if (o.loanAmount || (e.risk && e.risk > ctx.cash + ctx.savings)) flags.push('noCushion');
+      if (e.cash || e.monthly) reasons.push(R('net', `${sgn(e.cash || 0)} עכשיו${e.monthly ? ` ו־${sgn(-e.monthly)} בחודש` : ''}`, ((e.cash || 0) - (e.monthly || 0) * months) / E));
+      if (e.energy) reasons.push(R('energy', `${e.energy > 0 ? '+' : '−'}${Math.abs(e.energy)} 🔋 — ${ctx.energy < 55 ? 'חשוב' : 'פחות חשוב'} כשאתה ${ctx.energy < 55 ? 'עייף' : 'רענן'}`, energyValue(ctx.energy, e.energy)));
+      if (e.study && !ctx.study.done) reasons.push(R('study', 'מקרב את סוף הלימודים (+20% ברוטו בסוף)', 0.5));
+      if (e.risk) reasons.push(R('risk', `סיכוי 35% לאבד ${fmtM(e.risk)}`, -0.35 * e.risk / E));
+      if (hap) reasons.push(R('happy', `${hap > 0 ? '+' : '−'}${Math.abs(hap)} 😊`, happinessValue(ctx.happyBase ?? ctx.happiness, hap)));
+      break; }
     case 'payday': case 'edu':
       if (o.kind === 'plan') {
         const e = o.effects || {}; money = e.netDelta || 0; hap = e.happiness || 0;
-        if (st.life.energy + (e.energy || 0) < 25) flags.push('burnout');
-        money += (e.energy || 0) * E * (st.life.energy < 60 ? 0.02 : 0.005); // energy is worth more when you are tired
-        if (o.plan === 'study' && !st.life.study.done) money += LIFE_CFG.studyRaise * baseNet(st) * 24 / st.life.study.need; // human capital
+        if (ctx.energy + (e.energy || 0) < 25) flags.push('burnout');
+        money += energyValue(ctx.energy, e.energy || 0) * E; // energy is worth more when you are tired
+        if (o.plan === 'study' && !ctx.study.done) { money += LIFE_CFG.studyRaise * ctx.baseNet * 24 / ctx.study.need; reasons.push(R('study', 'מקרב את סוף הלימודים (+20% ברוטו בסוף)', LIFE_CFG.studyRaise * ctx.baseNet * 24 / ctx.study.need / E)); }
+        if (e.netDelta) reasons.push(R('net', `${sgn(e.netDelta)} בחודש ביד`, e.netDelta / E));
+        if (e.energy) reasons.push(R('energy', `${e.energy > 0 ? '+' : '−'}${Math.abs(e.energy)} 🔋 — ${ctx.energy < 55 ? 'חשוב' : 'פחות חשוב'} כשאתה ${ctx.energy < 55 ? 'עייף' : 'רענן'}`, energyValue(ctx.energy, e.energy || 0)));
       }
-      if (o.id === 'raise') money = (o.chance || 0) * baseNet(st) * 0.06 * 24 - (1 - (o.chance || 0)) * 0.15 * E;
-      if (o.id === 'save') money = emergencyOf(st, E).months < 3 ? E : 0;
-      if (o.id === 'course') money = 0.5 * E;
+      if (o.id === 'raise') money = (o.chance || 0) * ctx.baseNet * 0.06 * 24 - (1 - (o.chance || 0)) * 0.15 * E;
+      if (o.id === 'save') money = ctx.fundMonths < 3 ? E : 0;
+      if (o.id === 'course') money = (ctx.study.done ? 0 : LIFE_CFG.studyRaise * ctx.baseNet * 24 / ctx.study.need * 2) + ((o.effects && o.effects.cash) || 0) + energyValue(ctx.energy, -4) * E;
       break;
     case 'business':
-      if (o.id === 'start') { money = (o.net || 0) * 24 - 0.6 * d.startCapital * Math.min(1, 5 * d.startCapital / Math.max(1, netWorthOf(st))); if (o.loanAmount) flags.push('debt'); }
-      else if (o.kind === 'biz' && o.effects) money = (o.effects.delta3 || 0) * 8;
+      if (o.id === 'start') { money = (o.net || 0) * 24 - 0.6 * d.startCapital * Math.min(1, 5 * d.startCapital / Math.max(1, ctx.netWorth)) - (d.ownerEnergy || 0) * 12 * 0.012 * E; if (o.loanAmount) flags.push('debt'); /* owner-run: a second job that costs 🔋 every month */ const cu = cushionCheck(ctx, -d.startCapital, o.loanAmount, 0); if (cu.flagged) flags.push('noCushion'); }
+      else if (o.kind === 'biz' && o.effects) { money = (o.effects.delta3 || 0) * 8; reasons.push(R('net', `תחזית ל־3 חודשים: ${sgn(o.effects.delta3 || 0)} רווח בעסק`, money / E)); }
       break;
-    case 'tax': if (o.id === 'report') money = 0.5 * E; break;
-    case 'mystery': if (d.kind === 'quiz') money = o.id === 'a' + ((W(st).mystery.find((x) => x.kind === 'quiz' && x.text === d.question) || {}).correct) ? E : 0; break;
+    case 'tax': if (o.id === 'report') { money = (o.saving ?? 0.5 * E) - (o.fee || 0) * 12; reasons.push(R('net', `חוסך קנס של בערך ${fmtM(o.saving || 0)} בשנה${o.fee ? `, עולה ${fmtM(o.fee * 12)} בשנה` : ''}`, money / E)); } break;
+    case 'mystery': if (d.kind === 'quiz') money = o.id === 'a' + ((getWorld(ctx.worldId).mystery.find((x) => x.kind === 'quiz' && x.text === d.question) || {}).correct) ? E : 0; break;
     default: break;
   }
-  const pen = { noCushion: 4, dsr: 3, gamble: 3, panicSell: 3, concentrated: 2, burnout: 3, debt: 0 };
-  const U = money / E + hap * 0.05 - flags.reduce((a, f) => a + (pen[f] || 0), 0);
-  return { U, flags };
+  const U = money / E + (hap ? hapW * happinessValue(ctx.happyBase ?? ctx.happiness, hap) : 0) - flags.reduce((a, f) => a + (DQ_PEN[f] || 0), 0);
+  if (flags.includes('noCushion') && !reasons.some((r) => r.key === 'cushion')) reasons.push(R('cushion', 'אחרי זה כמעט לא תישאר כרית', -4));
+  for (const f of flags) if (['gamble', 'concentrated', 'panicSell', 'burnout', 'dsr'].includes(f)) reasons.push(R('risk', DQ_WHY[f], -(DQ_PEN[f] || 1)));
+  if (!reasons.length) reasons.push(R('net', Math.abs(money) < 0.05 * E ? 'בלי השפעה כספית גדולה לפי מה שידוע' : `לפי מה שידוע: ${money > 0 ? 'מוסיף' : 'עולה'} בערך ${fmtM(Math.abs(Math.round(money / 10) * 10))} לאורך שנתיים`, money / E));
+  return { U, flags, reasons };
 }
-function decisionRecord(st, ev, o, params) {
-  if (!st.life || ev.auto) return null;
+/** Which options form the decision pool (null = not a scored decision). o = the chosen option (null: for primary/hints). */
+function scorePool(ev, o) {
+  if (!ev || ev.auto) return null;
   const en = ev.options.filter((x) => x.enabled);
-  if (en.length < 2 || (ev.type === 'trade' && o.id === 'done') || (ev.type === 'business' && o.id === 'ok') || ev.type === 'crisis' || ev.type === 'giving' || ev.type === 'shipping' || (ev.type === 'market' && !ev.options.some((x) => x.kind === 'sell'))) return null;
-  const E = Math.max(1, expensesOf(st));
-  const qtyFor = (x) => (x.id === o.id ? params : x.needsQty ? { qty: 1 } : undefined);
+  if (en.length < 2 || ['crisis', 'giving', 'shipping'].includes(ev.type)) return null;
+  if (ev.type === 'trade' && (!o || o.id === 'done')) return null;
+  if (ev.type === 'business' && o && o.id === 'ok') return null;
+  if (ev.type === 'market' && !ev.options.some((x) => x.kind === 'sell')) return null;
   // the monthly plan is compared with the other plans only; saving / asking for a raise / a course are good habits on their own
-  const pool = (ev.type === 'payday' || ev.type === 'edu') ? (o.kind === 'plan' ? en.filter((x) => x.kind === 'plan') : [o]) : en;
-  const us = pool.map((x) => ({ id: x.id, ...optionU(st, ev, x, qtyFor(x), E) }));
+  if (ev.type === 'payday' || ev.type === 'edu') return (!o || o.kind === 'plan') ? en.filter((x) => x.kind === 'plan') : [o];
+  return en;
+}
+/**
+ * Score every option of the decision pool from public information only: [{id, U, flags, reasons}] (U in months of
+ * expenses). [] when the event is not a scored decision (trade window, crisis, auto card…). Pure: never mutates st.
+ */
+export function scoreOptions(st, ev) {
+  ev = ev || currentEvent(st);
+  const pool = scorePool(ev, null); if (!pool) return [];
+  const ctx = pubCtx(st);
+  return pool.map((x) => { const u = optionU(ctx, ev, x, x.needsQty ? { qty: 1 } : undefined); return { id: x.id, U: u.U, flags: u.flags, reasons: u.reasons }; });
+}
+/** guide-level primary from the scores: argmax; within 0.1 of the top, closing options first, then the card's own default. */
+function primaryFromScores(ev, sc) {
+  const best = Math.max(...sc.map((x) => x.U));
+  const cand = sc.filter((x) => x.U >= best - 0.1);
+  const closing = cand.filter((x) => !NON_CLOSING.test(x.id));
+  const set = closing.length ? closing : cand;
+  const legacy = set.find((x) => (ev.options.find((y) => y.id === x.id) || {}).primary) || set.find((x) => SAFE_IDS.includes(x.id)); // the card's default, else the safe "continue"
+  return (legacy || set.slice().sort((a, b) => b.U - a.U)[0]).id;
+}
+const NON_CLOSING = /^(inspect:|offer:|biz:(?!sell)|sell:|auto:|report$)/;
+function decisionRecord(st, ev, o, params) {
+  if (!st.life) return null;
+  const pool = scorePool(ev, o); if (!pool) return null;
+  const ctx = pubCtx(st);
+  const qtyFor = (x) => (x.id === o.id ? params : x.needsQty ? { qty: 1 } : undefined);
+  const us = pool.map((x) => ({ id: x.id, ...optionU(ctx, ev, x, qtyFor(x)) }));
   const mine = us.find((x) => x.id === o.id) || { U: 0, flags: [] };
   const best = us.reduce((a, b) => (b.U > a.U ? b : a)); const worst = us.reduce((a, b) => (b.U < a.U ? b : a));
   const personal = ev.type === 'life' && ev.data.personal; // life choices (kids, wedding, family, friends): no "right answer" — only risk flags count
+  const values = ev.type === 'life' && ev.data.values;     // lifestyle trade-offs (car, health): a wide band
   let score = personal || best.U - worst.U < 0.5 || best.U - mine.U < 0.5 ? 100 : Math.round(100 * clamp((mine.U - worst.U) / (best.U - worst.U), 0, 1));
+  if (values) score = best.U - mine.U <= 1.5 ? 100 : mine.flags.length ? score : Math.max(60, score);
   if (personal && mine.flags.length) score = 50;
   const verdict = mine.flags.some((f) => f !== 'debt') ? 'risky' : score >= 85 ? 'strong' : score >= 60 ? 'ok' : score < 40 ? 'costly' : 'mixed';
-  const why = mine.flags.find((f) => f !== 'debt') ? DQ_WHY[mine.flags.find((f) => f !== 'debt')] : best.U - worst.U < 0.5 ? DQ_WHY.near : mine === best ? DQ_WHY.best : `היה עדיף: ${(ev.options.find((x) => x.id === best.id) || {}).label || ''}`.slice(0, 60);
+  const bestOpt = ev.options.find((x) => x.id === best.id) || {};
+  const why = mine.flags.find((f) => f !== 'debt') ? DQ_WHY[mine.flags.find((f) => f !== 'debt')] : values ? DQ_WHY.values : best.U - worst.U < 0.5 ? DQ_WHY.near : mine === best || best.U - mine.U < 0.5 ? DQ_WHY.best
+    : /^inspect:/.test(best.id) ? DQ_WHY.inspectFirst : `היה עדיף: ${bestOpt.label || ''}`.slice(0, 60);
   const pr = [...(DQ_PRINC[ev.type] || [])];
   if (mine.flags.includes('noCushion')) pr.push('cushion');
   if (mine.flags.includes('debt') || o.loanAmount) pr.push('debt_cost');
   if (mine.flags.includes('panicSell') || (ev.type === 'trade' && ev.data.ticker === 'IDX')) pr.push('time_in_market');
   if (ev.type === 'bank' || o.id === 'buyVar' || o.id === 'buyFix') pr.push('rate_risk');
-  return { t: st.turn, m: st.month, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U) };
+  if (/^inspect:/.test(o.id) || (ev.data.dd && ev.data.dd.level === 0 && o.kind === 'buy')) pr.push('knowledge');
+  const rec = { t: st.turn, m: st.month, k: (st.actions || []).length, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) };
+  if (st.pending && st.pending.hinted) rec.h = 1;
+  return rec;
 }
 function recordDecision(st, r, out) {
-  const D = (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0 } });
+  const D = dqOf(st);
   D.decisions.push(r); if (D.decisions.length > 120) D.decisions.shift();
   D.sum += r.s; D.n++;
   for (const p of r.p) { const m = D.mastery[p] || { v: 0.5, n: 0 }; m.v = round2(m.n ? m.v * 0.7 + 0.3 * r.s / 100 : r.s / 100); m.n++; D.mastery[p] = m; }
-  out.decision = { score: r.s, verdict: r.v, why: r.why, principles: r.p };
+  if (st.mentor !== 'pro') out.decision = { score: r.s, verdict: r.v, why: r.why, principles: r.p }; // pro: the verdict waits for the end-of-game review
 }
-const dqOf = (st) => (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0 } });
+const dqOf = (st) => (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0, dd: 0, cycle: 0 }, hints: 0, levelChanges: [] });
 function addLuck(st, part, amount) { const D = dqOf(st); D.luck[part] = Math.round((D.luck[part] || 0) + amount); }
 /** checkEnd's learning block: decision quality, luck, mastery per principle. */
 function learningOf(st) {
@@ -2068,7 +2492,12 @@ function learningOf(st) {
     : q >= 75 ? 'החלטות טובות — וגם המזל לא הפריע. ככה בונים הצלחה שחוזרת על עצמה.'
     : luck.total > 0 ? 'המזל עזר לך יותר מההחלטות. בפעם הבאה: לבדוק תזרים, כרית וחוב לפני כל קנייה.'
     : 'יש מקום לשפר את ההחלטות: תסתכל על הכרית, על עלות החוב ועל מה שכל נכס מכניס באמת.';
-  return { decisionQuality: q, decisions: D.n, verdicts: counts, principles, luck, top, sentence: gz(st, sentence) };
+  // T2 §5.6: hints, with/without-hint quality, level changes, the decision-by-decision review (all levels; pro shows it by default)
+  const grp = (xs) => ({ n: xs.length, avg: xs.length ? Math.round(xs.reduce((a, r) => a + r.s, 0) / xs.length) : null });
+  const byHint = { withHint: grp(D.decisions.filter((r) => r.h)), without: grp(D.decisions.filter((r) => !r.h)) };
+  const review = D.decisions.slice(-40).map((r) => ({ t: r.t, m: r.m, c: r.c, o: r.o, score: r.s, verdict: r.v, why: r.why, best: r.b || null, hinted: !!r.h, type: r.type }));
+  return { decisionQuality: q, decisions: D.n, verdicts: counts, principles, luck, top, sentence: gz(st, sentence),
+    mentor: st.mentor || 'guide', hints: D.hints || 0, byHint, levelChanges: (D.levelChanges || []).slice(), review };
 }
 
 /* ---------------------------------------------------------------- v3 choose helpers */
@@ -2242,14 +2671,25 @@ const CHOOSE = {
   },
 
   deal(st, p, o, params, out) {
-    if (o.id.startsWith('offer:')) return negotiate(st, p, +o.id.slice(6), o, out);
+    const c = p.card; const qAfter = () => { if (st.mentor !== 'guide' && c.q) out.mentor = (c.q + ' ' + (out.mentor || '')).trim(); }; // §7.5: the trap question comes back as reflection
+    if (o.id === 'inspect:1' || o.id === 'inspect:2') { inspect(st, p, o, out); return false; }
+    if (o.id.startsWith('offer:')) { const closed = negotiate(st, p, +o.id.slice(6), o, out); if (closed) qAfter(); return closed; }
     if (o.id === 'pass') {
-      const c = p.card; const cf = assetCf(st, { k: c.k, noi: c.noi, cf: c.cf, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd });
+      const cf = assetCf(st, { k: c.k, noi: c.noi, cf: c.cf, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd });
       out.mentor = mentorLine(st, cf < 0 ? 'passBad' : cf === 0 ? 'passZero' : 'passGood', {});
+      if (R4(st) && p.dd && !p.dd.starter) {
+        st.stats.ddPassed++;
+        // the truth of a passed deal stays sealed during play; it only feeds the stats (and a possible achievement)
+        const first = (describe(st).options || []).find((x) => x.kind === 'buy'); const lm = first ? first.loanMonthly : 0;
+        const t = ddTruthOf(c, p.dd); const cfT = assetCf(st, c.noi != null ? { k: c.k, noi: t.base, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd } : { k: c.k, cf: t.base, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd });
+        if (p.dd.level >= 1 && cfT - lm <= 0 && cf - lm > 0) st.stats.ddAvoided++;
+      }
       ach(st, out, 'pass', { cf, golden: p.golden });
+      qAfter();
       return true;
     }
     buyAsset(st, p, out, o);
+    qAfter();
     return true;
   },
 
@@ -2483,7 +2923,7 @@ const CHOOSE = {
     const L = loanFor(st, amt); if (L.need) { st.loans += L.need; st.cash += L.need; }
     st.cash -= amt;
     const h = p.hidden;
-    const x = { id: st.nextId++, n: p.card.n, sector: p.card.sector, amount: amt, paper: amt, mult: h.mult, revealAt: st.month + h.revealIn, signalAt: st.month + h.signalIn, signalMult: h.signalMult, status: 'active', month: st.month, cpi: st.life.cpi, ev: round2(pitchEV(st, p.card)) };
+    const x = { id: st.nextId++, n: p.card.n, sector: p.card.sector, amount: amt, paper: amt, mult: h.mult, revealAt: st.month + h.revealIn, signalAt: st.month + h.signalIn, signalMult: h.signalMult, status: 'active', month: st.month, cpi: st.life.cpi, ev: round2(pitchEV(st.worldId, p.card)) };
     st.angels.push(x); st.stats.angels++;
     out.spawn.push({ assetId: 'v' + x.id, key: 'v' + x.id, model: w.models.angel, label: x.n, color: 'blue' });
     cashFx(out, -amt); sound(out, 'buy');
@@ -2624,6 +3064,322 @@ export function invest(st, side, qty) {
   return { ...out, event: null, end: endIfIdle(st, out) };
 }
 
+/* ============================================================ T2: monthly focus, hints, mentor level, public view */
+const MEDIAN_DOWN = new Map();
+/** Median down payment of a world's deal deck (public static data) — "can you afford a typical deal?". */
+function medianDown(worldId) {
+  if (MEDIAN_DOWN.has(worldId)) return MEDIAN_DOWN.get(worldId);
+  const xs = (getWorld(worldId).deals || []).filter((c) => c.down != null && !c.tk && !c.crypto).map((c) => c.down).sort((a, b) => a - b);
+  const v = xs.length ? xs[Math.floor(xs.length / 2)] : 0; MEDIAN_DOWN.set(worldId, v); return v;
+}
+const loanRoomOf = (st) => { const cap = loanCap(st); return Number.isFinite(cap) ? Math.max(0, cap - st.loans) : 0; };
+const frugalTarget = (st) => { const subs = st.subs.slice().sort((a, b) => b.amount - a.amount); if (subs.length) return { sub: subs[0] }; const xs = st.expenses.filter(FC.frugalEligible).sort((a, b) => b.amount - a.amount); return xs.length ? { line: xs[0] } : null; };
+/** Why a focus cannot be activated now (null = it can). */
+function focusDisabled(st, id) {
+  const L = st.life; const F = FC.FOCUS[id];
+  if (!F) return 'אין מוקד כזה';
+  if (id === 'none') return null;
+  if (id === 'research' && (st.history || !st.econ)) return FC.FOCUS_REASON.history;
+  if (L.energy < F.minEnergy) return FC.FOCUS_REASON.tired;
+  if (id === 'debt' && !st.loans && !st.credit) return FC.FOCUS_REASON.noDebt;
+  if (id === 'ops') { const bs = managedOf(st); if (!bs.length) return FC.FOCUS_REASON.noBiz; if (!bs.some((a) => BIZ.canDecide(a.biz))) return FC.FOCUS_REASON.bizRecent; }
+  if (id === 'frugal' && !frugalTarget(st)) return FC.FOCUS_REASON.noCut;
+  return null;
+}
+/** Deal / mystery tiles within 2..12 steps (public board geometry). */
+function dealTilesAhead(st) { const w = W(st); let n = 0; for (let k = 2; k <= 12; k++) { const t = w.tiles[w.board[(st.pos + k) % w.board.length]].type; if (t === 'deal' || t === 'mystery') n++; } return n; }
+/** Pay for a focus and apply its immediate part (§6.2). */
+function activateFocus(st, id, out, o = {}) {
+  const L = st.life; const F = FC.FOCUS[id]; const C = FC.focusCfg(st.worldId);
+  L.energy = clamp(L.energy - F.cost.energy, 0, 100); L.happiness = clamp(L.happiness - F.cost.happiness, 0, 100);
+  L.focus = { id, m: st.month, opsOpen: false, opsUsed: false };
+  L.focusMonths[id] = (L.focusMonths[id] || 0) + 1;
+  if (id === 'debt') {
+    const fee = FC.debtFee(st.worldId, st.loans, st.credit); st.cash -= fee; cashFx(out, -fee, `עמלת איחוד חובות ${fmtM(fee)}`);
+    const room = Number.isFinite(loanCap(st)) ? Math.max(0, loanCap(st) - st.loans) : st.credit;
+    const move = Math.min(st.credit, room);
+    if (move > 0) { st.credit -= move; st.loans += move; st.stats.maxLoans = Math.max(st.stats.maxLoans, st.loans); }
+    L.debtDeal = { until: st.month + C.debtMonths - 1, adj: C.debtAdj };
+    if (!L.debtBonus) { L.debtBonus = true; creditScore(st, C.debtCredit); }
+    out.news.push({ kind: 'focus', text: `סידרת את החובות: ${move > 0 ? `${fmtM(move)} מחוב האשראי עברו להלוואה, ` : ''}הריבית על ההלוואה יורדת ב־${Math.abs(C.debtAdj)}% בחודש עד חודש ${L.debtDeal.until}.` });
+    ensureCash(st, out, 'focus');
+  } else if (id === 'frugal') {
+    L.frugalCuts = Math.min(C.frugalMaxCuts, (L.frugalCuts || 0) + 1);
+    const t = frugalTarget(st);
+    if (t && t.sub) { st.subs = st.subs.filter((x) => x !== t.sub); out.news.push({ kind: 'focus', text: `ביטלת את המנוי "${t.sub.label}": ${fmtM(t.sub.amount)} פחות בחודש — לתמיד.` }); }
+    else if (t && t.line) { const cut = r10(t.line.amount * C.frugalCut); t.line.amount -= cut; t.line.audited = true; out.news.push({ kind: 'focus', text: `קיצצת את "${t.line.label}" ב־${fmtM(cut)} בחודש — לתמיד.` }); }
+    lesson(st, out, 'lifestyle_creep');
+  } else if (id === 'research') {
+    if (st.econ) st.econ.sharpUntil = st.month + C.researchMonths - 1;
+  } else if (id === 'ops') {
+    if (o.fromAgenda || st.pending || st.phase !== 'roll') L.focus.opsOpen = true; else { openOps(st); L.focus.opsUsed = true; }
+  }
+}
+/** ops focus: the business panel opens now, as a pending card with NO draw (the pawn does not move; closing returns to 'roll'). */
+function openOps(st) {
+  const a = managedOf(st).filter((x) => BIZ.canDecide(x.biz)).sort((x, y) => (x.biz.lastDecisionMonth ?? -1) - (y.biz.lastDecisionMonth ?? -1))[0] || managedOf(st)[0];
+  st.pending = { type: 'business', mode: 'manage', assetId: a.id, source: 'focus', id: st.nextEventId++, tile: 'K', pos: st.pos, month: st.month };
+  st.phase = 'event';
+}
+/** guide only: the focus the mentor would pick (§6.4). */
+function focusSuggest(st) {
+  const L = st.life; const ok = (id) => !focusDisabled(st, id);
+  if (L.energy < 45) return 'none';
+  if (st.credit > 0 && ok('debt')) return 'debt';
+  if (managedOf(st).some((a) => BIZ.canDecide(a.biz)) && ok('ops')) return 'ops';
+  if (st.subs.length && ok('frugal')) return 'frugal';
+  if (L.energy >= 60 && dealTilesAhead(st) >= 3 && st.cash + loanRoomOf(st) >= medianDown(st.worldId) && ok('scout')) return 'scout'; // tuning: only with 🔋 to spare and deals in reach
+  if (st.econ && st.econ.lc != null && st.month - st.econ.lc <= 2 && ok('research')) return 'research';
+  return 'none';
+}
+/** The focus picker payload (metrics().focus, payday/edu ev.data.focus). null in rules-3 games. */
+function focusBlock(st) {
+  if (!R4(st) || !st.life || !st.life.focus) return null;
+  const L = st.life; const sug = st.mentor === 'guide' ? focusSuggest(st) : null;
+  const options = FC.FOCUS_IDS.map((id) => {
+    const F = FC.FOCUS[id]; const why = focusDisabled(st, id);
+    const o = { id, icon: F.icon, label: F.label, desc: F.desc, cost: { energy: F.cost.energy, happiness: F.cost.happiness, cash: id === 'debt' && (st.loans || st.credit) ? FC.debtFee(st.worldId, st.loans, st.credit) : 0 },
+      benefit: F.benefit, notBest: F.notBest, enabled: !why, reason: why || undefined };
+    if (sug === id) o.suggested = true;
+    return o;
+  });
+  return { current: { id: L.focus.id, label: FC.FOCUS[L.focus.id].label, m: L.focus.m }, locked: L.focus.id !== 'none' || !!L.focus.locked,
+    opsOpen: !!(L.focus.opsOpen && !L.focus.opsUsed), agenda: [1, 2].map((slot) => ({ slot, id: L.agenda[slot - 1] || null, label: L.agenda[slot - 1] ? FC.FOCUS[L.agenda[slot - 1]].label : null })),
+    options, text: mentorLine(st, 'focusAsk', {}) };
+}
+/** §10.7 focus scoring: flags only (future cards make precise values fake precision). */
+function focusDecision(st, id, energyAfter) {
+  const L = st.life; const flags = [];
+  if (energyAfter < 25) flags.push('burnout');
+  let noUse = false;
+  if (id === 'scout') noUse = st.cash + loanRoomOf(st) < medianDown(st.worldId);
+  if (id === 'debt') noUse = st.loans + st.credit < 20 * FC.debtFee(st.worldId, st.loans, st.credit);
+  if (id === 'network') noUse = !raiseEligible(st) && dealTilesAhead(st) < 2;
+  if (id === 'research') noUse = st.maxMonths - st.month < 6;
+  if (noUse) flags.push('noUse');
+  const s = flags.length ? 60 : 100;
+  const rec = { t: st.turn, m: st.month, k: Math.max(0, (st.actions || []).length - 1), type: 'focus', c: 'מוקד החודש', o: id, s, v: flags.length ? 'mixed' : 'strong', f: flags, p: ['time'], why: flags.length ? DQ_WHY[flags[0]] : DQ_WHY.best, gap: flags.length ? 1 : 0, b: FC.FOCUS[id].label };
+  return rec;
+}
+/**
+ * Choose the monthly focus. slot 0 = activate for the current month (between rolls, or on the payday / education card),
+ * paid now from 🔋 (and ₪ for debt); one per month — `none` locks the month. slot 1/2 = the agenda for the next paydays (free).
+ * Logged as ['F', id, slot] whenever it changes state. Rules 4 only.
+ */
+export function setFocus(st, id, slot = 0) {
+  if (st.over) throw new Error('game over');
+  const out = newOut(); const fail = (error) => ({ ...out, ok: false, error, event: currentEvent(st), focus: focusBlock(st), end: null });
+  if (!R4(st) || !st.life || !st.life.focus) return fail('המוקד החודשי לא זמין במשחק הזה');
+  if (!FC.FOCUS[id]) return fail('אין מוקד כזה');
+  const L = st.life; slot = Number(slot) || 0;
+  if (slot === 1 || slot === 2) {
+    const v = id === 'none' ? null : id;
+    if (L.agenda[slot - 1] !== v) { act(st, ['F', id, slot]); L.agenda[slot - 1] = v; }
+    return { ...out, event: currentEvent(st), focus: focusBlock(st), end: null };
+  }
+  if (slot !== 0) return fail('אין מוקד כזה');
+  if (id === 'ops' && L.focus.id === 'ops' && L.focus.opsOpen && !L.focus.opsUsed) { // an ops focus from the agenda: open the panel once, between rolls
+    if (st.pending || st.phase !== 'roll') return fail('אפשר לפתוח את לוח העסק בין התורות');
+    if (focusDisabled(st, 'ops')) return fail(focusDisabled(st, 'ops'));
+    act(st, ['F', id, 0]); openOps(st); L.focus.opsUsed = true;
+    return { ...out, event: currentEvent(st), focus: focusBlock(st), end: null };
+  }
+  if (L.focus.id !== 'none' || L.focus.locked) return fail(FC.FOCUS_REASON.locked);
+  const when = (st.phase === 'roll' && !st.pending) || (st.pending && (st.pending.type === 'payday' || st.pending.type === 'edu'));
+  if (!when) return fail('אפשר לבחור מוקד בין התורות או בכרטיס המשכורת');
+  const why = focusDisabled(st, id); if (why) return fail(why);
+  act(st, ['F', id, 0]);
+  if (id === 'none') { L.focus = { id: 'none', m: st.month, opsOpen: false, opsUsed: false, locked: true }; L.focusMonths.none++; }
+  else {
+    const rec = focusDecision(st, id, L.energy - FC.FOCUS[id].cost.energy);
+    activateFocus(st, id, out, {});
+    recordDecision(st, rec, out); if (out.decision) out.decision.type = 'focus';
+  }
+  out.mentor = gz(st, out.mentor);
+  return { ...out, event: currentEvent(st), focus: focusBlock(st), end: endIfIdle(st, out) };
+}
+
+/** The hint for the current event: the scorer's top option + its top-2 reasons (null option on personal / values cards). */
+function hintFor(st, ev) {
+  const sc = scoreOptions(st, ev); if (!sc.length) return null;
+  const tradeoff = ev.type === 'life' && (ev.data.personal || ev.data.values);
+  const top = sc.slice().sort((a, b) => b.U - a.U || (NON_CLOSING.test(a.id) ? 1 : 0) - (NON_CLOSING.test(b.id) ? 1 : 0))[0];
+  const pickId = tradeoff ? null : primaryFromScores(ev, sc);
+  const pick = tradeoff ? null : sc.find((x) => x.id === pickId) || top;
+  let reasons;
+  if (pick) reasons = pick.reasons.slice().sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).slice(0, 2).map((r) => r.text);
+  else reasons = sc.map((x) => { const o = ev.options.find((y) => y.id === x.id); const r = x.reasons.slice().sort((a, b) => Math.abs(b.w) - Math.abs(a.w))[0]; return `${o.label}: ${r ? r.text : 'בלי השפעה כספית גדולה'}`; }).slice(0, 3);
+  if ((ev.type === 'payday') && (st.savings || 0) / Math.max(1, expensesOf(st)) < 3) reasons.push(`שווה לבדוק גם: קרן החירום (${round2((st.savings || 0) / Math.max(1, expensesOf(st))).toFixed(1)}/3 חודשים)`);
+  const o = pick && ev.options.find((y) => y.id === pick.id);
+  return { optionId: o ? o.id : null, label: o ? gz(st, o.label) : null, reasons: reasons.map((t) => gz(st, t)), note: 'רמז לפי מה שידוע עכשיו — לא הבטחה.' };
+}
+/** §5.4 ask the mentor (guide/hint levels; counted once per event, logged as ['H']). */
+export function requestHint(st) {
+  if (st.over) throw new Error('game over');
+  const out = newOut(); const p = st.pending;
+  const fail = (error) => ({ ...out, ok: false, error, event: currentEvent(st), hintsUsed: (st.dq && st.dq.hints) || 0, end: null });
+  if ((st.mentor || 'guide') === 'pro') return fail('ברמת מומחה אין רמזים — הניתוח המלא מחכה בסוף');
+  if (!p) return fail('אין כרגע החלטה פתוחה');
+  const ev = describe(st);
+  if (ev.auto || ev.type === 'trade' || (ev.type === 'mystery' && ev.data.kind === 'quiz') || !scorePool(ev, null)) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
+  const hint = hintFor(st, ev); if (!hint) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
+  if (!p.hinted) { act(st, ['H']); p.hinted = true; dqOf(st).hints = (dqOf(st).hints || 0) + 1; }
+  return { ...out, event: ev, hint, hintsUsed: dqOf(st).hints, end: null };
+}
+/** §5.5 change the mentor level mid-game (free and history only; presentation only, no money effect). Logged as ['M', level]. */
+export function setMentorLevel(st, level) {
+  if (st.over) throw new Error('game over');
+  const out = newOut(); const fail = (error) => ({ ...out, ok: false, error, event: currentEvent(st), end: null });
+  if (!MN.LEVELS.includes(level)) return fail('אין רמה כזו');
+  if (!(st.mode === 'free' || st.mode === 'history')) return fail('בדירוג כולם משחקים באותה רמה');
+  if (st.tutorial && !st.flags.tutorialDone) return fail('אפשר לשנות רמה אחרי העסקה הראשונה');
+  if (st.mentor === level) return fail('זו כבר הרמה שלך');
+  act(st, ['M', level]);
+  dqOf(st).levelChanges.push({ m: st.month, from: st.mentor, to: level });
+  st.mentor = level;
+  return { ...out, event: currentEvent(st), mentor: MN.LEVEL_TEXT[level].label, end: null };
+}
+/** metrics().mentor */
+function mentorBlock(st) {
+  const lv = st.mentor || 'guide'; const p = st.pending;
+  // cheap (metrics() is hot): by card type; requestHint() itself is authoritative and refuses unscored cards
+  const canHint = lv !== 'pro' && !!p && !st.over && !['trade', 'crisis', 'giving', 'shipping'].includes(p.type) && !(p.type === 'market' && !(p.card && p.card.k === 'sell'))
+    && p.type !== 'mystery' && !(p.type === 'life' && p.eventId === 'reserve') && !(p.type === 'tax' && (st.life.sideReport || !(st.life.plan === 'side' || st.life.side.total > 0)));
+  return { level: lv, label: MN.LEVEL_TEXT[lv].label, hintsUsed: (st.dq && st.dq.hints) || 0, canHint };
+}
+const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); } return o; };
+/**
+ * §12.2 everything a player (or a T6 rival / a sim policy) may see — nothing sealed. Deep-frozen unless freeze:false.
+ */
+export function publicView(st, { freeze = true, event } = {}) {
+  const m = metrics(st); const L = m.life;
+  const life = { ...L, inflationLastYear: L.inflationLastYear }; delete life.inflationYear;
+  const pv = { v: st.v, worldId: st.worldId, charId: st.charId, mode: st.mode, mentor: st.mentor, rules: st.rules || 3, month: st.month, maxMonths: st.maxMonths, turn: st.turn, phase: st.phase,
+    metrics: { ...m, life }, event: event && st.pending && event.id === st.pending.id ? event : currentEvent(st), econ: CY.econPublic(st.econ, st.month), focus: m.focus, hintsUsed: (st.dq && st.dq.hints) || 0 };
+  return freeze ? deepFreeze(JSON.parse(JSON.stringify(pv))) : pv;
+}
+
+/* ============================================================ T2 §9: impact panel data (computed on demand, never in describe) */
+const IMPACT_DISCLAIMER = 'זה תרחיש לפי מה שידוע עכשיו — לא תחזית ולא הבטחה.';
+/** A throwaway copy of the state for dry runs: no history, and every sealed value replaced by its public expectation. */
+function shadowOf(st, o = {}) {
+  const { actions, log, dq, ...rest } = st;
+  const sh = JSON.parse(JSON.stringify(rest));
+  sh.actions = []; sh.log = []; sh.dq = JSON.parse(JSON.stringify({ ...dq, decisions: [] }));
+  const p = sh.pending;
+  if (p) {
+    if (p.dd && p.type === 'deal' && R4(sh) && !p.dd.starter && p.dd.level < 2) { const B = ddBasis(st, st.pending); p.dd.base = B.base; p.dd.val = B.value; p.dd.repair = B.rep; p.dd.f = 1; p.dd.vf = 1; p.dd.jitter = 0.5; p.dd.risk = 0; }
+    if (p.negR != null) p.negR = o.negR ?? 0.5;
+    if (p.raiseR != null) p.raiseR = o.raiseR ?? 0.5;
+    if (p.r != null) p.r = o.r ?? 0.5;
+    if (p.hidden) p.hidden = { mult: 1, revealIn: 99, signalIn: 99, signalMult: 1 };
+  }
+  if (sh.life) { sh.life.raiseR = 0.5; sh.life.sideSeed = 1; }
+  if (sh.world && sh.world.coin) sh.world.coin.path = sh.world.coin.path.map(() => 1);
+  return sh;
+}
+/** Apply a ref to a shadow. → the action's result (ok:false when the ref does not apply now). */
+function applyRef(sh, ref, params = {}) {
+  if (ref === 'act:loan') return takeLoan(sh, params.amount);
+  if (ref === 'act:repay') return repayLoan(sh, params.amount);
+  if (ref === 'act:payCredit') return payCredit(sh);
+  if (ref.startsWith('act:save:')) return moveSavings(sh, +ref.slice(9));
+  if (ref.startsWith('focus:')) { sh.pending = null; sh.phase = 'roll'; if (sh.life && sh.life.focus) sh.life.focus = { id: 'none', m: sh.month, opsOpen: false, opsUsed: false }; return setFocus(sh, ref.slice(6), 0); }
+  if (!sh.pending) return { ok: false };
+  try { return choose(sh, null, ref, { qty: Math.max(1, Math.floor(params.qty || 1)) }); } catch (e) { return { ok: false }; }
+}
+const monthsOf = (cash, savings, E) => round2((cash + savings) / Math.max(1, E));
+function forcedLoanOf(st, cash, savings) { const u = autoUnit(st); const x = cash + savings; return x < 0 ? Math.ceil(-x / u) * u : 0; }
+/**
+ * E.impactFor(st, ref, params?) → Impact | null. ref = an option id of the pending event | 'act:loan' | 'act:repay' |
+ * 'act:payCredit' | 'act:save:<₪>' | 'focus:<id>'. Runs the REAL engine on a sealed shadow and compares metrics before/after,
+ * so the UI does no finance math. Pure (st is never touched).
+ */
+export function impactFor(st, ref, params = {}) {
+  if (!st || st.over || typeof ref !== 'string') return null;
+  const mb = metrics(st); const Lb = st.life;
+  const ev = st.pending ? (params.event && params.event.id === st.pending.id ? params.event : currentEvent(st)) : null; const o = ev ? ev.options.find((x) => x.id === ref) : null;
+  if (!ref.startsWith('act:') && !ref.startsWith('focus:') && (!o || !o.enabled)) return null;
+  const isOffer = /^offer:/.test(ref); const isRaise = ref === 'raise'; const isChance = !!(o && o.kind === 'life' && o.chance);
+  const run = (seal) => { const sh = shadowOf(st, seal); const r = applyRef(sh, ref, params); return r && r.ok !== false ? { sh, r } : null; };
+  const main = run(isOffer || isRaise || isChance ? { negR: 0, raiseR: 0, r: 0 } : {});
+  if (!main) return null;
+  const sh = main.sh; const ma = metrics(sh); const La = sh.life;
+  const ddB = o && o.kind === 'buy' && ev.type === 'deal' && st.pending.dd && R4(st) && !st.pending.dd.starter ? ddBasis(st, st.pending) : null;
+  const bizStart = ref === 'start' && ev && ev.type === 'business';
+  let cfAfter = ma.cashflow; let perMonth;
+  if (bizStart) { const A = BIZ.ARCHETYPES[st.pending.typeId]; cfAfter += Math.round(BIZ.forecast(BIZ.create(st.pending.typeId, { month: st.month }), BIZ.suggest(BIZ.create(st.pending.typeId, { month: st.month })).decisions, 3).netProfit / 3); perMonth = -A.ownerEnergy; }
+  if (o && o.kind === 'plan' && o.effects) perMonth = o.effects.energy;
+  if (La.workLoad > Lb.workLoad) perMonth = -(La.workLoad - Lb.workLoad) * 4;
+  const E1 = Math.max(1, ma.expenses);
+  const newLiabilities = [];
+  if (sh.loans > st.loans) newLiabilities.push({ label: 'הלוואה בנקאית', amount: sh.loans - st.loans, monthly: Math.round((sh.loans - st.loans) * loanPct(sh) / 100) });
+  if (sh.credit > st.credit) newLiabilities.push({ label: 'חוב כרטיס אשראי', amount: sh.credit - st.credit, monthly: Math.round((sh.credit - st.credit) * W(sh).creditPct / 100) });
+  for (const a of sh.assets) if (!st.assets.some((x) => x.id === a.id) && a.debt > 0) newLiabilities.push({ label: `${(W(sh).kinds[a.k] || {}).debtLabel || 'משכנתא'} · ${a.n}`, amount: a.debt, monthly: 0 });
+  for (const x of sh.expenses) if (!st.expenses.some((y) => y.id === x.id)) newLiabilities.push({ label: x.label + (x.until ? ` (עד חודש ${x.until})` : ''), amount: x.until ? x.amount * (x.until - Math.max(x.from || sh.month, sh.month) + 1) : x.amount * 12, monthly: x.amount });
+  const imp = {
+    ref, label: o ? gz(st, o.label) : ref, basis: 'certain',
+    cashBefore: mb.cash, cashAfter: ma.cash, fundBefore: mb.savings, fundAfter: ma.savings,
+    cushionMonthsBefore: monthsOf(mb.cash, mb.savings, mb.expenses), cushionMonthsAfter: monthsOf(ma.cash, ma.savings, E1), fundMonthsAfter: round2(ma.savings / E1),
+    cfBefore: mb.cashflow, cfAfter, cfDelta: cfAfter - mb.cashflow, passiveDelta: ma.passive - mb.passive, expensesDelta: ma.expenses - mb.expenses,
+    netWorthDelta: ma.netWorth - mb.netWorth, goalProgressDelta: round2(ma.goalProgress - mb.goalProgress), newLiabilities,
+    power: { before: Math.round(Lb.energy), after: Math.round(La.energy), delta: Math.round(La.energy - Lb.energy), ...(perMonth != null ? { perMonth } : {}) },
+    happiness: { before: Math.round(happyNow(st)), after: Math.round(happyNow(sh)), delta: Math.round(happyNow(sh) - happyNow(st)) },
+    time: {}, mainRisk: null, assumptions: [], scenarios: null, branches: null, disclaimer: IMPACT_DISCLAIMER,
+  };
+  if (La.study.months !== Lb.study.months || La.study.done !== Lb.study.done) imp.time = { studyMonths: La.study.done && !Lb.study.done ? Lb.study.need - Lb.study.months : La.study.months - Lb.study.months, note: 'מקרב את סוף הלימודים' };
+  // assumptions (§9.5)
+  if (ddB) imp.assumptions.push(ddB.level === 0 ? 'התזרים לפי מה שהמוכר הצהיר (לא נבדק)' : ddB.level === 1 ? 'לפי טווח הבדיקה' : 'לפי בדיקה מקצועית');
+  if (sh.loans > st.loans || st.loans > 0) imp.assumptions.push(`הריבית על ההלוואה נשארת ${round2(loanPct(sh))}% בחודש`);
+  imp.assumptions.push('המשכורת והתוכנית החודשית לא משתנות', 'בלי שינוי במצב הכלכלה');
+  if (bizStart) imp.assumptions.push('תחזית העסק בלי אירועים מיוחדים');
+  // branches (offers, raise, a counter-offer): p sums to 1
+  if (isOffer || isRaise || isChance) {
+    const ch = isOffer ? o.chance : isRaise ? o.chance : o.chance;
+    const alt = run({ negR: 0.9999, raiseR: 0.9999, r: 0.9999 });
+    const mAlt = alt ? metrics(alt.sh) : ma;
+    const labels = isOffer ? ['המוכר מסכים — אפשר לקנות בזול', 'המוכר מסרב — העסקה מתבטלת'] : isRaise ? ['הבוס מסכים', 'הבוס מסרב (ותחכה חצי שנה)'] : ['הבוס מסכים', 'הבוס מסרב'];
+    imp.branches = [{ p: round2(ch), label: labels[0], cashAfter: ma.cash, cfAfter: ma.cashflow, netWorthDelta: ma.netWorth - mb.netWorth },
+      { p: round2(1 - round2(ch)), label: labels[1], cashAfter: mAlt.cash, cfAfter: mAlt.cashflow, netWorthDelta: mAlt.netWorth - mb.netWorth }];
+    if (isOffer && sh.pending) { const ev2 = describe(sh); const b = ev2.options.filter((x) => x.kind === 'buy' && x.enabled).sort((x, y) => y.net - x.net)[0]; if (b) imp.branches[0].buyNet = b.net; }
+    imp.basis = 'branches';
+  } else if (ddB && ddB.level < 2) imp.basis = 'expected';
+  else if (bizStart) imp.basis = 'expected';
+  // scenarios (deals, business start, loans, refinancing, installments): base and hard, 6 months, no draws
+  const wantScen = (o && (o.kind === 'buy' && ev.type === 'deal')) || bizStart || ref === 'act:loan' || ref === 'refi' || ref === 'inst3';
+  if (wantScen) {
+    const base = { months: 6, cash: ma.cash + 6 * cfAfter, cf: cfAfter };
+    base.cushionMonths = monthsOf(base.cash, ma.savings, E1); base.forcedLoan = forcedLoanOf(st, base.cash, ma.savings);
+    const hs = JSON.parse(JSON.stringify(sh)); hs.rules = 4; hs.econ = { phase: 'rec', amp: Math.max(1, CY.cycleCfg(st.worldId).amp), hard: true, sharpUntil: 0, hist: [], truth: [] };
+    const what = ['חודש אחד בלי משכורת'];
+    if (ddB && ddB.level < 2) {
+      const a = hs.assets.find((x) => !st.assets.some((y) => y.id === x.id));
+      if (a) { const c = st.pending.card; const noi = c.noi != null; const base0 = noi ? c.noi : c.cf; const lo = ddB.level === 0 ? DD.trueBase(base0, DD.p10Factor(st.worldId, ddB.warn, noi)) : ddB.lo; if (noi) a.noi = Math.min(a.noi, lo); else a.cf = Math.min(a.cf, lo); }
+      what.push('הנכס מכניס פחות ממה שהוצהר');
+    }
+    what.push('מיתון: שכר דירה −3%, עסקים −10%, ריבית +0.3%');
+    let cfHard = metrics(hs).cashflow; if (bizStart) cfHard += Math.round((cfAfter - ma.cashflow) * 0.8);
+    cfHard = Math.min(cfHard, cfAfter);
+    const hard = { months: 6, cash: ma.cash + 6 * cfHard - ma.salary, cf: cfHard, what };
+    hard.cushionMonths = monthsOf(hard.cash, ma.savings, E1); hard.forcedLoan = forcedLoanOf(st, hard.cash, ma.savings);
+    imp.scenarios = { base, hard };
+  }
+  // the main risk (§9.4) — the same checks as the evaluator
+  const sc = ev ? (scoreOptions(st, ev).find((x) => x.id === ref) || null) : null;
+  const debtPay = ma.expenseLines.filter((l) => l.id === 'loan' || l.id === 'credit').reduce((a, l) => a + l.amount, 0);
+  const income = ma.salary + ma.sideIncome + Math.max(0, ma.passive);
+  const cushFlag = imp.cushionMonthsAfter < 1 && !(imp.cfDelta >= 0.15 * E1 && imp.cushionMonthsAfter >= 0.5);
+  if (cushFlag) imp.mainRisk = { key: 'noCushion', text: `אחרי זה תישאר כרית של ${Math.max(0, imp.cushionMonthsAfter).toFixed(1)} חודשים. הוצאה לא צפויה אחת — והבנק יחליט בשבילך.` };
+  else if (ddB && ddB.level === 0 && ddB.warn >= 1) imp.mainRisk = { key: 'unverified', text: `המספרים לא נבדקו, ויש ${ddB.warn} סימני אזהרה.` };
+  else if (income > 0 && debtPay > 0.4 * income) imp.mainRisk = { key: 'dsr', text: 'החזרי החובות יעברו 40% מההכנסה.' };
+  else if (ref === 'buyVar') { const d = ev.data.debt || 0; imp.mainRisk = { key: 'rate', text: `ריבית משתנה: אם הריבית תעלה ב־1%, התזרים יורד ב־${fmtM(r10(d / 1200))}.` }; }
+  else if (W(st).mechanic === 'fx' && o && o.kind === 'buy' && ev.data.sens) imp.mainRisk = { key: 'fx', text: `דולר +10% → תזרים ${sgn((ma.worldIndicators.exposure || {}).cf || 0)}.` };
+  else if (sc && sc.flags.some((f) => ['concentrated', 'gamble', 'burnout'].includes(f))) { const f = sc.flags.find((x) => ['concentrated', 'gamble', 'burnout'].includes(x)); imp.mainRisk = { key: f, text: DQ_WHY[f] + '.' }; }
+  else imp.mainRisk = { key: 'none', text: 'אין סיכון בולט מעבר לרגיל.' };
+  imp.mainRisk.text = gz(st, imp.mainRisk.text);
+  return imp;
+}
+
 /**
  * Re-run a game from its config + st.actions (server-side verification of ranked results). Pure & deterministic.
  * cfg = {worldId, charId, seed, mode, maxMonths, scenarioId, bailout, tutorial}. Throws {message:'replay_mismatch …'} on an impossible action.
@@ -2645,6 +3401,9 @@ export function replay(cfg, actions) {
         case 'I': r = invest(st, a[1], a[2]); break;
         case 'S': r = moveSavings(st, a[1]); break;
         case 'T': r = setSideReport(st, a[1]); break;
+        case 'F': r = setFocus(st, a[1], a[2] ?? 0); break;
+        case 'H': r = requestHint(st); break;
+        case 'M': r = setMentorLevel(st, a[1]); break;
         default: throw new Error('unknown action');
       }
     } catch (e) { throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${e.message}`); }
@@ -2654,8 +3413,14 @@ export function replay(cfg, actions) {
 }
 /** Config needed by replay() for this game. */
 export function replayConfig(st) {
-  return { worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode, maxMonths: st.maxMonths, scenarioId: st.history ? st.history.scenarioId : undefined, bailout: !!st.bailout, tutorial: !!st.tutorial };
+  const cfg = { worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode, maxMonths: st.maxMonths, scenarioId: st.history ? st.history.scenarioId : undefined, bailout: !!st.bailout, tutorial: !!st.tutorial,
+    mentor: startLevel(st), rules: st.rules || 3 };
+  if (st.gender) cfg.gender = st.gender;
+  if (st._dev) cfg._dev = { ...st._dev };
+  return cfg;
 }
+/** The mentor level the game STARTED with (mid-game changes are replayed through 'M'). */
+function startLevel(st) { const ch = (st.dq && st.dq.levelChanges) || []; return ch.length ? ch[0].from : st.mentor; }
 
 /** Actions can lower expenses (→ win) — only end the game between events. */
 function endIfIdle(st, out) {
@@ -2711,6 +3476,11 @@ export function checkEnd(st) {
   res.learning = learningOf(st);
   res.lessons = st.lessons.slice();
   res.happiness = happy;
+  if (R4(st)) { // T2: the truth may be shown now — claimed vs actual for the deals you bought, and the real cycle path
+    res.ddRecap = st.assets.filter((a) => a.dd).map((a) => ({ name: a.n, claimedCf: a.dd.claimedCf, cf: assetCf(st, a), repair: a.dd.repair, level: a.dd.level }));
+    res.ddPassed = st.stats.ddPassed || 0;
+    res.econPath = st.econ ? { truth: st.econ.truth.map((x) => ({ m: x.m, phase: x.phase, label: CY.PHASE_LABEL[x.phase] })), signal: st.econ.hist.map((x) => ({ m: x.m, s: x.s })), text: 'עכשיו אפשר לראות מה באמת היה' } : null;
+  }
   return res;
 }
 /** History mode: you vs. the buy-and-hold investor vs. cash under the mattress. */
