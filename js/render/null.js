@@ -1,12 +1,14 @@
 // Scene API contract + a no-op scene. game.js starts with this binding (so calls before the renderer exists can't
 // crash) and falls back to it when no renderer at all can start (body[data-renderer="none"]). No DOM at import time.
 
-/** Every function game.js may call on a scene (32 used today) + the T1 additions. `kind` is a string constant. */
+/** Every function game.js may call on a scene (32 used today) + the T1 and T5 additions. `kind` is a string constant. */
 export const SCENE_API = Object.freeze([
   'init', 'setSpeed', 'setPaused', 'frame', 'preloadWorld', 'worldLoaded', 'preloadLife', 'preloadDice', 'setPawn', 'buildWorld',
   'placePawn', 'hop', 'throwDice', 'holdDice', 'cancelHold', 'resetCamera', 'setCameraMode', 'getCameraMode', 'spawn', 'despawn',
   'launch', 'syncCity', 'hasKey', 'bump', 'shield', 'floatLabel', 'sparkle', 'hearts', 'shake', 'confetti', 'celebrate', 'project',
   'kind', 'dispose', 'onContextLost', 'failedModels',
+  // T5 §10.2 (living city, picking, motion, quality, turn skip)
+  'setLevel', 'pulse', 'onPick', 'pickAt', 'highlight', 'setMotion', 'setQuality', 'getQuality', 'skip', 'introWorld', 'setPawnRing', 'perfStats',
 ]);
 
 export const kind = 'none';
@@ -51,3 +53,17 @@ export function project() {
 export function dispose() {}
 export function onContextLost() {}
 export function failedModels() { return []; }
+// T5 §10.2
+let quality = 'high';
+export function setLevel() {}
+export function pulse() {}
+export function onPick() { return () => {}; }
+export function pickAt() { return null; }
+export function highlight() {}
+export function setMotion() {}
+export function setQuality(t) { if (['high', 'mid', 'low'].includes(t)) quality = t; }
+export function getQuality() { return quality; }
+export function skip() {}
+export function introWorld() {}
+export function setPawnRing() {}
+export function perfStats() { return {}; }

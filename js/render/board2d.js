@@ -4,31 +4,30 @@
 // cost); every exported function catches its own errors. Styles live in css/stability.css (#board2d / .b2d-*).
 import { boardInfo } from '../engine.js';
 import { reducedMotion } from '../motion.js'; // T5: the in-app motion setting wins over the OS (CR-R1)
+import { MOTION, labelColor, worldStyle, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
+import { bus } from '../bus.js';
 
 export const kind = '2d';
 
 const TOKEN = { classic: '♟', car: '🚕', tophat: '🎩', rocket: '🚀', crown: '👑', diamond: '💎' };
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך' };
-const COLORS = { green: '#178a55', red: '#d23b30', blue: '#2f6fdb', gold: '#a8740a' };
 const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
   [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'],
 ];
-const CITY_ICON = { apartment: '🏢', business: '🏪', stock: '📈', crypto: '🪙', bank: '🏦', tower: '🏙️', mall: '🛍️', hotel: '🏨', ship: '🚢', warehouse: '📦',
-  factory: '🏭', gold: '🥇', campus: '🏫', datacenter: '🖥️', rocket: '🚀', foundation: '💗', home_family: '🏡', wedding: '💍', university: '🎓', pension: '🏝️',
-  index_fund: '📊', side_hustle: '🛠️', hospital: '🏥' };
 const HISTORY_COLORS = { board: '#efe4c8', boardEdge: '#5b4127', center: '#e6d6b0' };
 
 let root = null, boardEl = null, gridEl = null, cityEl = null, capEl = null, pawnEl = null, fxEl = null;
 let n = 40, side = 10, pos = 0, speed = 1, paused = false, camMode = 'follow', rect = null, gridN = 4;
-const city = new Map(); // key -> {el, model}
+const city = new Map(); // key -> {el, model, label, kind, level}
+const pickCbs = new Set();
+let curWorld = null, motionOverride = null, quality = 'high', turnMs = 0, hlKey = null;
 const timers = new Set();
 const anims = new Set();
 
 const warn = (e) => console.warn('[b2d]', e);
-const reduced = () => { try { return reducedMotion(); } catch (e) { return false; } };
+const reduced = () => { if (motionOverride != null) return motionOverride; try { return reducedMotion(); } catch (e) { return false; } };
 const D = (ms) => { const d = Math.max(1, ms * speed); return reduced() ? Math.min(60, d) : d; };
 const sleep = (ms) => new Promise((r) => { const t = setTimeout(() => { timers.delete(t); r(); }, ms); timers.add(t); });
 function el(tag, cls, parent, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }
@@ -54,14 +53,14 @@ function gridXY(i) {
 function tileCenter(i) { const c = cellPx(); const [gx, gz] = gridXY(i); return { x: (gx + 0.5) * c, y: (gz + 0.5) * c }; }
 const pawnXf = (p, lift = 0, sx = 1, sy = 1) => `translate(${p.x}px, ${p.y - lift}px) translate(-50%, -62%) scale(${sx}, ${sy})`;
 function tileIcon(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
-function cityIcon(model) { const name = String(model || '').split('/').pop(); return CITY_ICON[name] || '🏠'; }
+const cityIcon = cityEmoji;
 
 /* ============================================================ setup */
 export async function init(r) {
   root = r || document.getElementById('board2d');
   if (!root) throw new Error('board2d root missing');
   root.innerHTML = '';
-  root.setAttribute('role', 'img');
+  root.setAttribute('role', 'group'); // T5: the city cards are buttons (role=img would hide them from assistive tech)
   root.setAttribute('aria-label', 'לוח המשחק (מצב קל)');
   boardEl = el('div', 'b2d-board', root);
   gridEl = el('div', 'b2d-grid', boardEl);
@@ -75,7 +74,7 @@ export function dispose() {
   try {
     for (const t of timers) clearTimeout(t); timers.clear();
     for (const a of anims) { try { a.cancel(); } catch (e) { /* ignore */ } } anims.clear();
-    city.clear();
+    city.clear(); pickCbs.clear();
     if (root) { root.innerHTML = ''; root.hidden = true; }
     root = boardEl = gridEl = cityEl = capEl = pawnEl = fxEl = null;
   } catch (e) { warn(e); }
@@ -123,6 +122,10 @@ export function buildWorld(w) {
     boardEl.style.setProperty('--b2d-edge', T.boardEdge || '#6b4430');
     boardEl.style.setProperty('--b2d-center', T.center || '#efe3cb');
     boardEl.classList.toggle('b2d-hist', hist);
+    curWorld = w || null; const ws = worldStyle(w);
+    for (const c of [...boardEl.classList]) if (c.startsWith('b2d-m-')) boardEl.classList.remove(c);
+    boardEl.classList.add('b2d-m-' + ws.motif); boardEl.dataset.world = hist ? 'h' : (w && w.id) || '';
+    boardEl.style.setProperty('--b2d-accent', ws.accent); boardEl.style.setProperty('--b2d-rim', ws.rim);
     gridEl.innerHTML = '';
     gridEl.style.gridTemplateColumns = gridEl.style.gridTemplateRows = `repeat(${side + 1}, 1fr)`;
     for (const t of tiles) {
@@ -130,14 +133,14 @@ export function buildWorld(w) {
       const d = el('div', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl);
       d.style.gridColumn = String(gx + 1); d.style.gridRow = String(gz + 1);
       d.style.background = t.color || '#ddd'; d.style.color = t.ink || '#222';
-      d.dataset.i = String(i); d.title = t.name || '';
+      d.dataset.i = String(i); d.title = t.name || ''; hidden(d);
       hidden(el('span', 'b2d-ti', d, tileIcon(t.icon)));
       const nm = el('span', 'b2d-tn', d, t.name || ''); nm.dir = 'rtl';
     }
     const center = el('div', 'b2d-center', gridEl);
     center.style.gridColumn = `2 / span ${Math.max(1, side - 1)}`; center.style.gridRow = `2 / span ${Math.max(1, side - 1)}`;
-    capEl = el('div', 'b2d-cap', center, hist ? 'התיק שלך' : (CAPTION[w && w.id] || 'התיק שלך')); capEl.dir = 'rtl';
-    cityEl = hidden(el('div', 'b2d-city', center));
+    capEl = hidden(el('div', 'b2d-cap', center, worldStyle(w).caption)); capEl.dir = 'rtl';
+    cityEl = el('div', 'b2d-city', center); cityEl.setAttribute('role', 'group'); cityEl.setAttribute('aria-label', 'העיר שלך');
     city.clear(); gridN = 4; cityEl.style.setProperty('--n', String(gridN));
     layout();
   } catch (e) { warn(e); }
@@ -157,13 +160,15 @@ export async function hop(from, to, last = false) {
     const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     pos = Number(to) || 0;
     pawnEl.style.transform = pawnXf(b);
-    await animate(pawnEl, [{ transform: pawnXf(a) }, { transform: pawnXf(m, lift) }, { transform: pawnXf(b) }], { duration: D(190), easing: 'ease-in-out' });
-    if (last) await animate(pawnEl, [{ transform: pawnXf(b) }, { transform: pawnXf(b, 0, 1.15, 0.8) }, { transform: pawnXf(b) }], { duration: D(110) });
+    if (reduced()) { glowTile(to); turnMs += last ? 120 : 0; if (last) await animate(pawnEl, [{ opacity: 0 }, { opacity: 1 }], { duration: 120 }); return; } // teleport + passed-tile glow
+    turnMs += D(MOTION.hop) + (last ? D(MOTION.hopSquash) : 0);
+    await animate(pawnEl, [{ transform: pawnXf(a) }, { transform: pawnXf(m, lift) }, { transform: pawnXf(b) }], { duration: D(MOTION.hop), easing: 'ease-in-out' });
+    if (last) await animate(pawnEl, [{ transform: pawnXf(b) }, { transform: pawnXf(b, 0, 1.15, 0.8) }, { transform: pawnXf(b) }], { duration: D(MOTION.hopSquash) });
   } catch (e) { warn(e); }
 }
 export async function throwDice(faces, opts = {}) {
   try {
-    const d = D(450); const cb = opts && opts.onBounce;
+    const d = reduced() ? 150 : D(450); const cb = opts && opts.onBounce; turnMs = d;
     if (cb) { const t1 = setTimeout(() => { timers.delete(t1); try { cb(1); } catch (e) { warn(e); } }, d * 0.55); timers.add(t1); const t2 = setTimeout(() => { timers.delete(t2); try { cb(2); } catch (e) { warn(e); } }, d * 0.78); timers.add(t2); }
     await sleep(d);
   } catch (e) { warn(e); }
@@ -180,28 +185,55 @@ function ensureGrid(count) {
   let g = 4; while (g * g < count && g < 8) g++;
   if (g !== gridN) { gridN = g; if (cityEl) cityEl.style.setProperty('--n', String(g)); }
 }
-function addCard(key, model, label) {
-  const c = el('div', 'b2d-card', cityEl);
-  c.dataset.key = key; c.title = label || '';
-  el('span', 'b2d-ce', c, cityIcon(model));
-  if (label) { const l = el('span', 'b2d-cl', c, String(label).slice(0, 18)); l.dir = 'rtl'; }
-  city.set(key, { el: c, model });
+/** T5 §5.3 / §6.2: every city card is a real button; click / Enter → the same pick event as a 3D tap */
+function addCard(key, model, label, kind = null, level = null) {
+  const c = el('button', 'b2d-card', cityEl); c.type = 'button';
+  c.dataset.key = key; c.dataset.kind = 'plain'; c.title = label || '';
+  hidden(el('span', 'b2d-ce', c, cityIcon(model)));
+  if (label) { const l = hidden(el('span', 'b2d-cl', c, String(label).slice(0, 18))); l.dir = 'rtl'; }
+  c.addEventListener('click', (e) => { const r = c.getBoundingClientRect(); emitPick(key, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
+  const it = { el: c, model, label: label || '', kind, level: null };
+  city.set(key, it);
+  paintLevel(it, normLevel(level));
   return c;
+}
+function emitPick(key, x, y) {
+  for (const f of [...pickCbs]) { try { f(key, { x, y }); } catch (e) { warn(e); } }
+  try { bus.emit('city:pick', { key, x, y, source: '2d' }); } catch (e) { warn(e); }
+}
+/** card look per level (T5 §5.3): data-level / data-kind, pips, corner badges, accessible name T5-C2 */
+function paintLevel(it, L) {
+  const c = it.el; it.level = L;
+  c.dataset.kind = L ? L.kind : 'plain';
+  if (L) c.dataset.level = String(L.n); else delete c.dataset.level;
+  c.setAttribute('aria-label', cardName(it.label, kindLabelOf(curWorld, it.kind, it.model), L));
+  for (const x of c.querySelectorAll('.b2d-pips,.b2d-corner-b,.b2d-annex,.b2d-act')) x.remove();
+  if (L) {
+    hidden(el('span', 'b2d-pips', c, pipsText(L)));
+    if (L.kind === 'biz') {
+      const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');
+      hidden(el('span', 'b2d-corner-b', c, corner));
+      if (L.n >= 2) hidden(el('span', 'b2d-annex', c, '+'));
+    }
+  }
+  const a = activityOf(L);
+  if (a) hidden(el('span', 'b2d-act', c, ACTIVITY_EMOJI[a]));
 }
 export function spawn(key, model, opts = {}) {
   try {
     if (!key || !cityEl || city.has(key)) return;
     ensureGrid(city.size + 1);
-    const c = addCard(key, model, opts.label);
+    const c = addCard(key, model, opts.label, opts.kind || null, opts.level || null);
     if (opts.silent) return;
-    animate(c, [{ transform: 'translateY(-160%) scale(.8)', opacity: 0 }, { transform: 'translateY(0) scale(1.05)', opacity: 1, offset: 0.6 }, { transform: 'translateY(-12%) scale(1)', offset: 0.8 }, { transform: 'translateY(0) scale(1)', opacity: 1 }],
-      { duration: D(720), easing: 'ease-out' }).then(() => { if (opts.label) floatLabel(opts.label, opts.color || 'green', key); if (opts.golden) sparkle(key); });
+    const frames = reduced() ? [{ transform: 'scale(.9)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }]
+      : [{ transform: 'translateY(-160%) scale(.8)', opacity: 0 }, { transform: 'translateY(0) scale(1.05)', opacity: 1, offset: 0.6 }, { transform: 'translateY(-12%) scale(1)', offset: 0.8 }, { transform: 'translateY(0) scale(1)', opacity: 1 }];
+    animate(c, frames, { duration: reduced() ? MOTION.t1 : D(MOTION.spawn), easing: 'ease-out' }).then(() => { if (opts.label) floatLabel(opts.label, opts.color || 'green', key); if (opts.golden) sparkle(key); });
   } catch (e) { warn(e); }
 }
 export function despawn(key) {
   try {
     const it = city.get(key); if (!it) return; city.delete(key);
-    animate(it.el, [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.01)', opacity: 0 }], { duration: D(380), fill: 'forwards' }).then(() => it.el.remove());
+    animate(it.el, [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.01)', opacity: 0 }], { duration: reduced() ? MOTION.t1 : D(MOTION.despawn), fill: 'forwards' }).then(() => it.el.remove());
   } catch (e) { warn(e); }
 }
 export function launch(key, success) {
@@ -214,17 +246,22 @@ export function launch(key, success) {
 export function syncCity(list, { silent = true } = {}) { // eslint-disable-line no-unused-vars -- always without animation
   try {
     if (!cityEl) return;
-    const want = new Map((list || []).map((m) => [m.key, m]));
+    const fx = fixtureCount(globalThis.location ? location.search : '');
+    const want = new Map([...(list || []), ...(fx && curWorld ? fixtureCity(curWorld, fx) : [])].map((m) => [m.key, m]));
     for (const k of [...city.keys()]) if (!want.has(k)) { city.get(k).el.remove(); city.delete(k); }
     ensureGrid(want.size);
-    for (const m of want.values()) if (!city.has(m.key)) addCard(m.key, m.model, m.label);
+    for (const m of want.values()) {
+      if (!city.has(m.key)) addCard(m.key, m.model, m.label, m.kind || null, m.level || null);
+      else if ('level' in m) setLevel(m.key, m.level, { animate: false });
+    }
   } catch (e) { warn(e); }
 }
 export function hasKey(key) { try { return city.has(key); } catch (e) { return false; } }
 export function bump(key) {
   try {
     const it = city.get(key); if (!it) return;
-    animate(it.el, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: D(520) });
+    if (reduced()) return;
+    animate(it.el, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: D(MOTION.bump) });
     sparkle(key, 3);
   } catch (e) { warn(e); }
 }
@@ -252,11 +289,11 @@ export function floatLabel(text, color = 'green', at = 'pawn', { rise = 1.5, dur
     if (!text || !fxEl) return;
     const p = anchorXY(at);
     const s = el('span', 'b2d-float', fxEl, String(text)); s.dir = 'rtl';
-    const col = COLORS[color] || color || COLORS.green;
+    const col = labelColor(color);
     s.style.left = p.x + 'px'; s.style.top = p.y + 'px'; s.style.color = col; s.style.borderColor = col;
-    const up = Math.max(24, cellPx() * rise);
+    const up = reduced() ? 0 : Math.max(24, cellPx() * rise); // reduced: no rise, opacity only
     animate(s, [{ transform: 'translate(-50%,-50%) scale(.7)', opacity: 0 }, { transform: `translate(-50%,calc(-50% - ${up * 0.6}px)) scale(1)`, opacity: 1, offset: 0.25 },
-      { transform: `translate(-50%,calc(-50% - ${up * 0.8}px))`, opacity: 1, offset: 0.75 }, { transform: `translate(-50%,calc(-50% - ${up}px))`, opacity: 0 }], { duration: D(dur) }).then(() => s.remove());
+      { transform: `translate(-50%,calc(-50% - ${up * 0.8}px))`, opacity: 1, offset: 0.75 }, { transform: `translate(-50%,calc(-50% - ${up}px))`, opacity: 0 }], { duration: reduced() ? 1200 : D(Math.min(dur, 1900)) * 0.85 }).then(() => s.remove());
   } catch (e) { warn(e); }
 }
 function burst(at, glyph, count, cls) {
@@ -267,7 +304,7 @@ function burst(at, glyph, count, cls) {
     s.style.left = p.x + 'px'; s.style.top = p.y + 'px';
     const a = (i / count) * Math.PI * 2 + Math.random() * 0.5, r = c * (0.8 + Math.random() * 0.9);
     all.push(animate(s, [{ transform: 'translate(-50%,-50%) scale(.4)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * r}px), calc(-50% + ${Math.sin(a) * r - c}px)) scale(1)`, opacity: 0 }],
-      { duration: D(1400), easing: 'ease-out' }).then(() => s.remove()));
+      { duration: D(MOTION.sparkle), easing: 'ease-out' }).then(() => s.remove()));
   }
   return Promise.all(all);
 }
@@ -279,7 +316,7 @@ export function shake(amp = 0.35, dur = 480) {
     const a = Math.max(2, Math.min(14, (Number(amp) || 0.35) * 20));
     const f = []; for (let i = 0; i < 8; i++) f.push({ transform: `translate(${(Math.random() - 0.5) * 2 * a}px, ${(Math.random() - 0.5) * a}px)` });
     f.push({ transform: 'translate(0,0)' });
-    animate(boardEl, f, { duration: D(dur) });
+    animate(boardEl, f, { duration: D(Math.min(dur, MOTION.shake)) });
   } catch (e) { warn(e); }
 }
 export async function confetti() {
@@ -291,13 +328,13 @@ export async function confetti() {
       const s = hidden(el('span', 'b2d-conf', root));
       s.style.left = Math.random() * W + 'px'; s.style.background = cols[i % cols.length];
       all.push(animate(s, [{ transform: `translate(0,-20px) rotate(0deg)`, opacity: 1 }, { transform: `translate(${(Math.random() - 0.5) * 120}px, ${H + 40}px) rotate(${360 + Math.random() * 720}deg)`, opacity: 0.9 }],
-        { duration: 3000, delay: Math.random() * 400, easing: 'cubic-bezier(.3,.6,.6,1)' }).then(() => s.remove()));
+        { duration: MOTION.confetti - 400, delay: Math.random() * 400, easing: 'cubic-bezier(.3,.6,.6,1)' }).then(() => s.remove()));
     }
     await Promise.all(all);
   } catch (e) { warn(e); }
 }
 export async function celebrate(win) {
-  try { if (boardEl) await animate(boardEl, [{ transform: 'scale(1)' }, { transform: 'scale(1.04)' }, { transform: 'scale(1)' }], { duration: D(win ? 1500 : 1200), easing: 'ease-in-out' }); } catch (e) { warn(e); }
+  try { if (boardEl && !reduced()) await animate(boardEl, [{ transform: 'scale(1)' }, { transform: 'scale(1.04)' }, { transform: 'scale(1)' }], { duration: D(win ? MOTION.celebrate : MOTION.celebrate * 0.8), easing: 'ease-in-out' }); } catch (e) { warn(e); }
 }
 /** Screen point (CSS px) of the pawn or a city card — for DOM effects such as flying coins. */
 export function project(at = 'pawn') {
@@ -307,4 +344,45 @@ export function project(at = 'pawn') {
     if (t) { const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
   } catch (e) { warn(e); }
   return { x: (globalThis.innerWidth || 0) / 2, y: (globalThis.innerHeight || 0) / 2 };
+}
+
+/* ============================================================ T5 §10.2 */
+/** setLevel(key, level, {animate}) — data-level, pips, border style, accessible name; level-up pulse 450 ms (reduced: instant). */
+export function setLevel(key, level, { animate: anim = false } = {}) {
+  try {
+    const it = city.get(key); if (!it) return;
+    const L = normLevel(level); const prev = it.level;
+    if (JSON.stringify(L) === JSON.stringify(prev)) return;
+    paintLevel(it, L);
+    const down = prev && L && prev.kind === 'biz' && L.kind === 'biz' && L.n < prev.n;
+    if (down) flash(it, '⚠', 1500);
+    if (anim && !down && !reduced()) animate(it.el, [{ transform: 'scale(1)' }, { transform: 'scale(1.14)' }, { transform: 'scale(1)' }], { duration: D(MOTION.bump) });
+  } catch (e) { warn(e); }
+}
+function flash(it, glyph, ms) {
+  const b = hidden(el('span', 'b2d-act b2d-flash', it.el, glyph));
+  const t = setTimeout(() => { timers.delete(t); b.remove(); }, ms); timers.add(t);
+}
+/** pulse(key, kind) — an arrow badge for 1.2 s */
+export function pulse(key, kind = 'good') { try { const it = city.get(key); if (it) flash(it, kind === 'bad' ? '⬇️' : kind === 'event' ? '🎉' : '⬆️', 1200); } catch (e) { warn(e); } }
+export function onPick(cb) { if (typeof cb !== 'function') return () => {}; pickCbs.add(cb); return () => pickCbs.delete(cb); }
+export function pickAt(x, y) {
+  try { const e = document.elementFromPoint(x, y); const c = e && e.closest && e.closest('#board2d .b2d-card'); return c && city.has(c.dataset.key) ? c.dataset.key : null; } catch (e) { return null; }
+}
+export function highlight(key) {
+  try { if (hlKey && city.has(hlKey)) city.get(hlKey).el.classList.remove('hl'); hlKey = key && city.has(key) ? key : null; if (hlKey) city.get(hlKey).el.classList.add('hl'); } catch (e) { warn(e); }
+}
+export function setMotion(r) { motionOverride = r == null ? null : !!r; }
+export function setQuality(t) { if (['high', 'mid', 'low'].includes(t)) quality = t; }
+export function getQuality() { return quality; }
+/** finish running WAAPI animations (a tap on the board during the turn animation) */
+export function skip() { try { for (const a of [...anims]) { try { a.finish(); } catch (e) { /* ignore */ } } } catch (e) { warn(e); } }
+export function introWorld() { try { if (boardEl && !reduced()) animate(boardEl, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.t2 }); } catch (e) { warn(e); } }
+export function setPawnRing(color) { try { if (pawnEl && color) pawnEl.style.setProperty('--ring', color); } catch (e) { warn(e); } }
+export function perfStats() { return { framesRendered: 0, lastTurnMs: Math.round(turnMs), tier: quality }; }
+function glowTile(i) {
+  try {
+    const t = gridEl && gridEl.querySelector(`.b2d-tile[data-i="${i}"]`); if (!t) return;
+    t.classList.add('b2d-passed'); const h = setTimeout(() => { timers.delete(h); t.classList.remove('b2d-passed'); }, 300); timers.add(h);
+  } catch (e) { warn(e); }
 }

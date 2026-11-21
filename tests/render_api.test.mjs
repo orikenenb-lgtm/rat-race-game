@@ -12,7 +12,8 @@ const ok = (c, msg) => { n++; if (!c) { fails++; console.log('FAIL', msg); } };
 const nul = await import('../js/render/null.js');
 const b2d = await import('../js/render/board2d.js'); // must not touch the DOM at import
 const API = nul.SCENE_API;
-ok(Array.isArray(API) && Object.isFrozen(API) && API.length === 36, 'SCENE_API frozen, 36 names (' + API.length + ')');
+ok(Array.isArray(API) && Object.isFrozen(API) && API.length === 48, 'SCENE_API frozen, 48 names: 36 T1 + 12 T5 (' + API.length + ')');
+for (const f of ['setLevel', 'pulse', 'onPick', 'pickAt', 'highlight', 'setMotion', 'setQuality', 'getQuality', 'skip', 'introWorld', 'setPawnRing', 'perfStats']) ok(API.includes(f), 'T5 §10.2 name in SCENE_API: ' + f);
 const game = readFileSync(resolve(ROOT, 'js/game.js'), 'utf8');
 const used = new Set([...game.matchAll(/\bscene\.(\w+)\(/g)].map((m) => m[1]));
 for (const u of used) ok(API.includes(u), `game.js calls scene.${u}( which is not in SCENE_API`);
