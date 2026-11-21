@@ -547,5 +547,17 @@ test('review M2: the friend chain renders with a masculine friend in both runs (
     assert.ok(txt.includes(CH.NAMES.friend[run - 1]) || step === 'f3b', `run ${run} ${step}: the friend's name is shown`);
   }
 });
+test('review M3: side s1 — reporting is the better choice for every character (U(file) > U(later)); the guide highlights it; the late return bills the accountant too', () => {
+  for (const w of WORLDS4) for (const ch of E.getWorld(w).characters) {
+    const st = forced(w, 'side', 's1', { charId: ch.id, mentor: 'guide', prep: (s) => { s.life.plan = 'side'; s.life.side.months = 1; }, data: { first: 1500 } });
+    const card = E.inbox(st)[0]; const sc = E.scoreStory(st, card);
+    const U = (id) => sc.find((x) => x.id === id).U;
+    assert.ok(U('file') > U('later'), `${w}/${ch.id}: file ${U('file').toFixed(2)} vs later ${U('later').toFixed(2)}`);
+    assert.equal(card.options.find((o) => o.primary).id, 'file', `${w}/${ch.id}: guide highlights reporting`);
+  }
+  // unreported side income: the year-end / tax-tile bill carries the accountant's fee for those months (rules 4)
+  const st = E.createGame({ worldId: 'w2', seed: 31 }); st.life.plan = 'side'; st.econ = null; st.pos = 9; st.phase = 'roll'; E.rollDice(st);
+  assert.ok(st.life.sideFeeDue === E.getWorld('w2').sideReportFee || st.life.sideTaxDue === 0);
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

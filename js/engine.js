@@ -905,7 +905,7 @@ function paydayImpl(st, out, step, landed) {
     if (sideAct > 0) {
       const due = Math.round(sideAct * marginalRate(ps.gross || grossBase(st))); L.side.total += sideAct;
       if (L.sideReport) { cf -= due; st.taxes.side += due; if (R4(st)) cf -= sideReportFee(st); } // reported: monthly advance payments (מקדמות) + the accountant (T2), no year-end penalty
-      else L.sideTaxDue += due;
+      else { L.sideTaxDue += due; if (R4(st)) L.sideFeeDue = (L.sideFeeDue || 0) + sideReportFee(st); } // T3 review M3: the accountant's annual return is due either way — later, in one bill
     }
   }
   st.taxes.rental += rentTaxOf(st);
@@ -1194,8 +1194,8 @@ function yearlyPrices(st, out) {
     lesson(st, out, 'inflation'); lesson(st, out, 'wage_lag');
     if (st.cash > 3 * Math.max(1, expensesOf(st))) lesson(st, out, 'real_vs_nominal');
   }
-  if (L.sideTaxDue > 0) { // side income without advance payments: billed at year end, +10% penalty
-    const bill = Math.round(L.sideTaxDue * 1.1); st.cash -= bill; st.taxes.side += bill; L.sideTaxDue = 0; cashFx(out, -bill);
+  if (L.sideTaxDue > 0) { // side income without advance payments: billed at year end, +10% penalty (+ the late annual return, rules 4)
+    const fee = Math.round(L.sideFeeDue || 0); const bill = Math.round(L.sideTaxDue * 1.1) + fee; st.cash -= bill; st.taxes.side += bill - fee; L.sideTaxDue = 0; L.sideFeeDue = 0; cashFx(out, -bill);
     out.news.push({ kind: 'tax', text: `מס הכנסה: חשבון שנתי על העסק הצדדי — ${fmtM(bill)} (כולל קנס של 10%). 🌍 במציאות פותחים תיק ומשלמים מקדמות כל חודש, ואז אין קנס.`, tax: bill });
     lesson(st, out, 'side_tax');
   }
@@ -1794,7 +1794,7 @@ const DESCRIBE = {
 
   tax(st, p, ev) {
     const L = st.life; const T = st.taxes;
-    const refund = Math.round(L.taxRefund), bill = Math.round(L.sideTaxDue);
+    const refund = Math.round(L.taxRefund), bill = Math.round(L.sideTaxDue) + Math.round(L.sideFeeDue || 0); // + the late annual return (T3 review M3)
     const paid = T.income + T.bl; const grossIn = Math.max(1, (st.stats.paydays || 1) * grossBase(st));
     ev.title = 'מס הכנסה — תיאום שנתי'; ev.text = 'פעם בשנה עושים סדר: מקבלים בחזרה מס ששולם ביותר, ומשלמים על הכנסות שלא דווחו.';
     ev.mentor = mentorLine(st, 'taxAsk', {});
@@ -1805,7 +1805,7 @@ const DESCRIBE = {
       const fee = R4(st) ? sideReportFee(st) : 0; // T2 §11.1 #2: reporting has a cost (the accountant), so it is not always better
       const sideM = L.plan === 'side' ? payslipOf(st).sideIncome : Math.round(L.side.total / Math.max(1, L.side.months || 12));
       const saving = Math.round(0.1 * sideM * marginalRate(grossBase(st)) * 12);
-      ev.options.push(opt('report', fee ? `לפתוח תיק ולשלם מקדמות על העסק הצדדי (עלות רו״ח ${fmtM(fee)} בחודש)` : 'לפתוח תיק ולשלם מקדמות על העסק הצדדי', true, { kind: 'report', fee, saving }));
+      ev.options.push(opt('report', fee ? `לפתוח תיק ולשלם מקדמות על העסק הצדדי (עלות רו״ח ${fmtM(fee)} בחודש)` : 'לפתוח תיק ולשלם מקדמות על העסק הצדדי', true, { kind: 'report', fee, saving, feeEither: R4(st) })); // rules 4: unreported income also pays the accountant (late annual return, T3 review M3)
     }
     if (!refund && !bill && ev.options.length === 1) { ev.auto = true; ev.toastText = mentorLine(st, 'taxNone', { paid: fmtM(paid), rate: pct(ev.data.effectiveRate, 1) }) || 'אין חוב ואין החזר מס.'; }
   },
@@ -2623,7 +2623,7 @@ function optionU(ctx, ev, o, params) {
       if (o.id === 'start' || o.id.startsWith('start:')) { const cap = o.startCapital || d.startCapital; money = (o.net || 0) * 24 - 0.6 * cap * Math.min(1, 5 * cap / Math.max(1, ctx.netWorth)) - (d.ownerEnergy || 0) * 12 * 0.012 * E; if (o.loanAmount) flags.push('debt'); /* owner-run: a second job that costs 🔋 every month */ const cu = cushionCheck(ctx, -cap, o.loanAmount, 0); if (cu.flagged) flags.push('noCushion'); }
       else if (o.kind === 'biz' && o.effects) { money = (o.effects.delta3 || 0) * 8; reasons.push(R('net', `תחזית ל־3 חודשים: ${sgn(o.effects.delta3 || 0)} רווח בעסק`, money / E)); }
       break;
-    case 'tax': if (o.id === 'report') { money = (o.saving ?? 0.5 * E) - (o.fee || 0) * 12; reasons.push(R('net', `חוסך קנס של בערך ${fmtM(o.saving || 0)} בשנה${o.fee ? `, עולה ${fmtM(o.fee * 12)} בשנה` : ''}`, money / E)); } break;
+    case 'tax': if (o.id === 'report') { const fee12 = o.feeEither ? 0 : (o.fee || 0) * 12; money = (o.saving ?? 0.5 * E) - fee12; reasons.push(R('net', `חוסך קנס של בערך ${fmtM(o.saving || 0)} בשנה${fee12 ? `, עולה ${fmtM(fee12)} בשנה` : o.fee ? ' — את הרו״ח משלמים גם בלי תיק, בדוח המאוחר' : ''}`, money / E)); } break;
     case 'mystery': if (d.kind === 'quiz') money = o.id === 'a' + ((getWorld(ctx.worldId).mystery.find((x) => x.kind === 'quiz' && x.text === d.question) || {}).correct) ? E : 0; break;
     default: break;
   }
@@ -2896,11 +2896,11 @@ const CHOOSE = {
 
   tax(st, p, o, params, out) {
     if (o.id === 'report') { st.life.sideReport = true; lesson(st, out, 'side_tax'); out.mentor = 'פתחת תיק במס הכנסה: מעכשיו משלמים מקדמות כל חודש, ואין קנס בסוף השנה.'; return false; }
-    const L = st.life; const refund = Math.round(L.taxRefund), bill = Math.round(L.sideTaxDue);
+    const L = st.life; const fee = Math.round(L.sideFeeDue || 0); const refund = Math.round(L.taxRefund), bill = Math.round(L.sideTaxDue) + fee;
     const net = refund - bill;
     if (net) { st.cash += net; cashFx(out, net); sound(out, net > 0 ? 'coin' : 'loss'); }
-    if (bill) st.taxes.side += bill;
-    L.taxRefund = 0; L.sideTaxDue = 0;
+    if (bill) st.taxes.side += bill - fee;
+    L.taxRefund = 0; L.sideTaxDue = 0; L.sideFeeDue = 0;
     out.mentor = refund ? mentorLine(st, 'taxRefund', { amount: fmtM(refund) }) : bill ? mentorLine(st, 'taxBill', { amount: fmtM(bill) }) : null;
     if (refund) lesson(st, out, 'tax_refund');
     if (bill) lesson(st, out, 'side_tax');
@@ -3641,7 +3641,7 @@ const STORY_HOOKS = {
     apply(st, x) { setGross(st, x.hit ? 1.18 : 1.05); st.story.jobChangeM = st.month; x.out.news.push({ kind: 'story', chain: 'career', text: x.hit ? 'מצאת משרה שמשלמת על התואר: +18% ברוטו.' : 'מצאת עבודה — פחות ממה שקיווית: +5% ברוטו.' }); } },
   degreeAsk: { preview(st, e) { e.oddsMoney = { p: round2(raiseChance(st)), hit: salaryDelta(st, 1.08) * 24, miss: 0 }; },
     apply(st, x) { if (x.hit) { setGross(st, 1.08); st.life.lastRaise = st.month; st.life.raises++; x.out.news.push({ kind: 'story', chain: 'career', text: 'הבוס הסכים: +8% ברוטו על התואר.' }); } else { st.life.happiness = clamp(st.life.happiness - 3, 0, 100); x.out.news.push({ kind: 'story', chain: 'career', text: 'הבוס אמר "אחר כך". לפחות שאלת.' }); } } },
-  sideLater: { preview(st, e) { e.cash -= r100(sideExpected(st) * marginalRate(grossBase(st)) * 12 * 0.1); } }, // the expected +10% penalty at year end (the tax itself is due either way)
+  sideLater: { preview(st, e) { e.cash -= r100(sideExpected(st) * marginalRate(grossBase(st)) * 12 * 0.1); e.flow -= sideReportFee(st); e.months = 0; } }, // the +10% penalty at year end; the accountant's annual return is due either way (T3 review M3) — the tax itself too
   bigOrder: { preview(st, e, x) { e.cash += r100(0.55 * x.S) - r100(0.3 * x.S); },
     apply(st, x) { st.cash -= r100(0.3 * x.S); addIncome(st, 'תשלום על הזמנת העוגות', r100(0.55 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; if (x.hit) { it.from = st.month + 2; it.until = st.month + 2; x.out.news.push({ kind: 'story', chain: 'side', text: 'הלקוח מאחר — התשלום יגיע רק בעוד חודשיים.' }); } else { it.from = st.month + 1; it.until = st.month + 1; } } },
   bigOrderAdvance: { preview(st, e, x) { e.oddsMoney = { p: 0.6, hit: r100(0.55 * x.S) - r100(0.3 * x.S), miss: 0 }; },
