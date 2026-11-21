@@ -427,7 +427,7 @@ function payslipOf(st, planId) {
     return { gross: 0, overtime: 0, incomeTax: 0, bl: 0, pensionEmployee: 0, net: ben, employerPension: 0, severanceDeposit: 0, pensionDeposit: 0, effectiveTaxRate: 0, marginalRate: 0, jobless: true,
       sideIncome: 0, studyCost: 0, lines: [{ label: 'דמי אבטלה (בערך 60%)', amount: ben }], reality: '🌍 במציאות דמי אבטלה מחושבים לפי הברוטו, עם תקרה, אחרי ימי המתנה, ורק למי שעבד מספיק חודשים.' };
   }
-  const cut = st.story && st.story.flags.payCut && st.story.flags.payCut.until >= st.month ? st.story.flags.payCut : null; // T3 grossTemp (crisis job cut, part time)
+  const cut = payCutOf(st); // T3 grossTemp (crisis job cut) and part time — stacked multiplicatively (T3 review M1)
   const gross = cut ? r10(g0 * P.grossMult * cut.mult) : r10(g0 * P.grossMult);
   const s = slip(gross, taxPoints(st));
   const side = planId && planId !== L.plan ? (planId === 'side' ? r10(LIFE_CFG.sideBase * Math.max(1, sideLevel(L)) * Math.max(baseNet(st), 3000)) : 0) : sideExpected(st);
@@ -3558,6 +3558,16 @@ function storyVars(st, chainId, item) {
 /* ---------------------------------------------------------------- effects preview (signed flow, salary, odds) and money */
 /** Monthly net change from a gross multiplier (salary chip). */
 const salaryDelta = (st, mult) => slip(r10(grossBase(st) * mult), taxPoints(st)).net - baseNet(st);
+/** T3 review M1: the active temporary pay cuts (st.story.flags.payCut: a legacy single object or a list of {src, mult, until, label}). */
+function payCutsOf(st) { const p = st.story && st.story.flags.payCut; return (!p ? [] : Array.isArray(p) ? p : [p]).filter((c) => c && c.until >= st.month); }
+/** The combined cut this month → {mult, label} | null (every active cut multiplies; one label per source). */
+function payCutOf(st) { const cs = payCutsOf(st); if (!cs.length) return null; return { mult: cs.reduce((m, c) => m * c.mult, 1), label: [...new Set(cs.map((c) => c.label || 'קיצוץ זמני בשכר'))].join(' + ') }; }
+/** Add a temporary cut (replacing a running cut of the same source). */
+function addPayCut(st, cut) { const F = st.story.flags; const list = (Array.isArray(F.payCut) ? F.payCut : F.payCut ? [{ src: F.payCut.label === 'חצי משרה' ? 'partTime' : 'crisis', ...F.payCut }] : []).filter((c) => c.src !== cut.src && c.until >= st.month); list.push(cut); F.payCut = list; }
+/** Drop the cuts of one source (sideGraduate ends only the part time). */
+function dropPayCut(st, src) { const F = st.story.flags; if (!F.payCut) return; const list = (Array.isArray(F.payCut) ? F.payCut : [{ src: F.payCut.label === 'חצי משרה' ? 'partTime' : 'crisis', ...F.payCut }]).filter((c) => c.src !== src); F.payCut = list.length ? list : null; }
+/** The net change of a temporary cut from the CURRENT effective pay (stacked cuts included) — the chips use this (M1). */
+function tempCutDelta(st, mult) { const c = payCutOf(st); const g1 = r10(grossBase(st) * (c ? c.mult : 1)); return slip(r10(g1 * mult), taxPoints(st)).net - slip(g1, taxPoints(st)).net; }
 /**
  * ₪ over H months of an effects block — the ONE money function behind the card totals (total12 / total24) and the evaluator (§9.2).
  * Never reads a seal: sealed branches enter at their shown odds.
@@ -3583,7 +3593,7 @@ function storyEffects(st, chainId, stepId, o, item) {
   if (fx.carCut) e.flow += carLines(st).reduce((x, l) => x + r10(l.amount * fx.carCut), 0);
   if (fx.carLinePct) e.flow -= carLines(st).reduce((x, l) => x + r10(l.amount * fx.carLinePct / 100), 0);
   if (fx.grossMult) { e.salary = salaryDelta(st, fx.grossMult); e.salaryMonths = 0; }
-  if (fx.grossTemp) { e.salary = salaryDelta(st, fx.grossTemp.mult); e.salaryMonths = fx.grossTemp.months; }
+  if (fx.grossTemp) { e.salary = tempCutDelta(st, fx.grossTemp.mult); e.salaryMonths = fx.grossTemp.months; }
   if (fx.jobless) { e.salary = -r10(baseNet(st) * 0.4); e.salaryMonths = fx.jobless; }
   if (fx.planLock) { const ps = payslipOf(st, fx.planLock.plan); e.salary = ps.net - payslipOf(st).net; e.salaryMonths = fx.planLock.months; e.energy += PLANS[fx.planLock.plan].energy * fx.planLock.months; e.happiness += PLANS[fx.planLock.plan].happiness * fx.planLock.months; }
   if (fx.sideReport) { e.flow -= sideReportFee(st); e.months = 0; e.oddsMoney = null; }
@@ -3636,8 +3646,8 @@ const STORY_HOOKS = {
     apply(st, x) { st.cash -= r100(0.3 * x.S); addIncome(st, 'תשלום על הזמנת העוגות', r100(0.55 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; if (x.hit) { it.from = st.month + 2; it.until = st.month + 2; x.out.news.push({ kind: 'story', chain: 'side', text: 'הלקוח מאחר — התשלום יגיע רק בעוד חודשיים.' }); } else { it.from = st.month + 1; it.until = st.month + 1; } } },
   bigOrderAdvance: { preview(st, e, x) { e.oddsMoney = { p: 0.6, hit: r100(0.55 * x.S) - r100(0.3 * x.S), miss: 0 }; },
     apply(st, x) { if (!x.hit) { x.out.news.push({ kind: 'story', chain: 'side', text: 'בית הקפה לא הסכים למקדמה והזמין ממישהו אחר.' }); return; } st.cash += r100(0.275 * x.S) - r100(0.3 * x.S); addIncome(st, 'יתרת התשלום על העוגות', r100(0.275 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; it.from = st.month + 1; it.until = st.month + 1; } },
-  sidePartTime: { preview(st, e) { e.salary = salaryDelta(st, 0.6); e.salaryMonths = 5; e.flow += sideExpected(st); e.months = 5; },
-    apply(st, x) { st.story.flags.payCut = { mult: 0.6, until: st.month + 4, label: 'חצי משרה' }; x.c.data.partTime = true; x.c.data.gradAt = 12; st.life.sideBoost = st.month + 4; } },
+  sidePartTime: { preview(st, e) { e.salary = tempCutDelta(st, 0.6); e.salaryMonths = 5; e.flow += sideExpected(st); e.months = 5; },
+    apply(st, x) { addPayCut(st, { src: 'partTime', mult: 0.6, until: st.month + 4, label: 'חצי משרה' }); x.c.data.partTime = true; x.c.data.gradAt = 12; st.life.sideBoost = st.month + 4; } },
   sideSmall: { apply(st, x) { x.c.data.small = true; } },
   sideGrad: { preview(st, e, x) { const t = x.o.bizType || 'coffee'; const G = BIZ.SIDE_GRAD[t]; const b = BIZ.create(t, { month: st.month, overrides: G.overrides, t3: true }); const f = BIZ.forecast(b, BIZ.suggest(b).decisions, 3); e.flow += Math.round(f.netProfit / 3); e.months = 0; e.energy -= BIZ.ARCHETYPES[t].ownerEnergy; },
     apply(st, x) { sideGraduate(st, x.o.bizType || 'coffee', x.out); } },
@@ -3685,7 +3695,7 @@ function sideGraduate(st, typeId, out) {
   a.n = 'העסק הצדדי שלך'; a.cost = 0; a.down = 0; a.biz.invested = 0;
   out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, 'biz'), label: a.n, color: 'green' });
   out.news.push({ kind: 'sideBiz', text: mentorLine(st, 'sideBiz', { cf: 'רווח' }), assetId: 'a' + a.id });
-  L.side.months = 0; L.side.level = 0; L.plan = 'work'; st.story.flags.payCut = null;
+  L.side.months = 0; L.side.level = 0; L.plan = 'work'; dropPayCut(st, 'partTime'); // M1: a running crisis cut stays
 }
 
 /* ---------------------------------------------------------------- applying a story option (L card or inbox item) */
@@ -3702,7 +3712,7 @@ function applyStoryFx(st, fx, x) {
   if (fx.energy) L.energy = clamp(L.energy + fx.energy, 0, 100);
   if (fx.glow) addGlow(st, fx.glow);
   if (fx.grossMult) setGross(st, fx.grossMult);
-  if (fx.grossTemp) st.story.flags.payCut = { mult: fx.grossTemp.mult, until: st.month + fx.grossTemp.months - 1, label: 'קיצוץ זמני בשכר' };
+  if (fx.grossTemp) addPayCut(st, { src: 'crisis', mult: fx.grossTemp.mult, until: st.month + fx.grossTemp.months - 1, label: 'קיצוץ זמני בשכר' });
   if (fx.workLoad) L.workLoad = Math.max(0, L.workLoad + fx.workLoad);
   if (fx.planLock) { st.story.flags.planLock = { prev: L.plan === fx.planLock.plan ? 'work' : L.plan, plan: fx.planLock.plan, until: st.month + fx.planLock.months - 1 }; applyPlan(st, fx.planLock.plan, out); }
   if (fx.jobless) { L.jobless = { until: st.month + fx.jobless - 1 }; st.story.jobChangeM = st.month; lesson(st, out, 'unemployment'); mark(st, 'jobless', 0, CUR_K, ''); }
@@ -3800,7 +3810,7 @@ function storyMonth(st, out, o) {
   S.offSide = L.plan === 'side' ? 0 : S.offSide + 1;
   if (L.workLoad > 0) { if (S.loadSince == null) S.loadSince = st.month; } else S.loadSince = null;
   const F = S.flags;
-  if (F.payCut && F.payCut.until < st.month) { F.payCut = null; out.news.push({ kind: 'story', text: 'הקיצוץ בשכר נגמר — המשכורת חוזרת למלואה.' }); }
+  if (F.payCut) { const all = Array.isArray(F.payCut) ? F.payCut : [F.payCut]; const live = all.filter((c) => c.until >= st.month); if (live.length < all.length) { F.payCut = live.length ? (Array.isArray(F.payCut) ? live : live[0]) : null; out.news.push({ kind: 'story', text: live.length ? 'קיצוץ אחד בשכר נגמר.' : 'הקיצוץ בשכר נגמר — המשכורת חוזרת למלואה.' }); } }
   if (F.planLock && F.planLock.until < st.month) { const pl = F.planLock; F.planLock = null; if (L.plan === pl.plan && PLANS[pl.prev]) { applyPlan(st, pl.prev, out); out.news.push({ kind: 'story', text: `המנוחה נגמרה. חוזרים ל"${PLANS[pl.prev].label}".` }); } }
   st.incomeExtra = st.incomeExtra.filter((x) => !x.until || x.until >= st.month);
   // career: promo news at +6 after accept; warn ends early on 2 good paydays or a burnout

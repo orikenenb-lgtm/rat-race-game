@@ -522,5 +522,19 @@ test('review M4: w1 (rules 4) scales the money of personal / values cards and th
   for (const o of ev.options) { assert.ok(o.major, 'life options carry the impact panel'); const im = E.impactFor(st, o.id, { event: ev }); assert.ok(im && Number.isFinite(im.cashAfter) && Number.isFinite(im.cfAfter), o.id); }
 });
 
+/* ------------------------------------------------------------------ T3 review fixes (docs/next-level/reviews/T3-review.md) */
+test('review M1: stacked pay cuts multiply (half time × crisis cut), the chip equals the applied change', () => {
+  const st = forced('w2', 'crisis', 'job', { charId: 'chef' });
+  const g0 = E.metrics(st).payslip.base;
+  st.story.flags.payCut = [{ src: 'partTime', mult: 0.6, until: st.month + 4, label: 'חצי משרה' }];
+  const net0 = E.metrics(st).payslip.net; assert.equal(E.metrics(st).payslip.gross, Math.round(g0 * 0.6 / 10) * 10);
+  const card = E.inbox(st).find((c) => c.chain === 'crisis'); const chip = card.options.find((o) => o.id === 'accept').effects.salary;
+  resolveForced(st, 'crisis', 'job', 'accept');
+  const ps = E.metrics(st).payslip;
+  assert.equal(ps.gross, Math.round(Math.round(g0 * 0.6 / 10) * 10 * 0.9 / 10) * 10, 'half time × 0.9, never back up to 90 %');
+  assert.ok(ps.gross < g0 * 0.6, 'accepting a cut never raises the pay');
+  assert.equal(chip, ps.net - net0, 'the salary chip = the applied net change');
+  assert.equal(st.story.flags.payCut.length, 2);
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
