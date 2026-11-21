@@ -978,7 +978,7 @@ export function resolveEvent(b0, key, choiceId, opts = {}) {
     case 'competitor:freemium': err = viaDecisions({ price: priceAt(b, 0.7) }); push(b, 'churnMult', 6, 0.8); break;
     case 'lateClient:accept': case 'lateClient:advance': {
       const o = b2bOrder(b); const adv = choiceId === 'advance';
-      if (adv && !(((a + 0.5) % 1) < 0.6)) { text = 'הלקוח לא הסכים למקדמה — והלך למתחרה.'; break; }
+      if (adv && !(((a * 9973 + sb * 7919) % 1) < 0.6)) { text = 'הלקוח לא הסכים למקדמה — והלך למתחרה.'; break; } // T3 review m1: agreement from a third derived value, so "late" (a) and "bad" (b) keep their shown odds
       b.queued.push({ kind: 'b2b', units: o.units, price: o.price, adv: adv ? 0.3 : 0, late: a < 0.25, bad: sb < 0.08, client: dec.data.client || '' });
       text = adv ? 'הלקוח הסכים: 30% עכשיו, השאר בעוד חודשיים.' : 'ההזמנה יוצאת בחודש הבא. התשלום — בעוד חודשיים.'; break; }
     case 'breakdown:repair': oneOff(b, 'תיקון הציוד', p.repair * b.cpi); break;

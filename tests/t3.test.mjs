@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import * as E from '../js/engine.js';
 import * as BIZ from '../js/finance/business.js';
 import * as CH from '../js/systems/chains.js';
-import { STREAMS, makeStreams } from '../js/rng.js';
+import { STREAMS, makeStreams, mix32 } from '../js/rng.js';
 import { playOut, prng } from './lib/random-player.mjs';
 import { validateActions } from '../supabase/functions/verify-result/verify_core.js';
 
@@ -49,7 +49,7 @@ function resolveForced(st, chainId, step, opt) {
 function sampleGames(n, worldId, o = {}) {
   const out = [];
   for (let i = 0; i < n; i++) {
-    const w = E.getWorld(worldId); const cfg = { worldId, charId: w.characters[i % w.characters.length].id, seed: 4000 + i * 37 + worldId.charCodeAt(1) * 1009, mode: 'free', mentor: ['guide', 'hint', 'pro'][i % 3] };
+    const w = E.getWorld(worldId); const cfg = { worldId, charId: w.characters[i % w.characters.length].id, seed: 4000 + i * 37 + worldId.charCodeAt(1) * 1009, mode: o.mode || 'free', mentor: ['guide', 'hint', 'pro'][i % 3] };
     out.push(playOut(E, cfg, prng(cfg.seed ^ 0x7f4a7c15), { v4: true, stories: o.stories !== false }));
   }
   return out;
@@ -76,8 +76,12 @@ test('§12.3 story draws = 2 × paydays; each business story stream = 2 × its s
   for (const st of [...sampleGames(N(6), 'w1'), ...sampleGames(N(6), 'w3')]) {
     const s0 = makeStreams(st.seed).story; assert.equal(draws(s0, st.rng.story), 2 * st.stats.paydays, 'story draws');
     for (const a of st.assets.filter((x) => x.biz && x.biz.t3)) {
-      // the business stream starts at mix32(seed ^ 0x51A7E5ED) — compare via the 3-draw sibling (bizRng): story = 2/3 × bizRng draws
-      void a;
+      // review M9: the business story stream advanced by exactly 2 per simulated month of this business
+      // the business's seed = its 3-draw stream wound back by 3 × months; its story stream starts at mix32(seed ^ 0x51A7E5ED)
+      const key = 'a' + a.id; const m = a.biz.totals.months;
+      const seed = Number(((BigInt(st.bizRng[key] >>> 0) - 3n * BigInt(m) * INC) % MOD + MOD) % MOD);
+      const story0 = mix32((seed >>> 0 || 1) ^ 0x51A7E5ED) || 1;
+      assert.equal(draws(story0, st.bizStory[key]), 2 * m, `${key}: story draws = 2 × ${m} simulated months`);
     }
   }
   // a fresh business: 2 story draws per simulated month exactly
@@ -143,7 +147,7 @@ test('§12.7 / U10 mid-chain serialize / deserialize plays on byte-identically (
         kinds[k]++;
         const a = E.deserialize(E.serialize(st)); const b = st;
         const go = (x, rr) => { for (let u = 0; u < 15 && !x.over; u++) { for (const it of E.inbox(x)) if (rr() < 0.5) { const en = it.options.filter((o) => o.enabled); E.resolveStory(x, it.itemId, en[Math.floor(rr() * en.length)].id); } if (x.over) break; if (x.pending) { const ev = E.currentEvent(x); const en = ev.options.filter((o) => o.enabled); E.choose(x, ev, en[Math.floor(rr() * en.length)].id, { qty: 1 }); continue; } E.rollDice(x); let ev = E.landing(x); let n = 0; while (ev && !x.over) { const en = ev.options.filter((o) => o.enabled); const o = n++ > 2 ? (en.find((y) => ['ok', 'pass', 'done'].includes(y.id)) || en[0]) : en[Math.floor(rr() * en.length)]; ev = E.choose(x, ev, o.id, { qty: 1 }).event; } } };
-        const ca = clone(a), cb = E.deserialize(E.serialize(b)); go(ca, prng(g)); go(cb, prng(g));
+        const ca = clone(a), cb = clone(b); go(ca, prng(g)); go(cb, prng(g)); // review M9: the reloaded save vs CONTINUOUS play (a plain clone, no deserialize)
         assert.equal(E.serialize(ca), E.serialize(cb), `round trip at ${k}`);
       }
       if (st.pending) { const ev = E.currentEvent(st); const en = ev.options.filter((o) => o.enabled); E.choose(st, ev, en[Math.floor(r() * en.length)].id, { qty: 1 }); continue; }
@@ -363,12 +367,17 @@ test('§12.30 / U13 copy: text ≤ 120 and remember / hint ≤ 70 after filling 
 test('§12.15–16 natural frequency and pacing (random games, all worlds; the 300-game version is tools/sim.mjs --stories)', () => {
   const rows = [];
   for (const w of WORLDS4) {
-    const gs = sampleGames(N(30), w); const n = gs.length; const has = (id) => gs.filter((g) => g.story.chains[id]).length / n;
+    const gs = sampleGames(N(30), w, { mode: 'weekly' }); const n = gs.length; const has = (id) => gs.filter((g) => g.story.chains[id]).length / n; // review M8/M9: a time-limited game
     const per12 = gs.map((g) => g.story.memory.filter((m) => !['car', 'move', 'friend'].includes(m.chain) || !['s1', 'm1', 'homeRepair', 'f1', 'carBack'].includes(m.step)).length * 12 / Math.max(1, g.month - 1)).sort((a, b) => a - b);
     rows.push({ w, car: has('car'), move: has('move'), friend: has('friend'), career: has('career'), crisis: has('crisis'), med: per12[Math.floor(n / 2)], p90: per12[Math.floor(n * 0.9)] });
   }
   console.log('   ' + rows.map((r) => `${r.w} car ${(r.car * 100).toFixed(0)}% move ${(r.move * 100).toFixed(0)}% friend ${(r.friend * 100).toFixed(0)}% career ${(r.career * 100).toFixed(0)}% crisis ${(r.crisis * 100).toFixed(0)}% items/12m med ${r.med.toFixed(1)} p90 ${r.p90.toFixed(1)}`).join('\n   '));
-  for (const r of rows) { assert.ok(r.p90 <= 6.5, 'p90 items per 12 months'); assert.ok(r.career >= 0.3, 'career triggers'); }
+  for (const r of rows) {
+    assert.ok(r.p90 <= 6.5, 'p90 items per 12 months'); assert.ok(r.career >= 0.3, 'career triggers'); assert.ok(r.med >= 0.4, 'items per 12 months: median ' + r.med);
+    // review M9: upper bounds that can fail (spec band 25–60 % / career ≤ 80 % / crisis ≤ 85 %, + sampling slack for N = 30)
+    for (const k of ['car', 'move', 'friend']) assert.ok(r[k] <= 0.75, `${r.w} ${k} ${r[k]}`);
+    assert.ok(r.career <= 0.92 && r.crisis <= 0.97, `${r.w} career ${r.career} crisis ${r.crisis}`);
+  }
 });
 
 /* ------------------------------------------------------------------ business (§6, §12.21–27) */
@@ -451,9 +460,20 @@ test('U18 / §12.24 lateClient: receivable due at +2, +3 when late, written off 
     if (kind === 'late') assert.ok(runs.every((r) => !(r.opex.badDebt > 0)));
     void terms;
   }
-  let late = 0, bad = 0; const n = 10000; let s = 7; const R = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  for (let i = 0; i < n; i++) { const a = R(), b2 = R(); if (a < 0.25) late++; if (b2 < 0.08) bad++; }
-  assert.ok(Math.abs(late / n - 0.25) <= 0.03 && Math.abs(bad / n - 0.08) <= 0.03);
+  // review M9 / m1: the frequencies of the ENGINE's resolution (seals from a PRNG), for 'accept' and — given agreement — for 'advance'
+  const base = BIZ.simulate(BIZ.create('laundromat', { t3: true }), null, () => 0.5, { cal: 3, story: () => 0.5 }).business;
+  let s = 7; const R = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (const choice of ['accept', 'advance']) {
+    let n = 0, late = 0, bad = 0, agreed = 0; const tries = 10000;
+    for (let i = 0; i < tries; i++) {
+      const b = clone(base); b.decide = { key: b.month + ':lateClient', id: 'lateClient', m: b.month, seal: { a: R(), b: R() }, data: { units: 300, price: 16, gross: 4800 } };
+      const x = BIZ.resolveEvent(b, b.decide.key, choice).business; const q = x.queued.find((y) => y.kind === 'b2b'); if (!q) continue;
+      agreed++; n++; if (q.late) late++; if (q.bad) bad++;
+    }
+    assert.ok(Math.abs(late / n - 0.25) <= 0.03, `${choice}: P(late) ${(late / n).toFixed(3)} vs the card's 1 in 4`);
+    assert.ok(Math.abs(bad / n - 0.08) <= 0.03, `${choice}: P(bad) ${(bad / n).toFixed(3)} vs 8%`);
+    if (choice === 'advance') assert.ok(Math.abs(agreed / tries - 0.6) <= 0.03, `advance: P(agree) ${(agreed / tries).toFixed(3)} vs 6 in 10`);
+  }
 });
 test('U17 / §12.25 growthStage: never ±2 in a month; needs 2 good / 3 bad months; stage 3 reachable', () => {
   let reached3 = 0, lifetimes = 0;
