@@ -389,6 +389,7 @@ body.lb-lobby-open { overflow: hidden; }
 .lb-shell .lb-radios input, .lb-radios input { width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; flex: none; accent-color: var(--gold-text); }
 .lb-radios label:has(input:checked) { background: light-dark(#fff3d2, #33291a); border-color: var(--gold-text); }
 .lb-radios label:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.lb-radios input:focus-visible { outline: none; box-shadow: none; } /* the label carries the one ring */
 .lb-radios .lb-note { flex-basis: 100%; margin-top: 2px; }
 
 /* ---------------- END SCREEN */
