@@ -2,7 +2,7 @@
 # Builds the lobby test copy in $COPY_DIR/rr2lobby (default /tmp/rr2lobby): real project + stubs for the in-game screen (stubs never touch the project).
 set -e
 SRC="${SRC:-$(cd "$(dirname "$0")/.." && pwd)}"
-COPY_DIR="${COPY_DIR:-/tmp}"
+COPY_DIR="${COPY_DIR:-/tmp}"; mkdir -p "$COPY_DIR"
 rm -rf $COPY_DIR/rr2lobby && cp -r "$SRC" $COPY_DIR/rr2lobby && rm -rf $COPY_DIR/rr2lobby/.git
 ln -s /tmp/t/node_modules/three $COPY_DIR/rr2lobby/three
 cp $SRC/tests/stubs/index.html $COPY_DIR/rr2lobby/index.html
