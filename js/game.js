@@ -16,6 +16,7 @@ import * as OV from './render/overlay.js';
 import { flag } from './flags.js';
 import * as saves from './saves.js';
 import { initMotion, reducedMotion } from './motion.js';
+import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coaches, tour, practice chip
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -69,6 +70,7 @@ function barLobby() { try { persist(); } catch (e) { /* ignore */ } OV.hideRecov
 function showRecoverBar(v) {
   const lobby = { label: STR.Rlobby, fn: barLobby };
   if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
+  else if (v === 'R2' && scene.kind !== '3d') OV.showRecover({ title: STR.R1t, body: STR.R2b2d, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, lobby] }); // already מצב קל / none: nothing lighter to offer
   else if (v === 'R2') OV.showRecover({ title: STR.R1t, body: STR.R2b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.Rsave, fn: () => recover() }, lobby] });
   else {
     // phones (≤600px) have no HUD lite button (CR-S2): offer מצב קל on the bar while in 3D
@@ -80,7 +82,8 @@ export function isStuck() { return stuck; }
 /** Continue from the save (the save was written when the flow broke). lite → continue in מצב קל. */
 export async function recover({ lite = false } = {}) {
   OV.hideRecover(); stuck = false; busy = false; closeCard();
-  if (lite && flag('board2d') !== 'off') return setLite(true);
+  // מצב קל is a live 3D → 2D switch; in 2D / none there is nothing to switch, so resume from the save (review B-1)
+  if (lite && scene.kind === '3d' && flag('board2d') !== 'off') return setLite(true);
   if (!CFG) return false;
   return startGame({ ...CFG, resume: true });
 }
@@ -104,9 +107,10 @@ addEventListener('error', (ev) => onGlobalError(ev.error || ev.message, [ev.file
 addEventListener('unhandledrejection', (ev) => onGlobalError(ev.reason, (ev.reason && ev.reason.stack) || ''));
 
 /* ============================================================ saves (T1: js/saves.js — backup, quarantine, quota) */
-/** localStorage key for a config: free → rr2-save-free-<world>; ranked → rr2-save-<resultId>. */
+/** localStorage key for a config: free → rr2-save-free-<world>; learning → rr2-save-learn-<world>; ranked → rr2-save-<resultId>. */
 export function saveKeyFor(cfg) {
   if (!cfg) return null;
+  if ((cfg.mode === 'free' || !cfg.mode) && cfg.learn) return `rr2-save-learn-${cfg.worldId || 'w1'}`; // T4 IR-T4-1: learning mode's own slot
   if (cfg.mode === 'free' || !cfg.mode) return `rr2-save-free-${cfg.worldId || 'w1'}`;
   if (cfg.mode === 'history') return cfg.scenarioId ? `rr2-save-history-${cfg.scenarioId}` : `rr2-save-history-seed-${cfg.seed >>> 0}`;
   if (cfg.resultId) return `rr2-save-${cfg.resultId}`;
@@ -117,7 +121,9 @@ let quotaWarned = false;
 function persist() {
   if (!S || !CFG) return;
   const r = saves.write(saveKeyFor(CFG), CFG, S);
-  if (!r.ok && r.quota && !quotaWarned) { quotaWarned = true; toastWhenIdle(SS.S7, { kind: 'bad', ms: 8000 }); }
+  // full (quota) or blocked storage (SecurityError, review m-2): tell the player once per game; a refused future-save
+  // overwrite is not a storage failure (the future save is kept on purpose)
+  if (!r.ok && !r.future && !quotaWarned) { quotaWarned = true; toastWhenIdle(r.quota ? SS.S7 : SS.S7b, { kind: 'bad', ms: 8000 }); }
 }
 /** ui.js keeps only the newest 4 queued toasts: hand an important one over when the toast pill has been idle twice in a row */
 function toastWhenIdle(text, opts, tries = 0) {
@@ -277,7 +283,7 @@ function syncLiteBtn() {
 export async function setLite(on) {
   settings.lite = !!on; writeSettings({ lite: !!on });
   if (!on) { if (scene.kind !== '3d') reloadInto3D(); return; }
-  if (scene.kind !== '3d') { if (stuck) return recover(); syncLiteBtn(); return; }
+  if (scene.kind !== '3d') { syncLiteBtn(); return CFG && S && !S.over && stuck ? recover() : undefined; }
   liteJustOn = true;
   try { persist(); } catch (e) { /* ignore */ }
   gen++; closeCard(); OV.hideRecover(); stuck = false; busy = false;
@@ -511,11 +517,13 @@ async function startInner(cfg, my) {
     // a new game: whatever unfinished game this slot holds is backed up first (future saves are never overwritten)
     const cl = saves.claimSlot(saveKeyFor(cfg), cfg.seed);
     if (!cl.ok) {
-      const go = await noBackupModal(!cl.future);
+      const go = await noBackupModal(!cl.keep); // future / unreadable saves are never overwritten without a backup
       if (my !== gen) return false;
       if (!go) { busy = false; bus.emit('lobby:open', {}); return false; }
     }
-    st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout, scenarioId: cfg.scenarioId });
+    // T4 IR-T4-2: learn / dream / mentor (free games only; an engine without them simply ignores the keys)
+    st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout, scenarioId: cfg.scenarioId,
+      learn: !!cfg.learn && cfg.mode === 'free', dream: cfg.mode === 'free' ? cfg.dream : undefined, mentor: cfg.mentor });
     st.ui = saves.normalizeUi({});
     cfg.charId = st.charId;
   }
@@ -581,16 +589,7 @@ async function startInner(cfg, my) {
     ui.setRollEnabled(true); ui.focusRoll();
     updateRollEnergy();
     offerTurbo();
-    const tutorialHere = CFG.tutorial && W.id === 'w1';
-    if (tutorialHere) markWorldCoached(W.id); // the tutorial explains w1
-    if (wantCoach('roll')) {
-      await new Promise((r) => setTimeout(r, 700));
-      if (my !== gen || busy || ui.isEventOpen()) return true;
-      await showCoach('roll', { target: '#roll', title: 'מטילים קובייה', text: 'לחץ כאן (או על רווח) כדי להטיל. החייל מתקדם, ועל כל משבצת מחכה הזדמנות, הוצאה או הפתעה.' });
-    } else if (!worldCoached(W.id)) {
-      await new Promise((r) => setTimeout(r, 900));
-      await worldCoach(my);
-    }
+    await onboard.afterStart(hooks(my)); // T4 IR-T4-3
     return true;
   } catch (e) {
     OV.hideLoading();
@@ -599,39 +598,11 @@ async function startInner(cfg, my) {
   }
 }
 
-/* ============================================================ first visit to a world: 2 coach marks about its mechanic */
-const COACH_KEY = 'rr2-coach';
-const readCoach = () => { try { return JSON.parse(localStorage.getItem(COACH_KEY) || '{}') || {}; } catch (e) { return {}; } };
-const worldCoached = (wid) => !!readCoach()[wid];
-function markWorldCoached(wid) { try { localStorage.setItem(COACH_KEY, JSON.stringify({ ...readCoach(), [wid]: true })); } catch (e) { /* ignore */ } }
-const narrow = () => innerWidth <= 820;
-const WORLD_COACH = {
-  w1: [
-    { target: '#hGoal', title: 'מד החופש', text: 'המטרה בשכונה: הכנסה פסיבית — כסף שנכסים מכניסים בלי שתעבוד — שמכסה את כל ההוצאות. כשהפס מתמלא, יצאת מהמירוץ.' },
-    { target: () => (narrow() ? '#sheetBtn' : '#sheet .total'), title: 'הדוח הכספי', text: 'כאן רואים מה נכנס, מה יוצא, מה יש לך ומה אתה חייב. לפני כל החלטה — תציץ בשורה התחתונה: התזרים החודשי.' },
-  ],
-  w2: [
-    { target: '#hWorld', title: 'הריבית', text: 'בעיר הגדולה הריבית זזה. משכנתא משתנה עולה ויורדת איתה; קבועה ננעלת ולא מפתיעה. משבצות הבנק (תכלת) מזיזות אותה.' },
-    { target: '#hGoal', title: 'יעד רחוק', text: 'סגנון החיים כאן יקר, אז היעד רחוק. משבצות השדרוג (כתומות) מגדילות הכנסה מנכס או מקצצות הוצאה — לתמיד.' },
-  ],
-  w3: [
-    { target: '#hWorld', title: 'שער הדולר', text: 'בנמל הכל תלוי בדולר: דולר חזק טוב ליצואנים ולספינות, ורע ליבואנים. גידור נועל את השער לשנה — קונים אותו כשהשער נוח, לא באמצע סערה.' },
-    { target: '#hGoal', title: 'היעד: שווי נקי', text: 'כאן לא סופרים תזרים אלא שווי: כל מה שיש לך פחות כל מה שאתה חייב. וזהב? הוא קופץ במשברים — ביטוח טוב לתיק.' },
-  ],
-  w4: [
-    { target: '#hGoal', title: 'שני יעדים', text: 'בעמק העתיד צריך גם שווי נקי וגם נקודות השפעה. שני הפסים חייבים להתמלא.' },
-    { target: '#hWorld', title: 'סטארט־אפים והשפעה', text: 'במשבצות הפיץ\' (סגולות) רוב הסטארט־אפים נכשלים ומעטים עושים פי 20 — אז מפזרים הרבה צ\'קים קטנים. משבצות הנתינה (ורודות) בונות השפעה שגדלה עם הזמן.' },
-  ],
-};
-async function worldCoach(my) {
-  const marks = WORLD_COACH[W.id]; if (!marks) return;
-  markWorldCoached(W.id);
-  for (let i = 0; i < marks.length; i++) {
-    if (my !== gen || busy || ui.isEventOpen() || !$('#start').hidden) return;
-    const m = marks[i]; const target = typeof m.target === 'function' ? m.target() : m.target;
-    const v = await ui.coach({ target, title: m.title, text: m.text, step: i + 1, total: marks.length, label: `${W.name} ·`, skipLabel: 'דלג' });
-    if (v === 'skip') return;
-  }
+/* ============================================================ T4 onboarding hooks (js/onboard.js owns the coaches, WORLD_COACH and rr2-coach) */
+/** IR-T4-3: built per start; IR-T4-8: the practice answer path (free/learn only — no checkpoint, practice never runs in ranked). */
+function hooks(my) {
+  return { S, CFG, W, my, gen: () => gen, persist, render, isBusy: () => busy,
+    answerPractice: (qid, idx) => { if (typeof E.answerPractice !== 'function') return null; const r = E.answerPractice(S, qid, idx); render(); persist(); return r; } };
 }
 
 /* ============================================================ turbo offer (once, after the 2nd game) */
@@ -639,17 +610,6 @@ function offerTurbo() {
   if (settings.turbo || settings.turboOffered || (settings.games || 0) < 2) return;
   settings.turboOffered = true; writeSettings({ turboOffered: true });
   setTimeout(() => ui.toast('רוצה פי 2 מהירות?', { action: { label: 'טורבו!', fn: () => { if (!settings.turbo) $('#turboBtn').click(); } } }), 2600);
-}
-
-/* ============================================================ tutorial coach marks (roll → meter → ROI, any order, skippable) */
-const COACH_TOTAL = 3;
-function wantCoach(k) { return !!(CFG && CFG.tutorial && UIS && UIS.coach && !UIS.coach.skip && !UIS.coach[k]); }
-async function showCoach(k, o) {
-  UIS.coach[k] = true; persist();
-  const step = ['roll', 'meter', 'roi'].filter((x) => UIS.coach[x]).length;
-  const v = await ui.coach({ ...o, step, total: COACH_TOTAL });
-  if (v === 'skip') UIS.coach.skip = true;
-  persist();
 }
 
 /* ============================================================ render */
@@ -711,8 +671,12 @@ function safeCall(o, fn, dflt) {
   } catch (e) { console.error(e); return dflt; }
 }
 const RANKED = new Set(['daily', 'weekly', 'challenge']);
+const TUTORIAL_FREE_ROLLS = typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORIAL_FREE_ROLLS : 10;
 const usesEnergy = () => {
   if (!CFG || RANKED.has(CFG.mode) || CFG.resultId) return false;
+  if (CFG.learn) return false; // T4 §7.1: learning mode never costs ⚡ (also before the engine's rollCost knows st.learn)
+  // T4 D-9 (P1): the first 10 rolls of the tutorial game are free; the engine's rollCost takes over once it exports the constant
+  if (S && CFG.tutorial && W && W.id === 'w1' && typeof E.TUTORIAL_FREE_ROLLS !== 'number' && (S.turn || 0) < TUTORIAL_FREE_ROLLS) return false;
   if (S && typeof E.rollCost === 'function') { try { return E.rollCost(S) > 0; } catch (e) { /* fall through */ } }
   return true;
 };
@@ -720,7 +684,7 @@ let noEnTimer = 0;
 function showNoEnergy(en, info = false) {
   if (info && safeCall(en, 'canRoll', true)) {
     const g0 = safeCall(en, 'get', null) || { value: 0, max: 25 };
-    ui.modal({ tag: '⚡ אנרגיה', color: '#f2b632', title: `⚡ ${g0.value}/${g0.max}`, html: '<p class="d">כל הטלה במשחק חופשי עולה ⚡ אחת, והאנרגיה מתמלאת לבד עם הזמן. אתגרים מדורגים (יומי, שבועי, קבוצות) לא עולים אנרגיה. בונוסים: האתגר היומי, חברים שמצטרפים, ורצף ימים.</p>', actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
+    ui.modal({ tag: '⚡ זריקות', color: '#f2b632', title: `⚡ ${g0.value}/${g0.max}`, html: '<p class="d">כל הטלה במשחק רגיל עולה זריקה אחת ⚡, והזריקות מתמלאות לבד עם הזמן. אתגרים מדורגים (יומי, שבועי, קבוצות) ותרגול חופשי לא עולים זריקות. בונוסים: האתגר היומי, חברים שמצטרפים, ורצף ימים.</p>', actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
     return;
   }
   sfx('loss');
@@ -728,11 +692,11 @@ function showNoEnergy(en, info = false) {
   const left = () => safeCall(en, 'msUntilNext', 0);
   const g = safeCall(en, 'get', null) || { value: 0, max: 25 };
   const p = ui.modal({
-    tag: '⚡ אנרגיה', color: '#f2b632', title: 'נגמרה האנרגיה ⚡',
-    html: `<div class="noen"><div class="noen-ring"><b id="noenT" class="num">${fmtMs(left())}</b><small>עד ⚡ הבאה</small></div>
-      <p class="d">כל הטלה עולה ⚡ אחת. האנרגיה מתמלאת לבד — ${g.max ? `עד ${g.max}` : ''}, אחת כל כמה דקות. המשחק שלך שמור ומחכה.</p>
+    tag: '⚡ זריקות', color: '#f2b632', title: 'נגמרו הזריקות ⚡',
+    html: `<div class="noen"><div class="noen-ring"><b id="noenT" class="num">${fmtMs(left())}</b><small>עד הזריקה הבאה</small></div>
+      <p class="d">כל הטלה עולה זריקה אחת ⚡. הזריקות מתמלאות לבד — ${g.max ? `עד ${g.max}` : ''}, אחת כל כמה דקות. המשחק שלך שמור ומחכה.</p>
       <p class="note">בינתיים אפשר:</p>
-      <div class="noen-acts"><button data-go="library">📚 ספריית השיעורים</button><button data-go="daily">📅 האתגר היומי (בלי ⚡)</button><button data-go="groups">⚡ לשלוח אנרגיה לחברים</button><button data-go="sheet">📄 לעבור על הדוח שלי</button></div></div>`,
+      <div class="noen-acts"><button data-go="learn">🎓 לתרגל בלי הגבלה</button><button data-go="library">📚 ספריית השיעורים</button><button data-go="daily">📅 האתגר היומי (בלי ⚡)</button><button data-go="groups">🎁 לשלוח זריקות לחברים</button><button data-go="sheet">📄 לעבור על הדוח שלי</button></div></div>`,
     actions: [{ label: 'סגירה', cls: 'primary', v: 'close' }],
     dismissable: true,
     onExtra: (e) => {
@@ -740,6 +704,7 @@ function showNoEnergy(en, info = false) {
       const go = b.dataset.go;
       document.querySelector('#gm .acts button')?.click();
       if (go === 'sheet') setTimeout(() => ui.toggleSheet(true), 50);
+      else if (go === 'learn') { persist(); bus.emit('lobby:open', { view: 'world', id: W.id, learn: true }); } // T4 IR-T4-6
       else { persist(); bus.emit('lobby:open', { view: go }); }
     },
   });
@@ -747,7 +712,7 @@ function showNoEnergy(en, info = false) {
   noEnTimer = setInterval(() => {
     const el = document.getElementById('noenT'); if (!el) { clearInterval(noEnTimer); return; }
     el.textContent = fmtMs(left());
-    if (safeCall(en, 'canRoll', false)) { el.textContent = '⚡ מוכן!'; clearInterval(noEnTimer); }
+    if (safeCall(en, 'canRoll', false)) { el.textContent = '⚡ יש זריקה!'; clearInterval(noEnTimer); }
   }, 500);
   p.then(() => clearInterval(noEnTimer));
 }
@@ -862,9 +827,7 @@ async function turnBody(my) {
   busy = false;
   if (S.over) return;
   ui.setRollEnabled(true); ui.focusRoll();
-  if (wantCoach('meter')) {
-    await showCoach('meter', { target: '#hGoal', title: W.goal.type === 'passive' ? 'מד החופש' : 'היעד של העולם', text: W.goal.type === 'passive' ? 'כשההכנסה הפסיבית (כסף מנכסים) מכסה את כל ההוצאות — הפס מתמלא ויצאת מהמירוץ. זו המטרה.' : 'כשהפס מתמלא — ניצחת. כל החלטה מזיזה אותו.' });
-  }
+  await onboard.afterTurn(hooks(my)); // T4 IR-T4-3
 }
 
 /** Payday while hopping: floating number, coins to the HUD, count-up. No modal. */
@@ -942,6 +905,7 @@ function resolveCard(ev, my) {
       }
       if (!res.ok) { ctl.error(res.error); sfx('loss'); working = false; ctl.busy(false); return; }
       checkpoint();
+      closedRes = res;
       if (res.done) close();
       await applyOut(res, { inCard: !res.done });
       render(); persist();
@@ -950,14 +914,9 @@ function resolveCard(ev, my) {
       working = false; ctl.busy(false);
     }
     card = { ctl, resolve };
-    function close() { if (card && card.ctl === ctl) card = null; ctl.close(); setTimeout(() => ui.focusRoll(), 30); }
-    // coach mark 3: the ROI button on the first deal
-    if (wantCoach('roi') && cur.type === 'deal' && cur.data && cur.data.down) {
-      setTimeout(async () => {
-        if (my !== gen || !card || card.ctl !== ctl) return;
-        await showCoach('roi', { target: '#evCard [data-roi]', title: 'הסוד של המשקיעים', text: 'לפני שקונים: כמה אחוז בשנה הכסף שלך מרוויח? לחץ כאן ותראה את החישוב. אם התשואה גבוהה ממה שעולה ההלוואה — העסקה עובדת בשבילך. אם נמוכה — היא עובדת נגדך.' });
-      }, 450);
-    }
+    let closedRes = null;
+    function close() { if (card && card.ctl === ctl) card = null; ctl.close(); try { onboard.onCardClosed(cur, closedRes, hooks(my)); } catch (e) { console.warn(e); } setTimeout(() => ui.focusRoll(), 30); }
+    try { onboard.onCard(cur, ctl, hooks(my)); } catch (e) { console.warn(e); } // T4 IR-T4-3: in-card coaches (ROI)
   });
 }
 function closeCard() { if (card) { const c = card; card = null; c.ctl.close(); c.resolve(null); } ui.closeEvent(); }
@@ -1006,7 +965,8 @@ async function applyOut(out, opts = {}) {
     bus.emit('lesson', { ids: out.lessons.map((l) => l.id), list: out.lessons });
     ui.lessonToast(out.lessons, (l) => ui.lessonCard(l));
   }
-  if (out.reward) bus.emit('reward', out.reward); // quiz: reward = understanding (+1⚡ via the lobby)
+  if (out.reward) bus.emit('reward', out.reward); // quiz: reward = understanding (+1⚡ via the lobby; never in learning mode)
+  if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
   for (const n of out.news || []) {
@@ -1020,6 +980,7 @@ async function applyOut(out, opts = {}) {
     }
     if (n.kind === 'inflation' && n.reality && S && S.ui) S.ui.inflReality = n.reality;
     if (n.kind === 'goalHold') { ui.toast('⏳ ' + n.text, { kind: 'gold' }); continue; }
+    if (n.kind === 'goal') { ui.toast('🎯 ' + n.text, { kind: 'gold' }); continue; } // T4 IR-T4-4: tutorial goal chain (E-4)
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);
@@ -1122,13 +1083,14 @@ async function savingsModal(deposit) {
  */
 function goLobby() {
   persist();
-  ui.hideCoach(); ui.toggleSheet(false);
+  ui.hideCoach(); onboard.hidePractice(); ui.toggleSheet(false); // IR-T4-9
   bus.emit('lobby:open', {});
 }
 
 /* ============================================================ end of game */
+const safe0 = (fn) => { try { return fn(); } catch (e) { return null; } };
 async function endGame(end, my) {
-  busy = true; ui.setRollEnabled(false); closeCard(); ui.hideCoach();
+  busy = true; ui.setRollEnabled(false); closeCard(); ui.hideCoach(); onboard.hidePractice(); // IR-T4-9
   const win = end.status === 'won';
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
   await scene.celebrate(win);
@@ -1145,6 +1107,7 @@ async function endGame(end, my) {
     summary: typeof E.summaryForServer === 'function' ? { seed: S.seed, ...E.summaryForServer(S) } : null,
     bailoutUsed: !!(S.flags && S.flags.bailoutUsed),
     lifeSummary: end.lifeSummary || null, benchmark: end.benchmark || null, scenarioId: (S.history && S.history.scenarioId) || CFG.scenarioId || null, seed: S.seed >>> 0,
+    learn: !!CFG.learn, dream: S.dream ? safe0(() => E.metrics(S).dream) : null, // T4 IR-T4-5
   };
   busy = false;
   bus.emit('game:end', payload);
