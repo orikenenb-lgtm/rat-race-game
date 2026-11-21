@@ -381,6 +381,15 @@ body.lb-lobby-open { overflow: hidden; }
 .lb-toggle i::after { content: ''; position: absolute; top: 3px; inset-inline-start: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); transition: inset-inline-start .2s; }
 .lb-toggle.on i { background: var(--green); }
 .lb-toggle.on i::after { inset-inline-start: 23px; }
+/* settings radio groups (T5 §7.3 "תצוגה ותנועה"): markup = <fieldset class="lb-radios"><legend>…</legend><label><input type="radio" name="motion" value="auto">לפי המכשיר</label>…<p class="lb-note">…</p></fieldset>
+   every option is a ≥ 44px pill; the native radio dot carries the state (not colour alone) */
+.lb-radios { border: 0; margin: 12px 0 0; padding: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lb-radios legend { float: inline-start; width: 100%; padding: 0; margin: 0 0 2px; font-weight: 700; }
+.lb-radios label { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--tap); padding: 0 14px; border-radius: var(--r-pill); background: var(--paper2); border: 1.5px solid var(--line); font-weight: 700; cursor: pointer; }
+.lb-shell .lb-radios input, .lb-radios input { width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; flex: none; accent-color: var(--gold-text); }
+.lb-radios label:has(input:checked) { background: light-dark(#fff3d2, #33291a); border-color: var(--gold-text); }
+.lb-radios label:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.lb-radios .lb-note { flex-basis: 100%; margin-top: 2px; }
 
 /* ---------------- END SCREEN */
 .lb-end { align-items: center; padding-top: 6px; }
