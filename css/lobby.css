@@ -864,7 +864,9 @@ body.lb-lobby-open { overflow: hidden; }
 /* library (§9.3): locked = teaser + how to unlock */
 .lib-card.is-locked { background: var(--paper2) !important; border: 2px dashed var(--line) !important; box-shadow: none; }
 .lib-card.is-locked b { font-size: 15px; }
-.lib-card.is-locked small { color: var(--t4-mut); font-size: 13px; }
+.lib-card.is-locked { flex-direction: column; align-items: flex-start; gap: 4px; min-height: 0; padding: 10px 12px !important; }
+.lib-card.is-locked small { display: block; color: var(--t4-mut); font-size: 13px; }   /* §9.3: the unlock hint is the point of a locked card */
+.lib-card.is-locked b { color: var(--ink); }
 .lib-lock { font-size: 20px; line-height: 1; }
 .ls-line { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
 .ls-ex { background: var(--paper2); border-radius: 12px; padding: 8px 10px; }

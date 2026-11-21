@@ -91,4 +91,10 @@ export const LESSON_META = {
   // T2 lessons (after the T4 spec): triggers js/engine.js inspect() and the cycle label change in the payday step
   due_diligence: { teaser: 'מה המוכר לא מספר לך?', hint: 'בודקים עסקה לפני שקונים.' },
   business_cycle: { teaser: 'למה יש שנים טובות ושנים קשות?', hint: 'כשהכלכלה עוברת למיתון או לצמיחה.' },
+  // T3 lessons (story chains js/systems/chains.js and business events, engine lane — added while T3 was landing)
+  total_cost: { teaser: 'כמה רכב עולה באמת בשנה?', hint: 'בסיפור "רכב ותחבורה", כשהרכב מתקלקל.' },
+  housing_share: { teaser: 'כמה מהמשכורת מותר לתת לדירה?', hint: 'בסיפור "דירה ויוקר מחיה", כשהחוזה נגמר.' },
+  sunk_cost: { teaser: 'למה קשה לעצור כשכבר השקעת?', hint: 'בסיפור "חבר מבקש עזרה".' },
+  biz_seasonality: { teaser: 'למה יש חודשים חזקים וחלשים?', hint: 'בעסק שלך, כשמתכוננים לעונה.' },
+  biz_terms: { teaser: 'הלקוח שמשלם בעוד חודשיים', hint: 'בעסק שלך, כשלקוח מאחר לשלם.' },
 };
