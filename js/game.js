@@ -15,6 +15,7 @@ import { loadRenderer, preferredChoice, prefetch3D } from './render/select.js';
 import * as OV from './render/overlay.js';
 import { flag } from './flags.js';
 import * as saves from './saves.js';
+import { initMotion, reducedMotion } from './motion.js';
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -69,7 +70,11 @@ function showRecoverBar(v) {
   const lobby = { label: STR.Rlobby, fn: barLobby };
   if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
   else if (v === 'R2') OV.showRecover({ title: STR.R1t, body: STR.R2b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.Rsave, fn: () => recover() }, lobby] });
-  else OV.showRecover({ title: STR.R1t, body: STR.R1b, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, lobby] });
+  else {
+    // phones (≤600px) have no HUD lite button (CR-S2): offer מצב קל on the bar while in 3D
+    const phoneLite = scene.kind === '3d' && flag('board2d') !== 'off' && matchMedia('(max-width: 600px)').matches;
+    OV.showRecover({ title: STR.R1t, body: STR.R1b, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, ...(phoneLite ? [{ label: STR.Rlite, fn: () => recover({ lite: true }) }] : []), lobby] });
+  }
 }
 export function isStuck() { return stuck; }
 /** Continue from the save (the save was written when the flow broke). lite → continue in מצב קל. */
@@ -176,8 +181,19 @@ let forced2d = null;                            // reason when the next init mus
 let ctxDead = false, ctxT = 0;
 async function doInit() {
   initShell();
+  initMotion(); // T5 CR-S1: <html data-motion> + follows the OS while the setting is 'auto'
   await initRenderer();
+  applyMotion(reducedMotion());
 }
+/** T5 CR-S1: reduced motion. Scenes without setMotion (3D) simply get no camera shake from here (fxShake). */
+let motionReduced = false, motionWired = false;
+function applyMotion(reduced) {
+  motionReduced = !!reduced;
+  try { scene.setMotion?.(motionReduced); } catch (e) { console.warn(e); }
+  try { ui.setMotion?.(motionReduced); } catch (e) { console.warn(e); }
+  if (!motionWired) { motionWired = true; bus.on('motion:change', ({ reduced: r } = {}) => applyMotion(r)); }
+}
+function fxShake(amp, dur) { if (!motionReduced) scene.shake(amp, dur); }
 let shellDone = false;
 /** once per page: wiring, settings, the #start observer, the lite button */
 function initShell() {
@@ -897,7 +913,7 @@ function resolveCard(ev, my) {
     const jackpot = ev.type === 'mystery' && ev.data && ev.data.kind === 'cash' && ev.data.amount > 0;
     sfx(jackpot ? 'golden' : ev.sound || 'card');
     if (ev.golden || jackpot) { scene.sparkle('pawn'); ui.vibrate([15, 40, 15]); }
-    else if (ev.sound === 'loss' && ['market', 'bank', 'fx', 'shipping'].includes(ev.type)) scene.shake(0.18, 380);
+    else if (ev.sound === 'loss' && ['market', 'bank', 'fx', 'shipping'].includes(ev.type)) fxShake(0.18, 380);
     let cur = ev, working = false;
     const ctl = ui.openEvent(cur, ctx(), (optId, params) => onChoose(optId, params).catch((e) => {
       if (my !== gen || stuck) return;
@@ -963,7 +979,7 @@ async function applyOut(out, opts = {}) {
         break;
       case 'float': scene.floatLabel(e.text, e.color || 'green', e.at || 'pawn'); break;
       case 'loan': ui.bumpCash(); break;
-      case 'shake': scene.shake(0.4, 520); ui.vibrate([25, 40, 25]); break;
+      case 'shake': fxShake(0.4, 520); ui.vibrate([25, 40, 25]); break;
       case 'sparkle': if (!(out.spawn || []).some((x) => (x.key || x.assetId) === e.at)) scene.sparkle(e.at || 'pawn'); ui.vibrate([15, 40, 15]); break; // spawned golden assets sparkle after their drop
       case 'confetti': scene.confetti(); break;
       case 'upgrade': scene.bump(e.assetId); scene.floatLabel('שדרוג!', 'gold', e.assetId); break;
@@ -1004,7 +1020,7 @@ async function applyOut(out, opts = {}) {
 
 /* ============================================================ burnout */
 async function burnoutCard(b) {
-  sfx('loss'); scene.shake(0.25, 450); ui.vibrate([20, 40, 20]);
+  sfx('loss'); fxShake(0.25, 450); ui.vibrate([20, 40, 20]);
   await ui.modal({ tag: 'שחיקה', color: '#b45309', title: b.title || 'נשרפת. חודש בבית.', html: `<div class="say static"><span class="av sm" aria-hidden="true">אע</span><span class="st">${ui.esc(b.mentor || 'הזמן והכוח שלך הם הנכס הכי יקר. כשרצים בלי עצירה — הגוף עוצר בשבילך.')}</span></div>
     <p class="d">${ui.esc(b.text || 'עבדת יותר מדי בלי מנוחה. החודש אין משכורת, יש הוצאות רפואיות, והתוכנית שלך עוברת למנוחה.')}</p>
     ${b.cost ? `<div class="grid"><div class="row"><span>עלות החודש הזה</span><b class="num neg">${E.fmtM(-Math.abs(b.cost))}</b></div></div>` : ''}
@@ -1013,7 +1029,7 @@ async function burnoutCard(b) {
 
 /* ============================================================ bail-out (first bankruptcy → the bank restructures; a teaching moment) */
 async function bailoutCard(b) {
-  sfx('loss'); scene.shake(0.3, 500); ui.vibrate([30, 50, 30]);
+  sfx('loss'); fxShake(0.3, 500); ui.vibrate([30, 50, 30]);
   if (b.mentor) ui.mentor(b.mentor);
   const E2 = E; const leaks = (b.leaks || []).filter((l) => l.amount > 0).slice(0, 4);
   const html = `${b.mentor ? `<div class="say static"><span class="av sm" aria-hidden="true">אע</span><span class="st">${ui.esc(b.mentor)}</span></div>` : ''}

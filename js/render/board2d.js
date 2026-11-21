@@ -3,6 +3,7 @@
 // The only engine call is E.boardInfo() for tile names/colours. No DOM access at import time; no animation loop (idle = zero
 // cost); every exported function catches its own errors. Styles live in css/stability.css (#board2d / .b2d-*).
 import { boardInfo } from '../engine.js';
+import { reducedMotion } from '../motion.js'; // T5: the in-app motion setting wins over the OS (CR-R1)
 
 export const kind = '2d';
 
@@ -27,7 +28,7 @@ const timers = new Set();
 const anims = new Set();
 
 const warn = (e) => console.warn('[b2d]', e);
-const reduced = () => { try { return !!(globalThis.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } };
+const reduced = () => { try { return reducedMotion(); } catch (e) { return false; } };
 const D = (ms) => { const d = Math.max(1, ms * speed); return reduced() ? Math.min(60, d) : d; };
 const sleep = (ms) => new Promise((r) => { const t = setTimeout(() => { timers.delete(t); r(); }, ms); timers.add(t); });
 function el(tag, cls, parent, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }

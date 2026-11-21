@@ -8,6 +8,9 @@ body:not([data-renderer="3d"]) canvas#c{display:none}
 body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 #liteBtn{font-size:20px;line-height:1}
 #liteBtn[hidden],#camBtn[hidden]{display:none}
+/* CR-S2: phones — the HUD's first row has no room for a 4th tool button. מצב קל stays reachable from the renderer
+   notices (S-N7 offer), the recover bar (also on S-R1 on phones) and the start error panel. */
+@media (max-width:600px){#liteBtn{display:none}}
 
 /* ============================================================ the flat board */
 .b2d-board{position:absolute;--cell:40px;--b2d-board:#f6efe2;--b2d-edge:#6b4430;--b2d-center:#efe3cb;
