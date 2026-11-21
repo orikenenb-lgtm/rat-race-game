@@ -57,11 +57,12 @@ export function mix32(x) {
 
 /**
  * Build the named streams object for a seed. Stream order/names are part of the save format — APPEND ONLY (a stream's seed
- * comes from its index). 0–9 v1–v3 · 10 dd, 11 cycle (T2, rules 4 only) · 12 rival, 13 listing (reserved for T6, unused).
- * Next free index: 14 (T3 appends 'story', then a per-business stream).
+ * comes from its index). 0–9 v1–v3 · 10 dd, 11 cycle (T2, rules 4 only) · 12 rival, 13 listing (reserved for T6, unused) ·
+ * 14 story (T3, rules 4 only: exactly 2 draws per payday). Per-business sealed streams live in state.bizRng / state.bizStory (not here).
+ * Next free index: 15.
  */
 export const STREAMS = ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index',
-  'dd', 'cycle', 'rival', 'listing'];
+  'dd', 'cycle', 'rival', 'listing', 'story'];
 export function makeStreams(seed) {
   const s = {};
   STREAMS.forEach((name, k) => { s[name] = mix32((seed >>> 0) + Math.imul(k + 1, 0x9E3779B9)); });

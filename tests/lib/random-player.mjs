@@ -8,6 +8,8 @@ export function prng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B7
  *   legacy-equivalence fixtures, whose decisions must not depend on mentor-level presentation).
  * opts.v4 (default false): also use the T2 actions — setFocus (5%), requestHint (5%), setMentorLevel in free modes (1%).
  *   Off by default so the r() sequence of every existing caller is unchanged.
+ * opts.stories (default false): T3 — before each roll, each open story-inbox item is resolved with probability 0.5 (a random
+ *   enabled option, logged 'Q'); otherwise it expires into its default. Off by default (unchanged r() sequences).
  */
 export function playOut(E, cfg, r, opts = {}) {
   const usePrimary = opts.usePrimary !== false; const v4 = !!opts.v4;
@@ -22,6 +24,9 @@ export function playOut(E, cfg, r, opts = {}) {
     if (v4 && !st.over) {
       if (r() < 0.05) E.setFocus(st, FOCI[Math.floor(r() * FOCI.length)], Math.floor(r() * 3));
       if (!st.over && (st.mode === 'free' || st.mode === 'history') && r() < 0.01) E.setMentorLevel(st, ['guide', 'hint', 'pro'][Math.floor(r() * 3)]);
+    }
+    if (opts.stories && !st.over && E.inbox) {
+      for (const it of E.inbox(st)) { if (st.over) break; if (r() < 0.5) { const en = it.options.filter((o) => o.enabled); if (en.length) E.resolveStory(st, it.itemId, en[Math.floor(r() * en.length)].id); } }
     }
     if (st.over) break;
     if (st.pending) { // a focus (ops) may have opened the business panel between rolls

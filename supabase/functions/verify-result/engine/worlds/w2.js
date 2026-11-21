@@ -8,7 +8,7 @@
 //  • Bonds (AGAH) are priced from the rate: rate up ⇒ bond price down.
 //  • 'U' tiles: upgrade an owned asset (+noi, +value, no new debt) or trim a lifestyle expense (cuts the finish line).
 //  • Doodads here come with "מנוי" (subscription) options — lifestyle inflation that permanently raises expenses.
-import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER, STAKE_KIND } from './common.js';
 
 const board = ring(['OBODUOLMO', 'XOKBOL?UO', 'OMDOLEOBM', 'UOXLDITOI']); // v3: 40 tiles, paydays on the corners
 
@@ -45,9 +45,9 @@ export default {
     },
   },
   trim: { pct: 0.35, costMonths: 5 },
-  models: { tower: 'tower', mall: 'mall', hotel: 'hotel', side: 'mall', biz: 'mall' },
+  models: { tower: 'tower', mall: 'mall', hotel: 'hotel', side: 'mall', biz: 'mall', stake: 'mall' },
   bizOffers: ['pizza', 'laundromat', 'coffee'],
-  kinds: { tower: { label: 'נדל"ן למגורים', debtLabel: 'משכנתא', rent: true }, mall: { label: 'מסחר', debtLabel: 'הלוואה', rent: true }, hotel: { label: 'מלונאות', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
+  kinds: { tower: { label: 'נדל"ן למגורים', debtLabel: 'משכנתא', rent: true }, mall: { label: 'מסחר', debtLabel: 'הלוואה', rent: true }, hotel: { label: 'מלונאות', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: 'bank' },
     MADAD: { name: 'מדד ת"א · סל מניות', start: 100, div: 0.4, step: [10, 100], model: 'bank', modelLabel: 'תיק השקעות' },

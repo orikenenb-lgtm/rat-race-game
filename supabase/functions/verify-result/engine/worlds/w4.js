@@ -10,7 +10,7 @@
 //    vests over giving.vest months (programs take time) — so whoever gives only at the end has to wait.
 //    Monthly pledges add impact every payday; realised impact ripples (+giving.ripple a month).
 //  • Win = net worth ≥ target AND impact ≥ goal.impact.
-import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER, STAKE_KIND } from './common.js';
 
 const board = ring(['OAOGADOLA', 'KOAXG?OAL', 'OAEGOMADO', 'AXOLGMTAI']); // v3: 40 tiles, paydays on the corners
 
@@ -56,9 +56,9 @@ export default {
   },
   // a gift gives `immediate` of its impact now and the rest spread over `vest` months; realised impact then ripples.
   giving: { unit: 20000, levels: [100000, 400000, 1500000], pledge: 15000, pledgeBoost: 1.2, ripple: 0.01, immediate: 0.3, vest: 10 },
-  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', biz: 'campus', angel: 'rocket', giving: 'foundation' },
+  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', biz: 'campus', angel: 'rocket', giving: 'foundation', stake: 'campus' },
   bizOffers: ['app', 'laundromat', 'pizza'],
-  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
+  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: null },
     INDX: { name: 'INDX · מדד חדשנות עולמי', start: 100, div: 0.5, step: [100, 1000], model: null },

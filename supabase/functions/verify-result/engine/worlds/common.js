@@ -39,6 +39,9 @@ export function tilesFor(board, over = {}) {
 }
 
 // Default mentor lines (≤ ~25 words). A string, or an array (engine rotates deterministically).
+/** T3 §5.5: a 20% stake in a friend's business (an income asset; the city model falls back to the world's business model). */
+export const STAKE_KIND = { label: 'שותפות', debtLabel: 'הלוואה' };
+
 export const MENTOR = {
   start: 'התפקיד שלך: {who}. כל חודש נשארים לך {cf}. המטרה: {goal}.',
   payday0: 'כל הכסף שלך מגיע מהעבודה. אם תפסיק לעבוד — הוא נעצר. המטרה: נכסים שעובדים בשבילך.',

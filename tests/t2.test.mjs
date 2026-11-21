@@ -56,8 +56,8 @@ function dealState(worldId, card, o = {}) { // a deal pending built by hand (rul
 }
 
 /* ------------------------------------------------------------------ T1 streams */
-test('T1 STREAMS = 14 names (append-only); makeStreams for indexes 0–9 equals the v3 fixture', () => {
-  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing']);
+test('T1 STREAMS = 15 names (append-only; T3 appended story); makeStreams for indexes 0–9 equals the v3 fixture', () => {
+  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story']);
   const fx = JSON.parse(readFileSync(FIX('v3-streams.json'), 'utf8'));
   for (const [seed, s] of Object.entries(fx)) { const now = makeStreams(+seed); for (const k of OLD_STREAMS) assert.equal(now[k], s[k], `seed ${seed} ${k}`); }
   assert.equal(Object.keys(fx).length, 20);
@@ -87,7 +87,9 @@ test('T2+T3 fixed draws: decisions (inspect, focus, hints, offers, mentor level)
       const dd0 = a.rng.dd; const ra = E.rollDice(a); const rb = E.rollDice(b);
       assert.deepEqual(ra.dice, rb.dice); paydays += ra.paydays.length;
       let ea = E.landing(a); let eb = E.landing(b);
-      assert.equal(ea.type, eb.type); if (ea.type !== 'business') assert.equal(ea.title, eb.title, `${w.id} t${t}`);
+      // T3: a life card may be substituted / a chain variant shown by a pure function of YOUR state — the drawn card is the same
+      const drawnOf = (st, ev) => (ev.type === 'life' && st.pending ? st.pending.drawn || st.pending.eventId : ev.type === 'doodad' && st.pending && st.pending.card.swapped ? st.pending.card.swapped : ev.title);
+      assert.equal(ea.type, eb.type); if (ea.type !== 'business') assert.equal(drawnOf(a, ea), drawnOf(b, eb), `${w.id} t${t}`);
       if (a.pending && (a.pending.type === 'deal' || ['O', '?'].includes(a.pending.tile))) deals++;
       const tileType = w.tiles[w.board[a.pos]].type;
       assert.equal(draws(dd0, a.rng.dd), tileType === 'deal' || tileType === 'mystery' ? 6 : 0, `${w.id} t${t} dd draws on ${tileType}`);

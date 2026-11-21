@@ -28,7 +28,11 @@ function randomChoice(ev, r, n) {
 function turn(st, decide) {
   const roll = E.rollDice(st);
   let ev = E.landing(st);
-  const sig = `${roll.die}|${ev.type}|${ev.type === 'business' ? '' : ev.title}`; // the K tile shows YOUR business (decision-dependent text, same draws)
+  // the K tile shows YOUR business (decision-dependent text, same draws); T3: a life card may be substituted / a car repair swapped
+  // by a pure function of YOUR state (rules 4) — the DRAWN card is what must be identical for everyone
+  const p = st.pending || {};
+  const drawn = ev.type === 'life' ? (p.drawn || p.sub || p.eventId) : ev.type === 'doodad' && p.card && p.card.swapped ? p.card.swapped : ev.title;
+  const sig = `${roll.die}|${ev.type}|${ev.type === 'business' ? '' : drawn}`;
   let n = 0, end = null;
   while (ev) {
     const [id, params] = decide(ev, n);
@@ -125,7 +129,9 @@ function checkEvent(st, ev, where) {
   const nPrim = ev.options.filter((o) => o.primary).length;
   if (st.mentor !== 'guide') assert.equal(nPrim, 0, where + ' T2: no highlighted option at hint/pro');
   else if (ev.type === 'mystery' && ev.data.kind === 'quiz') assert.equal(nPrim, 0, where + ' quiz must not highlight an answer');
-  else if (ev.type === 'life' && (ev.data.personal || ev.data.values)) assert.equal(nPrim, 0, where + ' a personal life choice / lifestyle trade-off has no highlighted answer');
+  else if (ev.type === 'life' && ev.data.chain) assert.ok(nPrim <= 1, where + ' T3 chain card: at most the guide pick (car / transport, financial steps)');
+  else if (ev.type === 'life' && ev.data.values) assert.equal(nPrim, 1, where + ' director (T2 A1): a lifestyle trade-off highlights the cheapest reasonable option at guide');
+  else if (ev.type === 'life' && ev.data.personal) assert.equal(nPrim, 0, where + ' a personal life choice has no highlighted answer');
   else assert.equal(nPrim, 1, where + ' exactly one primary');
   for (const o of ev.options) assert.equal(typeof o.primary, 'boolean', where + ' primary must be boolean');
   if (ev.auto) { assert.equal(ev.options.length, 1, where + ' auto card must have one option'); assert.ok(ev.toastText && ev.toastText.length > 0, where + ' auto card needs toastText'); }
@@ -685,7 +691,7 @@ test('life events: every option of every dilemma is choosable and shows money + 
   for (const w of E.WORLDS) for (const E0 of LIFE.LIFE_EVENTS) for (const o0 of E0.options) {
     const st = E.createGame({ worldId: w.id, seed: 3 });
     st.pending = { id: 1, type: 'life', tile: 'L', pos: w.board.indexOf('L'), eventId: E0.id, r: 0.5 }; st.phase = 'event';
-    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, st.mentor !== 'guide' || ((E0.personal || E0.values) && E0.options.length > 1) ? 0 : 1);
+    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, st.mentor !== 'guide' || (E0.personal && E0.options.length > 1) ? 0 : 1); // values cards: the director's guide pick (A1)
     const o = ev.options.find((x) => x.id === o0.id);
     for (const k of ['cash', 'monthly', 'months', 'happiness', 'energy']) assert.ok(Number.isFinite(o.effects[k]), `${E0.id}/${o.id}.${k}`);
     const res = E.choose(st, ev, o.id); assert.ok(res.ok && res.done, `${E0.id}/${o.id}`);

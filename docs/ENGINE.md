@@ -589,3 +589,61 @@ Spec: `docs/next-level/specs/T2-strategic-depth.md`. Everything from v3 still ho
 * `_dev: {noCycle, noDD}` (sim ablations only; refused in ranked modes).
 
 UI lines that still show the old inflation meaning (owned by the UI agent): `js/ui.js:253, :270, :294` read `metrics().life.inflationYear` — it is now last year's / the expected figure, so the copy "השנה המחירים עולים ב־…" should say "בשנה שעברה" (or use `inflationLastYear`).
+
+## Changes v4 — T3 "סיפורים ועסקים" (stories & business) — engine contract
+Spec: `docs/next-level/specs/T3-stories-business.md` (Implementation notes at its end). Everything is **rules 4 only** (a rules-3 game
+never draws `story`, never gets a chain, an inbox item or a T3 business — tested against the v3 golden fixture). Save version stays 4:
+`v4Defaults` → `ensureStoryState(st)` (idempotent, no randomness, runs at every load). Chain data: `js/systems/chains.js` (`E.CH`).
+
+### 1. Streams, actions, saves
+* **Stream 14 `story`**: exactly 2 draws every payday of a rules-4 game (history included) → `st.story.r` (the seals of chain items created
+  that payday). **Per-business sealed story stream** `st.bizStory['a<id>']` (seed `mix32(bizSeed ^ 0x51A7E5ED)`): exactly 2 draws per
+  simulated month (`BIZ.simulate(…, {cal, story})`, on top of the existing 3). No other stream gets a draw; tile L still pops one card + one `r`.
+  Substitutions, variants, the bike doodad and every outcome are pure functions of state (+ the seals).
+* **Action `Q`** `['Q', itemId, optionId]` = `resolveStory`. In `replay`, in `verify_core CODES`. A `q:<item>:<choice>` option on the
+  business manage card routes to `resolveStory` (logged `Q`, the card stays open).
+* New state: `st.story` {chains, inbox (≤ 3), nextId, seen/shown (L-card anti-repeat), memory (≤ 40), flags {noCar, commute, area, payCut,
+  planLock, busM}, r, pacing marks}, `st.bizStory`, `st.incomeExtra` [{label, amount, from?, until?}] (in cashflow, not passive),
+  `st.stats.storyDefaults`, `st.dq.luck.story`, `st.life.forcedM`. Expense **tags** are derived from labels (`tagOf`: rent / mortgage / car /
+  carLoan / transport) unless a story effect stored one — so nothing is written at load and saves round-trip byte-identically.
+  A pre-T3 rules-4 save: businesses → `BIZ.upgradeT3` (no `holiday`, T3 event table), an open `L.friend` → the friend chain (same month,
+  same outcome), a legacy bus line → `noCar`.
+
+### 2. Chains and the inbox
+* Six chains (car, move, career, side, friend, crisis — crisis w1–w4 only). Entry steps of car / moving / friend are the **tile-L card**
+  itself (`pending.chain = {id, step}`; `ev.data.chain`, `ev.data.remember`); later steps and the trigger chains (career, side, crisis)
+  arrive as **inbox items** at a payday. Pacing: ≤ 1 chain item per payday, ≥ 2 months apart, ≤ 3 open items, ≤ 2 open chains (crisis exempt);
+  chain item due = created + 2 paydays, business item due = the next payday (before the next simulated month). An item nobody resolves
+  takes its `default` (news "לא החלטת — …", no decision recorded, `stats.storyDefaults++`).
+* `E.inbox(st)` → story cards; `E.resolveStory(st, itemId, optionId)` → `{ok, error?, effects, news, lessons, decision, spawn, despawn,
+  event (the pending tile card or null), inbox, end}`; `E.scoreStory(st, card)`; `E.storyMoneyFor(st, effects, H)` (= `effects.total24` at 24).
+  `publicView().inbox` = the cards. Cards never contain a seal (tested by a scramble of every story seal).
+* Story card: `{id:'q12', itemId, type:'story', kind:'chain'|'biz', chain?, step?, assetId?, tag, color, ink, title, text, remember, hint,
+  mentor, personal, progress:{n, of}|null, options:[{id, label, enabled, reason?, primary, dq, kind:'story', default, effects:{cash, flow, months,
+  salary, salaryMonths, happiness, energy, glow, study, risk, total12, total24, note, monthly (deprecated = −flow), oddsMoney}, odds:{p, text}|null,
+  loanAmount, loanMonthly, impact:{now, monthly, months, horizon, total, risk, wellbeing}, preview? (biz)}], data:{cushion:{months, text}, due,
+  dueText, defaultId, chain?, biz?}}`. `primary` only at guide: the evaluator's top on financial steps; the director's cheap pick on car /
+  transport steps (`option.guide`, cushion-aware); never on personal options.
+* C1–C9: tags + `housingOf`; bus → `noCar`, car lines cut 60 % and relabelled תחבורה ציבורית; a `car:true` doodad becomes the bike repair;
+  homeowners get `homeRepair` (no effect ever touches a mortgage line); per-card cooldowns / caps + a deterministic rotating substitution
+  (`CH.SUBST`, `quiet` = `LIFE_QUIET`, not in the life deck); every life option carries `flow` (signed), `salary`, `salaryMonths`, `total12/24`,
+  `dq`; renewal texts use last year's published inflation; evaluator classes personal / mixed / financial (§9).
+* End screen: `result.lifeSummary.stories = [{chain, title, path, outcome, cost, steps, open}]` (≤ 6), `storyDefaults`.
+* `metrics()` (rules 4) adds `calendar {m, label, season}`, `inbox {open, urgent}`, `story {noCar, area, commute}`; income lines include
+  `incomeExtra`; payslip shows "קיצוץ זמני בשכר" / "חצי משרה" while a `payCut` runs.
+
+### 3. Business (js/finance/business.js, `create({t3:true, setup})` in rules-4 games)
+* Setups `SETUPS[type]` (offer options `start:lean` / `start` (= std, the old id) / `start:strong`; `ev.data.setups`, `seasonProfile`,
+  `eventsText`). `SEASONS` (public calendar, `calOf`: game month 1 = January; history = the real month), shock floor 0.6, general expansion
+  (coffee / toyshop / app), B2B receivables on terms (`arTerms`, written off as `badDebt` "חוב אבוד"), decision events (`T3_CHOICES`,
+  `eventChoices(b, {cal})`, `resolveEvent(b, key, choice)` atomic; previews = deterministic 3-month forecast deltas), state events (overload,
+  buyerOffer, season prep announced leadTime + 1 months ahead), `report.why` {profit, cash, sentence} (Σ profit = Δ net profit; net profit + Σ
+  cash = cash change; integers), `report.stage` / `growthStage` (hysteresis 2 up / 3 down), `report.activity`, `summary().{stage, signature,
+  l1, l2, l3, seasonProfile, decide}`. `SIDE_GRAD` for the side chain's graduation.
+* Engine glue: business news gains `{type, icon, cal, revenueGross, profit, cashDelta, toOwner, why, stage, stagePrev, activity, decide}`
+  (`note` = `why.sentence`, deprecated); effects `{type:'bizStage', at, from, to}` and `{type:'bizPulse', at, kind, amount}`.
+
+### 4. CR-29 (ranked rules from the date key)
+* `js/systems/rules.js`: `RULES4_FROM`, `dayOf`, `rulesForDay`. `createGame({mode: ranked, dateKey})` → `st.rules = rulesForDay(dateKey)`
+  (daily key, weekly key `YYYY-Www`, or the Israel date the challenge was created); `dailyConfig()` returns `dateKey` + `rules`.
+  `verify_core.js rulesFor` is a tested duplicate; `index.ts` challenge_day = `created_at AT TIME ZONE 'Asia/Jerusalem'`.

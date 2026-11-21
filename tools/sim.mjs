@@ -6,8 +6,11 @@
 //        node tools/sim.mjs --perf [w]                  describe / impactFor p95 and games/sec
 // Policies carry a mentor level (default 'hint'); the T2 policies decide from E.publicView only (tools/policies.mjs).
 import * as E from '../js/engine.js';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { facade, claimedNet, adaptiveFocus, runFocus, ddRule, medianDown } from './policies.mjs';
+import { collect, bundleText, sha256 } from './build-edge.mjs';
+/** T7 CR-21: every sim JSON names the exact engine it measured. */
+export const ENGINE_SHA = sha256(bundleText(collect()));
 
 const args = process.argv.slice(2);
 const N = +(args.find((a) => /^\d+$/.test(a)) || 600);
@@ -156,7 +159,7 @@ export const POLICIES = {
   },
   // a kid who just taps the highlighted button every time (and never touches the loan buttons) — mentor level guide
   guideTapper: {
-    mentor: 'guide',
+    mentor: 'guide', story: 'tapper',
     decide(st, ev, ctx) {
       if (ev.type === 'trade') return ['done'];
       const en = ev.options.filter((x) => x.enabled);
@@ -199,7 +202,7 @@ function smartLike(v = {}) {
     return o2;
   };
   return {
-    mentor: 'hint', quiz: 'smart',
+    mentor: 'hint', quiz: 'smart', story: 'smart',
     decide(st, ev, ctx) { const pv = PV(st, ev); return greedyLike(facade(pv), ev, ctx, true, mods(pv)); },
     between(st) {
       const pv = PV(st); const lb = pv.metrics.econ ? pv.metrics.econ.label : null;
@@ -216,7 +219,7 @@ Object.assign(POLICIES, {
   adaptive: smartLike({ adaptive: true }),
   // the literal highlight-free tapper: uniform random among enabled options, never asks for hints, no between-roll actions
   blindTapper: {
-    mentor: 'hint', quiz: 'tapper',
+    mentor: 'hint', quiz: 'tapper', story: 'random',
     decide(st, ev, ctx) {
       if (ev.type === 'trade') return ['done'];
       const en = ev.options.filter((x) => x.enabled);
@@ -245,7 +248,7 @@ Object.assign(POLICIES, {
   },
   // archetypes (gameplay.md §7d), played as the player — the same code T6 rivals will reuse
   saver: {
-    mentor: 'hint', quiz: 'cautious',
+    mentor: 'hint', story: 'smart', quiz: 'cautious',
     decide(st, ev, ctx) {
       const pv = PV(st, ev); const f = facade(pv); const m = pv.metrics; const d = ev.data;
       if (ev.type === 'deal') { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled && !o.loanAmount).sort((x, y) => y.net - x.net)[0]; if (!b || b.net <= 0) return ['pass']; const ins = ddRule('flagged', pv, ev, b.id); if (ins && ctx.n < 2) return [ins]; return [m.cash + m.savings - d.down >= 6 * m.expenses ? b.id : 'pass']; }
@@ -262,7 +265,7 @@ Object.assign(POLICIES, {
     },
   },
   founder: {
-    mentor: 'hint', quiz: 'smart',
+    mentor: 'hint', story: 'smart', quiz: 'smart',
     decide(st, ev, ctx) {
       const pv = PV(st, ev); const f = facade(pv); const w = E.getWorld(pv.worldId); const d = ev.data;
       if (ev.type === 'business') { if (d.mode === 'offer') return [has(ev, 'start') ? 'start' : 'pass']; return [ctx.n === 0 && has(ev, 'biz:suggest') ? 'biz:suggest' : 'ok']; }
@@ -272,7 +275,7 @@ Object.assign(POLICIES, {
     between(st) { betweenCommon(st, 0.8, true); if (!st.over) E.setPlan(st, planFor(facade(PV(st)), 'smart')); if (!st.over) runFocus(st, (PV(st).metrics.focus || { options: [] }).options.find((o) => o.id === 'ops' && o.enabled) ? 'ops' : 'adaptive'); },
   },
   diversified: {
-    mentor: 'hint', quiz: 'smart',
+    mentor: 'hint', story: 'smart', quiz: 'smart',
     decide(st, ev, ctx) {
       const pv = PV(st, ev); const f = facade(pv); const m = pv.metrics; const d = ev.data;
       if (ev.type === 'deal') { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0]; if (!b || b.net <= 0) return ['pass']; const ins = ddRule('flagged', pv, ev, b.id); if (ins && ctx.n < 2) return [ins]; const haveKind = m.assets.some((a) => a.kind === d.kind); if (b.loanAmount > 2 * Math.max(0, m.cashflow) * 4) return ['pass']; return [(!haveKind || b.net >= 0.1 * m.expenses) ? b.id : 'pass']; }
@@ -303,6 +306,9 @@ Object.assign(POLICIES, {
     between(st) { const L = PV(st).metrics.life; E.setPlan(st, L.energy > 35 ? 'overtime' : 'work'); },
   },
 });
+// T3 sim policies: sideHustler (smart + the side plan until the side business graduates) and owner (smart + starts every offered business)
+POLICIES.sideHustler = { ...smartLike(), between(st) { POLICIES.smart.between(st); if (st.over) return; const pv = PV(st); const L = pv.metrics.life; if (!pv.metrics.businesses.some((b) => b.name === 'העסק הצדדי שלך') && L.energy >= 30 && L.plan !== 'side') E.setPlan(st, 'side'); } };
+POLICIES.owner = { ...smartLike(), decide(st, ev, ctx) { if (ev.type === 'business' && ev.data.mode === 'offer') { const o = ev.options.filter((x) => x.kind === 'buy' && x.enabled).sort((a, b) => (a.startCapital || ev.data.startCapital) - (b.startCapital || ev.data.startCapital))[0]; return [o ? o.id : 'pass']; } return POLICIES.smart.decide(st, ev, ctx); } };
 // focus variants (smart with the focus rule replaced) and DD variants (smart with the inspect rule replaced)
 for (const id of ['none', 'scout', 'debt', 'ops', 'frugal', 'network', 'research', 'adaptive']) POLICIES['f:' + id] = smartLike({ focus: id });
 for (const id of ['never', 'always', 'flagged', 'borderline']) POLICIES['dd:' + id] = smartLike({ dd: id });
@@ -445,7 +451,7 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
 /* ---------- play one game */
 const QUIZ_SKILL = { random: 0.33, cautious: 0.8, greedy: 0.7, smart: 0.95, reckless: 0.4, tapper: 0.5 };
 export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
-  const { log, ...gameOpts } = opts;
+  const { log, onRoll, ...gameOpts } = opts;
   const P = POLICIES[pol];
   const st = E.createGame({ worldId, charId, seed, mode: 'free', mentor: P.mentor || 'hint', ...gameOpts });
   const r = prng(seed * 7919 + pol.length);
@@ -471,13 +477,33 @@ export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
     }
   };
   while (!end && st.month <= capMonths && guard++ < 5000) {
+    if (P.story && !st.over) storyStep(st, P.story, r);
+    if (st.over) { end = st.result; break; }
     P.between(st, { r });
     if (st.over) { end = st.result; break; }
     if (st.pending) { resolve(E.currentEvent(st)); if (end || st.over) { end = end || st.result; break; } } // e.g. the ops focus opened the business panel
     E.rollDice(st);
+    if (onRoll) onRoll(st);
     resolve(E.landing(st));
   }
   return { st, end };
+}
+
+/* ---------- T3: the story inbox (public cards only). tapper = the highlighted option, else wait for the default;
+   smart = the evaluator's best option on financial / mixed items, the default on personal ones; random = 50%: a random option */
+function storyStep(st, mode, r) {
+  for (const it of E.inbox(st)) {
+    if (st.over) return;
+    const en = it.options.filter((o) => o.enabled); if (!en.length) continue;
+    let pick = null;
+    if (mode === 'tapper') pick = en.find((o) => o.primary) || null;
+    else if (mode === 'random') pick = r() < 0.5 ? en[Math.floor(r() * en.length)] : null;
+    else if (mode === 'smart') {
+      if (en.every((o) => o.dq === 'personal' || o.dq === 'none')) pick = null;
+      else { const sc = E.scoreStory(st, it).sort((a, b) => b.U - a.U)[0]; pick = sc ? en.find((o) => o.id === sc.id) : null; }
+    }
+    if (pick) E.resolveStory(st, it.itemId, pick.id);
+  }
 }
 
 /* ---------- statistics */
@@ -537,6 +563,44 @@ function summary(worldId, rows) {
   };
 }
 
+
+/* ---------- T3: story / business sim checks (spec §13.2) */
+const ONCARD = new Set(['s1', 'm1', 'homeRepair', 'f1', 'carBack']);
+export function storiesWorld(wid, n, pols = ['blindTapper', 'guideTapper', 'smart', 'sideHustler', 'owner']) {
+  const w = E.getWorld(wid); const games = [];
+  for (const pol of pols) for (let i = 0; i < n; i++) {
+    const ch = w.characters[i % w.characters.length]; const T = E.starThresholds(w, ch.id); const cap = Math.round(T.maxMonths * 1.6);
+    const seen = new Map(); let maxOpen = 0, maxChains = 0;
+    const { st, end } = play(wid, ch.id, 1000 + i * 7 + wid.charCodeAt(1) * 100003, pol, cap, { onRoll: (x) => {
+      for (const it of x.story.inbox) if (!seen.has(it.id)) seen.set(it.id, { kind: it.kind, m: it.createdM, chain: it.chain, step: it.step, assetId: it.assetId });
+      maxOpen = Math.max(maxOpen, x.story.inbox.length); maxChains = Math.max(maxChains, Object.entries(x.story.chains).filter(([id, c]) => id !== 'crisis' && !['idle', 'done'].includes(c.stage)).length);
+    } });
+    const months = Math.max(1, st.month - 1);
+    const items = [...seen.values()]; const chainItems = items.filter((x) => x.kind === 'chain'); const bizItems = items.filter((x) => x.kind === 'biz');
+    const bizMonths = st.assets.filter((a) => a.biz).reduce((x, a) => x + a.biz.month, 0) + (st.stats.sold ? 6 : 0);
+    const stand = st.life.events.filter((e) => !e.id.startsWith('story:'));
+    let repeats = 0; const last = {}; for (const e of stand) { if (e.id !== 'quiet' && last[e.id] != null && e.m - last[e.id] < 12) repeats++; last[e.id] = e.m; }
+    const chains = Object.fromEntries(Object.entries(st.story.chains).map(([id, c]) => [id, { run: c.run, done: c.stage === 'done', steps: c.steps.length }]));
+    games.push({ pol, char: ch.id, won: !!(end && end.status === 'won'), inTime: !!(end && end.status === 'won' && end.months <= T.maxMonths), months, chains,
+      chainItems12: chainItems.length * 12 / months, bizItemsYear: bizMonths >= 6 ? bizItems.length * 12 / bizMonths : null, defaults: st.stats.storyDefaults, resolved: st.actions.filter((a) => a[0] === 'Q').length,
+      subs: stand.length, repeats, maxOpen, maxChains, sidePlan: st.life.planMonths.side, stages: st.assets.filter((a) => a.biz).map((a) => a.biz.stage), quiet: stand.filter((e) => e.id === 'quiet').length });
+  }
+  return games;
+}
+function storiesSummary(wid, games) {
+  const q2 = (xs, p) => (xs.length ? q(xs, p) : null); const pc = (x) => Math.round(x * 100);
+  const by = (pol) => games.filter((g) => g.pol === pol); const core = games.filter((g) => ['blindTapper', 'guideTapper', 'smart'].includes(g.pol));
+  const rate = (gs, id) => (gs.length ? gs.filter((g) => g.chains[id]).length / gs.length : 0);
+  const ci = core.map((g) => g.chainItems12); const bi = games.filter((g) => g.bizItemsYear != null).map((g) => g.bizItemsYear);
+  const sideGames = by('sideHustler').filter((g) => g.sidePlan >= 15);
+  const stages = games.flatMap((g) => g.stages); const stDist = [0, 1, 2, 3].map((k) => stages.filter((x) => x === k).length);
+  return { world: wid, n: core.length, start: Object.fromEntries(['car', 'move', 'friend', 'career', 'crisis', 'side'].map((id) => [id, pc(rate(core, id))])), side15: sideGames.length ? pc(sideGames.filter((g) => g.chains.side).length / sideGames.length) : null,
+    completion: pc(core.flatMap((g) => Object.values(g.chains)).filter((c) => c.done).length / Math.max(1, core.flatMap((g) => Object.values(g.chains)).length)),
+    stepsPerRun: +(core.flatMap((g) => Object.values(g.chains)).reduce((x, c) => x + c.steps / Math.max(1, c.run), 0) / Math.max(1, core.flatMap((g) => Object.values(g.chains)).length)).toFixed(2),
+    chainItems12: { med: +(q2(ci, 0.5) || 0).toFixed(2), p90: +(q2(ci, 0.9) || 0).toFixed(2) }, bizItemsYear: { med: +(q2(bi, 0.5) || 0).toFixed(2), p90: +(q2(bi, 0.9) || 0).toFixed(2), n: bi.length },
+    defaultsShare: pc(core.reduce((x, g) => x + g.defaults, 0) / Math.max(1, core.reduce((x, g) => x + g.defaults + g.resolved, 0))), repeats: games.reduce((x, g) => x + g.repeats, 0), quietShare: pc(core.reduce((x, g) => x + g.quiet, 0) / Math.max(1, core.reduce((x, g) => x + g.subs, 0))),
+    maxOpen: Math.max(...games.map((g) => g.maxOpen)), maxChains: Math.max(...games.map((g) => g.maxChains)), stageDist: stDist };
+}
 
 /* ---------- T2: acceptance matrix, dominance scan, performance (spec §13) */
 const T2_CORE = ['guideTapper', 'blindTapper', 'naive', 'smart', 'adaptive', 'cautious', 'greedy', 'saver', 'founder', 'diversified', 'gambler'];
@@ -630,30 +694,37 @@ export function perf(wid = null, n = 6) {
   return { states: sts.length, describe: { p50: p(dsc, 0.5), p95: p(dsc, 0.95) }, impactFor: { n: imp.length, p50: p(imp, 0.5), p95: p(imp, 0.95) }, sim: { games, secs: (Date.now() - t0) / 1000, gamesPerSec: +(games / ((Date.now() - t0) / 1000)).toFixed(2) } };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report'))) {
+if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories'))) {
   const nArg = +(args.find((a) => /^\d+$/.test(a)) || 0);
+  mkdirSync('tools/balance-data', { recursive: true });
+  if (args.includes('--stories')) {
+    const wid = ONLY || 'w1'; const n = nArg || 60; const t0 = Date.now();
+    const games = storiesWorld(wid, n); const sum = storiesSummary(wid, games);
+    writeFileSync(`tools/balance-data/stories-${wid}.json`, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), summary: sum, games }) + '\n');
+    console.log(JSON.stringify(sum));
+  }
   if (args.includes('--matrix')) {
     const wid = ONLY || 'w1'; const n = nArg || 100; const t0 = Date.now();
     const recs = matrixWorld(wid, n, undefined, (pol, ch, secs) => { if (!QUIET) console.log(`${wid} ${ch} ${pol} done (${secs}s)`); });
-    const file = `tools/balance-t2-${wid}.json`;
-    writeFileSync(file, JSON.stringify({ world: wid, n, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints'], recs }) + '\n');
+    const file = `tools/balance-data/matrix-${wid}.json`;
+    writeFileSync(file, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints'], recs }) + '\n');
     console.log(`wrote ${file}: ${recs.length} games in ${Math.round((Date.now() - t0) / 1000)}s`);
   }
   if (args.includes('--dominance')) {
     const n = nArg || 40; const out = {};
     for (const wid of ONLY ? [ONLY] : E.WORLDS.map((w) => w.id)) out[wid] = dominance(wid, n);
-    writeFileSync(`tools/balance-t2-dominance${ONLY ? '-' + ONLY : ''}.json`, JSON.stringify(out) + '\n');
+    writeFileSync(`tools/balance-data/dominance${ONLY ? '-' + ONLY : ''}.json`, JSON.stringify({ engineSha: ENGINE_SHA, ...out }) + '\n');
     for (const [wid, t] of Object.entries(out)) { const flagged = Object.entries(t).filter(([, x]) => !x.allow && x.n >= 20 && x.top / x.n > 0.85); console.log(wid, 'flagged:', flagged.map(([k, x]) => `${k} ${x.top}/${x.n}`).join(', ') || 'none'); }
   }
-  if (args.includes('--perf')) console.log(JSON.stringify(perf(ONLY, nArg || 6)));
+  if (args.includes('--perf')) { const pf = { engineSha: ENGINE_SHA, ...perf(ONLY, nArg || 6) }; writeFileSync('tools/balance-data/perf.json', JSON.stringify(pf) + '\n'); console.log(JSON.stringify(pf)); }
   if (args.includes('--report')) t2Report();
   process.exit(0);
 }
 function t2Report() {
-  const byWorld = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = `tools/balance-t2-${w}.json`; if (existsSync(f)) byWorld[w] = JSON.parse(readFileSync(f, 'utf8')); }
+  const byWorld = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = [`tools/balance-data/matrix-${w}.json`, `tools/balance-t2-${w}.json`].find(existsSync); if (f) byWorld[w] = JSON.parse(readFileSync(f, 'utf8')); }
   const G = gates(byWorld); const P = (x) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).toFixed(0) + '%'); const Mo = (x) => (Number.isFinite(x) ? x : '—');
-  const dom = {}; for (const f of ['tools/balance-t2-dominance.json', ...['w1', 'w2', 'w3', 'w4'].map((w) => `tools/balance-t2-dominance-${w}.json`)]) if (existsSync(f)) Object.assign(dom, JSON.parse(readFileSync(f, 'utf8')));
-  const perfF = 'tools/balance-t2-perf.json'; const pf = existsSync(perfF) ? JSON.parse(readFileSync(perfF, 'utf8')) : null;
+  const dom = {}; for (const f of ['tools/balance-data/dominance.json', ...['w1', 'w2', 'w3', 'w4'].map((w) => `tools/balance-data/dominance-${w}.json`)]) if (existsSync(f)) { const j = JSON.parse(readFileSync(f, 'utf8')); delete j.engineSha; Object.assign(dom, j); }
+  const perfF = ['tools/balance-data/perf.json', 'tools/balance-t2-perf.json'].find(existsSync) || 'tools/balance-data/perf.json'; const pf = existsSync(perfF) ? JSON.parse(readFileSync(perfF, 'utf8')) : null;
   const L = [];
   L.push('# דוח איזון — מירוץ העכברים v4 (T2 "עומק אסטרטגי")', '');
   L.push(`Generated by \`node tools/sim.mjs --matrix N wX\` (one process per world) + \`--dominance\` + \`--perf\`, then \`node tools/sim.mjs --report\`. Seeds are fixed (\`1000 + i·7 + world·100003\`), so the numbers are reproducible. N per (world × character × policy): ${Object.values(byWorld).map((x) => `${x.world} ${x.n}`).join(' · ')}. Free mode, capped at 1.6× the character's month limit; "in time" = escaped within the limit. Cells = world × character × cycle bucket (§8.6) with ≥ 15 games.`, '');

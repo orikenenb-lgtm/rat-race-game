@@ -162,6 +162,13 @@ export const LIFE_EVENTS = [
     ] },
 ];
 
+/** T3 §3.5: the substitution of last resort on tile L. NOT in LIFE_EVENTS (the life deck — its size drives the shuffle draws — is unchanged). */
+export const LIFE_QUIET = { id: 'quiet', personal: true, title: 'חודש בלי הפתעות', text: 'אין דרמות החודש. מה עושים עם השקט?', primary: 'rest',
+  options: [
+    { id: 'treat', label: 'ערב בחוץ עם החברים', cash: -0.05, happiness: 2, note: 'קטן, משמח, נגמר.' },
+    { id: 'rest', label: 'ערב על הספה', energy: 4, note: 'גם זה מטעין.' },
+  ] };
+
 /* ============================================================ lessons library */
 // cat: money | debt | invest | tax | time | life | world | history
 export const LESSONS = [
@@ -215,6 +222,9 @@ export const LESSONS = [
   { id: 'kids_cost', cat: 'life', title: 'ילדים', text: 'ילדים הם השמחה הכי גדולה — וגם הוצאה קבועה של שנים. מתכננים אותה כמו כל הוצאה קבועה.' },
   { id: 'guarantor', cat: 'life', title: 'ערבות', text: 'לחתום ערבות זה להבטיח לשלם חוב של מישהו אחר. אם הוא לא ישלם — אתה תשלם.' },
   { id: 'friend_loan', cat: 'life', title: 'להלוות לחבר', text: 'מלווים לחבר רק סכום שמוכנים לא לראות שוב. ככה שומרים גם על הכסף וגם על החברות.' },
+  { id: 'total_cost', cat: 'life', title: 'עלות כוללת של רכב', text: 'רכב עולה הרבה יותר מהמחיר שלו: דלק, ביטוח, טיפולים, תיקונים וירידת ערך. מחשבים את כל השנה — לא רק את החשבון של היום.' },
+  { id: 'housing_share', cat: 'money', title: 'כמה מהנטו הולך על דיור', text: 'כלל אצבע נפוץ: דיור עד בערך שליש מהנטו. זה לא חוק — אבל מעל זה כל העלאה בשכירות לוחצת על כל השאר.' },
+  { id: 'sunk_cost', cat: 'money', title: 'עלות שקועה', text: 'כסף שכבר נתת לא יחזור כי תיתן עוד. כל החלטה חדשה שואלת רק: מה הסיכוי מכאן והלאה?' },
   { id: 'car_cost', cat: 'life', title: 'רכב', text: 'רכב חדש מאבד חלק גדול מערכו כבר בשנים הראשונות. תחבורה ציבורית ואופניים הם חיסכון רציני.' },
   { id: 'reserve_duty', cat: 'life', title: 'מילואים', text: 'בזמן מילואים ביטוח לאומי משלם תגמול במקום המשכורת. ההכנסה נשמרת — הכוח פחות.' },
   { id: 'job_offer', cat: 'life', title: 'הצעת עבודה', text: 'משכורת גבוהה יותר שווה בדיקה: כמה שעות, כמה לחץ, ומה זה עושה לחיים שמחוץ לעבודה.' },
