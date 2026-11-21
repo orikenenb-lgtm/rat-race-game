@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { collect, bundleText, sha256 } from '../tools/build-edge.mjs';
 import { loadEngine } from '../supabase/functions/verify-result/engine_loader.js';
-import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM, isoDay } from '../supabase/functions/verify-result/verify_core.js';
+import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM, isoDay, inCutoverWeek } from '../supabase/functions/verify-result/verify_core.js';
 import * as Local from '../js/engine.js';
 import { playOut, prng } from './lib/random-player.mjs';
 
@@ -194,8 +194,12 @@ await test('review B1: RULES4_FROM is a Monday; a rules-3 row whose game was pla
   const w = Local.getWorld('w2'); const charId = dailyCharId(w, 2);
   const st = playOut(Local, { worldId: 'w2', charId, seed: 6161, mode: 'daily', maxMonths: 24 }, prng(61), { v4: true, stories: true }); // a v4 client, no date key
   assert.equal(st.rules, 4);
-  const row = { ...rowFor(Local, st, { mode: 'daily', profession: 'idx:2', seed: 6161 }), daily_key: '2026-11-28' }; // the server dates it before the cut-over
+  const row = { ...rowFor(Local, st, { mode: 'daily', profession: 'idx:2', seed: 6161 }), daily_key: '2026-11-28', finished_day: RULES4_FROM }; // the server dates it before the cut-over; finished in the cut-over week
   const out = verifyGame(E, row, st.actions); assert.ok(out.ok, out.error); assert.equal(out.rulesFallback, true); assert.equal(out.cfg.rules, 4);
+  // T3 review m3: the fallback window is the cut-over week only (by the result's finish day); outside it — or without a date — no retry
+  for (const fd of ['2026-12-13', '2026-12-14', '2026-12-06', '2027-03-01', null]) { const o = verifyGame(E, { ...row, finished_day: fd }, st.actions); assert.equal(o.ok, fd === '2026-12-13', `finished ${fd}`); if (!o.ok) assert.equal(o.cfg.rules, 3); }
+  assert.equal(inCutoverWeek('2026-12-07'), true); assert.equal(inCutoverWeek('2026-12-13'), true); assert.equal(inCutoverWeek('2026-12-14'), false); assert.equal(inCutoverWeek('2026-12-06'), false);
+  assert.match((await import('node:fs')).readFileSync(new URL('../supabase/functions/verify-result/index.ts', import.meta.url), 'utf8'), /as finished_day/);
   const forged = verifyGame(E, { ...row, net_worth: row.net_worth + 50000 }, st.actions); assert.equal(forged.ok, false); assert.equal(forged.cfg.rules, 3, 'the reported failure is the rules-3 one');
   const st3 = playOut(Local, { worldId: 'w2', charId, seed: 6262, mode: 'daily', maxMonths: 24, rules: 3 }, prng(62));
   const r3 = { ...rowFor(Local, st3, { mode: 'daily', profession: 'idx:2', seed: 6262 }), daily_key: '2026-12-09' };

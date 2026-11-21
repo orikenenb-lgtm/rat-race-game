@@ -120,10 +120,18 @@ export function verifyGame(E, row, actions) {
   const cfg = configFor(E, row);
   const first = replayCompare(E, cfg, row, actions);
   // review B1 defence in depth: a game the row dates before the cut-over may have been started by a v4 client — retry ONCE with
-  // rules 4 (the harder rule set, so a fallback gives a cheater nothing). Never from 4 to 3.
-  if (first.ok || cfg.rules !== 3) return first;
+  // rules 4. Never from 4 to 3. T3 review m3: rules 4 is NOT always harder (better on 12–15 % of seeds), so best-of-two is a real
+  // option — the retry is allowed only for a result FINISHED in the cut-over week (RULES4_FROM … RULES4_FROM + 6 days).
+  if (first.ok || cfg.rules !== 3 || !inCutoverWeek(row.finished_day)) return first;
   const second = replayCompare(E, { ...cfg, rules: 4 }, row, actions);
   return second.ok ? { ...second, rulesFallback: true } : first;
+}
+/** Is this (Israel) date inside the cut-over week [RULES4_FROM, RULES4_FROM + 6]? (missing date → false) */
+export function inCutoverWeek(day) {
+  const d = isoDay(day); if (!d) return false;
+  const [y, m, dd] = RULES4_FROM.split('-').map(Number); const from = daysFromCivil(y, m, dd);
+  const [y2, m2, d2] = d.split('-').map(Number); const x = daysFromCivil(y2, m2, d2);
+  return x >= from && x <= from + 6;
 }
 function replayCompare(E, cfg, row, actions) {
   let st;
