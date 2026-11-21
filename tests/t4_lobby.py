@@ -321,30 +321,29 @@ async def t_first_minute(b, path):
 
 async def drive(pg, rolls):
     """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button)."""
-    n = 0; deadline = time.time() + 60 * 8
+    n = 0; deadline = time.time() + 60 * 10
     while n < rolls and time.time() < deadline:
         if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); continue
-        if await pg.locator('#gm:not([hidden])').count(): await pg.locator('#gm .acts button').first.click(); await pg.wait_for_timeout(200); continue
+        if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); continue
         if await pg.locator('#evm:not([hidden])').count():
-            btn = pg.locator('#evCard button:not([disabled])[data-opt], #evCard .opts button:not([disabled])').first
-            if await btn.count(): await btn.click(timeout=5000)
-            else: await pg.locator('#evCard button:not([disabled])').last.click(timeout=5000)
-            await pg.wait_for_timeout(400); continue
+            # real cards: options are button[data-o]; prefer the highlighted one, else the first enabled (JS click: no animation waits)
+            await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()")
+            await pg.wait_for_timeout(500); continue
         if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()"):
             await pg.click('#roll'); n += 1; await pg.wait_for_timeout(1200); continue
         await pg.wait_for_timeout(300)
     return n
 
 async def t_learnreal(b):
-    ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:1,tutorialDone:true,lastMode:'learn'}))", "localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))"])
+    ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:1,tutorialDone:true,lastMode:'learn'}))", "localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))", "if(!sessionStorage.getItem('t4e')){sessionStorage.setItem('t4e','1');localStorage.setItem('rr2-energy', JSON.stringify({e:5, at:Date.now(), granted:{}}))}"])
     await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
     e0 = await ls(pg, 'rr2-energy')
     await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
     check(await pg.evaluate("document.querySelector('input[name=t4mode][value=learn]').checked"), 'lastMode learn preselected for a returning player')
     await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
-    n = await drive(pg, 12)
+    n = await drive(pg, 40)
     e1 = await ls(pg, 'rr2-energy'); hid = await pg.evaluate("[document.getElementById('hEnergy').hidden, document.getElementById('rollEn').hidden]")
-    check(n >= 8 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
+    check(n >= 20 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
     check(all(hid), f'AC-L1 #hEnergy / #rollEn hidden in learning mode ({hid})')
     keys = await pg.evaluate("Object.keys(localStorage).filter(k=>k.startsWith('rr2-save-'))")
     check('rr2-save-learn-w1' in keys and 'rr2-save-free-w1' not in keys, f'IR-T4-1 the real game saves into rr2-save-learn-w1 ({keys})')
