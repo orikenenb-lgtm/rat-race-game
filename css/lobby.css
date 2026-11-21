@@ -933,3 +933,52 @@ body.lb-lobby-open { overflow: hidden; }
 /* review m-4: the personal best stays visible on phones, compact, inside the hero (the 🏁 box is hidden ≤ 600 px) */
 .wv-best-sm { display: none; font-size: 13px; font-weight: 700; margin-top: 2px; text-shadow: 0 1px 4px rgba(0, 0, 0, .6); }
 .t4-mopt.is-locked { cursor: help; }
+
+/* ---------------- T6 personal end summary (flag recap2; spec §6.3–6.4) */
+.t6-end .end-card { padding-bottom: 12px; }
+.t6-end #endTop { padding: 14px 16px 0; }
+.t6-end .end-title { margin-top: 2px; }
+.t6-top { text-align: start; }
+.t6-dims { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+.t6-dim { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 12px; background: var(--paper2); }
+.t6-di { flex: none; font-size: 18px; line-height: 1.4; }
+.t6-dim > div { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.t6-dim b { font-size: 13px; color: var(--mut); }
+.t6-dh { font-size: 14px; }
+.t6-cmp { font-size: 12px; color: var(--mut); }
+.t6-cmp.pend { font-style: italic; }
+.t6-sug { margin: 10px 0 0; padding: 10px 12px; border-radius: 14px; background: light-dark(#fff6dc, #3a3020); border: 1px solid light-dark(#f0d58a, #6b5a2a); }
+.t6-sug p { margin: 4px 0 0; font-size: 14px; }
+.t6-rw, .t6-awbtn { display: block; width: 100%; min-height: var(--tap, 44px); margin-top: 8px; border-radius: 14px; font-weight: 800; }
+.t6-rwsub { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
+.t6-aw { margin-top: 8px; text-align: center; }
+.t6-aw small { font-size: 12px; color: var(--mut); }
+.t6-awl { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 2px; font-size: 15px; }
+.t6-more { margin: 12px 16px 0; text-align: start; }
+.t6-more > summary, .t6-sec > summary { min-height: var(--tap, 44px); display: flex; align-items: center; cursor: pointer; font-weight: 800; padding: 0 6px; border-radius: 12px; }
+.t6-more > summary { justify-content: center; background: var(--paper2); }
+.t6-sec { border-bottom: 1px solid var(--line); }
+.t6-secb { padding: 4px 4px 10px; }
+.t6-secb .end-learn, .t6-secb .life-card, .t6-secb .end-lesson, .t6-secb .end-leaks, .t6-secb .end-new { margin-inline: 0; }
+.t6-grid { display: grid; gap: 6px; grid-template-columns: 1fr; }
+.t6-cell { padding: 8px 10px; border-radius: 12px; background: var(--paper2); font-size: 14px; }
+.t6-cell p { margin: 2px 0 0; }
+.t6-scroll { overflow-x: auto; }
+.t6-vs { border-collapse: collapse; font-size: 12px; min-width: 520px; }
+.t6-vs th, .t6-vs td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.t6-vs thead th, .t6-vs tr:first-child th { font-size: 12px; }
+.t6-vs th small { display: block; font-weight: 400; color: var(--mut); font-size: 12px; }
+.t6-vs tr.me { background: light-dark(#fff6dc, #3a3020); }
+.t6-rule summary { min-height: var(--tap, 44px); display: flex; align-items: center; cursor: pointer; font-weight: 700; font-size: 14px; }
+.t6-rule p { margin: 2px 0 6px; font-size: 13px; }
+.t6-lost { padding-inline-start: 18px; font-size: 13px; }
+.t6-note { font-size: 13px; color: var(--mut); }
+.t6-btns .end-acts { margin-top: 10px; }
+.t6-wbr { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.t6-wbr .lb-continue { flex: 1 1 220px; }
+.t6-wbr .chip, .t6-wlast { min-height: var(--tap, 44px); }
+@media (max-width: 600px) {
+  .t6-end #endTop { padding: 10px 12px 0; }
+  .t6-end .end-art { display: none; }
+  .t6-dh { font-size: 13px; }
+}

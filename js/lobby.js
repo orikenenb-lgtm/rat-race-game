@@ -17,6 +17,10 @@ import { reducedMotion, motionPref, setMotionPref, initMotion } from './motion.j
 import { catName } from './data/lessons-meta.js';
 import { charMeta } from './data/characters-meta.js';
 import { PRACTICE } from './practice.js';
+import { flag } from './flags.js';
+import * as T6S from './summary.js';      // T6 §6: the personal end summary (graph, dimensions, more sections)
+import * as GH from './ghosts.js';        // T6 §2: finished ghost results (only after the game) — never sent to the server
+import * as RW from './rewind.js';        // T6 §7: practice branches (free / learn only)
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1025,6 +1029,16 @@ function modeNow(p = P.getProgress()) {
   if (worldMode) return worldMode;
   return completedAny(p) ? p.lastMode : 'normal';   // a brand-new player always gets a normal first game
 }
+/** T6 §7.4 items 3–4: the practice branch of this world (continue / delete) and "back to a moment of the last game" (flag rewind) */
+function t6WorldHtml(w) {
+  if (!flag('rewind')) return '';
+  const out = [];
+  const bs = safe(() => RW.branchSave(w.id), null);
+  if (bs) out.push(`<div class="t6-wbr"><button class="lb-continue is-learn" data-act="t6-branch" data-id="${w.id}"><span><b>${esc(RW.STR.lobbyCont.replace('{m}', bs.month))}</b></span></button><button class="chip" data-act="t6-branch-del" data-id="${w.id}">${esc(RW.STR.lobbyDel)}</button></div>`);
+  const L = safe(() => RW.lastGame(), null);
+  if (L && L.cfg && L.cfg.worldId === w.id) out.push(`<button class="chip t6-wlast" data-act="t6-last">${esc(RW.STR.lobbyLast)}</button>`);
+  return out.join('');
+}
 function renderWorld(id, opts = {}) {
   const w = worldOf(id); view = { k: 'world', id: w.id }; ++token; trace('world');
   if (opts.learn) worldMode = 'learn';
@@ -1039,7 +1053,7 @@ function renderWorld(id, opts = {}) {
   if (un) {
     const mode = modeNow(p);
     const cont = (x, learn) => `<button class="lb-continue ${learn ? 'is-learn' : ''}" data-act="continue-free" data-id="${w.id}" ${learn ? 'data-learn="1"' : ''}><span><b>${esc(learn ? T4.M6(x.charName || '', x.month) : T4.M5(x.charName || '', x.month))}</b></span></button>`;
-    body = `${sv ? cont(sv, false) : ''}${svL ? cont(svL, true) : ''}
+    body = `${sv ? cont(sv, false) : ''}${svL ? cont(svL, true) : ''}${t6WorldHtml(w)}
       ${modeGroupHtml(mode)}
       ${dreamRowHtml(p)}
       ${mentorRowHtml(p)}
@@ -1515,25 +1529,32 @@ function onGameEnd(e, delay) {
   const lessonIds = [e.lessons, e.end && e.end.lessons, e.summary && e.summary.lessons, saved && saved.lessons].filter(Array.isArray).flat();
   LIB.unlock(lessonIds, (e.end && Array.isArray(e.end.lessonList) && e.end.lessonList) || null);
   // §7.1 learning: no stars, best, unlocks, titles, pawns, achievements, worldsPlayed, gamesPlayed, wins, ⚡, boards
-  const res = learnMode ? P.recordLearnGame(e) : P.recordGame(e);
+  // T6 §9.3: the end of a continuation after the win records nothing (stars, best and unlocks were recorded at the win)
+  const afterWin = !!(e.afterWin || (e.end && e.end.afterWin));
+  const res = afterWin ? { newPawns: [], newAchievements: [], titleBefore: '', titleAfter: '', afterWin: true } : learnMode ? P.recordLearnGame(e) : P.recordGame(e);
   gamesThisSession++;
   res.newLessons = [...sessLessons]; sessLessons = [];
   const learning = (e.end && e.end.learning) || (e.summary && e.summary.learning) || null;
-  res.learn = safe(() => P.recordLearning(learning, [e.resultId || '', learnMode ? 'learn' : e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
-  res.quizEnergy = creditQuizAtEnd(e);
+  res.learn = afterWin ? null : safe(() => P.recordLearning(learning, [e.resultId || '', learnMode ? 'learn' : e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
+  res.quizEnergy = afterWin ? 0 : creditQuizAtEnd(e);
   if (e.mode === 'daily') { res.energy = grantDaily(P.streakInfo().streak); res.energyWhy = 'על האתגר היומי — אפשר להמשיך לשחק'; }
-  if (!learnMode && (e.mode || 'free') === 'free' && !hist) res.dream = safe(() => P.recordDream(e), null);   // §6.3 badges: free normal games only
-  logMilestones(e, res);
+  if (!learnMode && !afterWin && (e.mode || 'free') === 'free' && !hist) res.dream = safe(() => P.recordDream(e), null);   // §6.3 badges: free normal games only
+  if (!afterWin) logMilestones(e, res);
   lastEndSig = sigOf(e);
   const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
-  endCtx = { e, res, ranked, hist, learn: learnMode, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null, dreamSaved: null };
+  endCtx = { e, res, ranked, hist, learn: learnMode, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null, dreamSaved: null,
+    ghosts: null, rivals: (e.t6 && e.t6.rivals) || 'off' };
   if (ranked) {
     // the replay log goes to verify, never into rr_finish's stats (16 KB cap); prefer the longer of summary / saved state
     const { actions: sumActions = null, ...summary } = e.summary || {};
     const actions = [sumActions, saved && saved.actions].filter(Array.isArray).sort((a, b) => b.length - a.length)[0] || null;
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
-  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode))));
+  } else if (!(e.t6 && e.t6.afterwinAllowed)) {   // T6 §9.3: a win that may continue keeps its (finished) save until the player decides
+    // T6: a practice branch clears its OWN slot (rr2-save-branch-<w>), never the original's learn / free slot
+    const key = e.branch && e.saveKey && RW.isBranchKey(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
+    game().then((g) => g && g.clearSave && safe(() => g.clearSave(key)));
+  }
   setTimeout(() => {
     ensureCss(); install();
     const o = overlay(); if (!o) return;
@@ -1583,6 +1604,8 @@ function renderEnd(animate = false) {
     duelHtml = `<div class="end-duel"><div class="dl-side me"><small>אתה</small><b>${esc(resText(mine))}</b></div><div class="dl-vs">VS</div><div class="dl-side"><small>${esc(duel.by || 'החבר')}</small><b>${duel.r ? esc(resText(duel.r)) : '?'}</b></div>
       ${duel.r ? `<p class="dl-verdict ${v > 0 ? 'win' : v < 0 ? 'lose' : ''}">${v > 0 ? 'ניצחת בדו־קרב! 🏆' : v < 0 ? 'הפעם הוא ניצח. החזר לו אתגר!' : 'תיקו מושלם 🤝'}</p>` : ''}</div>`;
   }
+  const analysis = safe(() => (UIm && UIm.endAnalysisHtml ? UIm.endAnalysisHtml(end) : ''), '') || '';   // T2 §15.9 (was a MutationObserver in game.js)
+  if (flag('recap2') && e.t6) return renderEndT6({ e, res, w, c, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate, prog, sprint, g });
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
       <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
@@ -1598,6 +1621,7 @@ function renderEnd(animate = false) {
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
       ${learnHtml(e, res)}
+      ${analysis}
       ${practiceEndHtml(e)}
       ${dreamEndHtml(e)}
       ${mentorEndHtml(e)}
@@ -1610,6 +1634,65 @@ function renderEnd(animate = false) {
   if (animate) animateEnd(learn ? 0 : stars, won, res);
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
 }
+/* -------- T6 §6: the personal end summary (flag recap2). The old layout above stays the fallback. */
+let UIm = null; ui().then((m) => { UIm = m; }).catch(() => {});
+const T6END = { awLines: (A) => [`${A.months} חודשים אחרי היציאה`, `שווי נקי ${fmtSgn(A.nwDelta)} מאז היציאה`, `הכנסה פסיבית ${fmtSgn(A.passiveDelta)} מאז היציאה`,
+  A.hap0 != null && A.hap1 != null ? `אושר ${A.hap0} → ${A.hap1}` : A.happinessDelta != null ? `אושר ${A.happinessDelta > 0 ? '+' : ''}${Math.round(A.happinessDelta)} מאז היציאה` : '',
+  A.reason === 'afterWinBroke' && A.brokeM ? `החופש לא החזיק: בחודש ${A.brokeM} נגמר הכסף.` : A.stillFree ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'].filter(Boolean) };
+const fmtSgn = (n) => (Math.round(+n || 0) > 0 ? '+' : '') + fmtM(+n || 0);
+function t6Ctx() {
+  const { e } = endCtx; const t6 = e.t6 || {};
+  const ghostsOn = endCtx.rivals !== 'off';
+  const lg = safe(() => RW.lastGame(), null);
+  return { ghosts: endCtx.ghosts, rivals: ghostsOn ? (endCtx.ghosts ? 'done' : 'pending') : 'off', personas: safe(() => GH.personas(), T6S.PERSONAS_FALLBACK),
+    rewindAllowed: !!t6.rewindAllowed && !endCtx.ranked, lastGame: !!(lg || e.branch), afterwinAllowed: !!t6.afterwinAllowed, branchTl: t6.branchTl || null, graphId: 'end' };
+}
+function renderEndT6(o) {
+  const { e, res, w, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate } = o;
+  const ctx = t6Ctx();
+  const A = end.afterWin || e.afterWin || null;
+  const head = `<p class="end-kicker">${kicker}</p>
+      <h1 class="end-title">${A ? esc(T6S.T6.afterwinTitle) : title}</h1>
+      ${A ? `<ul class="t6-awl">${T6END.awLines(A).map((l) => `<li>${iso(l)}</li>`).join('')}${A.reason === 'cap' ? '<li>עברו 10 שנים מאז שיצאת מהמירוץ — כאן עוצרים.</li>' : ''}</ul>`
+        : learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
+      ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
+      ${duelHtml}
+      ${near && !(learn && /★/.test(near)) && !A ? `<p class="end-near">${iso(near)}</p>` : ''}
+      ${hist ? benchHtml(e) : ''}`;
+  const more = T6S.renderMore(e, { ...ctx, learnHtml: leaksHtml + learnHtml(e, res), lifeHtml: lifeHtml(e, won), analysisHtml: analysis + mentorEndHtml(e) + practiceEndHtml(e),
+    newsHtml: `<div class="end-new">${newsHtml(e, res, won ? resistedOf(e) : '')}</div>${dreamEndHtml(e)}`, lessonHtml: `<div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip && !(T6S.suggestionOf(end) || {}).text ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>`,
+    achOpen: !!(res.unlockedWorld || res.gained > 0) });
+  html(`<div class="lb-shell lb-end t6-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
+    <article class="end-card">
+      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${T6S.renderTop(e, ctx)}</div>
+      <div class="t6-btns">${endButtons(e, res, nextW, nextOpen)}</div>
+      ${more}
+      ${learn || A ? '' : ''}
+    </article>
+  </div>`);
+  const r = root(); T6S.wireSummary(r, (id) => (id === 'end' ? t6Graph() : null));
+  if (animate) animateEnd(learn ? 0 : stars, won, res);
+  else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
+  if (ctx.rivals === 'pending') { const ends = safe(() => GH.ends(), null); if (ends && GH.status().state === 'done') onGhostsDone({ ends }); }
+}
+function t6Graph() {
+  const { e } = endCtx; const end = e.end || {}; const t6 = e.t6 || {};
+  const tl = (end.recap && end.recap.graph && end.recap.graph.tl) || t6.tl; if (!tl) return null;
+  const notes = (end.recap && end.recap.graph && end.recap.graph.notes) || [];
+  return { tl, opts: { alt: T6S.altOf(tl, end), recessions: T6S.recessionsOf(end), lowCushion: end.recap && end.recap.graph ? end.recap.graph.lowCushion : null, notes, compareTl: t6.branchTl || null, compareLabel: T6S.T6.lg.orig } };
+}
+/** ghosts finished (bus 'ghosts:done'): fill the comparison lines and the "מול היריבים" section in place */
+function onGhostsDone({ ends } = {}) {
+  if (!endCtx || !endCtx.e || !endCtx.e.t6 || endCtx.rivals === 'off') return;
+  endCtx.ghosts = ends || null;
+  if (view.k !== 'end' || !flag('recap2')) return;
+  const ctx = t6Ctx(); const end = endCtx.e.end || {};
+  const dims = (end.recap && end.recap.dims) || endCtx.e.t6.dims;
+  const box = document.getElementById('t6Dims'); if (box && dims) box.outerHTML = T6S.dimRowsHtml(dims, ctx);
+  const sec = [...document.querySelectorAll('.t6-sec')].find((d) => d.querySelector('summary')?.textContent === T6S.T6.sec.rivals);
+  if (sec) { const b = sec.querySelector('.t6-secb'); if (b) b.innerHTML = T6S.rivalsSection(endCtx.e, ctx); }
+}
+bus.on('ghosts:done', onGhostsDone);
 /* -------- v3 end-screen blocks */
 /* "החלטות מול מזל" (spec §8): engine end.learning = {decisionQuality 0..100, luck:{total ₪}, principles:{id:{mastery,n}}, top, sentence}.
    Hidden when the block is missing (older engine / v2 saves). Principle names: local table, then the lesson library. */
@@ -1953,6 +2036,7 @@ function install() {
   if (installed) return;
   const r = root(); if (!r) return;
   installed = true;
+  window.__rrLobby = true;   // game.js: the end card renders ui.endAnalysisHtml itself (no MutationObserver)
   r.addEventListener('click', onClick);
   r.addEventListener('submit', onSubmit);
   r.addEventListener('change', onChange);
@@ -2037,6 +2121,12 @@ async function onClick(ev) {
     case 'rename-open': { const f = $('[data-form="rename"]'); if (f) { f.hidden = !f.hidden; if (!f.hidden) f.querySelector('input').select(); } return; }
     case 'code-show': { const box = $('#pfCode'); if (box) { box.hidden = !box.hidden; box.textContent = net.recoveryCode() || ''; b.textContent = box.hidden ? '👁️ להציג את הקוד' : '🙈 להסתיר'; } return; }
     case 'code-copy': return copyText(net.recoveryCode() || '', 'קוד השחזור הועתק. שמור אותו במקום בטוח');
+    case 't6-rewind': sfx('click'); return bus.emit('t6:rewind', { k0: +b.dataset.k0, origin: 'last' });       // T6 §7.4 (rewind.js refuses ranked)
+    case 't6-moments': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
+    case 't6-afterwin': sfx('click'); return bus.emit('game:afterwin', {});                                       // T6 §9.3
+    case 't6-branch': sfx('click'); { const bs = RW.branchSave(id); if (bs) return launch({ ...bs.cfg, resume: true }); return; }
+    case 't6-branch-del': { const ok = await ui().then((u) => (u.confirmBox ? u.confirmBox(RW.STR.deleteQ, { yes: RW.STR.del, no: RW.STR.cancel }) : true)); if (ok) { RW.deleteBranch(id); rerender(); } return; }
+    case 't6-last': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
     case 'end-again': sfx('click'); return endAgain(false);
     case 'end-same': sfx('click'); return endAgain(true);
     case 'life-image': return lifeImage();

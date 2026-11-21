@@ -2,7 +2,9 @@
 // If the lobby module is missing or fails, a minimal built-in picker (world + character + free play) keeps the game playable.
 import { bus } from './bus.js';
 import { unlock, sfx } from './audio.js';
-import { esc, achievementToast, goalWords, toast } from './ui.js';
+import { esc, achievementToast, goalWords, toast, endAnalysisHtml } from './ui.js';
+import { flag } from './flags.js';
+import * as T6S from './summary.js';   // T6: graph + five dimensions in the built-in end screen too (flag recap2)
 import * as EN from './engine.js';
 import * as saves from './saves.js';
 import { hideLoading } from './render/overlay.js';
@@ -132,12 +134,15 @@ function fallbackEnd(p) {
     <p class="lead">${esc(e.nearMiss ? e.nearMiss.text : '')}</p>
     ${e.starsBlockedByFund ? `<p class="warn">🛟 ★★★ נעצר בגלל קרן החירום: צריך לפחות ${starThresholds(p.worldId, p.charId).fundMonths || 3} חודשי הוצאות בצד. חופש בלי כרית נשבר במשבר הראשון.</p>` : ''}
     ${e.starsBlockedByHappiness ? `<p class="warn">😐 ★★★ נעצר בגלל האושר: צריך לפחות ${starThresholds(p.worldId, p.charId).happy || 60}. כסף זה לא הכל.</p>` : ''}
+    ${flag('recap2') && p.t6 ? T6S.renderTop(p, { rivals: 'off', graphId: 'fb' }) : ''}
     ${learnHtml(e.learning)}
+    ${endAnalysisHtml ? endAnalysisHtml(e) : ''}
     <div class="grid"><div class="row"><span>חודשים</span><b class="num">${p.months}</b></div><div class="row"><span>שווי נקי</span><span class="num">${fmtM(p.netWorth)}</span></div>
     <div class="row"><span>הכנסה פסיבית</span><span class="num">${fmtM(p.passive)}</span></div><div class="row"><span>הוצאות</span><span class="num">${fmtM(p.expenses)}</span></div></div>
     ${(e.leaks || []).filter((l) => l.amount > 0).length ? `<h3 class="fbh">לאן הכסף דלף</h3><div class="grid">${e.leaks.filter((l) => l.amount > 0).slice(0, 4).map((l) => `<div class="row"><span>${esc(l.label)}</span><span class="num neg">${fmtM(l.amount)}</span></div>`).join('')}</div>` : ''}
     <p class="note"><b>הלקח של ${esc(w.name)}:</b> ${esc(w.lesson)}</p><p class="note">${esc(e.tip || '')}</p>
     <div class="acts"><button class="primary" id="fbAgain">עוד פעם</button><button id="fbBack">בחירת עולם</button></div></div>`;
+  if (p.t6 && p.t6.tl) T6S.wireSummary(root(), (id) => (id === 'fb' ? { tl: p.t6.tl, opts: { alt: T6S.altOf(p.t6.tl, e), recessions: T6S.recessionsOf(e) } } : null));
   root().querySelector('#fbAgain').onclick = () => G.startGame({ worldId: p.worldId, charId: p.charId, mode: 'free', seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false });
   root().querySelector('#fbBack').onclick = () => fallbackLobby();
   setTimeout(() => root().querySelector('#fbAgain').focus(), 50);
