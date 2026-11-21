@@ -1,8 +1,8 @@
 #!/bin/bash
 # Builds the lobby test copy in /tmp/rr2lobby: real project + stubs for the in-game screen (stubs never touch the project).
 set -e
-SRC=/home/claude/rr2
-rm -rf /tmp/rr2lobby && cp -r $SRC /tmp/rr2lobby
+SRC="${SRC:-$(cd "$(dirname "$0")/.." && pwd)}"
+rm -rf /tmp/rr2lobby && cp -r "$SRC" /tmp/rr2lobby && rm -rf /tmp/rr2lobby/.git
 ln -s /tmp/t/node_modules/three /tmp/rr2lobby/three
 cp $SRC/tests/stubs/index.html /tmp/rr2lobby/index.html
 mkdir -p /tmp/rr2lobby/css && cp $SRC/tests/stubs/css/game.css /tmp/rr2lobby/css/game.css
