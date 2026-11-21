@@ -108,7 +108,7 @@ export async function init(canvas) {
     const rawDt = now - last; const dt = Math.min(0.1, rawDt / 1000); last = now;
     // render on demand: full speed while something moves; nothing when idle, under the lobby (paused) or in a hidden tab.
     // (T5: frames under the lobby were wasted and each one is a synchronous GPU wait on software GL — the boot freeze.)
-    if (paused || pageHidden) return;
+    if (paused || pageHidden || covered()) return;
     const active = interacting || camMoving || tweens.length > 0 || now < shakeUntil || now < activeUntil;
     if (!active && !dirty) return;
     dirty = false; lastRender = now; framesRendered++;
@@ -142,6 +142,7 @@ export async function init(canvas) {
   document.addEventListener('visibilitychange', onVis);
   onVis();
   initPick(canvas);
+  try { const l = document.getElementById('loading'); if (l) { const mo = new MutationObserver(() => { canvasVis(); if (!covered()) { invalidate(); wake(800); } }); mo.observe(l, { attributes: true, attributeFilter: ['hidden'] }); onPtr.push([{ removeEventListener() { mo.disconnect(); } }, '', null]); } } catch (e) { /* ignore */ }
   if (/[?&]perf=1\b/.test(location.search)) perfOverlay();
 }
 
@@ -157,7 +158,10 @@ export function setPaused(b) { paused = !!b; canvasVis(); if (!paused) { wake();
 /** While paused (the lobby covers the board) the canvas is not painted at all: on software compositing every painted WebGL
  * canvas is read back at each commit, which blocks the main thread until the GPU process has finished ALL queued work
  * (shader compiles, PMREM, uploads) — the 8–20 s "boot freeze" behind the lobby (T5 part B notes, CR-19a). */
-function canvasVis() { try { if (renderer) renderer.domElement.style.visibility = paused ? 'hidden' : ''; } catch (e) { /* ignore */ } }
+function canvasVis() { try { if (renderer) renderer.domElement.style.visibility = paused || covered() ? 'hidden' : ''; } catch (e) { /* ignore */ } }
+/** the T1 loading overlay (#loading) covers the board: no frames under it either, so its progress keeps updating */
+let loadingEl = null;
+function covered() { if (!loadingEl) loadingEl = document.getElementById('loading'); return !!(loadingEl && !loadingEl.hidden && loadingEl.isConnected); }
 export const isPaused = () => paused;
 
 let skipUntil = 0;
@@ -756,7 +760,11 @@ function historyModelsLater(w) {
 let precompileP = null;
 function precompile() {
   if (!paused || precompileP) return;
-  try { precompileP = renderer.compileAsync(scene, camera).catch(() => {}).finally(() => { precompileP = null; }); } catch (e) { precompileP = null; }
+  try {
+    // without the extension (e.g. swiftshader) compile() still queues every compile/link now; the first frame then waits less
+    if (!renderer.extensions.has('KHR_parallel_shader_compile')) { renderer.compile(scene, camera); return; }
+    precompileP = renderer.compileAsync(scene, camera).catch(() => {}).finally(() => { precompileP = null; });
+  } catch (e) { precompileP = null; }
 }
 /** rebuild the board + decor (quality change, late history models) and put the same city back, silently */
 function rebuildKeepCity() {
