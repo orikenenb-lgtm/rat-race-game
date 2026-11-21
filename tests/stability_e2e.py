@@ -576,7 +576,7 @@ async def s10(p):
     await pg.goto(BASE); await picker_start_w1(pg)
     n = await play_turns(pg, 3, sc)
     check(sc, 'A-29 game continues (3 turns)', n == 3)
-    await pg.wait_for_timeout(1000)
+    await saw_toast(pg, S['S7'], 30); await pg.wait_for_timeout(1000)
     tl = await toasts(pg)
     check(sc, 'A-29 S-S7 exactly once', tl.count(S['S7']) == 1, json.dumps(tl, ensure_ascii=False)[:400])
     errors_ok(sc, c)

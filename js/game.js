@@ -117,7 +117,13 @@ let quotaWarned = false;
 function persist() {
   if (!S || !CFG) return;
   const r = saves.write(saveKeyFor(CFG), CFG, S);
-  if (!r.ok && r.quota && !quotaWarned) { quotaWarned = true; ui.toast(SS.S7, { kind: 'bad', ms: 8000 }); }
+  if (!r.ok && r.quota && !quotaWarned) { quotaWarned = true; toastWhenIdle(SS.S7, { kind: 'bad', ms: 8000 }); }
+}
+/** ui.js keeps only the newest 4 queued toasts: hand an important one over when the toast pill has been idle twice in a row */
+function toastWhenIdle(text, opts, tries = 0) {
+  const idle = () => { const t = $('#toast'); return !t || !t.className.includes('on'); };
+  if (tries >= 60 || (idle() && tries > 0)) { ui.toast(text, opts); return; }
+  setTimeout(() => (idle() ? setTimeout(() => (idle() ? ui.toast(text, opts) : toastWhenIdle(text, opts, tries + 1)), 350) : toastWhenIdle(text, opts, tries + 1)), 500);
 }
 
 /* ============================================================ ranked server checkpoint (anti-replay) */
