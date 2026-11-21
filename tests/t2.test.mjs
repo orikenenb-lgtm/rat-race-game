@@ -341,7 +341,8 @@ test('T11 evaluator: offers on a bad deal ≤ pass; values/health/car/course/gua
   for (const json of states) {
     const st = E.deserialize(json); const ev = E.currentEvent(st); const sc2 = E.scoreOptions(st, ev); const pr = ev.options.find((o) => o.primary);
     const dataPick = ev.type === 'life' && (ev.data.values || ev.data.chain); // director (A1) values pick / T3 story steps: data-driven guide picks
-    if (sc2.length && pr && !dataPick && !(ev.type === 'business' && st.flags['bz_' + st.pending.id])) { const best = Math.max(...sc2.map((x) => x.U)); const mine = sc2.find((x) => x.id === pr.id); assert.ok(mine && mine.U >= best - 0.1 - 1e-9, `${ev.type}: primary ${pr.id} ${mine && mine.U} vs best ${best}`); }
+    const planPick = (ev.type === 'payday' || ev.type === 'edu') && pr && pr.kind === 'plan'; // T3 review M7: the careful plan rule, within the verdict's 0.5 band
+    if (sc2.length && pr && !dataPick && !(ev.type === 'business' && st.flags['bz_' + st.pending.id])) { const best = Math.max(...sc2.map((x) => x.U)); const mine = sc2.find((x) => x.id === pr.id); assert.ok(mine && mine.U >= best - (planPick ? 0.5 : 0.1) - 1e-9, `${ev.type}: primary ${pr.id} ${mine && mine.U} vs best ${best}`); }
     if (ev.type === 'life' && ev.data.personal) for (const o of ev.options.filter((x) => x.enabled)) { const c = E.deserialize(json); const d = E.choose(c, null, o.id).decision; assert.ok(!d || d.verdict !== 'costly'); }
     // one cushion rule: the card's warning, the evaluator's flag and the impact's main risk agree
     if (ev.type === 'deal' && !ev.auto) {

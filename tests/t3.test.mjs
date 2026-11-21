@@ -585,5 +585,27 @@ test('review M5: side s2 "take" shows the real cash now (−materials), the paym
   const c0 = st.cash, l0 = st.loans; resolveForced(st, 'side', 's2', 'take');
   assert.equal(st.cash - c0 - (st.loans - l0), o.effects.cash, 'the chip = the applied cash change (net of the forced loan)');
 });
+test('review M7: at guide the highlight checks a flagged deal first, values a setup by its capital, and rests only when tired', () => {
+  let flagged = 0, inspected = 0, rested = 0, restTired = 0, offers = 0;
+  for (const w of ['w1', 'w4']) for (const ch of E.getWorld(w).characters) for (let s = 0; s < N(4); s++) {
+    const st = E.createGame({ worldId: w, charId: ch.id, seed: 600 + s, mentor: 'guide' });
+    for (let i = 0; i < 300 && !st.over; i++) {
+      if (st.pending) { const ev = E.currentEvent(st); const o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled); E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}); continue; }
+      E.rollDice(st); let ev = E.landing(st); let n = 0;
+      while (ev && !st.over && n < 8) {
+        const pr = ev.options.find((x) => x.primary);
+        if (ev.type === 'deal' && ev.data.dd && ev.data.dd.level === 0 && ev.data.dd.flags.some((f) => f.kind === 'warn')) {
+          const ins = ev.options.find((o) => o.id === 'inspect:1' && o.enabled && (o.rivalRisk || 0) < 0.3); const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0];
+          if (ins && b && b.net + (ev.data.dd.claimed.cf - ev.data.dd.expected.cf) > 0) { flagged++; if (pr && pr.id === 'inspect:1') inspected++; }
+        }
+        if ((ev.type === 'payday' || ev.type === 'edu') && pr && pr.id === 'plan:rest') { rested++; if (st.life.energy < 35 || st.life.plan === 'rest' || st.life.happiness < 57) restTired++; }
+        if (ev.type === 'business' && ev.data.mode === 'offer' && pr && pr.kind === 'buy') { offers++; const sc = E.scoreOptions(st, ev); const U = (id) => (sc.find((x) => x.id === id) || {}).U; assert.ok(U(pr.id) >= Math.max(...sc.map((x) => x.U)) - 0.1); }
+        const o = pr || ev.options.find((x) => x.enabled); ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}).event; n++;
+      }
+    }
+  }
+  assert.ok(flagged > 20 && inspected === flagged, `flagged deals ${flagged}, inspect highlighted ${inspected}`);
+  assert.ok(rested > 0 && restTired / rested >= 0.9, `rest highlighted ${rested}, tired / recovering ${restTired}`);
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

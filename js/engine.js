@@ -1608,7 +1608,7 @@ function applyMentor(st, p, ev) {
     if (ev.forcePrimary) pick = ev.options.find((o) => o.id === ev.forcePrimary && o.enabled) || null; // a data-driven guide pick (values cards, story steps)
     else if (!ev.noPrimary) {
       if (ev.type === 'business' && ev.data.mode === 'manage' && st.flags['bz_' + p.id]) pick = ev.options.find((o) => o.id === 'ok' && o.enabled) || null; // one decision per visit, then "המשך"
-      else { const pool = scorePool(ev, null); if (pool) { const sc = scoreOptions(st, ev); if (sc.length) { const id = primaryFromScores(ev, sc); pick = ev.options.find((o) => o.id === id) || null; } } }
+      else { const pool = scorePool(ev, null); if (pool) { const sc = scoreOptions(st, ev); if (sc.length) { const id = primaryFromScores(ev, sc, st); pick = ev.options.find((o) => o.id === id) || null; } } }
       if (!pick) { const marked = ev.options.filter((o) => o.primary && o.enabled); pick = marked[0] || ev.options.find((o) => o.enabled && SAFE_IDS.includes(o.id)) || ev.options.find((o) => o.enabled) || null; }
     }
     for (const o of ev.options) o.primary = o === pick;
@@ -2567,7 +2567,8 @@ function optionU(ctx, ev, o, params) {
       }
       if (o.id === 'inspect:1' || o.id === 'inspect:2') {
         const base = Math.max(0, best ? best.U : 0); const evi2 = best ? best.evi2 : 0;
-        const U = o.id === 'inspect:1' ? (1 - h) * (base + 0.7 * evi2) - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : (1 - h) * (base + evi2) - (o.cost ? o.cost.cash || 0 : 0) / E;
+        let U = o.id === 'inspect:1' ? (1 - h) * (base + 0.7 * evi2) - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : (1 - h) * (base + evi2) - (o.cost ? o.cost.cash || 0 : 0) / E;
+        if (flaggedInspect(ev) === o.id) U = Math.max(U, base + 0.05); // T3 review M7: with warning signs, checking first is the careful choice
         const k = d.dd ? d.dd.flags.filter((f) => f.kind === 'warn').length : 0;
         reasons.push(R('evi', evi2 > 0.3 ? 'העסקה גבולית: בדיקה שווה יותר ממה שהיא עולה' : 'הבדיקה כנראה לא תשנה את ההחלטה', evi2 - 0.1));
         if (k) reasons.push(R('flags', `יש ${k} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
@@ -2625,7 +2626,7 @@ function optionU(ctx, ev, o, params) {
       if (o.id === 'course') money = (ctx.study.done ? 0 : LIFE_CFG.studyRaise * ctx.baseNet * 24 / ctx.study.need * 2) + ((o.effects && o.effects.cash) || 0) + energyValue(ctx.energy, -4) * E;
       break;
     case 'business':
-      if (o.id === 'start' || o.id.startsWith('start:')) { const cap = o.startCapital || d.startCapital; money = (o.net || 0) * 24 - 0.6 * cap * Math.min(1, 5 * cap / Math.max(1, ctx.netWorth)) - (d.ownerEnergy || 0) * 12 * 0.012 * E; if (o.loanAmount) flags.push('debt'); /* owner-run: a second job that costs 🔋 every month */ const cu = cushionCheck(ctx, -cap, o.loanAmount, 0); if (cu.flagged) flags.push('noCushion'); }
+      if (o.id === 'start' || o.id.startsWith('start:')) { const cap = o.startCapital || d.startCapital; money = (o.net || 0) * 24 - 0.6 * cap * Math.min(1, 5 * cap / Math.max(1, ctx.netWorth)) - cap * 0.004 * 24 - (d.ownerEnergy || 0) * 12 * 0.012 * E; /* T3 review M7: the capital tied up has a price (≈ 5 % a year) */ if (o.loanAmount) flags.push('debt'); /* owner-run: a second job that costs 🔋 every month */ const cu = cushionCheck(ctx, -cap, o.loanAmount, 0); if (cu.flagged) flags.push('noCushion'); }
       else if (o.kind === 'biz' && o.effects) { money = (o.effects.delta3 || 0) * 8; reasons.push(R('net', `תחזית ל־3 חודשים: ${sgn(o.effects.delta3 || 0)} רווח בעסק`, money / E)); }
       break;
     case 'tax': if (o.id === 'report') { const fee12 = o.feeEither ? 0 : (o.fee || 0) * 12; money = (o.saving ?? 0.5 * E) - fee12; reasons.push(R('net', `חוסך קנס של בערך ${fmtM(o.saving || 0)} בשנה${fee12 ? `, עולה ${fmtM(fee12)} בשנה` : o.fee ? ' — את הרו״ח משלמים גם בלי תיק, בדוח המאוחר' : ''}`, money / E)); } break;
@@ -2662,8 +2663,11 @@ export function scoreOptions(st, ev) {
   return pool.map((x) => { const u = optionU(ctx, ev, x, x.needsQty ? { qty: 1 } : undefined); return { id: x.id, U: u.U, flags: u.flags, reasons: u.reasons }; });
 }
 /** guide-level primary from the scores: argmax; within 0.1 of the top, closing options first, then the card's own default. */
-function primaryFromScores(ev, sc) {
+function primaryFromScores(ev, sc, st) {
+  // T3 review M7: two guide rules where the scores alone mislead a highlight-tapper (the sims: smart − guide gap)
+  const fl = flaggedInspect(ev); if (fl && sc.some((x) => x.id === fl)) return fl;                       // a flagged deal: check it first
   const best = Math.max(...sc.map((x) => x.U));
+  if (st && st.life && (ev.type === 'payday' || ev.type === 'edu')) { const want = guidePlan(st); const o = ev.options.find((x) => x.enabled && x.kind === 'plan' && x.plan === want); const u = o && sc.find((x) => x.id === o.id); if (u && u.U >= best - 0.5) return o.id; } // never a highlight the verdict would call weak
   const cand = sc.filter((x) => x.U >= best - 0.1);
   const closing = cand.filter((x) => !NON_CLOSING.test(x.id));
   const set = closing.length ? closing : cand;
@@ -2671,6 +2675,30 @@ function primaryFromScores(ev, sc) {
   return (legacy || set.slice().sort((a, b) => b.U - a.U)[0]).id;
 }
 const NON_CLOSING = /^(inspect:|offer:|biz:(?!sell)|sell:|auto:|report$)/;
+/**
+ * T3 review M7 (public data only): the inspection to take first on a deal the seller's numbers make worth buying but that shows ≥ 1
+ * warning sign (level 0 → inspect:1), or whose checked range straddles zero (level 1 → inspect:2) — unless others may close first (≥ 30 %).
+ */
+function flaggedInspect(ev) {
+  if (!ev || ev.type !== 'deal' || !ev.data || !ev.data.dd) return null;
+  const dd = ev.data.dd; const warn = dd.flags.filter((f) => f.kind === 'warn').length;
+  const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0]; if (!b) return null;
+  const ok = (id) => { const o = ev.options.find((x) => x.id === id && x.enabled); return o && (o.rivalRisk || 0) < 0.3 ? id : null; };
+  if (dd.level === 0 && warn >= 1 && b.net + (dd.claimed.cf - dd.expected.cf) > 0) return ok('inspect:1');
+  if (dd.level === 1 && dd.range && dd.range.cf[0] - (b.loanMonthly || 0) < 0 && dd.range.cf[1] - (b.loanMonthly || 0) > 0) return ok('inspect:2');
+  return null;
+}
+/** T3 review M7: the monthly plan a careful player picks (rest only when tired / recovering, study early, overtime when fresh). */
+function guidePlan(st) {
+  const L = st.life; const cf = cashflowOf(st);
+  if (L.energy < 35 || (L.plan === 'rest' && (L.energy < 75 || L.happiness < 62))) return 'rest';
+  if (L.happiness < 57 && st.month > 6) return 'rest';
+  if (!L.study.done && st.month <= 20 && L.energy >= 45) return 'study';
+  if (L.energy >= 80 && cf > 0) return 'overtime';
+  if (L.plan === 'overtime' && L.energy >= 50) return 'overtime';
+  return 'work';
+}
+function cashflowOf(st) { return salaryNow(st) + payslipOf(st).sideIncome + activeBizOf(st) + passiveOf(st) + extraIncomeOf(st) - expensesOf(st); }
 function decisionRecord(st, ev, o, params) {
   if (!st.life || ev.type === 'intro') return null; // T4 E-3: the intro card has no verdict, no dq entry, no mastery change
   const k0 = st.pending && st.pending.k0 != null ? st.pending.k0 : -1; // T6 §4.4 card start (-1: unknown → decisionPoints scans the log)
@@ -4243,7 +4271,7 @@ function hintFor(st, ev) {
   const sc = scoreOptions(st, ev); if (!sc.length) return null;
   const tradeoff = ev.type === 'life' && (ev.data.personal || ev.data.values);
   const top = sc.slice().sort((a, b) => b.U - a.U || (NON_CLOSING.test(a.id) ? 1 : 0) - (NON_CLOSING.test(b.id) ? 1 : 0))[0];
-  const pickId = tradeoff ? null : primaryFromScores(ev, sc);
+  const pickId = tradeoff ? null : primaryFromScores(ev, sc, st);
   const pick = tradeoff ? null : sc.find((x) => x.id === pickId) || top;
   let reasons;
   if (pick) reasons = pick.reasons.slice().sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).slice(0, 2).map((r) => r.text);
