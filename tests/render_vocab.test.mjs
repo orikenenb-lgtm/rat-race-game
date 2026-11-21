@@ -96,6 +96,17 @@ for (let i = 0; i < 90; i++) { const r = g.step(10, 80000 + i); if (r) steps.pus
 for (let i = 0; i < 90; i++) { const r = g.step(60, 120000 + i); if (r) steps.push(r); }
 ok(steps.join() === 'mid,low', 'governor: ≤ 2 steps, never up (' + steps.join() + ')');
 ok(Q.makeGovernor({ disabled: true }).step(80, 0) === null, 'governor disabled on software GL');
+{ const g2 = Q.makeGovernor({ tier: 'high' }); g2.disabled = true; let r = null; for (let i = 0; i < 90; i++) r = r || g2.step(60, i);
+  ok(r === null && g2.disabled, 'M-3 an explicit player choice disarms the governor');
+  g2.disabled = false; for (let i = 0; i < 90; i++) r = r || g2.step(60, 100000 + i); ok(r === 'mid', "M-3 'auto' re-arms it"); }
+// M-3: the scene registers lowPower → every caller (lobby "עכשיו", setQualityPref) resolves the tier the scene renders
+Q.setEnv({ lowPower: true, coarse: false, hq: false });
+ok(Q.resolveTier({ pref: 'auto' }) === 'low' && Q.resolveTier({ pref: 'mid' }) === 'mid', 'M-3 resolveTier uses the registered env (software GL → low)');
+Q.setEnv({ lowPower: false });
+// m-6: 12 px floor in the 2D board styles (stability.css): no font-size or max()/font shorthand below 12 px
+{ const css = readFileSync(resolve(ROOT, 'css/stability.css'), 'utf8'); const small = [];
+  for (const m of css.matchAll(/font(?:-size)?:\s*(?:max\()?(\d+(?:\.\d+)?)px/g)) if (+m[1] < 12) small.push(m[0]);
+  ok(!small.length, 'stability.css has no font size below 12 px: ' + small.join(', ')); }
 
 // asset info: reads metrics() only
 const st = E.createGame({ worldId: 'w1', charId: 'dev', seed: 7, mode: 'free' });

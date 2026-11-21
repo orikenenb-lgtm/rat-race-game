@@ -183,7 +183,7 @@ export function getCameraMode() { return camMode; }
 /* ============================================================ city: cards in the centre grid */
 function ensureGrid(count) {
   let g = 4; while (g * g < count && g < 8) g++;
-  if (g !== gridN) { gridN = g; if (cityEl) cityEl.style.setProperty('--n', String(g)); }
+  if (g !== gridN) { gridN = g; if (cityEl) { cityEl.style.setProperty('--n', String(g)); cityEl.classList.toggle('b2d-dense', g >= 6); } }
 }
 /** T5 §5.3 / §6.2: every city card is a real button; click / Enter → the same pick event as a 3D tap */
 function addCard(key, model, label, kind = null, level = null) {
@@ -355,7 +355,7 @@ export function setLevel(key, level, { animate: anim = false } = {}) {
     if (JSON.stringify(L) === JSON.stringify(prev)) return;
     paintLevel(it, L);
     const down = prev && L && prev.kind === 'biz' && L.kind === 'biz' && L.n < prev.n;
-    if (down) flash(it, '⚠', 1500);
+    if (down || (L && L.trouble && !(prev && prev.trouble))) flash(it, '⚠', 1500); // same rule as 3D (review m-7)
     if (anim && !down && !reduced()) animate(it.el, [{ transform: 'scale(1)' }, { transform: 'scale(1.14)' }, { transform: 'scale(1)' }], { duration: D(MOTION.bump) });
   } catch (e) { warn(e); }
 }

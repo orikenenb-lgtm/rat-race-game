@@ -46,8 +46,7 @@ t2|1|engine,backend,tests|node|tests/t2.test.mjs:engine (T2)|none|n/a|n/a|1800|n
 stories|1|engine,backend,tests|node|tests/stories.test.mjs:stories (T3)|none|n/a|n/a|1800|node tests/stories.test.mjs
 t4_engine|1|engine,backend,tests|node|tests/t4_engine.test.mjs:onboarding (T4)|none|n/a|n/a|1200|node tests/t4_engine.test.mjs
 t4_meta|1|engine,ui,lobby,tests|node|tests/t4_meta.test.mjs:onboarding (T4)|none|n/a|n/a|1200|node tests/t4_meta.test.mjs
-t5_tokens|1|rendering,ui,lobby,tests|node|tests/t5_tokens.test.mjs:rendering (T5)|none|n/a|n/a|600|node tests/t5_tokens.test.mjs
-t5_vocab|1|rendering,ui,lobby,tests|node|tests/t5_vocab.test.mjs:rendering (T5)|none|n/a|n/a|600|node tests/t5_vocab.test.mjs
+render_vocab|0|all|node|tests/render_vocab.test.mjs:rendering (T5)|none|n/a|n/a|600|node tests/render_vocab.test.mjs
 balance_gates|1|engine|node|tests/balance_gates.mjs:T7|none|n/a|n/a|120|node tests/balance_gates.mjs
 lobby_smoke|1|all|browser|tests/lobby_smoke.py:T7|fake|n/a|swiftshader|900|python3 tests/lobby_smoke.py $L
 game_e2e_w1|1|engine,shell,rendering,ui,lobby,tests|browser|tests/game_e2e.py:game|none|n/a|swiftshader|2400|python3 tests/game_e2e.py w1 8 --base=$G --prefix=run_
@@ -63,10 +62,7 @@ game_e2e_2d|2|shell,rendering|browser|tests/game_e2e.py:game|none|n/a|2d|3600|py
 stability_e2e|2|shell,rendering|browser|tests/stability_e2e.py:T1|none|n/a|mixed|3600|python3 tests/stability_e2e.py --base=${RL}index.html
 t4_onboarding|2|ui,lobby|browser|tests/t4_onboarding.py:onboarding (T4)|fake|n/a|swiftshader|1800|python3 tests/t4_onboarding.py
 t4_a11y|2|ui,lobby|browser|tests/t4_a11y.py:onboarding (T4)|fake|n/a|swiftshader|1800|python3 tests/t4_a11y.py
-t5_perf|2|rendering,ui|browser|tests/t5_perf.py:rendering (T5)|none|n/a|swiftshader|1800|python3 tests/t5_perf.py
-t5_city|2|rendering,ui|browser|tests/t5_city.py:rendering (T5)|none|n/a|swiftshader|1800|python3 tests/t5_city.py
-t5_ui|2|rendering,ui|browser|tests/t5_ui.py:rendering (T5)|none|n/a|swiftshader|1800|python3 tests/t5_ui.py
-t5_lobby|2|rendering,lobby|browser|tests/t5_lobby.py:rendering (T5)|none|n/a|swiftshader|1800|python3 tests/t5_lobby.py
+t5_render_e2e|2|rendering,ui,shell|browser|tests/t5_render_e2e.py:rendering (T5)|none|n/a|swiftshader|2400|python3 tests/t5_render_e2e.py $RL
 journey_e2e|2|engine,shell,lobby,backend,tests|browser|tests/journey_e2e.py:T7 (P1)|fake|replay|swiftshader|1800|python3 tests/journey_e2e.py $RL
 a11y_e2e|2|shell,ui,lobby,tests|browser|tests/a11y_e2e.py:T7|fake|accept|swiftshader|3600|python3 tests/a11y_e2e.py $RL $STRICTA --out=$OUT/a11y.json
 a11y_strict|3||browser|tests/a11y_e2e.py:T7|fake|accept|swiftshader|3600|python3 tests/a11y_e2e.py $RL --strict --strict-allowlist --out=$OUT/a11y_strict.json

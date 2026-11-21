@@ -18,8 +18,12 @@ function keyOf(m) {
   return [m.transparent ? 't' + m.opacity.toFixed(2) : 'o', m.side, m.flatShading ? 'f' : 's'].join('|');
 }
 /** one shader variant for every flattened model: base colour, roughness/metalness and emissive come from vertex attributes */
+export const FLAT_KEY = 'rr-flat-v2';
+let fallback = false; const patched = new Set();
 function patch(mat) {
+  patched.add(mat);
   mat.userData.uLit = mat.userData.uLit || { value: 0 };
+  if (fallback) { mat.customProgramCacheKey = () => 'rr-flat-fallback'; return mat; }
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uLit = mat.userData.uLit;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 rm; attribute vec4 emi; varying vec2 vRm; varying vec4 vEmi;')
@@ -29,7 +33,7 @@ function patch(mat) {
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vRm.y;')
       .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance = vEmi.rgb * (1.0 + uLit * vEmi.a);'); // a = "lit window" flag
   };
-  mat.customProgramCacheKey = () => 'rr-flat-v2';
+  mat.customProgramCacheKey = () => FLAT_KEY;
   return mat;
 }
 const shared = new Map();   // bucket key → material shared by every flattened model (one program, fewer state changes)
@@ -41,6 +45,15 @@ function bucketMaterial(k, mat) {
 }
 /** materials shared by all flattened models must never be disposed with one model */
 export const isSharedFlat = (m) => !!(m && m.userData && m.userData.sharedFlat);
+/**
+ * The patched shader failed to link (checked once by scene.js after the first frames, review M-2): every flattened material
+ * drops the patch and renders with plain vertex colours (roughness/metalness/emissive of the material — still visible).
+ */
+export function flatFallback() {
+  if (fallback) return false; fallback = true;
+  for (const m of patched) { m.onBeforeCompile = () => {}; m.customProgramCacheKey = () => 'rr-flat-fallback'; m.roughness = 0.7; m.metalness = 0.1; m.needsUpdate = true; }
+  return true;
+}
 /** a per-item copy of a flattened material whose "lit window" vertices glow brighter (business stage ≥ 1: +0.2 emissive) */
 export function litCopy(m, boost) {
   const c = patch(m.clone()); c.userData = { uLit: { value: boost } }; c.name = m.name + ':lit'; return c;

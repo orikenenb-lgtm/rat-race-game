@@ -26,7 +26,7 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
 .b2d-sm .b2d-ti{font-size:calc(var(--cell) * .5)}
 .b2d-center{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;margin:4px;padding:6px;
   border-radius:calc(var(--cell) * .3);background:var(--b2d-center);box-shadow:inset 0 2px 8px rgba(0,0,0,.08);min-width:0;min-height:0;overflow:hidden}
-.b2d-cap{font:max(11px,calc(var(--cell) * .34))/1.1 var(--title);color:color-mix(in srgb,var(--b2d-edge) 80%,transparent);opacity:.75}
+.b2d-cap{font:max(12px,calc(var(--cell) * .34))/1.1 var(--title);color:color-mix(in srgb,var(--b2d-edge) 80%,transparent);opacity:.75}
 .b2d-city{--n:4;display:grid;grid-template-columns:repeat(var(--n),1fr);gap:4px;width:100%;flex:1 1 auto;align-content:center;min-height:0}
 .b2d-card{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;border-radius:10px;
   background:rgba(255,255,255,.82);box-shadow:var(--shadow-s);color:#1d1a2b;min-width:0;overflow:visible}
@@ -90,13 +90,13 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
 .b2d-card.hl{box-shadow:0 0 0 3px var(--b2d-rim,#f2b632),var(--shadow-s)}
 .b2d-card[data-kind="biz"][data-level="0"]{border-style:dashed}
 .b2d-card[data-kind="biz"][data-level="3"]{border:4px double #c98a12}
-.b2d-pips{position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:max(9px,calc(var(--cell) * .9 / var(--n)));line-height:1;
+.b2d-pips{position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:max(12px,calc(var(--cell) * .9 / var(--n)));line-height:1;
   letter-spacing:1px;color:#8a5a00;background:#fffaf0;border-radius:6px;padding:0 3px;white-space:nowrap}
-.b2d-corner-b,.b2d-act{position:absolute;top:-6px;font-size:max(11px,calc(var(--cell) * 1 / var(--n)));line-height:1;background:#fffaf0;border-radius:999px;
+.b2d-corner-b,.b2d-act{position:absolute;top:-6px;font-size:max(12px,calc(var(--cell) * 1 / var(--n)));line-height:1;background:#fffaf0;border-radius:999px;
   padding:1px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .b2d-corner-b{inset-inline-end:-6px}
 .b2d-act{inset-inline-start:-6px}
-.b2d-annex{position:absolute;bottom:2px;inset-inline-end:3px;font:800 max(10px,calc(var(--cell) * .8 / var(--n)))/1 var(--font,Rubik,sans-serif);color:#8a5a00}
+.b2d-annex{position:absolute;bottom:2px;inset-inline-end:3px;font:800 max(12px,calc(var(--cell) * .8 / var(--n)))/1 var(--font,Rubik,sans-serif);color:#8a5a00}
 .b2d-flash{z-index:2}
 .b2d-passed{box-shadow:inset 0 0 0 3px #f2b632,0 0 10px #f2b632}
 .b2d-pawn{box-shadow:0 0 0 3px var(--ring,#fff),0 4px 10px rgba(0,0,0,.35)}
@@ -107,3 +107,5 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
 .b2d-m-stars .b2d-center{background-image:radial-gradient(rgba(109,40,217,.28) 1px,transparent 1.5px),radial-gradient(rgba(34,211,238,.28) 1px,transparent 1.5px);background-size:22px 22px,31px 31px;background-position:0 0,11px 7px}
 .b2d-m-news .b2d-center{background-image:repeating-linear-gradient(0deg,rgba(91,65,39,.16) 0 1px,transparent 1px 12px)}
 :root[data-motion=reduce] .b2d-card,:root[data-motion=reduce] .b2d-pawn{transition:none}
+/* dense city grids (6–8 per row): the short label goes; the card's accessible name keeps it (12 px floor, review m-6) */
+.b2d-dense .b2d-cl{display:none}

@@ -5,8 +5,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON } from './render/vocab.js';
-import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref } from './render/quality.js';
-import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy } from './render/flatten.js';
+import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
+import { bus } from './bus.js';
+import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
 import { createKit } from './render/kit3d.js';
 
 let renderer, scene, camera, controls, hemi, sun, fill;
@@ -24,7 +25,7 @@ export let lowPower = false;
 // T5: quality tier (§8.1), reduced motion (§7.2), frame accounting (§8.5)
 let tier = 'high', cfg = TIER_CONFIG.high, coarse = false, reduced = false, pageHidden = false;
 let framesRendered = 0, turnMs = 0, fpsBuf = [], governor = null, kit = null;
-let loopFn = null, onVis = null, onPtr = [], perfEl = null, perfTimer = 0;
+let loopFn = null, onVis = null, onPtr = [], offBus = [], perfEl = null, perfTimer = 0, onOnline = null;
 const pickCbs = new Set();
 
 const loader = new GLTFLoader();
@@ -55,7 +56,11 @@ export async function init(canvas) {
   const hq = /[?&]hq\b/.test(location.search);
   lowPower = !hq && probeLowPower();
   coarse = matchMedia('(pointer:coarse)').matches;
+  setEnv({ lowPower, coarse, hq }); // the lobby's "עכשיו" line and setQualityPref() resolve the same tier as the scene (M-3)
   tier = resolveTier({ lowPower, coarse, hq }); cfg = TIER_CONFIG[tier];
+  // paused only if the lobby really covers the board now (game.js keeps it in sync); a start that throws later never leaves
+  // a hidden, paused canvas behind a visible game (review m-3)
+  try { const st = document.getElementById('start'); paused = !!(st && !st.hidden); } catch (e) { paused = false; }
   renderer = new THREE.WebGLRenderer({ canvas, antialias: cfg.antialias, alpha: true, powerPreference: 'high-performance' });
   canvasVis();
   try {
@@ -64,6 +69,7 @@ export async function init(canvas) {
     const rn = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
     lowPower = !hq && /swiftshader|llvmpipe|software|basic render/i.test(rn);
   } catch (e) { /* ignore */ }
+  setEnv({ lowPower });
   renderer.debug.checkShaderErrors = /[?&]shaderdebug\b/.test(location.search); // the per-program log queries are synchronous GPU waits (T5 freeze note)
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -97,8 +103,17 @@ export async function init(canvas) {
   onResize = () => { resize(); invalidate(); };
   addEventListener('resize', onResize);
   // T1: WebGL context loss → game.js decides (keep the save, wait for restore, else offer מצב קל)
-  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); for (const f of ctxCbs) { try { f('lost'); } catch (x) { console.error(x); } } });
-  canvas.addEventListener('webglcontextrestored', () => { invalidate(); for (const f of ctxCbs) { try { f('restored'); } catch (x) { console.error(x); } } });
+  const onLost = (e) => { e.preventDefault(); for (const f of ctxCbs) { try { f('lost'); } catch (x) { console.error(x); } } };
+  const onRest = () => { invalidate(); for (const f of ctxCbs) { try { f('restored'); } catch (x) { console.error(x); } } };
+  canvas.addEventListener('webglcontextlost', onLost); canvas.addEventListener('webglcontextrestored', onRest);
+  onPtr.push([canvas, 'webglcontextlost', onLost], [canvas, 'webglcontextrestored', onRest]);
+  // an explicit choice in the lobby applies now and disarms the governor; 'auto' re-arms it (never on software GL) — M-3
+  const onQ = (e = {}) => {
+    if (e.auto) return;
+    if (governor) governor.disabled = lowPower || e.pref !== 'auto';
+    setQuality(TIER_CONFIG[e.tier] ? e.tier : resolveTier({ pref: e.pref }));
+  };
+  offBus.push(bus.on('quality:change', onQ));
   resize();
   controls.addEventListener('start', () => { interacting = true; wake(); });
   controls.addEventListener('end', () => { interacting = false; wake(1500); });
@@ -135,6 +150,7 @@ export async function init(canvas) {
     }
     renderer.render(scene, camera);
     if (off) camera.position.sub(off);
+    if (!flatChecked && framesRendered % 30 === 1) setTimeout(checkFlatShader, 1500);
   };
   renderer.setAnimationLoop(loopFn);
   // T5 §8.4: no frames at all while the page is hidden (combines with setPaused, the lobby pause)
@@ -142,6 +158,9 @@ export async function init(canvas) {
   document.addEventListener('visibilitychange', onVis);
   onVis();
   initPick(canvas);
+  // back online: retry the dice GLBs, the life prefetch and every stand-in still in the city (m-9)
+  onOnline = () => { diceReq = false; lifePrefetch = false; for (const [k, it] of city) if (it.obj.userData.fallbackOf) swapWhenReady(k, it.model); };
+  addEventListener('online', onOnline);
   try { const l = document.getElementById('loading'); if (l) { const mo = new MutationObserver(() => { canvasVis(); if (!covered()) { invalidate(); wake(800); } }); mo.observe(l, { attributes: true, attributeFilter: ['hidden'] }); onPtr.push([{ removeEventListener() { mo.disconnect(); } }, '', null]); } } catch (e) { /* ignore */ }
   if (/[?&]perf=1\b/.test(location.search)) perfOverlay();
 }
@@ -335,6 +354,7 @@ function loadGLB(url) {
           o.receiveShadow = true;
         }
       });
+      if (cache.get(url) !== p) { disposeTree(s); return s; } // its world was released while it loaded (m-4)
       ready.set(url, s);
       failed.delete(nameOf(url));
       return s;
@@ -355,6 +375,8 @@ export function dispose() {
   try { clearInterval(perfTimer); if (perfEl) perfEl.remove(); perfEl = null; } catch (e) { /* ignore */ }
   try { clearCity(); clearWorld(); if (kit) kit.dispose(); kit = null; } catch (e) { /* ignore */ }
   try { for (const g of ready.values()) disposeTree(g); ready.clear(); cache.clear(); } catch (e) { /* ignore */ }
+  try { for (const un of offBus) un(); offBus = []; if (onOnline) removeEventListener('online', onOnline); onOnline = null; } catch (e) { /* ignore */ }
+  try { if (renderer) renderer.forceContextLoss(); } catch (e) { /* ignore */ } // the 2D board must not keep a live WebGL context (m-2)
   pickCbs.clear();
   try { if (controls) controls.dispose(); } catch (e) { /* ignore */ }
   try { if (renderer) renderer.dispose(); } catch (e) { /* ignore */ }
@@ -658,6 +680,7 @@ function clearWorld() {
       if (o.isInstancedMesh) o.dispose(); // instanceMatrix / instanceColor GL buffers (CR-17: they leaked on every rebuild)
     }
   });
+  for (const o of worldGroup.children) if (o.userData.ownTree) disposeTree(o);  // inst() placeholders (m-5)
   worldGroup.clear();
   for (const t of disposables.splice(0)) t.dispose();
   centerMat = null;
@@ -670,9 +693,9 @@ let worldDir = null;
 /** T5 §8.4: entering a world with another asset folder frees the previous world's models (life/, pawns/, history/ stay). */
 function releaseOtherWorlds(dir) {
   if (dir === worldDir) return; worldDir = dir;
-  for (const url of [...cache.keys()]) {
+  for (const url of new Set([...cache.keys(), ...ready.keys()])) {
     const m = /^assets\/(w[1-4])\//.exec(url); if (!m || m[1] === dir) continue;
-    const g = ready.get(url); if (g) disposeTree(g);
+    const g = ready.get(url); if (g) disposeTree(g); // still loading → freed when it lands (loadGLB)
     ready.delete(url); cache.delete(url); heightOf.delete(url);
   }
 }
@@ -811,7 +834,7 @@ function govern(dt, now) {
   if (!governor) return;
   const t = governor.step(dt, now); if (!t) return;
   setQuality(t);
-  import('./bus.js').then(({ bus }) => bus.emit('quality:change', { tier: t, pref: 'auto', auto: true })).catch(() => {});
+  try { bus.emit('quality:change', { tier: t, pref: 'auto', auto: true }); } catch (e) { /* ignore */ }
 }
 
 /** "מכונת הזמן": sepia newspaper world, whatever the data theme says. */
@@ -1193,7 +1216,7 @@ function ensureGrid(count, animate = true) {
   let n = 4; while (n * n < count && n < 8) n++;
   if (n !== gridN) { gridN = n; relayout(animate); drawCenter(n); }
 }
-export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); }
+export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); }
 export function hasKey(key) { return city.has(key); }
 /** life models arrive lazily (CR-05): swap the stand-in for the real model in place */
 function swapWhenReady(key, model) {
@@ -1201,8 +1224,10 @@ function swapWhenReady(key, model) {
   loadGLB(it.obj.userData.fallbackOf).then(() => {
     const cur = city.get(key); if (!cur || cur !== it || !it.obj.userData.fallbackOf) return;
     const n = inst(model); if (n.userData.ownTree) { dropObj(n, new THREE.Group()); return; }
-    n.position.copy(it.obj.position); n.rotation.copy(it.obj.rotation); n.scale.copy(it.obj.scale);
-    dropObj(it.obj); it.obj = n; it.h0 = measure(n, n.userData.fallbackOf || modelUrlOf(model)); cityGroup.add(n); syncKit();
+    // the rest pose, not the stand-in's current pose: a spawn bounce / relayout tween may still be animating the old object (M-1)
+    const [x, z] = slotXZ(it.slot, gridN); n.position.set(x, CITY_Y, z); n.rotation.y = it.obj.rotation.y; n.scale.setScalar(sOf(it));
+    n.userData.key = key; n.userData.level = it.obj.userData.level;
+    dropObj(it.obj); it.obj = n; it.annex = null; if (it.level) applyLevelParts(it); it.h0 = measure(n, n.userData.fallbackOf || modelUrlOf(model)); cityGroup.add(n); syncKit();
   }, () => {});
 }
 const modelUrlOf = (model) => { let dir = assetDir(world), name = model; if (String(model).includes('/')) [dir, name] = String(model).split('/'); return modelUrl(dir, name); };
@@ -1335,7 +1360,9 @@ export function shield(keys) {
     const m = new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }));
     m.position.copy(it.obj.position); m.scale.setScalar(0.01); fxGroup.add(m);
     const s = slotScale(gridN) * 1.25;
-    tween(D(1700), (p) => { m.scale.setScalar(s * Math.min(1, p * 4)); m.material.opacity = p < 0.6 ? 0.35 : 0.35 * (1 - (p - 0.6) / 0.4); })
+    if (reduced) m.scale.setScalar(s); // reduced motion: a static dome, opacity fade 200 ms in / out (m-8)
+    const T = D(1700), f = 200 / T;
+    tween(T, (p) => { if (reduced) { m.material.opacity = 0.3 * Math.min(1, p / f, (1 - p) / f); return; } m.scale.setScalar(s * Math.min(1, p * 4)); m.material.opacity = p < 0.6 ? 0.35 : 0.35 * (1 - (p - 0.6) / 0.4); })
       .then(() => { fxGroup.remove(m); m.geometry.dispose(); m.material.dispose(); });
   }
 }
@@ -1590,6 +1617,7 @@ export async function throwDice(faces, opts = {}) {
     dice.forEach((d, i) => { d.visible = true; d.quaternion.copy(faceUpQuat(faces[i], Math.atan2(f.inward.x, f.inward.z))); d.position.copy(f.land).addScaledVector(f.side, (i - (dice.length - 1) / 2) * (DIE * 1.45)); d.position.y = DIE / 2 + 0.12; d.scale.setScalar(0.01); });
     if (opts.onBounce) { try { opts.onBounce(1); } catch (e) { console.error(e); } }
     await tween(150, (p) => dice.forEach((d) => d.scale.setScalar(Math.max(0.01, p))), 'dice');
+    prefetchLifeIdle();
     invalidate(); clearTimeout(diceHideT); diceHideT = setTimeout(() => { dice.forEach((d) => { d.visible = false; d.scale.setScalar(1); }); invalidate(); }, 600);
     return faces;
   }
@@ -1643,6 +1671,7 @@ export async function throwDice(faces, opts = {}) {
   }
   invalidate();
   diceHideT = setTimeout(() => hideDice(), 2600 * speed + 400);
+  prefetchLifeIdle();   // after the first roll: the remaining life models, one by one at idle (m-9)
   return faces;
 }
 export function hideDice() {
@@ -1673,21 +1702,21 @@ export function pickAt(cx, cy) {
     if (!renderer || !city.size) return null;
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
-    // 1) within 22 px of an item's projected centre → the nearest centre wins (every item gets a 44 px target, overlaps resolved)
-    let best = null, bd = 22.5 * 22.5;
-    for (const k of city.keys()) { const p = project(k); const d = (p.x - cx) ** 2 + (p.y - cy) ** 2; if (d <= bd) { bd = d; best = k; } }
-    if (best) return best;
-    // 2) else the first pick proxy under the point (bounding box × 1.15, layer 1)
+    // 1) the first pick proxy under the point (bounding box × 1.15, layer 1) — §6.1
     camera.updateMatrixWorld(); raycaster.setFromCamera(ndc, camera);
     const hit = raycaster.intersectObjects(pickGroup.children, false)[0];
-    return hit && hit.object.userData.key && city.has(hit.object.userData.key) ? hit.object.userData.key : null;
+    if (hit && hit.object.userData.key && city.has(hit.object.userData.key)) return hit.object.userData.key;
+    // 2) the ray missed: the nearest projected centre within 22 px (small / far items still get a 44 px target)
+    let best = null, bd = 22.5 * 22.5;
+    for (const k of city.keys()) { const p = project(k); const d = (p.x - cx) ** 2 + (p.y - cy) ** 2; if (d <= bd) { bd = d; best = k; } }
+    return best;
   } catch (e) { console.warn('[scene] pickAt', e); return null; }
 }
 /** onPick(cb) → unsubscribe; cb(key, {x, y}) on a tap (one pointer, < 8 px, < 350 ms; drags/pinches/orbits never pick). */
 export function onPick(cb) { if (typeof cb !== 'function') return () => {}; pickCbs.add(cb); return () => pickCbs.delete(cb); }
 function emitPick(key, x, y) {
   for (const f of [...pickCbs]) { try { f(key, { x, y }); } catch (e) { console.error(e); } }
-  import('./bus.js').then(({ bus }) => bus.emit('city:pick', { key, x, y, source: '3d' })).catch(() => {});
+  try { bus.emit('city:pick', { key, x, y, source: '3d' }); } catch (e) { console.error(e); }
 }
 function initPick(canvas) {
   const down = new Map(); let multi = false, hoverRaf = 0, hx = 0, hy = 0;
@@ -1724,7 +1753,9 @@ export function perfStats() {
   return { calls: r.render.calls, triangles: r.render.triangles, geos: r.memory.geometries, textures: r.memory.textures, texMB: +(texBytes() / 1048576).toFixed(1),
     dpr: renderer.getPixelRatio(), tier, lowPower, shadows: renderer.shadowMap.enabled, antialias: !!renderer.getContextAttributes()?.antialias, framesRendered, lastTurnMs: Math.round(turnMs),
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
-    paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), glb: [...ready.keys()] };
+    paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
+    kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
+    shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };
 }
 function perfOverlay() {
   perfEl = document.createElement('div'); perfEl.setAttribute('aria-hidden', 'true');
@@ -1753,6 +1784,37 @@ export async function perfRun(ms = 10000) {
   relayout(false); setCameraMode(was);
   return { ms: Math.round(performance.now() - t0), ...out.fps, calls: out.calls, tier: out.tier };
 }
+/* ---------- review M-2: one guarded check of the shared flatten shader, after its link has finished (no boot-path wait) */
+let flatChecked = false, flatOk = null;
+function checkFlatShader() {
+  if (flatChecked || !renderer) return;
+  try {
+    const gl = renderer.getContext(); const progs = (renderer.info.programs || []).filter((p) => String(p.cacheKey || '').includes(FLAT_KEY));
+    if (!progs.length) return;                       // no flattened model drawn yet: try again on a later frame
+    flatChecked = true;
+    const bad = progs.filter((p) => p.program && gl.getProgramParameter(p.program, gl.LINK_STATUS) === false);
+    flatOk = !bad.length;
+    if (bad.length) {
+      console.error('[render] the flattened-model shader failed to link; falling back to plain materials', gl.getProgramInfoLog(bad[0].program));
+      try { (window.__rrErrors = window.__rrErrors || []).push({ msg: 'flat_shader_link', where: 'scene', at: Date.now() }); } catch (e) { /* ignore */ }
+      flatFallback(); invalidate();
+    }
+  } catch (e) { console.warn('[render] shader check', e); }
+}
+/** debug / tests: the shader check state; `fail` simulates a link failure (the fallback path) */
+export function shaderCheck({ fail = false } = {}) { if (fail) { flatChecked = true; flatOk = false; flatFallback(); invalidate(); } return { checked: flatChecked, ok: flatOk }; }
+/** debug / tests (outside SCENE_API): pick-proxy screen rects {key: [x0, y0, x1, y1]} and a board tile's screen point */
+export function pickRects() {
+  const out = {}; const r = renderer.domElement.getBoundingClientRect(); const v = new THREE.Vector3(); camera.updateMatrixWorld();
+  for (const px of pickGroup.children) {
+    if (!city.has(px.userData.key)) continue; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const sx of [-0.5, 0.5]) for (const sy of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) { v.set(sx, sy, sz).applyMatrix4(px.matrixWorld).project(camera); const X = r.left + ((v.x + 1) / 2) * r.width, Y = r.top + ((1 - v.y) / 2) * r.height; x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y); }
+    out[px.userData.key] = [x0, y0, x1, y1];
+  }
+  return out;
+}
+export function itemPose(key) { const it = city.get(key); if (!it) return null; const o = it.obj; return { y: +o.position.y.toFixed(3), s: +o.scale.x.toFixed(3), rest: +sOf(it).toFixed(3), restY: CITY_Y, fallback: !!o.userData.fallbackOf, inScene: o.parent === cityGroup }; }
+export function projectTile(i) { const p = tilePos(i); p.project(camera); const r = renderer.domElement.getBoundingClientRect(); return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height }; }
 /** debug (outside SCENE_API): approximate draw calls per group — visible renderables inside the camera frustum */
 export function perfBreakdown() {
   const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));

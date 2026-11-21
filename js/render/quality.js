@@ -17,6 +17,10 @@ export const TIER_CONFIG = Object.freeze({
   low: { dpr: [1, 1], antialias: false, shadows: 'off', shadowMap: [0, 0], casters: 'none', decor: 0.4, updaters: false, particles: 0.3, confetti: 0, labels: 2, sepia: false, people: false },
 });
 
+/** The 3D scene registers what only it can know (software renderer, pointer) so that every caller — the lobby's "עכשיו"
+ * line, setQualityPref() and its 'quality:change' event — resolves the same tier the scene renders (review M-3). */
+let ENV = {};
+export function setEnv(env = {}) { ENV = { ...ENV, ...env }; }
 const read = () => { try { const o = JSON.parse(localStorage.getItem(KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
 /** Saved preference: 'auto' | 'high' | 'mid' | 'low' (default 'auto'). */
 export function qualityPref() { const p = read().quality; return PREFS.includes(p) ? p : 'auto'; }
@@ -31,6 +35,7 @@ export function setQualityPref(p, env = {}) {
 
 /** Device detection → tier. env: {lowPower, deviceMemory, cores, coarse, hq} (missing values are read from the browser). */
 export function autoTier(env = {}) {
+  env = { ...ENV, ...env };
   const g = globalThis;
   const nav = g.navigator || {};
   const hq = env.hq ?? (typeof g.location !== 'undefined' && /[?&]hq\b/.test(g.location.search || ''));
@@ -46,6 +51,7 @@ export function autoTier(env = {}) {
 }
 /** The effective tier: `?hq` → high; a saved non-auto preference; else autoTier(env). */
 export function resolveTier(env = {}) {
+  env = { ...ENV, ...env };
   const g = globalThis;
   const hq = env.hq ?? (typeof g.location !== 'undefined' && /[?&]hq\b/.test(g.location.search || ''));
   if (hq) return 'high';
@@ -66,13 +72,16 @@ export function tierDpr(tier, { dpr = 1, coarse = false, lowPower = false } = {}
  * → { step(dtMs, now) → null | 'mid' | 'low', reset() }. Disabled (always null) when `disabled` (software renderer, CI).
  */
 export function makeGovernor({ tier = 'high', disabled = false, window = 90, limitMs = 34, coolMs = 30000, maxSteps = 2 } = {}) {
-  let cur = tier, buf = [], last = -Infinity, steps = 0;
+  let cur = tier, buf = [], last = -Infinity, steps = 0, off = !!disabled;
   return {
     get tier() { return cur; },
+    /** an explicit player choice disarms it ('auto' re-arms it, except on software GL — the caller decides) */
+    get disabled() { return off; },
+    set disabled(v) { off = !!v; buf = []; },
     set tier(t) { cur = t; buf = []; },
     reset() { buf = []; },
     step(dt, now) {
-      if (disabled || !(dt > 0)) return null;
+      if (off || !(dt > 0)) return null;
       buf.push(dt); if (buf.length < window) return null;
       const s = [...buf].sort((a, b) => a - b); const med = s[s.length >> 1]; buf = [];
       if (med <= limitMs || steps >= maxSteps || now - last < coolMs || cur === 'low') return null;
