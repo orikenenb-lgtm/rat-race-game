@@ -430,7 +430,12 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
       return ['pass'];
     }
     case 'mystery': return [ev.options.find((o) => o.enabled).id];
-    case 'business': if (!smart) return [firstEnabled(ev, ['pass', 'ok'])]; return [(ev.options.find((x) => x.primary && x.enabled) || ev.options.find((x) => ['ok', 'pass'].includes(x.id))).id];
+    case 'business': {
+      if (!smart) return [firstEnabled(ev, ['pass', 'ok'])];
+      // v3's business rule, from public data only (T2 gate A5: smart at hint level has no highlight to follow, so it never opened a business)
+      if (d.mode === 'offer') { const o = has(ev, 'start'); return [o && !o.loanAmount && d.forecast3 && d.forecast3.netProfit > 0 && m.cash - d.startCapital >= 3 * m.expenses ? 'start' : 'pass']; }
+      return [ctx.n === 0 && has(ev, 'biz:suggest') && !(d.lastResult) ? 'biz:suggest' : firstEnabled(ev, ['ok', 'pass'])];
+    }
     case 'payday': case 'edu': return [planEventPick(st, ev, smart ? 'smart' : 'greedy')];
     case 'life': return [lifePick(st, ev, smart ? 'smart' : 'greedy')];
     default: return [firstEnabled(ev, ['ok', 'done', 'pass']) || ev.options.find((o) => o.enabled).id];
