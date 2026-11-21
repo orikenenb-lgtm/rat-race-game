@@ -31,6 +31,7 @@ export default {
   }),
   loan: { unit: 20000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
+  sideReportFee: 250, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'netWorth', target: 9_000_000 },
   maxMonths: 60,
   stars: { t2: 43, t3: 32 },

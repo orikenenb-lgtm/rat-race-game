@@ -28,6 +28,7 @@ export default {
   }),
   loan: { unit: 10000, autoUnit: 1000, pct: 1.5, rateLinked: true, rateMult: 0.25, bankrupt: 10, cap: 2.5 },
   creditPct: 5,
+  sideReportFee: 200, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'passive' },
   maxMonths: 76,
   stars: { t2: 42, t3: 30 },
