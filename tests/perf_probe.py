@@ -174,7 +174,8 @@ async def phase_b(b, base, cond):
     out['resumeToRollMs'] = None
     if await pg.locator('.lb-resume').count():
         await pg.evaluate("window.__markReset('rollEnabled')"); t0 = time.time(); await pg.click('.lb-resume')
-        await pg.wait_for_function("!document.querySelector('#roll').disabled && document.querySelector('#start').hidden", timeout=TIMEOUT)
+        # back in the game = lobby gone and the game interactive (roll enabled, or the card left open by the dice roll above)
+        await pg.wait_for_function("document.querySelector('#start').hidden && (!document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden)", timeout=TIMEOUT)
         out['resumeToRollMs'] = round((time.time() - t0) * 1000)
         await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', state='visible', timeout=TIMEOUT)
     first = {'w1': {**(await metrics(cdp, gc=True)), 'gl': dict(await pg.evaluate('__m.gl'))}}
@@ -268,7 +269,10 @@ async def run_one(base, cond, label, twod=False, leak=False, runs=1, wait=600):
                 r = await phase_a(b, base, '3g' if cond == '3g' else cond, 'full', twod=True); res['T'].append(r)
                 log(f'  [{label} {cond} run {i + 1} 2D] click→roll {r.get("clickToRollMs")} nav→roll {r.get("navToRollMs")} glb {len(r["glbBeforeRoll"])}')
             if leak and i == runs - 1:
-                res['B'] = await phase_b(b, base, cond)
+                try: res['B'] = await phase_b(b, base, cond)
+                except Exception as e:  # noqa: BLE001 — record, never hide: the leak budgets then print N/A(missing)
+                    res['B'] = None; res['leakError'] = repr(e)[:400]; log(f'  [{label} leak] ERROR {e!r}'[:300])
+            if res['B']:
                 B = res['B']; log(f'  [{label} leak] nodesRange {B["nodesRange"]} attached {B["attachedRange"]} listeners {B["listenersRange"]} heap +{B["heapGrowthMB"]}MB glRepeat {B["glRepeat"]} drawsLobby {B["drawsLobbyOverGame"]}')
             await b.close()
     res['summary'] = summarize(res)
