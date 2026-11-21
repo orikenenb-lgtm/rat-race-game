@@ -562,11 +562,13 @@ class FakeBackend:
         row = {'mode': r['mode'], 'world': r['world'], 'profession': r['profession'], 'seed': str(r['seed']), 'max_months': r['max_months'],
                'status': r['status'], 'months': r['months'], 'passive': r['passive'], 'expenses': r['expenses'], 'net_worth': r['net_worth'],
                'claim_stars': st.get('stars'), 'claim_progress': st.get('progress')}
-        # rules era (verify_core rulesFor, RULES4_FROM) is chosen from the date key the result was started on
+        # rules era (verify_core rulesFor, RULES4_FROM): the same date fields index.ts ROW selects —
+        # daily_key; weekly_start = Monday of the ISO week (to_date(weekly_key,'IYYY-"W"IW')); challenge_day = created_at (UTC date)
         if r['mode'] == 'daily': row['daily_key'] = r['daily']
-        elif r['mode'] == 'weekly': row['weekly_key'] = r['weekly']; row['weekly_start'] = r['start_day']
-        else: row['challenge_day'] = r['start_day']
-        row['start_day'] = r['start_day']
+        elif r['mode'] == 'weekly':
+            y, w = r['weekly'].split('-W'); row['weekly_start'] = dt.date.fromisocalendar(int(y), int(w), 1).isoformat()
+        else:
+            c = self.C.get(r['challenge']); row['challenge_day'] = (c['starts_at'] if c else self.now()).astimezone(UTC).date().isoformat()
         return row
 
     # -------------------------------------------------- dump / load
@@ -594,6 +596,12 @@ class FakeBackend:
 # ---------------------------------------------------------------- guard-only sink (suites with no backend use)
 class GuardOnly:
     def __init__(self): self.blocked = []; self.unexpected = []; self.calls = collections.Counter()
+
+def clock_at(iso):
+    """A ticking clock that starts at `iso` (UTC) and advances with real time — for FakeBackend(now=…) in ranked suites that
+    must sit in a given rules era (verify_core RULES4_FROM) while minute windows (rate limits) still pass."""
+    base = dt.datetime.fromisoformat(iso.replace('Z', '+00:00')); t0 = time.time()
+    return lambda: base + dt.timedelta(seconds=time.time() - t0)
 
 def new_context_kwargs(): return {'service_workers': 'block'}
 

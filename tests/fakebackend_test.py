@@ -278,22 +278,29 @@ def security_live_skips_without_live_env():
                            env={**e, **extra}, capture_output=True, text=True, timeout=120, cwd=ROOT)
         assert p.returncode == 0 and p.stdout.startswith('SKIPPED') and 'NETWORK' not in p.stdout + p.stderr, (extra, p.returncode, p.stdout[-300:], p.stderr[-300:])
 
+RULES4 = dt.datetime(2026, 12, 9, 9, 0, tzinfo=FB.UTC)   # Wednesday; its ISO week starts 2026-12-07 ≥ RULES4_FROM (2026-12-01)
 def replay_roundtrip():
-    """Honest game → verified:true from the real engine sidecar; forged claim → claim_mismatch (FB-5 at unit level)."""
-    fb = FB.FakeBackend(now=T0, verify='replay'); a = reg(fb); fb.set_daily('w1', 1)
+    """Honest game → verified:true from the real engine sidecar; forged claim → claim_mismatch (FB-5 at unit level).
+    Runs in both rules eras: a daily begun before RULES4_FROM replays with rules 3, after it with rules 4 (verify_core rulesFor)."""
+    has_rules = 'RULES4_FROM' in open(os.path.join(ROOT, 'supabase', 'functions', 'verify-result', 'verify_core.js'), encoding='utf-8').read()
+    for when, rules in ((T0, 3), (RULES4, 4)) if has_rules else ((T0, None),):
+        _replay_once(when, rules)
+def _replay_once(when, rules):
+    fb = FB.FakeBackend(now=when, verify='replay'); a = reg(fb); fb.set_daily('w1', 1)
     r = ok(fb, 'rr_begin', **A(a), p_mode='daily')
     js = """const E = await import(%s); const { playOut, prng } = await import(%s);
 const w = E.getWorld('w1'); const list = (w.daily && w.daily.chars) || w.characters.map((c) => c.id);
-const st = playOut(E, { worldId: 'w1', charId: list[1 %% list.length], seed: %d, mode: 'daily', maxMonths: 24, tutorial: false, bailout: false }, prng(7));
+const st = playOut(E, { worldId: 'w1', charId: list[1 %% list.length], seed: %d, mode: 'daily', maxMonths: 24, tutorial: false, bailout: false%s }, prng(7));
 const R = st.result; console.log(JSON.stringify({ actions: st.actions, status: R.status, months: Math.max(1, Math.min(200, Math.round(R.months))), passive: Math.round(R.passive),
   expenses: Math.max(0, Math.round(R.expenses)), netWorth: Math.round(R.netWorth), stars: R.stars || 0, progress: R.progress ?? null }));""" % (
-        json.dumps('file://' + os.path.join(ROOT, 'js', 'engine.js')), json.dumps('file://' + os.path.join(HERE, 'lib', 'random-player.mjs')), r['seed'])
+        json.dumps('file://' + os.path.join(ROOT, 'js', 'engine.js')), json.dumps('file://' + os.path.join(HERE, 'lib', 'random-player.mjs')), r['seed'], (', rules: %d' % rules) if rules else '')
     out = subprocess.run(['node', '--input-type=module', '-e', js], capture_output=True, text=True, timeout=180)
     g = json.loads(out.stdout.strip().splitlines()[-1])
     ok(fb, 'rr_finish', **A(a), p_result=r['result_id'], p_status=g['status'], p_months=g['months'], p_passive=g['passive'], p_expenses=g['expenses'],
        p_net_worth=g['netWorth'], p_stats={'stars': g['stars'], 'progress': g['progress']})
     st, v = fb.verify({'id': a['id'], 'secret': a['secret'], 'result_id': r['result_id'], 'actions': g['actions']})
-    assert st == 200 and v['verified'] is True, (st, v)
+    assert st == 200 and v['verified'] is True, (when.date(), rules, st, v)
+    print(f'   replay ok: daily {fb.day_key()} rules {rules} · {len(g["actions"])} actions · verified:true', flush=True)
     assert ok(fb, 'rr_daily', **A(a))['board'][0]['verified'] is True
     b = reg(fb, 'טסט־זייפן'); rb = ok(fb, 'rr_begin', **A(b), p_mode='daily')
     ok(fb, 'rr_finish', **A(b), p_result=rb['result_id'], p_status=g['status'], p_months=g['months'], p_passive=g['passive'], p_expenses=g['expenses'],

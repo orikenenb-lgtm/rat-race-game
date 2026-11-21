@@ -1,13 +1,14 @@
 # Integration smoke with the REAL game files (tests/make_realcopy.sh → http://localhost:8772/). OFFLINE by default: the fake
-# backend with verify=replay (the real engine replays ranked games in tests/fakeverify.mjs). The browser and the fake share the
-# real wall clock, so both pick the same rules era. --live = staging only. Usage: python3 tests/lobby_real.py [base_url] [--live]
+# backend with verify=replay (the real engine replays ranked games in tests/fakeverify.mjs). Rules era: the v4 client always
+# plays rules 4, and verify_core replays games started before RULES4_FROM (2026-12-01) with rules 3, so the fake's clock starts
+# at 2026-12-09 (its ISO week also starts after RULES4_FROM). --live = staging only. Usage: python3 tests/lobby_real.py [base_url] [--live]
 import asyncio, os, sys
 from playwright.async_api import async_playwright
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
 MODE = FB.mode_from_argv()
 BASE = FB.base_url('http://localhost:8772/')
 SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
-fb = FB.FakeBackend(verify='replay'); SINKS = []
+fb = FB.FakeBackend(verify='replay', now=FB.clock_at(os.environ.get('RR_FAKE_NOW', '2026-12-09T09:00:00Z'))); SINKS = []
 async def new_ctx(b, **kw):
     ctx = await b.new_context(**FB.new_context_kwargs(), **kw); SINKS.append(await FB.install_mode(ctx, fb, MODE))
     await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); return ctx
