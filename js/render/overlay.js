@@ -53,7 +53,8 @@ function render() {
   list.innerHTML = stages.map((s, i) => {
     const st = s.done ? 'done' : i === ai ? 'on' : 'todo';
     const cnt = s.countable && s.N ? `<small class="lcnt num">${esc(s.id === 'models' ? STR.L2n(s.n, s.N) : STR.L3n(s.n, s.N))}</small>` : '';
-    const note = !s.done && s.note ? `<small class="lnote">${esc(s.note)}</small>` : '';
+    const note = s.note && (!s.done || s.note === STR.L6) ?  // the 3D → 2D fallback note stays readable after its step
+       `<small class="lnote">${esc(s.note)}</small>` : '';
     return `<li class="${st}"${st === 'on' ? ' aria-current="step"' : ''}><span class="lmark" aria-hidden="true">${s.done ? '✓' : i + 1}</span><span class="ltxt">${esc(s.label)}${cnt}${note}</span></li>`;
   }).join('');
   if (txt && ai >= 0) txt.textContent = stages[ai].label;

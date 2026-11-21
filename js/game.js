@@ -434,10 +434,11 @@ async function startInner(cfg, my) {
   $('#start').hidden = true;
   // models stage = init set (if init is still running) + the target world's files + a new pawn; counts settled files
   const M = { initD: 0, initT: 0, extraT: 0, wD: 0, wT: null, pD: 0, pT: 0 };
+  let slowAt = 0; // S-L6 shown at… (the overlay then stays long enough to be read)
   const pushM = () => OV.stageProgress('models', M.initD + M.wD + M.pD, M.initT + (M.wT ?? M.extraT) + M.pT);
   if (initPending) {
     const watch = (ev) => {
-      if (ev.type === 'slow') OV.stageNote('renderer', STR.L6);
+      if (ev.type === 'slow') { slowAt = Date.now(); OV.stageNote('renderer', STR.L6); }
       if (initPhase === 'renderer') return;
       OV.stageDone('renderer');
       if (scene.kind !== '3d') { OV.stageDone('models'); OV.stageDone('life'); return; }
@@ -540,6 +541,7 @@ async function startInner(cfg, my) {
     try { await lifeP; } finally { lifeWatchers.delete(lw); }
   }
   OV.stageDone('life');
+  if (slowAt) await new Promise((r) => setTimeout(r, Math.max(0, 1200 - (Date.now() - slowAt))));
   if (my !== gen) return false;
 
   /* ---------- board + the game on screen (errors from here on → recover bar, the save is safe) */
