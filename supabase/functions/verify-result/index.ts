@@ -120,7 +120,7 @@ async function handleVerify(req: Request, body: any) {
   const ms = Math.round(performance.now() - t0);
   const r = out.result;
   const detail = { engine: ENGINE_SHA256, ms, client: clientEngine(req.headers.get('user-agent')), cfg: out.cfg, result: r,
-    diff: out.diff, source: q.actions ? 'request' : 'stats' };
+    diff: out.diff, source: q.actions ? 'request' : 'stats', ...(out.rulesFallback ? { rulesFallback: true } : {}) };
   // 4. store (guarded: never overwrites a verified row, never touches a row that is still playing)
   let stored = false;
   if (full) {

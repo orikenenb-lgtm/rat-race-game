@@ -7,7 +7,7 @@ export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20
 const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q']); // = the cases of engine.js replay() (Q = T3 story inbox)
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
  *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
-export const RULES4_FROM = '2026-12-01';
+export const RULES4_FROM = '2026-12-07'; // a Monday (review B1): a weekly never straddles the cut-over
 // ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
 function daysFromCivil(y, m, d) {
   y -= m <= 2 ? 1 : 0;
@@ -118,6 +118,14 @@ export function claimOf(row) {
  */
 export function verifyGame(E, row, actions) {
   const cfg = configFor(E, row);
+  const first = replayCompare(E, cfg, row, actions);
+  // review B1 defence in depth: a game the row dates before the cut-over may have been started by a v4 client — retry ONCE with
+  // rules 4 (the harder rule set, so a fallback gives a cheater nothing). Never from 4 to 3.
+  if (first.ok || cfg.rules !== 3) return first;
+  const second = replayCompare(E, { ...cfg, rules: 4 }, row, actions);
+  return second.ok ? { ...second, rulesFallback: true } : first;
+}
+function replayCompare(E, cfg, row, actions) {
   let st;
   try { st = E.replay(cfg, actions); }
   catch (e) { return { ok: false, error: 'replay:' + String(e && e.message || e).slice(0, 300), result: null, diff: null, cfg }; }

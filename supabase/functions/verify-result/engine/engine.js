@@ -119,6 +119,7 @@ export function createGame(o = {}) {
   // T2: rules gate, mentor level, dev-only ablation switches (sim), the economic cycle (2 'cycle' draws, rules 4 only)
   // CR-29: a ranked game takes its rules from its date key exactly as the verifier will (js/systems/rules.js = verify_core rulesFor)
   st.rules = RANKED_MODES.includes(st.mode) && o.dateKey != null ? rulesForDay(o.dateKey) : (o.rules === 3 ? 3 : 4);
+  if (RANKED_MODES.includes(st.mode) && o.dateKey != null) st.dateKey = String(o.dateKey); // kept for migration / replayConfig (review B1)
   st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, mentor: o.mentor, worldId: st.worldId });
   if (o._dev && (o._dev.noCycle || o._dev.noDD)) {
     if (RANKED_MODES.includes(st.mode)) throw new Error('dev flags are not allowed in ranked modes');
@@ -287,7 +288,7 @@ function migrateV3(st) {
     const fresh = makeStreams(st.seed);
     for (const k of STREAMS) if (st.rng[k] == null) st.rng[k] = fresh[k];
     const ranked = RANKED_MODES.includes(st.mode);
-    st.rules = ranked ? 3 : 4;
+    st.rules = ranked ? (st.dateKey ? rulesForDay(st.dateKey) : 3) : 4; // review m8: a dated ranked save follows its date
     st.mentor = ranked ? 'hint' : (st.tutorial || st.worldId === 'w1' ? 'guide' : 'hint');
     st.econ = null;
     if (R4(st)) { const r1 = next(st.rng, 'cycle'), r2 = next(st.rng, 'cycle'); if (!st.history) { st.econ = CY.initEcon(r1, r2, st.worldId); st.econ.hist[0].m = st.month; st.econ.truth[0].m = st.month; } }
@@ -4243,6 +4244,7 @@ export function replay(cfg, actions) {
 export function replayConfig(st) {
   const cfg = { worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode, maxMonths: st.maxMonths, scenarioId: st.history ? st.history.scenarioId : undefined, bailout: !!st.bailout, tutorial: !!st.tutorial,
     mentor: startLevel(st), rules: st.rules || 3 };
+  if (st.dateKey) cfg.dateKey = st.dateKey;
   if (st.gender) cfg.gender = st.gender;
   if (st._dev) cfg._dev = { ...st._dev };
   return cfg;

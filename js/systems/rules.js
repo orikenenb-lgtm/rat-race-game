@@ -9,7 +9,7 @@
 // day < RULES4_FROM → rules 3, otherwise rules 4. A missing / unreadable key → rules 4 (the current game).
 
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release (and in verify_core.js — tested equal). */
-export const RULES4_FROM = '2026-12-01';
+export const RULES4_FROM = '2026-12-07'; // a Monday: daily and weekly eras flip together (review B1)
 
 /** Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant). */
 function daysFromCivil(y, m, d) {
