@@ -496,6 +496,177 @@ async def test_v32(b, phone=False):
         await pg.click('#camBtn'); await pg.wait_for_timeout(1500); await pg.screenshot(path=f'{SHOTS}/{PFX}board_overview.png')
     await ctx.close()
 
+SAVE_JS = "(k) => { const s = JSON.parse(localStorage.getItem(k) || 'null'); return s && s.state; }"
+
+async def find_dd_deal(pg, world, tag, tries=14):
+    """Force deal tiles until a card with the due-diligence box (inspections) shows up."""
+    for i in range(tries):
+        s = await force_card(pg, world, 'O', {'cash': 900000, 'life.energy': 90}, 'deal')
+        if s['card'] and s['type'] == 'deal' and await pg.locator('#evCard .ddbox [data-o="inspect:1"]').count():
+            if await pg.locator('#evCard .ddflags .b').count() or i >= tries // 2: return s   # prefer a deal with public flags
+        if s['card']:
+            b = pg.locator('#evCard button[data-o="pass"]')
+            if await b.count(): await b.click()
+            else: await handle_card(pg, random.Random(i), tag, s)
+            await wait_idle(pg)
+    raise Exception('no deal with inspections in %d tries' % tries)
+
+async def test_nextlevel(b, phone=False):
+    """T2 'Next Level' UI: a w2 game at mentor 'hint' (engine default) — no highlighted option, hint on request (counted),
+    due diligence (flags, claimed vs range, inspection keeps the card open), impact panel, focus picker + agenda, economy gauge,
+    payday focus section, mentor level change from the ❓ menu, pro game end-screen analysis; then a w1 'guide' game unchanged."""
+    vp = {'width': 390, 'height': 800} if phone else {'width': 1300, 'height': 820}
+    ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone)
+    pg = await ctx.new_page(); tag = 'nl' + ('-phone' if phone else ''); attach(pg, tag); sfx = '_phone' if phone else '_desk'
+    await pg.goto(BASE); await pg.evaluate("() => localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true}))")
+    await start_world(pg, 'w2', 1)
+    rnd = random.Random(77)
+    s = await wait_idle(pg)
+    while s['card']: await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    st0 = await pg.evaluate(SAVE_JS, 'rr2-save-free-w2')
+    assert st0['mentor'] == 'hint', 'w2 default mentor must be hint, got %s' % st0.get('mentor')
+    assert (st0.get('rules') or 3) == 4, 'new games play rules 4'
+    # 1) a deal with due diligence
+    s = await find_dd_deal(pg, 'w2', tag)
+    await pg.wait_for_timeout(600)
+    n_primary = await pg.locator('#evCard button.primary[data-o]').count()
+    assert n_primary == 0, 'hint level: no highlighted option (%d)' % n_primary
+    foc = await pg.evaluate("() => document.activeElement && document.activeElement.id")
+    assert foc == 'evTitle', 'hint level: first focus on the card title, got %s' % foc
+    assert await pg.locator('#evCard .grid .b.warn').count(), 'dd status badge (seller · not checked) missing'
+    assert not await pg.is_visible('#hintP'), 'hint shown before asking'
+    flags = await pg.locator('#evCard .ddflags .b').all_inner_texts()
+    log(tag, '  dd flags:', flags, '· grid:', (await pg.inner_text('#evCard .grid')).replace('\n', ' | ')[:240])
+    await pg.evaluate("() => { const c = document.querySelector('#evCard'); const g = c.querySelector('.grid'); c.scrollTop = g.offsetTop - 60; }"); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}deal_dd{sfx}.png')
+    # hint (counted once, saved)
+    h0 = (await pg.evaluate(SAVE_JS, 'rr2-save-free-w2'))['dq'].get('hints', 0)
+    await pg.click('#evCard [data-hint]')
+    await pg.wait_for_selector('#hintP:not([hidden]) li', timeout=10000)
+    h1 = (await pg.evaluate(SAVE_JS, 'rr2-save-free-w2'))['dq'].get('hints', 0)
+    assert h1 == h0 + 1, 'hint not counted/saved (%s → %s)' % (h0, h1)
+    assert await pg.locator('#evCard button.primary[data-o]').count() == 0, 'a hint must never add the primary class'
+    log(tag, '  hint:', (await pg.inner_text('#hintP')).replace('\n', ' | ')[:200], '· hinted buttons', await pg.locator('#evCard button.hinted').count())
+    await pg.locator('#hintP').scroll_into_view_if_needed(); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}hint{sfx}.png')
+    # impact panel (collapsed at hint level; opens on tap; engine numbers + disclaimer)
+    assert await pg.locator('#impP').count(), 'impact panel missing on a deal with major options'
+    assert not await pg.evaluate("() => document.getElementById('impP').open"), 'impact panel must start collapsed at hint level'
+    await pg.click('#impP > summary')
+    await pg.wait_for_selector('#impP .imp-body table.ba', timeout=10000)
+    assert await pg.locator('#impP .disc').count(), 'impact disclaimer missing'
+    tabs = await pg.locator('#impP [data-imp]').count()
+    if tabs > 1:
+        await pg.locator('#impP [data-imp]').nth(1).click(); await pg.wait_for_timeout(300)
+        await pg.locator('#impP [data-imp]').nth(0).click(); await pg.wait_for_timeout(300)
+    log(tag, '  impact:', (await pg.inner_text('#impP .imp-body')).replace('\n', ' | ')[:240])
+    await pg.evaluate("() => { const c = document.querySelector('#evCard'); c.scrollTop = document.getElementById('impP').offsetTop - 20; }"); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}impact{sfx}.png')
+    await pg.click('#impP details.more > summary'); await pg.wait_for_timeout(300)
+    await pg.evaluate("() => { const c = document.querySelector('#evCard'); c.scrollTop = document.querySelector('#impP details.more').offsetTop - 20; }"); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}impact_details{sfx}.png')
+    # inspection: the card stays open and re-renders with the range; the hint is cleared (new facts)
+    await pg.click('#evCard [data-o="inspect:1"]')
+    await pg.wait_for_selector('#evCard .ddbox.lv1, #evCard .grid .b:not(.warn):not(.ok)', timeout=15000)
+    s = await st(pg); assert s['card'] and s['type'] == 'deal', 'inspection must keep the deal card open'
+    assert not await pg.is_visible('#hintP'), 'hint must clear after an inspection'
+    log(tag, '  after inspection:', (await pg.inner_text('#evCard .grid')).replace('\n', ' | ')[:240])
+    await pg.evaluate("() => { const c = document.querySelector('#evCard'); const g = c.querySelector('.grid'); c.scrollTop = g.offsetTop - 60; }"); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}deal_inspected{sfx}.png')
+    await pg.click('#evCard button[data-o="pass"]'); s = await wait_idle(pg)
+    while s['card']: await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    # 2) focus picker from the HUD chip (this month) + the agenda
+    await pg.click('#hLife [data-life="focus"]')
+    await pg.wait_for_selector('#gm:not([hidden]) .ftile', timeout=10000)
+    await pg.wait_for_timeout(400); await pg.screenshot(path=f'{SHOTS}/{PFX}focus_picker{sfx}.png')
+    tile = pg.locator('#gm .ftile[data-fid="research"]:not([disabled]), #gm .ftile[data-fid="frugal"]:not([disabled]), #gm .ftile[data-fid="scout"]:not([disabled])').first
+    fid = await tile.get_attribute('data-fid'); await tile.click()
+    await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(700)
+    st1 = await pg.evaluate(SAVE_JS, 'rr2-save-free-w2')
+    assert st1['life']['focus']['id'] == fid, 'focus not set: %s vs %s' % (st1['life']['focus'], fid)
+    await pg.click('#hLife [data-life="focus"]'); await pg.wait_for_selector('#gm:not([hidden]) .fslot', timeout=10000)
+    await pg.click('#gm .fslot[data-slot="1"]'); await pg.wait_for_timeout(200)
+    await pg.locator('#gm .ftile[data-fid="network"]').click()
+    await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(600)
+    st2 = await pg.evaluate(SAVE_JS, 'rr2-save-free-w2')
+    assert st2['life']['agenda'][0] == 'network', 'agenda slot 1 not set: %s' % st2['life']['agenda']
+    log(tag, '  focus:', fid, '· agenda:', st2['life']['agenda'])
+    # 3) economy gauge
+    await pg.click('#hLife [data-life="econ"]')
+    await pg.wait_for_selector('#gm:not([hidden]) .econ.big', timeout=10000)
+    log(tag, '  econ:', (await pg.inner_text('#gmCard')).replace('\n', ' | ')[:200])
+    await pg.wait_for_timeout(300); await pg.screenshot(path=f'{SHOTS}/{PFX}econ{sfx}.png')
+    await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(300)
+    await pg.screenshot(path=f'{SHOTS}/{PFX}hud{sfx}.png')
+    # 4) payday card: the focus section under the plans
+    s = await force_card(pg, 'w2', 'P', {'cash': 60000}, 'payday')
+    if s['type'] == 'payday':
+        await pg.wait_for_selector('#evCard .fsec', timeout=10000)
+        await pg.locator('#evCard .fsec').scroll_into_view_if_needed(); await pg.wait_for_timeout(300)
+        await pg.screenshot(path=f'{SHOTS}/{PFX}payday_focus{sfx}.png')
+        log(tag, '  payday focus:', (await pg.inner_text('#evCard .fsec')).replace('\n', ' | ')[:160])
+    s = await wait_idle(pg)
+    while s['card']:
+        ok = pg.locator('#evCard button[data-o="ok"]')
+        if await ok.count(): await ok.first.click()
+        else: await handle_card(pg, rnd, tag, s)
+        s = await wait_idle(pg)
+    # 5) mentor level from the ❓ menu → pro: no hint button any more
+    await pg.locator('#helpBtn:visible, #helpBtnM:visible').first.click(); await pg.wait_for_selector('#gm:not([hidden]) [data-h="mentor"]', timeout=10000)
+    await pg.click('#gm [data-h="mentor"]'); await pg.wait_for_selector('#gm:not([hidden]) [data-lv="pro"]', timeout=10000)
+    await pg.wait_for_timeout(300); await pg.screenshot(path=f'{SHOTS}/{PFX}mentor_level{sfx}.png')
+    await pg.click('#gm [data-lv="pro"]'); await pg.wait_for_selector('#gm:not([hidden]) .acts button.primary', timeout=10000)
+    await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(600)
+    st3 = await pg.evaluate(SAVE_JS, 'rr2-save-free-w2'); assert st3['mentor'] == 'pro', 'mentor level not changed: %s' % st3['mentor']
+    s = await find_dd_deal(pg, 'w2', tag)
+    assert await pg.locator('#evCard [data-hint]').count() == 0, 'pro: no hint button'
+    await pg.click('#evCard button[data-o="pass"]'); await wait_idle(pg)
+    # 6) end screen (pro): win fast with a test asset, then the fallback end card carries the open analysis
+    await pg.click('#homeBtn'); await pg.wait_for_selector('#fbCont', timeout=20000)
+    await pg.evaluate("""() => { const k='rr2-save-free-w2'; const s=JSON.parse(localStorage.getItem(k));
+       s.state.pending = null; s.state.phase = 'roll';
+       s.state.assets.push({id:99,k:'biz',n:'מכונת כסף (בדיקה)',cost:1000,down:1000,debt:0,value:1000,month:1,ups:0,cf:9999999}); s.state.nextId=100;
+       localStorage.setItem(k, JSON.stringify(s)); }""")
+    await pg.click('#fbCont')
+    await pg.wait_for_function("() => !document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden", timeout=120000)
+    for k in range(60):
+        s = await wait_idle(pg)
+        if s['start']: break
+        if s['card']:
+            ok = pg.locator('#evCard button[data-o="ok"], #evCard button[data-o="pass"], #evCard button[data-o="skip"]')
+            if await ok.count(): await ok.first.click()
+            else: await handle_card(pg, rnd, tag, s)
+            await pg.wait_for_timeout(300); continue
+        await pg.click('#roll')
+    await pg.wait_for_selector('.fb.end .end-analysis', timeout=120000)
+    assert await pg.evaluate("() => document.querySelector('.end-analysis').open"), 'pro: the analysis opens by itself'
+    await pg.locator('.end-analysis').scroll_into_view_if_needed(); await pg.wait_for_timeout(400)
+    log(tag, '  end analysis:', (await pg.inner_text('.end-analysis')).replace('\n', ' | ')[:300])
+    await pg.screenshot(path=f'{SHOTS}/{PFX}end_pro{sfx}.png', full_page=True)
+    await ctx.close()
+    # 7) w1 'guide' game: unchanged — a highlighted option with keyboard focus on it
+    ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone)
+    pg = await ctx.new_page(); attach(pg, tag + '-w1'); await pg.goto(BASE)
+    await pg.evaluate("() => localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true}))")
+    await start_world(pg, 'w1', 0)
+    s = await wait_idle(pg)
+    while s['card']: await handle_card(pg, rnd, tag, s); s = await wait_idle(pg)
+    assert (await pg.evaluate(SAVE_JS, 'rr2-save-free-w1'))['mentor'] == 'guide', 'w1 default mentor must be guide'
+    found = False
+    for i in range(10):
+        s = await force_card(pg, 'w1', 'O', {'cash': 50000}, 'deal')
+        if s['card'] and s['type'] == 'deal' and await pg.locator('#evCard button.primary[data-o]').count():
+            await pg.wait_for_timeout(500)
+            foc = await pg.evaluate("() => document.activeElement && document.activeElement.classList.contains('primary')")
+            assert foc, 'guide: keyboard focus on the highlighted option'
+            await pg.screenshot(path=f'{SHOTS}/{PFX}w1_guide_deal{sfx}.png'); found = True
+            await pg.locator('#evCard button.primary[data-o]').first.click(); await wait_idle(pg); break
+        if s['card']: await handle_card(pg, rnd, tag, s); await wait_idle(pg)
+    assert found, 'guide: no deal card with a highlighted option'
+    log(tag, 'next-level UI checks passed')
+    STATS['nextlevel' + sfx] = 1
+    await ctx.close()
+
 async def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     worlds = (args[0] if args else 'w1,w2,w3,w4').split(',')
@@ -511,6 +682,7 @@ async def main():
         if '--end' in sys.argv: await test_end(b)
         if '--bail' in sys.argv: await test_bailout(b, phone)
         if '--tut' in sys.argv: await test_tutorial(b, phone)
+        if '--nl' in sys.argv: await test_nextlevel(b, phone)
         if '--nov32' not in sys.argv: await test_v32(b, phone)
         if '--noplay' not in sys.argv:
             for w in worlds:

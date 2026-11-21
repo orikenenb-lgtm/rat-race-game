@@ -330,7 +330,8 @@ async def s4(p):
     await pg.click('#homeBtn'); await pg.wait_for_selector('#fbCont', timeout=30000)
     await pg.click('#fbCont'); await wait_playable(pg)
     n_apt2 = len(glb_reqs(c, 0, 'apartment'))
-    check(sc, 'A-6 failed GLB requested again at the next start', n_apt2 > n_apt1 > n_apt0 >= 1, f'{n_apt0}/{n_apt1}/{n_apt2}')
+    # T5 CR-B6: the boot no longer loads world 1 (n_apt0 = 0); the first start requests it, the next start requests the failed file again
+    check(sc, 'A-6 failed GLB requested again at the next start', n_apt2 > n_apt1 >= 1 and n_apt0 <= 1, f'{n_apt0}/{n_apt1}/{n_apt2}')
     no_percent_and_monotonic(sc, await samples(pg))
     errors_ok(sc, c)
     await shot(pg, 'glb404_3d')
