@@ -1,8 +1,8 @@
 // UI-layer feature flags. NEVER imported by engine.js or anything it imports (that would change the verify pin).
 // Sources, low → high: DEFAULTS < localStorage['rr2-flags'] (JSON object) < URL ?ff= (comma list: name:value, bare name = true,
 // -name = false). Values outside ALLOWED are ignored, corrupt JSON is ignored. Nothing is read at import time (Node tests).
-export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true });
-const ALLOWED = { board2d: ['auto', 'on', 'off'], recover: [true, false] };
+export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true, rivals: false, rewind: false, recap2: false, afterwin: false });
+const ALLOWED = { board2d: ['auto', 'on', 'off'], recover: [true, false], rivals: [true, false], rewind: [true, false], recap2: [true, false], afterwin: [true, false] };
 const KEY = 'rr2-flags';
 let F = null;
 let SRC = null; // test override: {search, storage}
@@ -51,3 +51,11 @@ export function flag(name) { if (!F) F = load(); return F[name]; }
 export function allFlags() { if (!F) F = load(); return { ...F }; }
 /** Node tests: re-read from {search, storage} (storage = object with getItem, or the raw JSON string). */
 export function _resetForTests(src = {}) { SRC = src; F = null; }
+
+/** T6 §8.1: practice-only features are off in every ranked game, whatever ?ff= or rr2-flags say. */
+export const PRACTICE_ONLY = new Set(['rewind', 'afterwin']);
+export const RANKED_MODES = new Set(['daily', 'weekly', 'challenge']);
+/** A ranked config: a daily / weekly / group challenge, or anything that carries a server result id. */
+export function isRankedCfg(cfg) { return !!(cfg && (RANKED_MODES.has(cfg.mode) || cfg.resultId)); }
+/** flag(name) for a game config: PRACTICE_ONLY flags are forced false for ranked configs. */
+export function flagFor(name, cfg) { if (PRACTICE_ONLY.has(name) && isRankedCfg(cfg)) return false; return flag(name); }

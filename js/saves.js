@@ -10,7 +10,8 @@ const SLOT = 'rr2-save-';
 const PENDING = 'rr2-pending-finish';
 /** keys the boot sweep checks besides the save slots: [key, kind] (obj = must be a JSON object, any = any JSON). */
 const SWEEP_KEYS = [['rr2-progress', 'obj'], ['rr-player', 'obj'], [PENDING, 'arr'], ['rr2-energy', 'any'], ['rr2-library', 'any'], ['rr2-settings', 'any'],
-  ['rr2-coach', 'any'], ['rr2-fallback', 'any'], ['rr2-flags', 'any'], ['rr2-seen-chal', 'any'], ['rr2-quiz-credit', 'any']];
+  ['rr2-coach', 'any'], ['rr2-fallback', 'any'], ['rr2-flags', 'any'], ['rr2-seen-chal', 'any'], ['rr2-quiz-credit', 'any'],
+  ['rr2-ghosts', 'arr'], ['rr2-branches', 'arr'], ['rr2-last-game', 'obj']];   // T6 §11.2 note 8 (rr2-ghosts is evictable; branch saves are rr2-save-branch-<w>)
 /** never evicted to make room */
 const NEVER_EVICT = /^(rr2-save-|rr2-progress$|rr-player$|rr2-pending-finish$|rr2-energy$)/;
 
