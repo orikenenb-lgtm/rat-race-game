@@ -504,3 +504,33 @@ Run: `bash tests/serve_copies.sh && python3 tests/stability_e2e.py [--only=S1,S7
 3. Full revert of the T1 commits. Data stays safe: wrapper v3 is read by the old `game.js` (it uses only `.cfg`/`.state`). `rr2-bak:*` / `rr2-quarantine:*` are ignored by old code (dead weight ≤ 256 KB). Known limitation: the old code again deletes future-version saves and keeps the history-key bug. That is exactly what T1 fixes, and it is why a revert should be the last resort.
 
 **Definition of done:** A-1…A-33 for every P0 (and each P1, or the P1 listed as cut with a reason). New and existing unit suites green. `tests/stability_e2e.py` green without `--slow`. A short note appended to `docs/next-level/TASK_BOARD.md` rows NL-02/NL-03 by the task manager (not by the implementer, unless told to).
+
+---
+
+## Implementation notes (T1 implementer, 2026-11-21)
+
+**Director decisions applied.** All T1 styles live in the new `css/stability.css`, linked from `index.html`. Nothing is injected from JS, so §0 rule 4 and the `#t1-overlay-css` / `#t1-b2d-css` ids are superseded. 2D → 3D goes through a page reload. `lobby.js` has only the §4.8 edits.
+
+**Files.** New: `js/flags.js`, `js/saves.js`, `js/render/{select,null,board2d,overlay}.js`, `css/stability.css`, `tests/{saves,flags,render_api}.test.mjs`, `tests/stability_e2e.py`, `tests/fixtures/make_saves.mjs`. Edited: `index.html`, `js/main.js`, `js/game.js`, `js/scene.js` (seams only), `js/lobby.js` (§4.8 lines). Not touched: `js/ui.js`, `css/game.css`, `css/lobby.css`, `js/engine.js` and its import graph.
+
+**Where the code differs from the spec, and why**
+1. `preferredChoice()` checks flag `board2d=off` before the `lite` setting, so `off` really means "never 2D". `#liteBtn` is hidden when the flag is `off`.
+2. Flow errors caught locally are re-thrown asynchronously, marked `__rrHandled`. They stay visible as uncaught errors in devtools and monitoring, and the global handler skips them. This is why A-15 sees exactly 1 page error.
+3. The global `error`/`unhandledrejection` handler does not show the bar after one check at `STUCK_CHECK_MS`. It checks a second time, and it keeps a flow-progress counter, so a long but healthy await (a slow 3D dice throw) doesn't raise a false bar. It never fires while a card, `#gm`, `#story` or `#coach` is open.
+4. The card choice callback (`resolveCard` → `onChoose`) is wrapped too. A throw there used to leave the card stuck in "busy".
+5. `loadGLB`: a rejected promise leaves the cache one tick later (`setTimeout 0`). The immediate `classic` fallback in `setPawn` then reuses it instead of firing a duplicate request. The next start still retries (A-6).
+6. `preloadWorld`/`preloadLife`/`preloadDice(onProgress)` count only the files that are not loaded yet, so `N` is the number of real requests (A-11). `preloadDice` gained the optional `onProgress` param.
+7. A start that waited for init in the same start does not re-request world-1 (or history) files that just failed in that init. Otherwise one hanging GLB would cost 2 × `GLB_TIMEOUT_MS` (A-5).
+8. If init is still pending and the target world isn't w1, the models stage `N` includes that world's files, computed after the renderer stage through `scene.worldModelNames` (3D-only, called with `.call` because it is outside `SCENE_API`). The bar is also clamped monotonic.
+9. The stage overlay appears only when the renderer, models or life stage is pending. The board stage alone takes milliseconds, so this avoids a flash on every start (the same rule as before T1).
+10. `saves.js` additions: `classifyState(state)` for the ranked server checkpoint, `peek(key)`, and `STR` (the save messages). `backup()` stores identical raws once (newest reason). `write()` checks each slot once per page: a future save is backed up before its first overwrite, and the write is refused if that backup fails.
+11. `clear()` keeps the slot when its backup fails (strict "never delete without a backup"). The next `claimSlot` then shows S-S6. When `claimSlot` can't back up a **future** save, S-S6 offers only "חזרה ללובי".
+12. Ranked: a corrupt or incompatible server checkpoint always gives S-S5 and `false`, even when a local save of the same seed exists. This is the conservative choice.
+13. S-L7 and its button sit in `#bootSlow`. `overlay.hideLoading()` removes it, so it never shows up again at a later start.
+14. Renderer notices (S-N1…N7) are shown by `game.js` after the board is on screen, not by `main.js`.
+
+15. **T5 change requests applied.** CR-S1: `doInit()` calls `initMotion()`; `reducedMotion()` goes to `scene.setMotion?.()` and `ui.setMotion?.()` and follows bus `motion:change`. The 3D scene has no `setMotion`, so `game.js` skips camera shake itself (`fxShake`). `board2d.js` reads `reducedMotion()` (the motion half of CR-R1). CR-S2: `#liteBtn` is hidden at ≤ 600 px (`css/stability.css`), and on phones in 3D the S-R1 bar also offers "להמשיך במצב קל". מצב קל is still reachable through S-N7, S-R2/S-R3 and the start error panel. A lobby settings entry could call `game.setLite(true)`. Verified at 360 and 390 px: row 1 no longer overflows. Making the remaining tool buttons 44×44 is left to the `game.css` owner.
+
+**Engine compatibility.** Every version check uses `E.SAVE_VERSION`. The unit suites passed against the engine lane's v4 working tree (`SAVE_VERSION = 4`, `migrateV3`). The e2e suite passed on the committed v3 engine and on the shared checkout (see the final report). The v4 `deserialize` seen in the working tree still throws `save_incompatible` for `v > SAVE_VERSION` (no distinct `save_future`, IR-2) and has no `MIN_SAVE_VERSION` (IR-3). T1 doesn't depend on either, because it pre-checks the version. Unknown worlds already map to `save_incompatible`, and `v4Defaults` runs at every load (IR-4).
+
+**Tests.** `node tests/saves.test.mjs` (90), `node tests/flags.test.mjs` (10), `node tests/render_api.test.mjs` (176: T-api, T-graph, T-history-keys). `python3 tests/stability_e2e.py [--slow]`: scenarios S0 (A-14 boot watchdog, an extra one) and S1–S12. `S5` also covers A-27, and `S7` also covers A-19.
