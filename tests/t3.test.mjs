@@ -559,5 +559,15 @@ test('review M3: side s1 — reporting is the better choice for every character 
   const st = E.createGame({ worldId: 'w2', seed: 31 }); st.life.plan = 'side'; st.econ = null; st.pos = 9; st.phase = 'roll'; E.rollDice(st);
   assert.ok(st.life.sideFeeDue === E.getWorld('w2').sideReportFee || st.life.sideTaxDue === 0);
 });
+test('review M4: the career warn card shows the real next-payday burnout chance (= the HUD), and the evaluator flags pushOn from the same numbers', () => {
+  for (const [plan, energy] of [['side', 30], ['overtime', 30], ['work', 20], ['study', 26], ['work', 50]]) {
+    const st = forced('w2', 'career', 'warn', { prep: (s) => { s.life.plan = plan; s.life.energy = energy; } });
+    const card = E.inbox(st)[0]; const hud = Math.round(E.metrics(st).life.burnoutRisk * 100);
+    const m = /בחודש הבא — (\d+)%\. ואם תמשיכי? כך עוד חודש: (\d+)%/.exec(card.hint); assert.ok(m, card.hint);
+    assert.equal(+m[1], hud, `${plan}/${energy}: card ${m[1]}% = HUD ${hud}%`);
+    const flagged = E.scoreStory(st, card).find((x) => x.id === 'pushOn').flags.includes('burnout');
+    assert.equal(flagged, Math.max(+m[1], +m[2]) >= 25, `${plan}/${energy}: the flag follows the shown odds`);
+  }
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

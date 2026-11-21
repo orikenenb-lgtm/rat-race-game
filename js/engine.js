@@ -672,7 +672,7 @@ function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, ac
     realCash: Math.round(st.cash / L.cpi), realNetWorth: Math.round(netWorth / L.cpi),
     studyProgress: L.study.done ? 1 : round2(L.study.months / L.study.need), studyDone: L.study.done, sideLevel: L.plan === 'side' || L.side.months ? sideLevel(L) : 0, sideMonths: L.side.months,
     family: { ...L.family, text: familyText(L.family) }, freeTimeMonths: L.planMonths.rest, burnouts: L.burnouts, jobless: !!(L.jobless && L.jobless.until >= st.month),
-    burnoutRisk: L.energy < LIFE_CFG.burnoutBelow ? round2(burnoutChance(L.energy)) : 0, autoInvest: L.autoInvest,
+    burnoutRisk: round2(burnoutOdds(st).next), autoInvest: L.autoInvest,
     raiseEligible: raiseEligible(st), raiseChance: raiseEligible(st) ? round2(raiseChance(st)) : 0,
   };
   const index = { projection: indexProjection(st), maxBuy: st.prices.IDX > 0 ? Math.floor(st.cash / st.prices.IDX) : 0, ticker: 'IDX', price: st.prices.IDX, qty: idxH ? idxH.qty : 0, value: idxH ? Math.round(idxH.qty * st.prices.IDX) : 0, avg: idxH && idxH.qty ? round2(idxH.basis / idxH.qty) : 0,
@@ -1008,6 +1008,11 @@ function focusRollover(st, out) {
 }
 
 /* ---------------------------------------------------------------- v3 monthly life update (inside payday, after cash) */
+/**
+ * T3 review M4: ONE burnout-odds source for the career card, the HUD and the evaluator. next = the real chance at the next payday
+ * (the draw uses the energy you have then = now); after = the chance one payday later if you keep this plan (projected energy).
+ */
+function burnoutOdds(st) { const L = st.life; const proj = Math.max(0, L.energy + PLANS[L.plan].energy - (L.plan === 'work' || L.plan === 'overtime' ? (L.workLoad || 0) * 4 : 0)); return { next: burnoutChance(L.energy), after: burnoutChance(proj) }; }
 function burnoutChance(energy) { const C = LIFE_CFG; return energy >= C.burnoutBelow ? 0 : clamp(C.burnoutBase + (C.burnoutBelow - energy) * C.burnoutSlope, 0, 0.95); }
 function creditScore(st, d) { const L = st.life; L.creditScore = clamp(Math.round(L.creditScore + d), 300, 850); }
 function happyNow(st) { const L = st.life; return clamp(L.happiness + L.glow.reduce((s, g) => s + g.amt, 0), 0, 100); }
@@ -3535,7 +3540,7 @@ function storyVars(st, chainId, item) {
     lease: fmtM(lease ? lease.amount : d.leaseAmt || 0), leaseNew: fmtM(r10(0.12 * S0)), extra: fmtM(chainId === 'friend' ? r100(0.5 * S0) : r10(0.02 * S0)),
     rent: fmtM(rent), raise: fmtM(chainId === 'move' && item && item.step === 'm2renew' ? r10(rent * raisePct / 100) : r10(0.03 * S0)), raisePct: String(raisePct),
     share: String(Math.round((rent || (h.line ? h.line.amount : 0)) / net * 100)), inflLast: String(inflLast),
-    energy: String(Math.round(L.energy)), months: String(Math.max(1, L.planMonths.work + L.planMonths.overtime)), pBurn: String(Math.round(burnoutChance(Math.max(0, L.energy + PLANS[L.plan].energy - (L.plan === 'work' || L.plan === 'overtime' ? L.workLoad * 4 : 0))) * 100)),
+    energy: String(Math.round(L.energy)), months: String(Math.max(1, L.planMonths.work + L.planMonths.overtime)), pBurn: String(Math.round(burnoutOdds(st).next * 100)), pBurn2: String(Math.round(burnoutOdds(st).after * 100)),
     cushion: (Math.round((st.cash + (st.savings || 0)) / E * 10) / 10).toFixed(1),
     due12: fmtM(r100(sideExpected(st) * marginalRate(grossBase(st)) * 12 * 1.1)), first: fmtM(d.first || sideExpected(st)), avg: fmtM(L.side.months ? r10(L.side.total / Math.max(1, L.side.months)) : sideExpected(st)), cost: fmtM(r100(0.3 * S0)),
     amount: fmtM(d.amount || r100(S0)), risk: fmtM(d.risk || r100(1.5 * S0)), name: fname,
@@ -4003,7 +4008,7 @@ function storyScores(st, ev) {
     const after = (ctx.cash + ctx.savings + (e.cash || 0) + (o.loanAmount || 0)) / E;
     if (after < 1 && (e.cash || 0) < 0) flags.push('noCushion');
     if (e.risk && e.risk.amount > ctx.cash + ctx.savings) flags.push('exposure');
-    if (ev.chain === 'career' && ev.step === 'warn' && o.id === 'pushOn' && burnoutChance(Math.max(0, ctx.energy - 4)) >= 0.25) flags.push('burnout');
+    if (ev.chain === 'career' && ev.step === 'warn' && o.id === 'pushOn' && Math.max(burnoutOdds(st).next, burnoutOdds(st).after) >= 0.25) flags.push('burnout'); // the same numbers the card shows (M4)
     if (ev.chain === 'crisis' && ev.step === 'c1' && o.id === 'sell' && ctx.idxPrice < 0.92 * (ctx.idxPeak || ctx.idxPrice)) flags.push('panicSell');
     const money = ev.kind === 'biz' ? (e.total24 || 0) : (e.total24 ?? 0);
     let U;

@@ -125,7 +125,7 @@ export const CHAINS = {
     steps: {
       warn: { title: 'אות אזהרה',
         text: '{months} חודשים בלי הפסקה. הכוח שלך {energy}/100.',
-        hint: 'במשחק: הסיכוי להישחק בחודש הבא — {pBurn}%.',
+        hint: 'במשחק: הסיכוי להישחק בחודש הבא — {pBurn}%. ואם תמשיך כך עוד חודש: {pBurn2}%.',
         options: [
           { id: 'pushOn', label: 'להמשיך כרגיל', dq: 'mixed', default: true, next: [{ end: true, in: 0 }], lesson: ['burnout'] },
           { id: 'week', label: 'שבוע חופש', dq: 'mixed', fx: { cash: -0.3, energy: 12, happiness: 2 }, next: [{ end: true, in: 0 }], lesson: ['rest_value'] },
@@ -307,5 +307,5 @@ export const PATH_TEXT = {
 };
 /** Template keys a chain text may use — all derived from public state (U12). */
 export const VAR_ALLOW = ['S', 'fix', 'fix2', 'paid', 'paidNow', 'spent', 'ago', 'saved', 'lease', 'leaseNew', 'extra', 'rent', 'raise', 'raisePct', 'share', 'inflLast',
-  'energy', 'months', 'pBurn', 'cushion', 'due12', 'first', 'avg', 'cost', 'amount', 'risk', 'dd', 'idxValue', 'units', 'auto', 'unitsDuring', 'diff', 'back', 'pathLine',
+  'energy', 'months', 'pBurn', 'pBurn2', 'cushion', 'due12', 'first', 'avg', 'cost', 'amount', 'risk', 'dd', 'idxValue', 'units', 'auto', 'unitsDuring', 'diff', 'back', 'pathLine',
   'name', 'rememberMove', 'rememberFriend', 'rememberF2', 'f2line', 'repair', 'repair2', 'debtLine', 'bizName', 'bizCash', 'raiseP', 'cf', 'netUp', 'energyAvg', 'label', 'n'];
