@@ -4,7 +4,20 @@
 export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actions; generous cap keeps replay < 1 s CPU
 export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
-const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T']); // = the cases of engine.js replay()
+const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M']); // = the cases of engine.js replay()
+/** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3. */
+export const RULES4_FROM = '2026-12-01';
+/** YYYY-MM-DD from a date-ish key ('2026-11-30', '20261130', a Date) or null. */
+function isoDay(v) {
+  if (v == null) return null;
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(String(v)); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+/** Legacy games (daily/weekly/challenge started before RULES4_FROM) replay with the pre-T2 rules. */
+export function rulesFor(row) {
+  const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
+  return day && day < RULES4_FROM ? 3 : 4;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class VerifyError extends Error { constructor(code, status = 400) { super(code); this.code = code; this.status = status; } }
@@ -53,7 +66,7 @@ export function configFor(E, row) {
   else throw new VerifyError('bad_char', 422);
   const seed = Number(row.seed);
   if (!Number.isFinite(seed)) throw new VerifyError('bad_seed', 422);
-  const cfg = { worldId: world.id, charId, seed, mode: row.mode, tutorial: false, bailout: false };
+  const cfg = { worldId: world.id, charId, seed, mode: row.mode, tutorial: false, bailout: false, mentor: 'hint', rules: rulesFor(row) };
   if (row.max_months != null) cfg.maxMonths = +row.max_months;
   return cfg;
 }
