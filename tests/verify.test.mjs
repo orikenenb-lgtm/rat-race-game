@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { collect, bundleText, sha256 } from '../tools/build-edge.mjs';
 import { loadEngine } from '../supabase/functions/verify-result/engine_loader.js';
-import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine } from '../supabase/functions/verify-result/verify_core.js';
+import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM } from '../supabase/functions/verify-result/verify_core.js';
 import * as Local from '../js/engine.js';
 import { playOut, prng } from './lib/random-player.mjs';
 
@@ -20,7 +20,7 @@ async function test(name, fn) {
 /** The server row a ranked game produces (rr_begin + rr_finish), from the client's final state. */
 function rowFor(E, st, { mode, profession, seed }) {
   const end = normalize(st.result);
-  return { mode, world: st.worldId, profession, seed: String(seed), max_months: mode === 'daily' ? 24 : null,
+  return { mode, world: st.worldId, profession, seed: String(seed), max_months: mode === 'daily' ? 24 : null, daily_key: mode === 'daily' ? '2026-12-02' : null, weekly_start: mode === 'weekly' ? '2026-12-07' : null, challenge_day: mode === 'challenge' ? '2026-12-05' : null,
     status: end.status, months: end.months, passive: end.passive, expenses: end.expenses, net_worth: end.netWorth,
     claim_stars: st.result.stars || 0, claim_progress: st.result.progress ?? null };
 }
@@ -45,7 +45,7 @@ await test(`honest ranked games verify (${GAMES} games: daily / weekly / challen
     if (mode === 'challenge') { charId = w.characters[i % w.characters.length].id; profession = charId; }
     else { const idx = (i * 7) % 3; profession = 'idx:' + idx; charId = dailyCharId(w, idx); }
     const cfg = { worldId: w.id, charId, seed, mode, maxMonths: mode === 'daily' ? 24 : undefined, tutorial: false, bailout: false };
-    const st = playOut(Local, cfg, prng(seed ^ 0x5bd1e995));
+    const st = playOut(Local, cfg, prng(seed ^ 0x5bd1e995), { v4: true });
     assert.ok(st.over, 'game ended');
     const row = rowFor(Local, st, { mode, profession, seed });
     const t0 = performance.now(); const out = verifyGame(E, row, st.actions); ms = Math.max(ms, performance.now() - t0);
@@ -99,7 +99,7 @@ await test('tampered / foreign action logs are rejected (edited decision, droppe
 await test('replay config comes only from the server row (client cannot pick seed / bailout / tutorial / month limit)', async () => {
   const w = E.getWorld('w2');
   const c = configFor(E, { mode: 'daily', world: 'w2', profession: 'idx:4', seed: '123', max_months: 24, bailout: true, tutorial: true });
-  assert.deepEqual(c, { worldId: 'w2', charId: dailyCharId(w, 4), seed: 123, mode: 'daily', tutorial: false, bailout: false, maxMonths: 24 });
+  assert.deepEqual(c, { worldId: 'w2', charId: dailyCharId(w, 4), seed: 123, mode: 'daily', tutorial: false, bailout: false, mentor: 'hint', rules: 4, maxMonths: 24 });
   assert.throws(() => configFor(E, { mode: 'free', world: 'w1', profession: 'idx:0', seed: '1' }), /unsupported_mode/);
   assert.throws(() => configFor(E, { mode: 'weekly', world: 'w9', profession: 'idx:0', seed: '1' }), /bad_world/);
   assert.throws(() => configFor(E, { mode: 'challenge', world: 'w1', profession: 'hacker', seed: '1' }), /bad_char/);
@@ -127,6 +127,26 @@ await test('every action code the engine replays is accepted (S = savings, T = s
   assert.ok(codes.length >= 11, 'found the replay switch: ' + codes.join(''));
   for (const c of codes) assert.ok(validateActions([[c, 'x']]), c);
   assert.ok(validateActions([['S', 1500], ['S', -500], ['T', true], ['T', false]]));
+});
+
+await test('T17: F/H/M are accepted codes; rulesFor maps a legacy day to rules 3; a rules-3 ranked log replays and verifies; an M entry in a ranked log is rejected', async () => {
+  assert.ok(validateActions([['F', 'scout', 0], ['F', 'none', 2], ['H'], ['M', 'pro']]));
+  assert.equal(RULES4_FROM, '2026-12-01');
+  assert.equal(rulesFor({ daily_key: '2026-11-30' }), 3); assert.equal(rulesFor({ daily_key: '2026-12-01' }), 4); assert.equal(rulesFor({ weekly_start: '2026-11-23' }), 3);
+  assert.equal(rulesFor({ challenge_day: '2026-12-09' }), 4); assert.equal(rulesFor({ daily_key: '20261129' }), 3); assert.equal(rulesFor({}), 4);
+  assert.equal(configFor(E, { mode: 'weekly', world: 'w1', profession: 'idx:0', seed: '5', weekly_start: '2026-11-16' }).rules, 3);
+  // a game started under v3 rules (before the release day) replays with rules 3 and verifies
+  const w = Local.getWorld('w3'); const charId = dailyCharId(w, 1);
+  const st = playOut(Local, { worldId: 'w3', charId, seed: 4242, mode: 'daily', maxMonths: 24, tutorial: false, bailout: false, rules: 3 }, prng(77));
+  assert.equal(st.rules, 3);
+  const row = { ...rowFor(Local, st, { mode: 'daily', profession: 'idx:1', seed: 4242 }), daily_key: '2026-11-28' };
+  const out = verifyGame(E, row, st.actions); assert.ok(out.ok, out.error); assert.equal(out.cfg.rules, 3);
+  assert.equal(verifyGame(E, { ...row, daily_key: '2026-12-02' }, st.actions).ok, false, 'the same log under rules 4 does not verify');
+  // a v4 ranked game with hints and focus verifies; an M entry is rejected (setMentorLevel refuses in ranked modes)
+  const g = games.find((x) => x.st.actions.some((a) => a[0] === 'F' || a[0] === 'H')) || games[0];
+  const acts = g.st.actions.slice(); const at = acts.findIndex((a) => a[0] === 'r');
+  acts.splice(at, 0, ['M', 'pro']);
+  const bad = verifyGame(E, g.row, acts); assert.equal(bad.ok, false); assert.match(bad.error, /^replay:/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
