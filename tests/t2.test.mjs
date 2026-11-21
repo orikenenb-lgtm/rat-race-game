@@ -82,7 +82,7 @@ test('T2+T3 fixed draws: decisions (inspect, focus, hints, offers, mentor level)
     let deals = 0, paydays = 0;
     for (let t = 0; t < 70; t++) {
       revive(a); revive(b);
-      if (t % 3 === 0) { E.setFocus(a, ['scout', 'network', 'research', 'frugal'][t % 4], 0); E.setFocus(a, 'scout', 1); }
+      if (t % 3 === 0) { E.setFocus(a, ['scout', 'network', 'research', 'frugal'][t % 4], 0); revive(a); E.setFocus(a, 'scout', 1); revive(a); }
       if (t === 10) E.setMentorLevel(a, 'hint');
       const dd0 = a.rng.dd; const ra = E.rollDice(a); const rb = E.rollDice(b);
       assert.deepEqual(ra.dice, rb.dice); paydays += ra.paydays.length;

@@ -12,7 +12,7 @@ export const PHASE_LABEL = Object.freeze({ exp: 'צמיחה', slow: 'האטה', 
 const NEXT = { exp: 'slow', slow: 'rec', rec: 'recov', recov: 'exp' };
 export const SCORE = Object.freeze({ exp: 80, slow: 52, rec: 20, recov: 42 });
 
-const GENTLE = { minLen: { exp: 12, slow: 3, rec: 3, recov: 3 }, pAdv: { exp: 0.07, slow: 0.30, rec: 0.40, recov: 0.35 }, soft: 0.60, init: [0.70, 0.20, 0, 0.10], amp: 0.5, swaps: false };
+const GENTLE = { minLen: { exp: 12, slow: 3, rec: 3, recov: 3 }, pAdv: { exp: 0.07, slow: 0.30, rec: 0.40, recov: 0.35 }, soft: 0.60, init: [0.70, 0.20, 0, 0.10], amp: 0.5, swaps: false }; // (amp 0.7 was tried in tuning: no measurable effect)
 const NORMAL = { minLen: { exp: 8, slow: 3, rec: 4, recov: 3 }, pAdv: { exp: 0.10, slow: 0.30, rec: 0.30, recov: 0.35 }, soft: 0.35, init: [0.55, 0.20, 0.10, 0.15], amp: 1.0, swaps: true };
 const CFG = { w1: GENTLE, w2: NORMAL, w3: NORMAL, w4: { ...NORMAL, amp: 1.1 }, h: NORMAL };
 

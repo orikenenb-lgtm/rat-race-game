@@ -9,12 +9,15 @@ const RISKS = [0, 1, 2, 3];
 
 const LIKE = [[0.75, 0.22, 0.03], [0.45, 0.45, 0.10], [0.15, 0.50, 0.35], [0.05, 0.30, 0.65]]; // P(k flags | r), shared
 const CF_GENTLE = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [0.10, 0.80]];
+const CF_W1 = [[0.95, 1.05], [0.82, 1.04], [0.45, 1.00], [-0.10, 0.75]];
 const CF_HARD = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [-0.40, 0.80]];
 const NOI_W2 = [[0.97, 1.03], [0.90, 1.03], [0.75, 1.00], [0.55, 0.95]];
 const VF = [[0.97, 1.03], [0.92, 1.02], [0.82, 1.00], [0.65, 0.95]];
 const REPAIR = [0.05, 0.20, 0.45, 0.75];
+// repair = down × (REP_MIN + REP_SPAN·u) when it happens (tuned, T2 §13.5 knob 1: spec 0.1 + 0.4u made big-down worlds punitive)
+const REP_MIN = 0.05, REP_SPAN = 0.25, REP_MEAN = REP_MIN + REP_SPAN / 2;
 const CFG = {
-  w1: { prior: [0.50, 0.33, 0.13, 0.04], cf: CF_GENTLE, minFee: 400 },
+  w1: { prior: [0.45, 0.32, 0.15, 0.08], cf: CF_W1, minFee: 400 }, // tuned (T2 §13.5 knob 1): believing the seller must cost something even in w1
   w2: { prior: [0.35, 0.35, 0.20, 0.10], cf: CF_GENTLE, noi: NOI_W2, minFee: 1500 },
   w3: { prior: [0.30, 0.32, 0.24, 0.14], cf: CF_HARD, minFee: 3000 },
   w4: { prior: [0.25, 0.30, 0.27, 0.18], cf: CF_HARD, minFee: 3000 },
@@ -68,7 +71,7 @@ export function drawDD(rs, card, worldId, opts = {}) {
   const f = round2(rng[0] + (rng[1] - rng[0]) * cfR);
   const vf = round2(VF[risk][0] + (VF[risk][1] - VF[risk][0]) * valueR);
   const ch = REPAIR[risk]; const down = Math.max(0, opts.down ?? (card ? card.down : 0) ?? 0);
-  const repair = repairR < ch ? r100(down * (0.1 + 0.4 * repairR / ch)) : 0;
+  const repair = repairR < ch ? r100(down * (REP_MIN + REP_SPAN * repairR / ch)) : 0;
   const dd = { risk, flags, f, vf, repair, jitter: jitterR, level: 0 };
   if (opts.noi) dd.noi = true;
   if (opts.golden) dd.golden = true;
@@ -92,8 +95,8 @@ for (const wid of Object.keys(CFG)) for (let k = 0; k <= 2; k++) {
   const C = CFG[wid]; const p = post(wid, k); const key = wid + ':' + k;
   POST[key] = p;
   const mean = (tab) => p.reduce((a, pr, r) => a + pr * (tab[r][0] + tab[r][1]) / 2, 0);
-  EXP[key] = { f: mean(C.cf), fNoi: C.noi ? mean(C.noi) : mean(C.cf), vf: mean(VF), rep: p.reduce((a, pr, r) => a + pr * REPAIR[r] * 0.3, 0),
-    byRisk: RISKS.map((r) => ({ r, p: p[r], f: (C.cf[r][0] + C.cf[r][1]) / 2, fNoi: C.noi ? (C.noi[r][0] + C.noi[r][1]) / 2 : (C.cf[r][0] + C.cf[r][1]) / 2, vf: (VF[r][0] + VF[r][1]) / 2, rep: REPAIR[r] * 0.3 })) };
+  EXP[key] = { f: mean(C.cf), fNoi: C.noi ? mean(C.noi) : mean(C.cf), vf: mean(VF), rep: p.reduce((a, pr, r) => a + pr * REPAIR[r] * REP_MEAN, 0),
+    byRisk: RISKS.map((r) => ({ r, p: p[r], f: (C.cf[r][0] + C.cf[r][1]) / 2, fNoi: C.noi ? (C.noi[r][0] + C.noi[r][1]) / 2 : (C.cf[r][0] + C.cf[r][1]) / 2, vf: (VF[r][0] + VF[r][1]) / 2, rep: REPAIR[r] * REP_MEAN })) };
   P10[key] = { f: p10Of(p, C.cf), fNoi: p10Of(p, C.noi || C.cf) };
 }
 
@@ -103,8 +106,8 @@ export function posterior(worldId, k) { return POST[(CFG[worldId] ? worldId : 'w
 export function expectFactors(worldId, k) { const e = EXP[(CFG[worldId] ? worldId : 'w1') + ':' + kOf(k)]; return { f: e.f, fNoi: e.fNoi, vf: e.vf, rep: e.rep, byRisk: e.byRisk.map((x) => ({ ...x })) }; }
 /** P10 of the cashflow factor given k flags (the "hard" impact scenario for unverified deals). */
 export function p10Factor(worldId, k, noi) { const e = P10[(CFG[worldId] ? worldId : 'w1') + ':' + kOf(k)]; return noi ? e.fNoi : e.f; }
-/** Expected repair share of the down payment once the level-1 bucket is known (repair = down × (0.1 + 0.4u)). */
-export const BUCKET_REP = Object.freeze({ none: 0, small: 0.125, big: 0.325 });
+/** Expected repair share of the down payment once the level-1 bucket is known (small < 15% of down: u < 0.4). */
+export const BUCKET_REP = Object.freeze({ none: 0, small: REP_MIN + REP_SPAN * 0.2, big: REP_MIN + REP_SPAN * 0.7 });
 
 /**
  * Level-1 range around the TRUE value (its position inside the range comes from the sealed jitter draw, so the range
