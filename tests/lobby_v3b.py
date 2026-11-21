@@ -301,7 +301,7 @@ async def learning_flow(b):
     check(await pg.evaluate("parseFloat(document.querySelector('.lr-bar.dq i').style.width)") == 78 and await pg.locator('.lr-bar.luck i.neg').count() == 1, 'bar widths: quality 78%, luck against you')
     check('המזל פחות' in L, 'one-line explanation from the engine')
     check('כדאי לחזק' in L and 'כרית ביטחון' in L, 'weakest principle (cushion 42%) shown')
-    check('הכי חזק' in L and 'זמן ואנרגיה' in L, 'strongest principle shown on the first game')
+    check('הכי חזק' in L and 'זמן וכוח' in L, 'strongest principle shown on the first game (T4 N12: "זמן וכוח")')
     check('בניין 4 דירות' in L, 'the decision worth rethinking is named')
     for name, vp, scheme in CONFIGS:
         await pg.set_viewport_size(vp); await pg.emulate_media(color_scheme=scheme); await pg.wait_for_timeout(300)
@@ -311,7 +311,8 @@ async def learning_flow(b):
     await pg.set_viewport_size(DESK); await pg.emulate_media(color_scheme='light')
     # v3.2: ★★★ also needs a 3-month emergency fund (world rules + end-screen explanation)
     await pg.evaluate("import('./js/lobby.js').then(m => m.openLobby({ k: 'world', id: 'w1' }))"); await pg.wait_for_selector('.wv-chars')
-    check('קרן חירום 3 חודשים' in await pg.inner_text('.wv-char .wv-th') and '😊 60' in await pg.inner_text('.wv-char .wv-th'), 'world rules: ★★★ needs 😊 60 + 🐷 3-month fund (from starThresholds)')
+    th = await pg.evaluate("document.querySelector('.wv-char .wv-th').textContent")   # T4 §5.1: the star block moved into "עוד פרטים" (S-K1)
+    check('קרן של 3 חודשים' in th and '😊 60' in th, 'world rules: ★★★ needs 😊 60 + 🛟 3-month fund (S-K1, from starThresholds)')
     await free_game(pg); await pg.evaluate("window.__stubEnd('won', 14, { stars: 2, happiness: 72, fundBlocked: true })"); await pg.wait_for_selector('.end-gate'); await pg.wait_for_timeout(600)
     g = await pg.inner_text('.end-gate')
     check('חסרה קרן חירום של 3 חודשים' in g and 'חופש שלא שורד משבר' in g and '✗' in g, f'end: fund gate explains the missing ★ ({g[:70]!r})')

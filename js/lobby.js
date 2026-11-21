@@ -475,7 +475,7 @@ const T4 = {
   M0: 'איך משחקים?', M1: '⭐ משחק רגיל', M2: 'כוכבים, הישגים ובונוסים. כל הטלה עולה ⚡ זריקה אחת.',
   M3: '🎓 תרגול חופשי', M4: 'בלי הגבלת זריקות. בלי כוכבים, הישגים ובונוסי ⚡. לנסות, לטעות וללמוד.',
   M5: (c, m) => `▶ להמשיך · ${c} · חודש ${m}`, M6: (c, m) => `▶ להמשיך בתרגול 🎓 · ${c} · חודש ${m}`, M8: '🎓 לתרגל בלי הגבלה',
-  K1: (t1, t2, t3) => `★ עד ${t1} חודשים · ★★ עד ${t2} · ★★★ עד ${t3}, וגם 😊 60 ו־🛟 קרן של 3 חודשים`,
+  K1: (t1, t2, t3, h = 60, f = 3) => `★ עד ${t1} חודשים · ★★ עד ${t2} · ★★★ עד ${t3}, וגם 😊 ${h} ו־🛟 קרן של ${f} חודשים`,
   K2: 'בסוף כל חודש חסר', K3f: ' (חיה מהמזומן)', K3m: ' (חי מהמזומן)', K4: 'בסוף כל חודש נשאר',
   Kgoal: (n) => `🎯 לצאת תוך ${n} חודשים`, Kmore: 'עוד פרטים ▾', Kless: 'פחות פרטים ▴', Kplay: 'לשחק ←',
   Knet: 'נטו בחודש', Kcash: 'מזומן בהתחלה', Kexp: 'הוצאות קבועות',
@@ -1095,7 +1095,7 @@ function charCard(w, c, d) {
   const exp = [...(c.expenses || [])].sort((a, b) => b[1] - a[1]).slice(0, 5);
   const did = `wvd-${w.id}-${c.id}`;
   const idl = identityLine(c);
-  return `<article class="wv-char" aria-labelledby="${did}-n">
+  return `<article class="wv-char" aria-labelledby="${did}-n" data-w="${w.id}" data-c="${c.id}">
     <div class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b id="${did}-n">${esc(c.name)}</b>${idl ? `<small class="wv-id">${esc(idl)}</small>` : ''}</span>${diffHtml(d || 2)}</div>
     <p class="wv-desc">${esc(c.desc || '')}</p>
     ${meta ? `<p class="wv-sw wv-str">💪 ${iso(meta.strength)}</p><p class="wv-sw wv-weak">⚠️ ${iso(meta.weakness)}</p>` : ''}
@@ -1105,7 +1105,7 @@ function charCard(w, c, d) {
       <div class="wv-nums"><span><small>${T4.Knet}</small><b>${iso(salary)}</b></span><span><small>${T4.Kcash}</small><b>${iso(fmtM(cc.cash))}</b></span></div>
       ${exp.length ? `<p class="wv-exph">${T4.Kexp}</p><ul class="wv-exp">${exp.map(([l, a]) => `<li><span>${esc(l)}</span><b>${iso(fmtM(a))}</b></li>`).join('')}</ul>` : ''}
       ${extras.length ? `<div class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</div>` : ''}
-      <p class="wv-th">${esc(T4.K1(T.maxMonths, T.t2, T.t3))}</p>
+      <p class="wv-th">${esc(T4.K1(T.maxMonths, T.t2, T.t3, int(T.happy, 60), int(T.fundMonths, 3)))}</p>
     </div>
     <div class="wv-acts"><button class="wv-more" data-act="char-more" aria-expanded="false" aria-controls="${did}">${T4.Kmore}</button><button class="primary wv-go" data-act="char" data-w="${w.id}" data-c="${c.id}" aria-label="${esc(T4.Kplay + ' ' + c.name)}">${T4.Kplay}</button></div>
   </article>`;
@@ -1945,6 +1945,9 @@ function install() {
   });
 }
 async function onClick(ev) {
+  // §5.1: the card is an <article> with two buttons; a tap on its plain area still plays (as the old whole-card button did)
+  const card = ev.target.closest('.wv-char');
+  if (card && !ev.target.closest('[data-act], .wv-details, a, input, label, summary')) { ev.preventDefault(); return startFree(card.dataset.w, card.dataset.c, { learn: modeNow() === 'learn' }); }
   const b = ev.target.closest('[data-act]'); if (!b || !root().contains(b)) return;
   const act = b.dataset.act; const id = b.dataset.id;
   if (b.tagName === 'A') { if (act === 'share') sfx('click'); return; }
