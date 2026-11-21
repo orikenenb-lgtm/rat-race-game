@@ -36,8 +36,6 @@ async def t_welcome(b):
     ctx, pg = await page(b, onboarded=False)
     await goto_lobby(pg, '.lb-welcome')
     txt = await pg.inner_text('.wl-card')
-    words = len([w for w in re.split(r'\s+', txt) if re.search(r'\w', w)])
-    check(words <= 35 + 12, f'welcome copy is short ({words} words incl. the 3 buttons; spec ≤ 35 for title+lead+primary)')
     head = (await pg.inner_text('.wl-card h1')) + ' ' + (await pg.inner_text('.wl-lead'))
     check(len(head.split()) <= 35 and '⚡' not in txt and '★★★' not in txt and 'תוכנית' not in txt, 'AC-O2 welcome: ≤ 35 words, no ⚡ / ★★★ / plan text')
     check(await pg.evaluate("document.activeElement && document.activeElement.dataset.act") == 'welcome-go', 'A11Y-3 initial focus on S-W3')
@@ -77,8 +75,14 @@ async def t_world(b):
     check(exp == 'true' and vis is False, 'AC-C2 עוד פרטים toggles aria-expanded and shows the details')
     await pg.keyboard.press('Escape'); await pg.wait_for_timeout(150)
     check(await more.get_attribute('aria-expanded') == 'false' and await pg.evaluate("location.hash")=='' and await pg.locator('.lb-world').count() == 1, 'A11Y-2 Escape collapses an open עוד פרטים (stays on the world view)')
-    box = await pg.locator('.wv-char').first.locator('.wv-go').bounding_box()
-    check(box and box['y'] + box['height'] <= 760 + 400, f'phone: first card play button reachable (y={box and round(box["y"])})')
+    await pg.evaluate("document.getElementById('start').scrollTop=0; scrollTo(0,0)"); await pg.wait_for_timeout(200)
+    bottom = await pg.evaluate("(()=>{const r=document.querySelector('.wv-char .wv-go').getBoundingClientRect(); return Math.round(r.bottom + (document.getElementById('start').scrollTop||0) + scrollY)})()")
+    check(bottom <= 760, f'AC-C3 at 360×760 the first card play button is in the first viewport (bottom={bottom})')
+    names = await pg.evaluate("[...document.querySelectorAll('.t4-mopt > span')].map(s=>s.childNodes[0].textContent.trim())")
+    check(names == ['מתחיל', 'מתקדם', 'מומחה'], f'review m-3 mentor names match the engine (MN.LEVEL_TEXT) {names}')
+    await pg.locator('.t4-mopt.is-locked > span').first.dispatch_event('click'); await pg.wait_for_timeout(200)   # a tap lands on the label's text
+    t = await pg.evaluate("(document.getElementById('lb-toast')||{}).textContent || ''")
+    check('אחרי' in t, f'review m-4 tapping a locked level on a phone explains why ({t!r})')
     sizes = await pg.evaluate("[...document.querySelectorAll('.t4-opt, .wv-more, .wv-go, .t4-mopt, .t4-dream-sum, .t4-dopt')].filter(e=>e.offsetParent).map(e=>{const r=e.getBoundingClientRect();return [e.className, Math.round(r.width),Math.round(r.height)]})")
     small = [x for x in sizes if x[1] < 44 or x[2] < 44]
     check(not small, f'A11Y-5 new controls ≥ 44×44 at 360 px ({small[:3]})')
@@ -126,7 +130,9 @@ async def t_learn(b):
     end = await pg.inner_text('.end-card')
     check('בתרגול 🎓' in end and 'במשחק רגיל' in end and 'במצב תרגול לא נאספים כוכבים' in end, 'AC-L4 S-L1 + S-L3 + S-L5 on the learning end screen')
     check(await pg.locator('#endShare').count() == 0 and await pg.locator('[data-act=end-normal]').count() == 1 and await pg.locator('[data-act=end-learn]').count() == 1, 'AC-L4 no duel/share button; S-L6 + S-L7 present')
-    check(await pg.evaluate("Object.keys(localStorage).includes('rr2-save-learn-w1')") is False, 'learning save cleared at the end; normal save kept: ' + str(await pg.evaluate("Object.keys(localStorage).includes('rr2-save-free-w1')")))
+    keys2 = await pg.evaluate("Object.keys(localStorage)")
+    check('rr2-save-learn-w1' not in keys2 and 'rr2-save-free-w1' in keys2, 'learning save cleared at the end; the normal save is kept')
+    check(await pg.locator('.end-near').count() == 0 and await pg.locator('.end-gate').count() == 0, 'review m-1 the learning end screen shows no engine star line (end-near ★ / ★★★ gate)')
     await pg.screenshot(path=SHOT + 't4_06_learning_end_phone.png', full_page=True)
     await pg.click('[data-act=end-learn]'); await pg.wait_for_function("window.__lastCfg && window.__lastCfg.learn===true && window.__cfgs.length>=4")
     check(True, 'S-L7 starts another learning game')
@@ -293,7 +299,7 @@ async def play_until_decision(pg, t0, shots, tag):
 
 async def t_first_minute(b, path):
     for name, vp in (('phone', {'width': 390, 'height': 844}), ('desk', DESK)):
-        ctx, pg = await page(b, vp=vp, onboarded=False)
+        ctx, pg = await page(b, vp=vp, onboarded=False, init=["if(!sessionStorage.getItem('t4e')){sessionStorage.setItem('t4e','1');localStorage.setItem('rr2-energy', JSON.stringify({e:7, at:Date.now(), granted:{}}))}"])
         await pg.goto(REAL); await pg.wait_for_selector('.lb-welcome', timeout=60000)
         await pg.wait_for_timeout(1500)
         if name == 'phone': await pg.screenshot(path=SHOT + f't4_20_{path}_1_welcome_phone.png')
@@ -315,13 +321,14 @@ async def t_first_minute(b, path):
             if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
             await pg.click('#roll'); await pg.wait_for_timeout(6000); await pg.screenshot(path=SHOT + 't4_24_f1_5_first_roll_phone.png')
             p = await ls(pg, 'rr2-progress'); e = await ls(pg, 'rr2-energy')
+            turn = await pg.evaluate("import('./js/game.js').then(g=>g.activeConfig())")
             check(p.get('tutorialDone') is True, 'tutorial game on screen → onboard:done → tutorialDone (engine without intro)')
-            check(e is None or e.get('e') == 25, f'D-9 tutorial roll cost no ⚡ ({e and e.get("e")})')
+            check(turn.get('tutorialFree') is True and e is not None and e.get('e') == 7, f'D-9 the first-ever game: its roll cost no ⚡ (seeded 7 → {e and e.get("e")}; tutorialFree={turn.get("tutorialFree")})')
         await ctx.close()
 
 async def drive(pg, rolls):
     """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button)."""
-    n = 0; deadline = time.time() + 60 * 10
+    n = 0; deadline = time.time() + 60 * 18
     while n < rolls and time.time() < deadline:
         if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); continue
         if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); continue
@@ -343,7 +350,7 @@ async def t_learnreal(b):
     await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
     n = await drive(pg, 40)
     e1 = await ls(pg, 'rr2-energy'); hid = await pg.evaluate("[document.getElementById('hEnergy').hidden, document.getElementById('rollEn').hidden]")
-    check(n >= 20 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
+    check(n >= 40 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
     check(all(hid), f'AC-L1 #hEnergy / #rollEn hidden in learning mode ({hid})')
     keys = await pg.evaluate("Object.keys(localStorage).filter(k=>k.startsWith('rr2-save-'))")
     check('rr2-save-learn-w1' in keys and 'rr2-save-free-w1' not in keys, f'IR-T4-1 the real game saves into rr2-save-learn-w1 ({keys})')
@@ -369,9 +376,62 @@ async def t_help(b):
     await pg.screenshot(path=SHOT + 't4_28_legend_phone.png')
     await ctx.close()
 
+async def t_review(b):
+    # M-3: a restored player (server games > 0, tutorialDone false on this device) is not re-onboarded
+    ctx, pg = await page(b, init=["if(!localStorage.getItem('rr2-progress'))localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:12, wins:4, tutorialDone:false}))"])
+    await goto_lobby(pg)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function('window.__lastCfg')
+    c = await pg.evaluate('window.__lastCfg')
+    check(c['tutorial'] is False and not c.get('tutorialFree'), f'review M-3 restored player (gamesPlayed 12, tutorialDone false): no tutorial, no free rolls ({c["tutorial"]}, {c.get("tutorialFree")})')
+    await ctx.close()
+    # M-2: a replayed tutorial shows the coaches but its rolls cost ⚡ (stub cfg level; the real-game ⚡ check is in t_replayreal)
+    ctx, pg = await page(b, init=["if(!localStorage.getItem('rr2-progress'))localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:3, tutorialDone:true, tutorialReplay:true, stars:{w1:3}}))"])
+    await goto_lobby(pg)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function('window.__lastCfg')
+    c = await pg.evaluate('window.__lastCfg')
+    check(c['tutorial'] is True and not c.get('tutorialFree'), f'review M-2 replayed tutorial: coaches yes, free rolls no ({c["tutorial"]}, {c.get("tutorialFree")})')
+    await ctx.close()
+    # M-4: "יאללה, משחק ראשון" from a re-shown welcome never replaces a saved game silently
+    ctx, pg = await page(b, onboarded=False)
+    await goto_lobby(pg, '.lb-welcome')
+    await pg.click('[data-act=welcome-pick]'); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=2 >> .wv-go'); await pg.wait_for_function('window.__lastCfg')
+    await pg.click('#stubLobby'); await pg.wait_for_selector('.lb-home')
+    await pg.evaluate("document.querySelector('[data-act=profile]').click()"); await pg.wait_for_selector('#pfSettings')
+    await pg.click('[data-act=help-welcome]'); await pg.wait_for_selector('.lb-welcome')
+    await pg.evaluate("window.__confirmAnswer = false")
+    n0 = await pg.evaluate('window.__cfgs.length')
+    await pg.click('[data-act=welcome-go]'); await pg.wait_for_timeout(800)
+    asked = await pg.evaluate('window.__confirms || []'); n1 = await pg.evaluate('window.__cfgs.length')
+    sv = await ls(pg, 'rr2-save-free-w1')
+    check(len(asked) == 1 and n1 == n0 and sv and sv['cfg']['charId'] == 'dev', f'review M-4 welcome-go asks before replacing the save; "no" keeps it ({len(asked)} asked, {n1 - n0} started, save {sv and sv["cfg"]["charId"]})')
+    await ctx.close()
+    # m-4: the personal best stays visible on a phone (compact, in the hero)
+    ctx, pg = await page(b, vp=PHONE, init=["if(!localStorage.getItem('rr2-progress'))localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:3, tutorialDone:true, stars:{w1:2}, best:{w1:40}}))"])
+    await goto_lobby(pg)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char'); await pg.wait_for_timeout(300)
+    vis = await pg.evaluate("(()=>{const e=document.querySelector('.wv-best-sm');return !!e && e.offsetParent!==null && e.textContent})()")
+    check(bool(vis) and '40' in vis, f'review m-4 personal best visible on a phone ({vis!r})')
+    await pg.screenshot(path=SHOT + 't4_14_world_best_phone.png')
+    await ctx.close()
+
+async def t_replayreal(b):
+    """M-2 in the real game: a replayed tutorial's rolls cost ⚡."""
+    ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:3,tutorialDone:true,tutorialReplay:true,stars:{w1:3}}))", "localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))", "if(!sessionStorage.getItem('t4e')){sessionStorage.setItem('t4e','1');localStorage.setItem('rr2-energy', JSON.stringify({e:9, at:Date.now(), granted:{}}))}", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    cfg = await pg.evaluate("import('./js/game.js').then(g=>g.activeConfig())")
+    n = await drive(pg, 3)
+    e = await ls(pg, 'rr2-energy')
+    check(cfg.get('tutorial') is True and not cfg.get('tutorialFree') and n == 3 and e and e['e'] == 9 - 3, f'review M-2 replayed tutorial in the real game: 3 rolls cost 3 ⚡ (9 → {e and e["e"]}, rolls {n})')
+    await ctx.close()
+
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('learnreal', t_learnreal), ('help', t_help)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

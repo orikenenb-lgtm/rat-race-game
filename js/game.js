@@ -688,8 +688,9 @@ const TUTORIAL_FREE_ROLLS = typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORI
 const usesEnergy = () => {
   if (!CFG || RANKED.has(CFG.mode) || CFG.resultId) return false;
   if (CFG.learn) return false; // T4 §7.1: learning mode never costs ⚡ (also before the engine's rollCost knows st.learn)
-  // T4 D-9 (P1): the first 10 rolls of the tutorial game are free; the engine's rollCost takes over once it exports the constant
-  if (S && CFG.tutorial && W && W.id === 'w1' && typeof E.TUTORIAL_FREE_ROLLS !== 'number' && (S.turn || 0) < TUTORIAL_FREE_ROLLS) return false;
+  // T4 D-9 (P1): the first 10 rolls of a brand-new player's first game are free (cfg.tutorialFree, set once per player by the lobby;
+  // a replayed tutorial does not get it — review M-2); the engine's rollCost takes over once it exports the constant
+  if (S && CFG.tutorialFree && W && W.id === 'w1' && typeof E.TUTORIAL_FREE_ROLLS !== 'number' && (S.turn || 0) < TUTORIAL_FREE_ROLLS) return false;
   if (S && typeof E.rollCost === 'function') { try { return E.rollCost(S) > 0; } catch (e) { /* fall through */ } }
   return true;
 };

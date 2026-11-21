@@ -1,10 +1,11 @@
 // T4 §5.2 — strength / weakness lines for the character cards (lobby lane, text only).
 // Every ₪ figure here is re-checked against the engine (characterCard / metrics(createGame()) / the starting assets) by
 // tests/t4_meta.test.mjs T-M4, rounded to the nearest ₪100 (a balance change that moves a figure fails the build).
+// Comparative claims ("הכי …") are re-derived from the world data by T-M4b — a balance change that breaks one fails the build.
 // A missing key simply omits the two rows on the card.
 export const CHAR_META = {
   'w1:teacher': { strength: 'הוצאות קבועות נמוכות — היעד קרוב', weakness: 'רק ₪5,000 במזומן — מתחילים בקטן' },
-  'w1:driver': { strength: 'הכי הרבה זמן בשכונה: 64 חודשים', weakness: 'חוב אשראי חודשי ומעט מזומן — כל הפתעה כואבת' },
+  'w1:driver': { strength: '64 חודשים — זמן נוח להתחיל לאט', weakness: 'חוב אשראי חודשי ומעט מזומן — כל הפתעה כואבת' },
   'w1:dev': { strength: '₪30,000 במזומן — אפשר לקנות נכס כבר בהתחלה', weakness: 'הוצאות של ₪19,000 בחודש — הקו רחוק' },
   'w1:doctor': { strength: 'המשכורת הכי גבוהה בשכונה', weakness: 'גם ההוצאות הכי גבוהות: משכורת גבוהה זה לא חופש' },
   'w2:lawyer': { strength: '₪90,000 במזומן ותזרים של +₪7,500', weakness: 'סגנון חיים של ₪34,500 בחודש — יש מה לקצץ, אם תעזי' },

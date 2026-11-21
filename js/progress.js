@@ -155,11 +155,12 @@ export function setTutorialDone() { if (!P.tutorialDone) { P.tutorialDone = true
 /** Old or hand-edited values → the T4 shape (additive: unknown keys are kept, nothing is deleted). */
 function cleanT4(p) {
   p.learnGames = Math.max(0, Math.floor(+p.learnGames) || 0);
-  p.dream = DREAM_IDS.includes(p.dream) ? p.dream : null;
+  const okId = (x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x);   // unknown (future engine) dream ids are kept
+  p.dream = okId(p.dream) ? p.dream : null;
   const d = p.dreams && typeof p.dreams === 'object' && !Array.isArray(p.dreams) ? p.dreams : {};
   p.dreams = {};
   for (const [id, v] of Object.entries(d)) {
-    if (!DREAM_IDS.includes(id) || !v || typeof v !== 'object') continue;
+    if (!okId(id) || !v || typeof v !== 'object') continue;
     p.dreams[id] = { done: [...new Set((Array.isArray(v.done) ? v.done : []).filter((x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x)))], games: Math.max(0, Math.floor(+v.games) || 0) };
   }
   p.tutorialReplay = p.tutorialReplay === true;
@@ -175,6 +176,8 @@ export function setLastMode(m) { const v = MODES.includes(m) ? m : 'normal'; if 
 export function setMentorPref(l) { const v = MENTOR_PREFS.includes(l) ? l : null; if (P.mentorPref !== v) { P.mentorPref = v; changed(); } return v; }
 /** Completed normal games (free / ranked / history) — learning games are not counted (they are not synced either). */
 export const completedGames = () => P.gamesPlayed;
+/** Review M-2: the very first game of a brand-new player (the only one whose first 10 rolls are free). */
+export const firstEverGame = () => !P.tutorialDone && !(P.gamesPlayed > 0) && !(P.learnGames > 0);
 /**
  * A finished LEARNING game (§7.1): learnGames += 1, tutorialDone, lastChar. Nothing else — no stars, best, unlocks,
  * titles, pawns, achievements, worldsPlayed, gamesPlayed, wins or hadBankruptcy. Returns what the end screen needs.
@@ -197,9 +200,13 @@ export function recordLearnGame(e = {}) {
   return lastLearnRes;
 }
 /** Free NORMAL games only (§6.3/§7.1): merge the dream missions completed in this game (end.dream / e.dream) into the lifetime badges. */
+let lastDreamSig = null;
 export function recordDream(e = {}) {
   const d = e.dream || (e.end && e.end.dream) || null;
-  if (!d || !DREAM_IDS.includes(d.id) || e.learn) return null;
+  if (!d || !/^[a-z0-9_]{2,32}$/.test(String(d.id)) || e.learn) return null;
+  const sig = [e.resultId || '', e.worldId, e.charId, e.seed ?? '', e.status, e.months, d.id].join('|');
+  if (sig === lastDreamSig) return null;                            // the same game:end delivered twice (review m-9)
+  lastDreamSig = sig;
   const done = (Array.isArray(d.missions) ? d.missions.filter((m) => m && m.done).map((m) => m.id) : Array.isArray(d.done) ? d.done : Object.keys(d.done || {}))
     .filter((x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x));
   const prev = P.dreams[d.id] || { done: [], games: 0 };
@@ -405,6 +412,8 @@ export function mergeProfile(prof) {
       if (P.best[w] == null || +v < P.best[w]) { P.best[w] = +v; ch = true; }
     }
     if (P.wins > P.gamesPlayed) P.gamesPlayed = P.wins;
+    // T4 §4.6 (review M-3): a player the server knows has finished games is never onboarded again on a new device
+    if (+m.games > 0 && !P.tutorialDone) { P.tutorialDone = true; ch = true; }
   }
   if (prof.pawn && !P.pawnChosenAt && prof.pawn !== P.pawn && PAWNS.some((x) => x.id === prof.pawn)) { P.pawn = prof.pawn; ch = true; }
   if (prof.daily_streak != null || prof.best_streak != null || prof.last_daily !== undefined) {
@@ -465,5 +474,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; changed(); }
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
 export { ACHIEVEMENTS, WIDS };

@@ -25,20 +25,36 @@ store['rr2-progress'] = JSON.stringify({ v: 1, stars: { w1: 2 }, gamesPlayed: 4,
 P._reset(JSON.parse(store['rr2-progress']));
 let p = P.getProgress();
 eq([p.learnGames, p.dream, p.dreams, p.tutorialReplay, p.lastMode, p.mentorPref, p.gamesPlayed, p.stars.w1, p.custom], [0, null, {}, false, 'normal', null, 4, 2, 'kept'], 'T-M1 old rr2-progress reads with T4 defaults, nothing dropped');
-const before = P.getProgress(); P.beginSession(); P.addAchievements(['golden']);
-const r = P.recordLearnGame({ worldId: 'w1', charId: 'driver', status: 'won', stars: 3, months: 30, seed: 5, netWorth: 1000, achievements: ['no_trap'] });
+// review m-7: start from tutorialDone:false; snapshot AFTER the in-game achievement so a leaked end-payload achievement is caught
+P._reset({ ...JSON.parse(store['rr2-progress']), tutorialDone: false });
+P.beginSession(); P.addAchievements(['golden']);
+const before = P.getProgress();
+const r = P.recordLearnGame({ worldId: 'w1', charId: 'driver', status: 'won', stars: 3, months: 30, seed: 5, netWorth: 1000, achievements: ['no_trap'], end: { achievements: ['first_win'] } });
 const after = P.getProgress();
-const changed = Object.keys(after).filter((k) => k !== 'dirty' && JSON.stringify(after[k]) !== JSON.stringify(before[k]));   // dirty = the sync flag of the test's addAchievements
-eq(changed.sort(), ['achievements', 'lastChar', 'learnGames'].sort(), 'T-M1 recordLearnGame changes only learnGames / tutorialDone / lastChar (achievements here = the test\'s own addAchievements call)');
+const changed = Object.keys(after).filter((k) => k !== 'dirty' && JSON.stringify(after[k]) !== JSON.stringify(before[k]));
+eq(changed.sort(), ['lastChar', 'learnGames', 'tutorialDone'].sort(), 'T-M1 recordLearnGame changes only learnGames / tutorialDone / lastChar');
+ok(!after.achievements.includes('no_trap') && !after.achievements.includes('first_win'), 'T-M1 a learning game\'s end-payload achievements are never recorded');
 eq([r.learn, r.wouldStars, r.worldId, r.gained, r.unlockedWorld, r.newAchievements.length], [true, 3, 'w1', 0, null, 0], 'T-M1 recordLearnGame result');
 eq(P.recordLearnGame({ worldId: 'w1', charId: 'driver', status: 'won', stars: 3, months: 30, seed: 5, netWorth: 1000 }).learnGames, 1, 'same learning game twice is counted once');
 P.requestTutorialReplay(); eq([P.consumeTutorialReplay(), P.consumeTutorialReplay()], [true, false], 'T-M1 tutorial replay is consumed once');
 eq([P.setDream('stable'), P.setDream('nope'), P.getProgress().dream], ['stable', null, null], 'T-M1 setDream validates');
 eq([P.setLastMode('learn'), P.setLastMode('x')], ['learn', 'normal'], 'setLastMode');
 eq([P.setMentorPref('hint'), P.setMentorPref('boss')], ['hint', null], 'setMentorPref');
-P.recordDream({ mode: 'free', dream: { id: 'biz', missions: [{ id: 'biz_seed', done: true }, { id: 'biz_own', done: false }] } });
+// review M-3: a server profile with finished games marks the tutorial done (a restore on a new device is not re-onboarded)
+P._reset({ tutorialDone: false, gamesPlayed: 0 });
+eq(P.firstEverGame(), true, 'M-2 brand-new player: first-ever game');
+P.mergeProfile({ stars: {}, achievements: [], meta: { games: 12, wins: 4, best: {} } });
+eq([P.getProgress().tutorialDone, P.getProgress().gamesPlayed, P.firstEverGame()], [true, 12, false], 'M-3 mergeProfile(meta.games > 0) → tutorialDone, and no free tutorial rolls');
+P._reset({ tutorialDone: false, learnGames: 1 }); eq(P.firstEverGame(), false, 'M-2 a learning game already played → not the first-ever game');
+P._reset({ tutorialDone: true, gamesPlayed: 3, tutorialReplay: true }); eq(P.firstEverGame(), false, 'M-2 a replayed tutorial is not the first-ever game');
+P._reset({ ...JSON.parse(store['rr2-progress']), dream: 'someday', dreams: { someday: { done: ['x_1'], games: 1 } } });
+eq([P.getProgress().dream, P.getProgress().dreams.someday.done], ['someday', ['x_1']], 'nit 9: an unknown (future engine) dream id is kept on load');
+P.setDream(null);
+const dEnd = { mode: 'free', worldId: 'w1', charId: 'teacher', seed: 9, status: 'lost', months: 52, dream: { id: 'biz', missions: [{ id: 'biz_seed', done: true }, { id: 'biz_own', done: false }] } };
+P.recordDream(dEnd);
+eq(P.recordDream({ ...dEnd }), null, 'm-9 the same game:end twice is recorded once');
 P.recordDream({ mode: 'free', learn: true, dream: { id: 'biz', missions: [{ id: 'biz_own', done: true }] } });
-eq(P.getProgress().dreams, { biz: { done: ['biz_seed'], games: 1 } }, 'recordDream: normal games only, merged badges');
+eq(P.getProgress().dreams.biz, { done: ['biz_seed'], games: 1 }, 'recordDream: normal games only, merged badges, counted once');
 const synced = JSON.stringify(Object.keys((await import('../js/progress.js')).getProgress()));
 ok(!/learnGames|mentorPref/.test(readFileSync(join(ROOT, 'js/progress.js'), 'utf8').match(/const metaOf = [^\n]*/)[0]), 'T4 fields are not in metaOf() (never synced)'); void synced;
 
@@ -46,7 +62,8 @@ ok(!/learnGames|mentorPref/.test(readFileSync(join(ROOT, 'js/progress.js'), 'utf
 const ids = E.LESSONS.map((l) => l.id);
 const missing = ids.filter((id) => !LESSON_META[id] || !LESSON_META[id].teaser || !LESSON_META[id].hint);
 eq(missing, [], `T-M2 every engine lesson (${ids.length}) has teaser + hint`);
-eq(Object.keys(LESSON_META).filter((id) => !ids.includes(id)), [], 'T-M2 no meta for unknown lessons');
+// review M-1: meta written ahead of an engine lane (T3 lessons) is PENDING until that engine work is committed — not a failure
+for (const id of Object.keys(LESSON_META).filter((x) => !ids.includes(x))) pending(`T-M2 lessons-meta has '${id}'; the engine has no such lesson yet (engine lane, T3)`);
 const trig = [...new Set(PR.PRACTICE.flatMap((x) => x.after))];
 eq(trig.filter((id) => !(LESSON_META[id] && LESSON_META[id].example)), [], 'T-M2 / AC-B5 every practice-trigger lesson has a worked example');
 eq(trig.filter((id) => !ids.includes(id)), [], 'practice triggers are real lesson ids');
@@ -79,10 +96,30 @@ for (const [key, m] of Object.entries(CHAR_META)) {
   const [wid, cid] = key.split(':'); const w = E.getWorld(wid); const ch = w.characters.find((x) => x.id === cid);
   ok(!!ch, `T-M4 ${key} exists`); if (!ch) continue;
   const cc = E.characterCard(w, ch); const st = E.createGame({ worldId: wid, charId: cid, seed: 1 }); const met = E.metrics(st);
-  const known = [cc.cash, cc.expenses, Math.abs(cc.surplus), Math.abs(met.cashflow), cc.salary, ...st.assets.map((a) => E.assetCf(st, a)), ...(ch.assets || []).map((a) => a.cf)]   // nominal asset cash flow (the card's figure; FX moves the live one).map((x) => Math.abs(Math.round(x || 0)));
+  const known = [cc.cash, cc.expenses, Math.abs(cc.surplus), Math.abs(met.cashflow), cc.salary, ...st.assets.map((a) => E.assetCf(st, a)), ...(ch.assets || []).map((a) => a.cf)]
+    .map((x) => Math.abs(Math.round(x || 0)));   // asset cf: live and nominal (the card's figure; FX moves the live one)
   for (const f of [...parseNis(m.strength), ...parseNis(m.weakness)]) {
     const hit = known.some((k) => (f.v >= 1e6 ? Math.abs(k - f.v) <= 0.005e6 : Math.round(k / 100) * 100 === f.v));
     ok(hit, `T-M4 ${key}: ${f.txt} matches an engine figure (${known.join(', ')})`);
+  }
+}
+// review M-5 (T-M4b): every comparative claim ("הכי …") is re-derived from the world data. An unknown phrasing fails, so a new
+// claim must be added here with its rule.
+const SUPER = [
+  [/הכי הרבה זמן/, 'maxMonths', 'max'], [/קו הסיום הכי קצר/, 'maxMonths', 'min'], [/המשכורת הכי גבוהה/, 'salary', 'max'],
+  [/ההוצאות הכי גבוהות/, 'expenses', 'max'], [/הכי הרבה (הון|כסף)/, 'cash', 'max'], [/הכי מעט כסף/, 'cash', 'min'],
+];
+for (const [key, m] of Object.entries(CHAR_META)) {
+  const [wid, cid] = key.split(':'); const w = E.getWorld(wid);
+  const val = (c, f) => { const cc = E.characterCard(w, c); return f === 'maxMonths' ? E.starThresholds(w, c.id).maxMonths : f === 'salary' ? (cc.salaryUsd ? cc.salaryUsd * 3.6 : cc.salary) : cc[f]; };
+  for (const line of [m.strength, m.weakness]) {
+    if (!/הכי/.test(line)) continue;
+    const rule = SUPER.find(([re]) => re.test(line));
+    ok(!!rule, `T-M4b ${key}: unclassified comparative claim "${line}" — add its rule to SUPER`);
+    if (!rule) continue;
+    const [, f, dir] = rule; const mine = val(w.characters.find((c) => c.id === cid), f);
+    const all = w.characters.map((c) => val(c, f));
+    ok(dir === 'max' ? mine === Math.max(...all) : mine === Math.min(...all), `T-M4b ${key}: "${line}" — ${f} ${mine} is the ${dir} of ${JSON.stringify(all)}`);
   }
 }
 ok(/64 חודשים/.test(CHAR_META['w1:driver'].strength) && (E.getWorld('w1').characters.find((c) => c.id === 'driver').maxMonths ?? E.getWorld('w1').maxMonths) === 64, 'T-M4 driver 64 months');
@@ -95,7 +132,7 @@ const files = [];
 const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.js$/.test(f)) files.push(p); } };
 walk(join(ROOT, 'js')); files.push(join(ROOT, 'index.html'));
 // allow-list: real-world energy industry (w4 pitch sector, the 2022 history headline). Other lanes' strings are PENDING, not failures.
-const ALLOW = [/מחירי האנרגיה/, /סקטור.{0,20}אנרגיה|אנרגיה.{0,6}(סולארית|ירוקה|מתחדשת)|'אנרגיה'/];
+const ALLOW = [/מחירי האנרגיה/, /סקטור.{0,20}אנרגיה|אנרגיה.{0,6}(סולארית|ירוקה|מתחדשת)/, /\bsector:\s*'אנרגיה'/];   // w4 pitch sector definition only
 const OTHER_LANE = { 'js/ui.js': 'in-game UI lane (N14)', 'index.html': 'in-game UI lane (N15, set at runtime by ui.js)', 'js/finance/business.js': 'engine lane (N18)' };
 const MINE = ['js/lobby.js', 'js/progress.js', 'js/energy.js', 'js/library.js', 'js/net.js', 'js/game.js', 'js/main.js', 'js/onboard.js', 'js/practice.js', 'js/data/lessons-meta.js', 'js/data/characters-meta.js'];
 for (const f of files) {
@@ -131,6 +168,10 @@ eq(PR.pickPractice(st0, { lastTurn: 4, offered: ['fund_a'] }, 7300), null, '≥ 
 eq(PR.pickPractice(st0, { lastTurn: 1, offered: ['fund_a'] }, 7300).id, 'liq_a', 'offered a → the next topic of the same (newest) lesson');
 eq(PR.pickPractice(st0, { lastTurn: 1, offered: ['fund_a', 'liq_a'] }, 7300).id, 'budget_a', '… then the older lesson');
 eq(PR.pickPractice(st0, { offered: ['a', 'b', 'c', 'd', 'e', 'f'] }, 7300), null, '≤ 6 per game');
+for (const lid of ['marginal_overtime', 'side_tax', 'time_scarce', 'rest_value', 'biz_receivables', 'biz_inventory']) {
+  const q2 = PR.pickPractice({ ...st0, lessons: [lid], practice: { answered: {} } }, {}, 7300);
+  ok(q2 && q2.kind === 'a', `m-2 lesson ${lid} (listed only under a 'b' item) offers its topic's 'a' item (${q2 && q2.id})`);
+}
 eq(PR.pickPractice({ ...st0, mode: 'daily' }, {}, 7300), null, 'AC-P1 never in ranked');
 eq(PR.pickPractice({ ...st0, intro: { step: 'glitch' } }, {}, 7300), null, 'AC-P1 never during the intro');
 const ra = PR.recordAnswer(st0, 'fund_a', 1, 5);

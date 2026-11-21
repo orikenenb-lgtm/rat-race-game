@@ -88,7 +88,8 @@ export function pickPractice(st, memo = {}, expenses = 0, fmt) {
   const lessons = Array.isArray(st.lessons) ? st.lessons : [];
   for (let i = lessons.length - 1; i >= 0; i--) {
     const lid = lessons[i];
-    const topics = [...new Set(PRACTICE.filter((x) => x.kind === 'a' && x.after.includes(lid)).map((x) => x.topic))];
+    // every item's trigger list counts (review m-2): a lesson listed only under a 'b' item still opens that topic, 'a' first
+    const topics = [...new Set(PRACTICE.filter((x) => x.after.includes(lid)).map((x) => x.topic))];
     for (const t of topics) {
       const a = PRACTICE_BY_ID[t + '_a']; const b = PRACTICE_BY_ID[t + '_b'];
       if (free(a.id)) return fillItem(a, expenses, fmt);

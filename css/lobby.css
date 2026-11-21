@@ -913,9 +913,10 @@ body.lb-lobby-open { overflow: hidden; }
   .t4-opt small { font-size: 12px; line-height: 1.3; }
   .t4-mentor { gap: 6px; }
   .t4-mopt { padding: 0 10px; }
-  .t4-mopt small { display: none; }            /* the 🔒 stays visible; the full lock text is in the label's aria/title */
+  .t4-mopt small { display: none; }            /* the 🔒 stays visible; a tap explains it (toast), the input's aria-label has the reason */
   .lb-world .wv-h { font-size: 18px; margin-top: 0 !important; }
-  .wv-char .wv-desc { -webkit-line-clamp: 1; }
+  .wv-char .wv-desc { -webkit-line-clamp: 2; font-size: 13px; line-height: 1.3; }
+  .lb-world .wv-hero-txt .wv-best-sm { display: inline-block; }
   .lb-world .lb-shell, .lb-world { gap: 10px; }
 }
 .lb-shell .sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
@@ -928,3 +929,7 @@ body.lb-lobby-open { overflow: hidden; }
   .t4-opt input { width: 18px; height: 18px; }
   .lb-world .wv-hero-txt .lb-stars i { font-size: 16px; }
 }
+
+/* review m-4: the personal best stays visible on phones, compact, inside the hero (the 🏁 box is hidden ≤ 600 px) */
+.wv-best-sm { display: none; font-size: 13px; font-weight: 700; margin-top: 2px; text-shadow: 0 1px 4px rgba(0, 0, 0, .6); }
+.t4-mopt.is-locked { cursor: help; }

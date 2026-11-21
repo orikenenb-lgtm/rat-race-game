@@ -269,9 +269,13 @@ async function startFree(worldId, charId, opts = {}) {
   if (!opts.duel && !opts.quick) P.setLastMode(learn ? 'learn' : 'normal');
   sfx('click');
   const prog = P.getProgress();
-  // §4.6: the tutorial runs in the first w1 game (or once after "הדרכה מלאה במשחק הבא"), never in a duel / replayed board
-  const tutorial = worldId === 'w1' && !opts.duel && !opts.seed && (!prog.tutorialDone || P.consumeTutorialReplay());
+  // §4.6: the tutorial runs in a brand-new player's first w1 game (or once after "הדרכה מלאה במשחק הבא"), never in a duel / replayed
+  // board, and never again for a player with finished games (review M-3: a restore / server merge can leave tutorialDone false)
+  const w1 = worldId === 'w1' && !opts.duel && !opts.seed;
+  const tutorial = w1 && (P.consumeTutorialReplay() || (!prog.tutorialDone && !completedAny(prog)));
   const cfg = { worldId, charId, seed: opts.seed || randSeed(), mode: 'free', tutorial, resume: false, bailout: learn ? true : P.bailoutAvailable() };
+  // review M-2: the 10 free rolls (D-9) belong to the player's very first game only — a replayed tutorial keeps its coaches, not the rolls
+  if (tutorial && !learn && P.firstEverGame()) cfg.tutorialFree = true;
   if (learn) cfg.learn = true;
   if (prog.dream && !opts.duel) cfg.dream = prog.dream;                       // engine ignores it until E-7 lands
   if (mentorLevels()) cfg.mentor = tutorial ? 'guide' : (mentorAllowed(prog.mentorPref, prog) && prog.mentorPref) || undefined;
@@ -513,7 +517,7 @@ const T4 = {
   H7: '🎬 סיור קצר — בפעם הבאה שתיכנס למשחק', H8: '👋 להציג שוב את מסך הפתיחה', Hhelp: 'איך משחקים', T2: 'מה כל סימן אומר',
   B1: (t, h) => `שיעור נעול: ${t}. איך פותחים: ${h}`, B2: 'עוד ▾', B3: (x) => `🔢 דוגמה: ${x}`, B5: (x) => `🎲 פישוט של המשחק: ${x}`, B6: (r, n) => `💡 תרגלת: ${r} מתוך ${n} נכונות`,
   P9: (r, n) => `תרגול: ${r} מתוך ${n}`,
-  S1: (n) => `🔥 ${n} ${n === 1 ? 'יום' : 'ימים'} ברצף. האתגר של היום מחכה לך.`,
+  S1: (n) => `🔥 ${n === 1 ? 'יום אחד' : n + ' ימים'} ברצף. האתגר של היום מחכה לך.`,
   // T5 §12 T5-S0…S1 (settings section, lobby lane) + T1 מצב קל
   S0: 'תצוגה ותנועה', S1leg: 'תנועה במשחק', S1opt: [['auto', 'לפי המכשיר'], ['reduce', 'מופחתת'], ['full', 'מלאה']],
   S1hint: 'מופחתת: בלי רעידות, קונפטי וקפיצות. הקוביות והחייל זזים מיד.', lite: 'מצב קל (בלי תלת־ממד)', liteHint: 'לוח דו־ממדי שטוח: מהיר יותר בטלפונים ישנים. החזרה לתלת־ממד טוענת את הדף מחדש.',
@@ -527,7 +531,9 @@ const DREAM_META = {
 };
 /** §14.1 feature detection: dreams exist only when the engine exports DREAMS (tests may provide window.__t4dreams). */
 function dreamsList() {
-  const d = Array.isArray(ENG.DREAMS) && ENG.DREAMS.length ? ENG.DREAMS : Array.isArray(globalThis.__t4dreams) ? globalThis.__t4dreams : null;
+  // the test seam (window.__t4dreams) is read only under automation (navigator.webdriver), never for real players
+  const seam = safe(() => globalThis.navigator && globalThis.navigator.webdriver === true, false) && Array.isArray(globalThis.__t4dreams) ? globalThis.__t4dreams : null;
+  const d = Array.isArray(ENG.DREAMS) && ENG.DREAMS.length ? ENG.DREAMS : seam;
   return d ? d.filter((x) => x && DREAM_META[x.id]).map((x) => ({ ...DREAM_META[x.id], ...x })) : null;
 }
 const dreamById = (id) => { const l = dreamsList(); return (l && l.find((x) => x.id === id)) || (DREAM_META[id] ? { id, ...DREAM_META[id], missions: [] } : null); };
@@ -1054,10 +1060,10 @@ function renderWorld(id, opts = {}) {
   html(`<div class="lb-shell lb-world ${un && modeNow(p) === 'learn' ? 'is-learn' : ''}">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
     <header class="wv-hero ${un ? '' : 'is-locked'}"><img src="${cardArt(w.id)}" alt="">
-      <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}</div></header>
+      <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}${p.best[w.id] ? `<span class="wv-best-sm">🏁 השיא שלך: ${int(p.best[w.id])} חודשים</span>` : ''}</div></header>
     <div class="wv-goal">
       <div><span>🎯 המטרה</span><b>${esc(w.goalLabel)}</b></div>
-      <div><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || '')}</b></div>
+      <div class="wv-new"><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || '')}</b></div>
       ${p.best[w.id] ? `<div><span>🏁 השיא שלך</span><b>${p.best[w.id]} חודשים</b></div>` : ''}
     </div>
     ${body}
@@ -1074,14 +1080,16 @@ function dreamRowHtml(p) {
   if (cur && !dreamOpen) {
     return `<div class="t4-dream-line"><button class="t4-dream-sum" data-act="dream-open" aria-expanded="false">${esc(T4.D9(cur.icon, cur.name))}</button></div>`;
   }
-  const opt = (id, ic, name, line) => `<label class="t4-dopt ${(p.dream || '') === id ? 'on' : ''}"><input type="radio" name="t4dream" value="${id}" ${(p.dream || '') === id ? 'checked' : ''}><span class="t4-dic" aria-hidden="true">${ic}</span><span><b>${esc(name)}</b>${line ? `<small>${esc(line)}</small>` : ''}</span></label>`;
+  const opt = (id, ic, name, line) => `<label class="t4-dopt ${(p.dream || '') === id ? 'on' : ''}"><input type="radio" name="t4dream" value="${id}" ${(p.dream || '') === id ? 'checked' : ''}><span class="t4-dic" aria-hidden="true">${esc(ic)}</span><span><b>${esc(name)}</b>${line ? `<small>${esc(line)}</small>` : ''}</span></label>`;
   return `<fieldset class="t4-dreams" role="radiogroup" aria-label="${T4.D5}"><legend><b>${T4.D6}</b><small>${T4.D7}</small></legend>
     <div class="t4-dgrid">${list.map((x) => opt(x.id, x.icon, x.name, x.line)).join('')}${opt('', '·', T4.D8, '')}</div></fieldset>`;
 }
 function mentorRowHtml(p) {
   const L = mentorLevels(); if (!L) return '';
   const cur = mentorAllowed(p.mentorPref, p) ? p.mentorPref || 'guide' : 'guide';
-  const name = { guide: T4.G3, hint: T4.G4, pro: T4.G5 };
+  // one vocabulary with the game (review m-3): T2's MN.LEVEL_TEXT labels, T4's words only as a fallback
+  const LT = (ENG.MN && ENG.MN.LEVEL_TEXT) || {};
+  const name = { guide: (LT.guide && LT.guide.label) || T4.G3, hint: (LT.hint && LT.hint.label) || T4.G4, pro: (LT.pro && LT.pro.label) || T4.G5 };
   const lock = { hint: T4.G7, pro: T4.G6 };
   return `<fieldset class="t4-mentor" role="radiogroup" aria-label="${T4.G2}"><legend>${T4.G2}</legend>${['guide', 'hint', 'pro'].filter((x) => L.includes(x)).map((lv) => {
     const ok = mentorAllowed(lv, p);
@@ -1381,7 +1389,7 @@ function dreamsProfileHtml(p) {
   const badges = list.map((d) => {
     const got = (p.dreams[d.id] && p.dreams[d.id].done) || []; if (!got.length) return '';
     const titles = got.map((id) => ((d.missions || []).find((m) => m.id === id) || {}).title || '').filter(Boolean);
-    return titles.map((t) => `<li>${d.icon} ${esc(t)} ✓</li>`).join('');
+    return titles.map((t) => `<li>${esc(d.icon)} ${esc(t)} ✓</li>`).join('');
   }).join('');
   return `<section class="lb-card pf-dreams"><h2>${T4.D12}</h2>${dreamRowHtml({ ...p, dream: p.dream })}${badges ? `<ul class="pf-badges">${badges}</ul>` : '<p class="lb-empty">משימה שתשלים במשחק רגיל תופיע כאן.</p>'}</section>`;
 }
@@ -1583,10 +1591,10 @@ function renderEnd(animate = false) {
       ${learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
       ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
       ${duelHtml}
-      ${near ? `<p class="end-near">${iso(near)}</p>` : ''}
+      ${near && !(learn && /★/.test(near)) ? `<p class="end-near">${iso(near)}</p>` : ''}
       ${!won ? `<div class="end-prog"><div class="lb-bar-track big"><i style="width:${Math.round(prog * 100)}%"></i></div><small>${sprint ? 'הגעת ל־' : 'עשית '}${num(Math.round(prog * 100) + '%')} ${sprint ? 'מהחופש' : g.type === 'passive' ? 'מהדרך לחופש' : 'מהדרך ליעד'}</small></div>` : ''}
       ${hist ? benchHtml(e) : ''}
-      ${happyGateHtml(e, w, stars)}
+      ${learn ? '' : happyGateHtml(e, w, stars)}
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
       ${learnHtml(e, res)}
@@ -1791,7 +1799,7 @@ function dreamEndHtml(e) {
   const p = P.getProgress();
   if (endCtx.dreamSaved && dreamById(endCtx.dreamSaved)) return `<section class="end-dream saved" role="status"><p>${esc(T4.D11(dreamById(endCtx.dreamSaved).name))}</p></section>`;
   if (p.dream) return '';
-  return `<section class="end-dream ask"><h3>${T4.D10}</h3><div class="t4-dgrid">${dreamsList().map((x) => `<button class="t4-dbtn" data-act="end-dream" data-id="${x.id}"><span class="t4-dic" aria-hidden="true">${x.icon}</span><span><b>${esc(x.name)}</b><small>${esc(x.line || '')}</small></span></button>`).join('')}</div></section>`;
+  return `<section class="end-dream ask"><h3>${T4.D10}</h3><div class="t4-dgrid">${dreamsList().map((x) => `<button class="t4-dbtn" data-act="end-dream" data-id="${x.id}"><span class="t4-dic" aria-hidden="true">${esc(x.icon)}</span><span><b>${esc(x.name)}</b><small>${esc(x.line || '')}</small></span></button>`).join('')}</div></section>`;
 }
 /** §6.5 S-G1: after the first completed game, offer less help (only when T2's mentor levels exist). */
 function mentorEndHtml(e) {
@@ -1971,6 +1979,8 @@ async function onClick(ev) {
   // §5.1: the card is an <article> with two buttons; a tap on its plain area still plays (as the old whole-card button did)
   const card = ev.target.closest('.wv-char');
   if (card && !ev.target.closest('[data-act], .wv-details, a, input, label, summary')) { ev.preventDefault(); return startFree(card.dataset.w, card.dataset.c, { learn: modeNow() === 'learn' }); }
+  // review m-4: a locked mentor level explains itself on tap (phones hide the inline reason; title= never shows on touch)
+  const lk = ev.target.closest('.t4-mopt.is-locked'); if (lk && lk.title) { toast(lk.title); return; }
   const b = ev.target.closest('[data-act]'); if (!b || !root().contains(b)) return;
   const act = b.dataset.act; const id = b.dataset.id;
   if (b.tagName === 'A') { if (act === 'share') sfx('click'); return; }
@@ -1987,7 +1997,7 @@ async function onClick(ev) {
       const open = b.getAttribute('aria-expanded') !== 'true';
       el.hidden = !open; b.setAttribute('aria-expanded', String(open)); b.textContent = open ? T4.Kless : T4.Kmore; return;
     }
-    case 'dream-open': dreamOpen = true; return view.k === 'profile' ? renderProfile() : rerender();
+    case 'dream-open': dreamOpen = true; if (view.k === 'profile') renderProfile(); else rerender(); return focusSoon('input[name="t4dream"]:checked, input[name="t4dream"]');   // A11Y-3
     case 'learn-now': { sfx('click'); const p = P.getProgress(); const wid = P.isUnlocked(p.lastSeenWorld) ? p.lastSeenWorld : 'w1'; worldMode = 'learn'; return go({ k: 'world', id: wid, learn: true }); }
     case 'end-normal': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, {});
     case 'end-learn': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, { learn: true, noAsk: true });
@@ -2038,7 +2048,7 @@ async function onClick(ev) {
       sfx('click'); safe(() => localStorage.setItem(ONBK, '1'));
       if (completedAny()) return go({ k: 'home' });
       worldMode = 'normal';
-      return startFree('w1', 'teacher', { quick: true, noAsk: true });
+      return startFree('w1', 'teacher', { quick: true });   // review M-4: asks before replacing a saved game, like every new game
     }
     case 'groups-view': return go({ k: 'groups' });
     case 'history': sfx('click'); return go({ k: 'history' });

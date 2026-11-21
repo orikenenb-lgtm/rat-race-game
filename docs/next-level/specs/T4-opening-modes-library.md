@@ -989,3 +989,16 @@ Files: `js/lobby.js`, `css/lobby.css`, `js/progress.js`, `js/library.js`, `js/en
 
 ### Change requests — T7 (tests)
 - **CR-T7-T4-1** `tests/a11y_e2e.py` K-3 Tabs until `document.activeElement.matches('.wv-char')`; the card is now an article: match `.wv-char .wv-go` (3 Tabs from the focused mode radio when the mentor row is shown).
+
+### Review fixes (docs/next-level/reviews/T4-review.md)
+- **M-2** The 10 free rolls (D-9) are a separate flag: the lobby sets `cfg.tutorialFree` only for a brand-new player's first game (`progress.firstEverGame()`: no `tutorialDone`, no finished normal or learning game, not a learning game). `game.js usesEnergy` gates on `CFG.tutorialFree`, not on `CFG.tutorial`. A replayed tutorial keeps its coaches and pays ⚡. **CR-E1 update (engine):** E-2 must gate on the same flag, `createGame({tutorialFree})` → `st.tutorialFree`, and `rollCost` returns 0 only for `st.tutorialFree && st.turn < TUTORIAL_FREE_ROLLS`; add `tutorialFree` to `replayConfig` for free games only.
+- **M-3** Tutorial rule = `consumeTutorialReplay() || (!tutorialDone && no finished game)`. `mergeProfile` sets `tutorialDone` when the server's `meta.games > 0` (restore code / server progress on a new device).
+- **M-4** "יאללה, משחק ראשון" goes through the normal `startFree` confirm when a w1 save exists.
+- **M-5** Driver strength is now `64 חודשים — זמן נוח להתחיל לאט`. T-M4b re-derives every "הכי …" claim from the world data (max/min of max months, salary, expenses, cash); an unclassified claim fails.
+- **M-1** `t4_meta` reports lessons-meta ids without an engine lesson as PENDING (the T3 lessons until T3's engine work is committed).
+- **Minors done:** m-1 (learning end screen: no ★ near-miss line, no ★★★ gate), m-2 (topics from every item's trigger list), m-3 (mentor names from `E.MN.LEVEL_TEXT`: מתחיל / מתקדם / מומחה), m-4 (phone: personal best in the hero; a locked level explains itself on tap; story 2 lines), m-5 (focus after "שינוי"), m-7 and m-8 (tests tightened; regression scenarios `review` and `replayreal`), m-9 (`recordDream` deduplicated), nits 3, 6 (icons escaped, `__t4dreams` read only under `navigator.webdriver`), 7, 8, 9.
+- **Left as change requests (other lanes' files):**
+  - m-6 in-game legend ⚡ value, `onboard.js` legend row `['⚡', 'זריקות', …]`: value `${EN.get()}/${EN.MAX}` from `./energy.js` (dynamic import).
+  - Nit 1 tour step 1 → title `💰 מזומן ותזרים`.
+  - Nit 2 `game.js resolveCard`: move `let closedRes = null;` up next to `let cur = ev, working = false;`.
+  - These sit next to the in-game UI lane's open hunks, so they were not touched here.
