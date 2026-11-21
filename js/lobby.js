@@ -310,6 +310,7 @@ async function playRanked(mode, challengeId = null, groupId = null, title = '') 
     const cfg = { worldId: w.id, charId, seed: Number(r.seed), mode, resultId: r.result_id, challengeId: challengeId || null, groupId: r.group_id || groupId || null,
       title: r.title || title || MODE_NAME[mode], tutorial: false, resume: false };
     if (mode === 'daily' && r.max_months != null) cfg.maxMonths = +r.max_months;
+    const dk = rankedDateKey(mode, r, challengeId, r.group_id || groupId); if (dk) cfg.dateKey = dk;   // T2 review B1 (CR-29): the rule set follows the server's day key
     const cpTurn = +r.checkpoint_turn || 0;
     if (cpTurn > 0) {
       const server = parseState(r.checkpoint);
@@ -325,6 +326,28 @@ async function playRanked(mode, challengeId = null, groupId = null, title = '') 
     if (sv) return launch(launchCfg({ ...sv.cfg, resume: true }));
     return launch(launchCfg(cfg));
   } finally { rankedBusy = false; }
+}
+/** The day key the verifier uses for this ranked result (verify_core rulesFor): daily → the Israel date of the daily key,
+ *  weekly → the ISO week key, challenge → the Israel date the challenge was created. rr_begin may return it as date_key (preferred);
+ *  otherwise it comes from what the lobby already fetched (rr_daily / rr_weekly key, the group's challenge starts_at — assumed equal
+ *  to created_at) and, last, from today's Israel date at the moment rr_begin answered. */
+function rankedDateKey(mode, r, challengeId, groupId) {
+  if (r && r.date_key) return String(r.date_key);
+  const today = P.israelDate();
+  if (mode === 'daily') return cache.daily && cache.daily.key === today ? cache.daily.key : today;
+  if (mode === 'weekly') {
+    if (cache.weekly && cache.weekly.key && /^\d{4}-W\d{1,2}$/.test(cache.weekly.key)) return cache.weekly.key;
+    const [y, m, d] = today.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1, d)); const dow = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - dow + 3); const wy = t.getUTCFullYear(); const w1 = new Date(Date.UTC(wy, 0, 4));
+    const wk = 1 + Math.round(((t - w1) / 864e5 - 3 + ((w1.getUTCDay() + 6) % 7)) / 7);
+    return `${wy}-W${String(wk).padStart(2, '0')}`;
+  }
+  if (mode === 'challenge') {
+    const g = groupId && cache.group[groupId]; const c = g && (g.challenges || []).find((x) => x.id === challengeId);
+    const at = c && (c.created_at || c.starts_at);
+    return at ? P.israelDate(new Date(at)) : today;
+  }
+  return null;
 }
 function needNick() {
   toast('צריך כינוי קודם — שנייה אחת');
