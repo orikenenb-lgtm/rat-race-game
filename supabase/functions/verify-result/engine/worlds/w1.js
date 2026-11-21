@@ -27,6 +27,7 @@ export default {
   start: {},
   models: { re: 'apartment', biz: 'business', side: 'business', stake: 'business' },
   bizOffers: ['coffee', 'toyshop'], // K tile: managed businesses (js/finance/business.js)
+  lifeMoneyScale: 0.35, // rules 4 (review M4 c): personal / values life cards and the life chains move less money in the kids' world
   kinds: { re: { label: 'נדל"ן', debtLabel: 'משכנתא', rent: true }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: 'stock' },

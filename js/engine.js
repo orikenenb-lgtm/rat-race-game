@@ -1555,6 +1555,13 @@ function dealReality(st, c, d) {
   return parts.join(' ') || null;
 }
 const lifeS = (st) => Math.max(baseNet(st), 3000);
+/**
+ * Review M4 (c), rules 4: in a world with `lifeMoneyScale` (w1) the money of personal / values life cards and of the life chains
+ * (car, move, friend) is scaled down, so a choice the game calls "no single right answer" cannot swing the escape odds by much.
+ */
+const LIFE_CHAINS = new Set(['car', 'move', 'friend']);
+function lifeScale(st, key) { const k = R4(st) && st.story ? W(st).lifeMoneyScale : null; return k && (LIFE_CHAINS.has(key) || key === true) ? k : 1; }
+const storyS = (st, chainId) => lifeS(st) * lifeScale(st, chainId);
 /** How much to move into the emergency fund now: up to 3 months of expenses, keeping 1 month of expenses in cash. */
 function saveSuggestion(st) { const e = expensesOf(st); const want = 3 * e - st.savings; const free = st.cash - e; return want > 0 && free > 0 ? r100(Math.min(want, free)) : 0; }
 /** Plan options for the payday / education cards: ok = keep the current plan; plan:<id> for the others. */
@@ -1590,7 +1597,7 @@ function carLine(st) { return st.expenses.find((x) => /רכב|ליסינג|טנ�
 function rentLine(st) { return st.expenses.find((x) => /שכירות|משכנתא/.test(x.label)) || st.expenses.slice().sort((a, b) => b.amount - a.amount)[0]; }
 /** ₪ / happiness / energy consequences of one life-event option (previewed on the card). */
 function lifeEffects(st, E, o) {
-  const S = lifeS(st); const L = st.life;
+  const S = lifeS(st) * lifeScale(st, !!(E.personal || E.values)); const L = st.life;
   const e = { cash: o.cash ? r100(o.cash * S) : 0, monthly: o.monthly ? r10(o.monthly * S) : 0, months: o.months ?? 0, happiness: (o.happiness || 0) + (o.glow ? o.glow : 0), energy: o.energy || 0, glow: o.glow || 0, note: o.note || '' };
   if (o.carCut) { const c = carLine(st); e.monthly = c ? -r10(c.amount * o.carCut) : 0; e.months = 0; if (!c) e.note = 'אין לך רכב בתקציב — אז אין מה לחסוך.'; }
   if (o.grossMult) { const g0 = grossBase(st); e.salary = slip(r10(g0 * o.grossMult), taxPoints(st)).net - baseNet(st); }
@@ -3327,7 +3334,7 @@ function storyLifeCard(st, card, r) {
 
 /* ---------------------------------------------------------------- story template variables (PUBLIC state only — U12) */
 function storyVars(st, chainId, item) {
-  const S0 = lifeS(st); const c = chainOf(st, chainId) || { data: {}, startM: st.month }; const d = c.data || {};
+  const S0 = storyS(st, chainId); const c = chainOf(st, chainId) || { data: {}, startM: st.month }; const d = c.data || {};
   const E = Math.max(1, expensesOf(st)); const L = st.life; const h = housingOf(st);
   const net = Math.max(1, baseNet(st)); const rent = h.kind === 'rent' ? h.line.amount : 0;
   const inflLast = L.infl.length ? L.infl[L.infl.length - 1] : (st.history ? 0 : 3);
@@ -3382,7 +3389,7 @@ export function storyMoneyFor(st, effects, H = 24) { return storyMoney(effects, 
 function storyOddsP(st, o) { return o.odds ? (o.odds.p === 'raise' ? round2(raiseChance(st)) : o.odds.p) : null; }
 /** Effects of one story option (the card's chips) — generic fx + the hook's preview. */
 function storyEffects(st, chainId, stepId, o, item) {
-  const S = lifeS(st); const fx = o.fx || {}; const h = housingOf(st);
+  const S = storyS(st, chainId); const fx = o.fx || {}; const h = housingOf(st);
   const e = { cash: 0, flow: 0, months: 0, salary: 0, salaryMonths: 0, happiness: fx.happiness || 0, energy: fx.energy || 0, glow: fx.glow || 0, study: fx.study || 0, risk: null, note: o.note || '' };
   if (fx.cash) e.cash += r100(fx.cash * S);
   if (fx.line) { e.flow -= r10(fx.line.amt * S); e.months = fx.line.months || 0; }
@@ -3520,7 +3527,7 @@ function applyStoryFx(st, fx, x) {
 }
 /** Resolve option `o` of chain step `stepId` (from the L card: seal = the card's r; from the inbox: the item's a/b). */
 function applyStoryOption(st, chainId, stepId, o, ctx, out) {
-  const C = CH.CHAINS[chainId]; const c = chainOf(st, chainId); const S = lifeS(st); const cash0 = st.cash;
+  const C = CH.CHAINS[chainId]; const c = chainOf(st, chainId); const S = storyS(st, chainId); const cash0 = st.cash;
   const seal = ctx.seal || { entry: 0.5, a: 0.5, b: 0.5 };
   const pHit = storyOddsP(st, o); const hit = pHit != null ? seal[o.odds.use] < pHit : false;
   const eff = storyEffects(st, chainId, stepId, o, ctx.item);
@@ -3672,7 +3679,7 @@ function friendResolve(st, out) {
   if (path === 'lend') {
     addLuck(st, 'friend', d.ok ? d.amount * 0.4 : -d.amount * 0.6);
     if (d.partner) {
-      if (d.ok) { const cf = r10(0.06 * lifeS(st)); const a = addAsset(st, { k: 'stake', n: `20% מהעסק של ${d.name || vars.name}`, cost: d.amount, down: d.amount, cf, value: r100(1.2 * d.amount) }, {}); out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, 'stake') || modelFor(st, 'biz'), label: a.n, color: 'green' }); d.cf = cf; endChain(st, 'friend', out, 'partnerOk', { ...vars, cf: fmtM(cf) }); }
+      if (d.ok) { const cf = r10(0.06 * storyS(st, 'friend')); const a = addAsset(st, { k: 'stake', n: `20% מהעסק של ${d.name || vars.name}`, cost: d.amount, down: d.amount, cf, value: r100(1.2 * d.amount) }, {}); out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, 'stake') || modelFor(st, 'biz'), label: a.n, color: 'green' }); d.cf = cf; endChain(st, 'friend', out, 'partnerOk', { ...vars, cf: fmtM(cf) }); }
       else endChain(st, 'friend', out, 'partnerBad');
       return;
     }

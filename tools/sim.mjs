@@ -306,6 +306,15 @@ Object.assign(POLICIES, {
     between(st) { const L = PV(st).metrics.life; E.setPlan(st, L.energy > 35 ? 'overtime' : 'work'); },
   },
 });
+// review M4 (c): smart with a fixed money habit on personal / values life cards — the escape-rate gap between them measures the
+// cards' money swing (target ≤ 10 pp in w1). cheap = the option with the most money over 24 months, dear = the least.
+const lifeMoney = (o) => (o.effects.total24 != null ? o.effects.total24 : lifeValue(o));
+for (const [k, dir] of [['life:cheap', 1], ['life:dear', -1]]) {
+  POLICIES[k] = { ...smartLike(), decide(st, ev, ctx) {
+    if (ev.type === 'life' && (ev.data.personal || ev.data.values || ev.data.chain)) { const en = ev.options.filter((o) => o.enabled); return [en.slice().sort((a, b) => dir * (lifeMoney(b) - lifeMoney(a)))[0].id]; }
+    return POLICIES.smart.decide(st, ev, ctx);
+  } };
+}
 // T3 sim policies: sideHustler (smart + the side plan until the side business graduates) and owner (smart + starts every offered business)
 POLICIES.sideHustler = { ...smartLike(), between(st) { POLICIES.smart.between(st); if (st.over) return; const pv = PV(st); const L = pv.metrics.life; if (!pv.metrics.businesses.some((b) => b.name === 'העסק הצדדי שלך') && L.energy >= 30 && L.plan !== 'side') E.setPlan(st, 'side'); } };
 POLICIES.owner = { ...smartLike(), decide(st, ev, ctx) { if (ev.type === 'business' && ev.data.mode === 'offer') { const o = ev.options.filter((x) => x.kind === 'buy' && x.enabled).sort((a, b) => (a.startCapital || ev.data.startCapital) - (b.startCapital || ev.data.startCapital))[0]; return [o ? o.id : 'pass']; } return POLICIES.smart.decide(st, ev, ctx); } };

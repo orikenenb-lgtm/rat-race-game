@@ -9,18 +9,19 @@ const RISKS = [0, 1, 2, 3];
 
 const LIKE = [[0.75, 0.22, 0.03], [0.45, 0.45, 0.10], [0.15, 0.50, 0.35], [0.05, 0.30, 0.65]]; // P(k flags | r), shared
 const CF_GENTLE = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [0.10, 0.80]];
-const CF_W1 = [[0.95, 1.05], [0.82, 1.04], [0.45, 1.00], [-0.10, 0.75]];
+const CF_W1 = [[0.95, 1.05], [0.82, 1.04], [0.40, 1.00], [-0.30, 0.65]]; // review M4: believing the seller must not beat smart in w1
 const CF_HARD = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [-0.40, 0.80]];
+const CF_W4 = [[0.95, 1.05], [0.80, 1.03], [0.40, 0.95], [-0.60, 0.70]]; // review M4: harder w4 (owner)
 const NOI_W2 = [[0.97, 1.03], [0.90, 1.03], [0.75, 1.00], [0.55, 0.95]];
 const VF = [[0.97, 1.03], [0.92, 1.02], [0.82, 1.00], [0.65, 0.95]];
 const REPAIR = [0.05, 0.20, 0.45, 0.75];
 // repair = down × (REP_MIN + REP_SPAN·u) when it happens (tuned, T2 §13.5 knob 1: spec 0.1 + 0.4u made big-down worlds punitive)
 const REP_MIN = 0.05, REP_SPAN = 0.25, REP_MEAN = REP_MIN + REP_SPAN / 2;
 const CFG = {
-  w1: { prior: [0.45, 0.32, 0.15, 0.08], cf: CF_W1, minFee: 400 }, // tuned (T2 §13.5 knob 1): believing the seller must cost something even in w1
-  w2: { prior: [0.35, 0.35, 0.20, 0.10], cf: CF_GENTLE, noi: NOI_W2, minFee: 1500 },
+  w1: { prior: [0.40, 0.30, 0.18, 0.12], cf: CF_W1, minFee: 400 }, // tuned (T2 §13.5 knob 1): believing the seller must cost something even in w1
+  w2: { prior: [0.30, 0.33, 0.24, 0.13], cf: CF_HARD, noi: NOI_W2, minFee: 1500 },
   w3: { prior: [0.30, 0.32, 0.24, 0.14], cf: CF_HARD, minFee: 3000 },
-  w4: { prior: [0.25, 0.30, 0.27, 0.18], cf: CF_HARD, minFee: 3000 },
+  w4: { prior: [0.20, 0.28, 0.30, 0.22], cf: CF_W4, minFee: 3000 },
   h: { prior: [0.50, 0.33, 0.13, 0.04], cf: CF_GENTLE, minFee: 400 },
 };
 

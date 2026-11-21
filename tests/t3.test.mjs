@@ -510,5 +510,17 @@ test('rules 3 stays v3: no story draws, no inbox, no chain, no T3 business in a 
   assert.ok(st.assets.every((a) => !a.biz || !a.biz.t3)); assert.ok(!st.actions.some((a) => a[0] === 'Q'));
 });
 
+test('review M4: w1 (rules 4) scales the money of personal / values cards and the life chains (lifeMoneyScale); rules 3 and other worlds unchanged; every life option has an impact panel with its cost', () => {
+  const k = E.getWorld('w1').lifeMoneyScale; assert.ok(k > 0 && k < 1);
+  const st = forced('w1', 'car', 's1', { charId: 'teacher', cash: 50000 }); const ev = E.currentEvent(st);
+  const st2 = forced('w2', 'car', 's1', { cash: 500000 }); const ev2 = E.currentEvent(st2);
+  const base1 = Math.max(st.salary, 3000), base2 = Math.max(st2.salary, 3000);
+  assert.equal(ev.options.find((o) => o.id === 'fix').effects.cash, -Math.round(0.4 * k * base1 / 100) * 100, 'w1 scaled');
+  assert.equal(ev2.options.find((o) => o.id === 'fix').effects.cash, -Math.round(0.4 * base2 / 100) * 100, 'w2 unscaled');
+  const r3 = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 3, mode: 'daily', rules: 3 }); r3.pending = { id: 4, type: 'life', tile: 'L', pos: 4, eventId: 'wedding', r: 0.5 }; r3.phase = 'event';
+  assert.equal(E.currentEvent(r3).options.find((o) => o.id === 'big').effects.cash, -Math.round(2.5 * Math.max(r3.salary, 3000) / 100) * 100, 'rules 3 = v3');
+  for (const o of ev.options) { assert.ok(o.major, 'life options carry the impact panel'); const im = E.impactFor(st, o.id, { event: ev }); assert.ok(im && Number.isFinite(im.cashAfter) && Number.isFinite(im.cfAfter), o.id); }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
