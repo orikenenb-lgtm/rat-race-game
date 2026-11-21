@@ -246,6 +246,11 @@ async def keys(b):
             await pg.keyboard.press('Escape'); await pg.wait_for_timeout(500); still = await pg.evaluate("!document.querySelector('#evm').hidden")
             ok = f0.get('inEvm') and all(s.get('inEvm') for s in fw + bw)
             rec('K-5 event card: initial focus inside, (n+2) Tab / Shift+Tab stay inside', 'PASS' if ok else 'FAIL', f"initial={f0['el']} fw={[s['el'] for s in fw][:6]} escape_keeps_decision_open={still}")
+            for _ in range(6):   # answer the card(s) so later flows (K-9, K-7) start from a clean game
+                if not await pg.evaluate("!document.querySelector('#evm').hidden"): break
+                btn = pg.locator('#evCard button.choice:enabled, #evCard button.primary:enabled').last
+                if not await btn.count(): break
+                await btn.click(); await pg.wait_for_timeout(1500)
         else: rec('K-5 event card focus trap', 'N/A (no card after the first roll)')
         await pg.evaluate("document.querySelector('#homeBtn').click()"); await pg.wait_for_selector('.lb-home', state='visible'); await pg.evaluate(QUIET)
         f = await pg.evaluate(FOCUS); first = (await tabs(pg, 1))[0]
@@ -279,7 +284,7 @@ PRIMARY = '#roll, #evCard button, .lb-big, #gm .acts button, .wv-char, [data-act
 NONAME = """() => [...document.querySelectorAll('button, a[href], [role=button], input, select')].filter(e => { const r = e.getBoundingClientRect(); return r.width && r.height && !e.closest('[hidden]') && !e.closest('[inert]'); })
   .filter(e => { const lb = (e.getAttribute('aria-labelledby') || '').split(/\\s+/).map(i => document.getElementById(i)).filter(Boolean).map(x => x.textContent).join('');
     const lab = (e.getAttribute('aria-label') || e.getAttribute('title') || lb || (e.labels && e.labels[0] && e.labels[0].textContent) || e.getAttribute('placeholder') || e.getAttribute('alt') || '').trim();
-    return !lab && !(e.innerText || e.value || '').trim() && !e.querySelector('img[alt]:not([alt=""])'); })
+    return !lab && !(e.innerText || e.textContent || e.value || '').trim() && !e.querySelector('img[alt]:not([alt=""])'); })
   .map(e => { const p = e.closest('[id]'); return (e.id ? '#' + e.id : e.tagName.toLowerCase() + (e.className ? '.' + String(e.className).split(' ')[0] : '')) + ' in #' + (p ? p.id : '?') + ' ' + e.outerHTML.replace(/\\s+/g, ' ').slice(0, 70); })"""
 OVER = """() => { const r = document.querySelector('#roll'); const rr = r && r.getBoundingClientRect(); const vis = r && !document.querySelector('#start').hidden ? null : rr;
   const chips = [...document.querySelectorAll('#hud .chip, #hud [id^="h"], #evCard h2, #evCard button')].filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.id || e.className).slice(0, 5);
