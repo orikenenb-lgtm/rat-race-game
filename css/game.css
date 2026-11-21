@@ -3,31 +3,64 @@
    PICTURE: the live 3D board fills the screen; your city grows in its centre. Paper-like panels float above it.
    TYPE: Secular One for titles, Rubik for everything else. Gold = the primary action. */
 
-/* ============================================================ tokens */
+/* ============================================================ tokens (T5 §2 — the single source; lobby.css and other lanes consume them)
+   Colour rule: hues are the warm board-game ones; only text luminance was lowered to reach WCAG AA (4.5:1) on all three
+   paper surfaces per mode (checked by tests/contrast.test.mjs). Fills (gold, accents, boards) are unchanged.
+   --gold / --gold2 / --accent are FILLS and borders only — gold-coloured TEXT uses --gold-text, world-coloured text --accent-ink. */
 :root{
   color-scheme:light dark;
+  /* surfaces */
   --paper:light-dark(#fffaf0,#1f1b27);
   --paper2:light-dark(#f6eedd,#2a2533);
   --paper3:light-dark(#efe4cd,#352f40);
-  --ink:light-dark(#1d1a2b,#f3eee4);
-  --mut:light-dark(#6b6478,#aaa3b6);
   --line:light-dark(#e6d9c1,#3b3447);
+  /* text + semantic (all ≥ 4.5:1 on paper/paper2/paper3 of their mode) */
+  --ink:light-dark(#1d1a2b,#f3eee4);
+  --mut:light-dark(#5f586c,#b3acbf);
+  --green:light-dark(#13744a,#3ccf8a);
+  --red:light-dark(#b8322a,#ff7a6e);
+  --blue:light-dark(#2459b8,#8ab2ff);
+  --pink:light-dark(#be185d,#ff8cc2);
+  --gold-text:light-dark(#8a5a00,#f2b632);
+  --accent-ink:light-dark(#8a5a00,#f2b632);   /* text-safe world accent; per world below (body[data-world]) */
+  /* fills */
   --gold:#f2b632; --gold2:#c98a12; --gold-ink:#2b1d00;
-  --green:light-dark(#178a55,#3ccf8a);
-  --red:light-dark(#d23b30,#ff7a6e);
-  --blue:light-dark(#2f6fdb,#7aa7ff);
-  --pink:light-dark(#c0266d,#ff7ab8);
+  --focus:light-dark(#2f6fdb,#7aa7ff);         /* focus ring only (decoupled from --blue) */
   --shadow:0 10px 30px rgba(40,20,0,.18);
   --shadow-s:0 4px 14px rgba(40,20,0,.14);
+  --shadow-l:0 14px 40px rgba(40,20,0,.28);
   --glass:light-dark(rgba(255,250,240,.9),rgba(31,27,39,.88));
   --radius:18px;
   --sky1:#ffd9a0; --sky2:#ff9f7a; --accent:#f2b632; --accent2:#f2b632;
+  /* type: titles Secular One; body, numbers and ₪ always Rubik (.num). rem so OS text scaling works. 12px is the floor. */
   --font:Rubik,system-ui,"Segoe UI",Arial,sans-serif;
   --title:"Secular One",Rubik,system-ui,sans-serif;
+  --fs-cap:.75rem;      /* 12  HUD labels, tags, captions — minimum size anywhere */
+  --fs-sm:.875rem;      /* 14  chips, notes */
+  --fs-md:1rem;         /* 16  body */
+  --fs-lg:1.1875rem;    /* 19  key numbers (Rubik 800) */
+  --fs-xl:1.4375rem;    /* 23  card / modal titles */
+  --fs-2xl:1.75rem;     /* 28  section heads */
+  --fs-3xl:clamp(2rem,6vw,2.75rem);
+  --fs-display:clamp(2.375rem,8vw,3.375rem);
+  /* spacing / radii */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
+  --r-xs:6px; --r-sm:10px; --r-md:12px; --r-lg:18px; --r-xl:24px; --r-pill:999px;
+  /* layers (documents the existing z-indexes; no behaviour change) */
+  --z-board:0; --z-banner:4; --z-hud:20; --z-toast:35; --z-celebrate:40; --z-modal:50; --z-coach:55; --z-recover:60; --z-loading:100;
+  /* motion (js mirror: vocab.js MOTION). Feedback motion never exceeds --dur-max. */
+  --dur-1:120ms; --dur-2:200ms; --dur-3:350ms; --dur-4:480ms; --dur-max:600ms;
+  --ease-out:cubic-bezier(.2,.8,.2,1); --ease-pop:cubic-bezier(.2,1.4,.4,1);
+  --tap:44px;           /* minimum touch target */
   --safe-b:env(safe-area-inset-bottom,0px);
 }
 :root[data-theme=light]{color-scheme:light}
 :root[data-theme=dark]{color-scheme:dark}
+/* world identity (T5 §3): --accent stays the fill (set by ui.applyTheme); --accent-ink is its text-safe variant */
+body[data-world=w2]{--accent-ink:light-dark(#9d1784,#ff4fd8)}
+body[data-world=w3]{--accent-ink:light-dark(#0b5f78,#38bdf8)}
+body[data-world=w4]{--accent-ink:light-dark(#6d28d9,#22d3ee)}
+body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--accent2:#c8a24a}
 
 /* ============================================================ base */
 *{box-sizing:border-box;min-width:0}
@@ -38,27 +71,34 @@ body[data-world=w2]::before,body[data-world=w4]::before{background:transparent}
 canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
 button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:12px;min-height:44px;padding:0 16px;background:var(--paper2);transition:transform .08s,background .15s,box-shadow .15s}
 button:hover:not(:disabled){background:var(--paper3)}
-button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+/* focus: 3px --focus ring + a paper halo outside it, so the ring keeps ≥ 3:1 on any backdrop (3D board, sky gradients, gold) */
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--focus);outline-offset:2px;box-shadow:0 0 0 7px var(--paper)}
+.primary:focus-visible,.hbtn:focus-visible{box-shadow:0 4px 0 var(--gold2),0 0 0 7px var(--paper)}
 button:disabled{opacity:.45;cursor:not-allowed}
 button:active:not(:disabled){transform:translateY(1px)}
 a{color:var(--blue)}
 input,select,textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--paper);border:1.5px solid var(--line);border-radius:12px;min-height:44px;padding:0 12px;width:100%}
 textarea{padding:10px 12px}
 .num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* the ₪ rule (T5 §2.2): Secular One draws ₪ like "שח", so money/numbers/% always render in Rubik — also inside titles */
+.num,.lb-num{font-family:var(--font)}
+:is(h1,h2,h3,.end-title,.banner b,.st-age b,.ach b,#coach .bubble b,.map-name,.wv-cname b,.lb-dh-txt b,.life-age,.life-q,.np-h b,.pf-dq b,.end-place b,.duel-title) :is(.num,.lb-num),
+:is(.st-age b,.end-place b,.pf-dq b,.ach b).num{font-weight:800}
 .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
 svg{fill:currentColor}
+small{font-size:max(var(--fs-cap),.8333em)} /* the browser default "smaller" drops below 12px under 14px text */
 
 /* ============================================================ shared classes (lobby reuses these) */
 .primary{background:var(--gold);color:var(--gold-ink);font-weight:800;box-shadow:0 4px 0 var(--gold2)}
 .primary:hover:not(:disabled){background:#f7c24a}
 .primary:active:not(:disabled){transform:translateY(2px);box-shadow:0 2px 0 var(--gold2)}
 .primary.wide,.wide{width:100%}
-.chip{min-height:36px;padding:0 12px;font-size:14px;border:1px solid var(--line);background:transparent;border-radius:999px}
+.chip{min-height:var(--tap);padding:0 12px;font-size:14px;border:1px solid var(--line);background:transparent;border-radius:999px}
 .chip[aria-pressed=true]{background:var(--gold);color:var(--gold-ink);border-color:var(--gold2)}
 .ibtn{width:44px;height:44px;min-height:44px;padding:0;display:grid;place-items:center;border-radius:12px;background:var(--glass);box-shadow:var(--shadow-s)}
 .ibtn svg{width:22px;height:22px}
 .ibtn[aria-pressed=true]{background:var(--gold);color:var(--gold-ink)}
-.ibtn.sm{width:40px;height:40px;min-height:40px}
+.ibtn.sm{width:var(--tap);height:var(--tap);min-height:var(--tap)}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:15px;padding:3px 0}
 .row>span:first-child{flex:1 1 auto}
 .row b,.row .num{white-space:nowrap}
@@ -67,13 +107,14 @@ svg{fill:currentColor}
 .grid{display:grid;gap:2px;background:var(--paper2);border-radius:14px;padding:10px 14px;margin:8px 0}
 .grid .row{border-bottom:1px dashed var(--line)}.grid .row:last-child{border:0}
 .big{font-size:22px;font-weight:800}
-.tag{display:inline-block;background:var(--c,#2f6fdb);color:var(--ink2,#fff);font-weight:700;font-size:14px;padding:4px 12px;border-radius:999px;line-height:1.4}
+/* tags carry white text: light accent colours are darkened in OKLCH (same hue) until white reaches 4.5:1 */
+.tag{display:inline-block;background:var(--c,#2459b8);background:oklch(from var(--c,#2459b8) min(l,.52) c h);color:var(--ink2,#fff);font-weight:700;font-size:14px;padding:4px 12px;border-radius:999px;line-height:1.4}
 .note{font-size:14px;color:var(--mut);margin:6px 0 0}
 .note.c{text-align:center}
 .err{color:var(--red);font-size:14px;min-height:1.2em;margin:4px 0 0}
 .err:empty{min-height:0;margin:0}
 .d{margin:0 0 10px;color:var(--mut)}
-.b{display:inline-block;font-style:normal;font-size:11px;font-weight:700;line-height:1.5;padding:0 7px;border-radius:999px;background:var(--paper3);color:var(--mut);margin-inline-start:6px;vertical-align:1px}
+.b{display:inline-block;font-style:normal;font-size:var(--fs-cap);font-weight:700;line-height:1.5;padding:0 7px;border-radius:999px;background:var(--paper3);color:var(--mut);margin-inline-start:6px;vertical-align:1px}
 .b.gold{background:#f6d77a;color:#4a3300}.b.warn{background:light-dark(#fde2e1,#4a2323);color:var(--red)}.b.ok{background:light-dark(#d9f3e6,#173a2a);color:var(--green)}.b.pink{background:light-dark(#fde2ef,#4a2236);color:var(--pink)}
 .card{width:min(470px,100%);max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain;background:var(--paper);border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:22px}
 .card.wide{width:min(720px,100%)}
@@ -106,8 +147,13 @@ svg{fill:currentColor}
 .track{height:14px;border-radius:9px;background:light-dark(#efe2c2,#463a26);margin:8px 0 6px;overflow:hidden}
 .track i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),#3ccf8a);border-radius:9px;transition:width .6s}
 .stack8>*+*{margin-top:8px}
-.stars{font-size:40px;letter-spacing:4px;color:light-dark(#d8ccb4,#4a4357)}
-.stars .on{color:var(--gold);text-shadow:0 2px 0 var(--gold2)}
+/* stars: shape carries the state — earned = filled gold with a --gold-text stroke, unearned = outline in --mut (T5 §2.5) */
+.stars{font-size:40px;letter-spacing:4px;color:transparent;-webkit-text-stroke:2px var(--mut)}
+.stars .on{color:var(--gold);-webkit-text-stroke:2px var(--gold-text)}
+/* level pips (business stage / upgrades): filled disc vs hollow ring, never colour alone; always next to the level text */
+.pips{display:inline-flex;gap:var(--sp-1);align-items:center;vertical-align:middle}
+.pips i{width:14px;height:14px;border-radius:50%;border:2px solid var(--mut);background:transparent}
+.pips i.on{background:var(--gold);border:2px solid var(--gold-text)}
 
 /* ============================================================ HUD */
 .hud{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));inset-inline:12px;display:flex;gap:10px;align-items:stretch;z-index:3;pointer-events:none}
@@ -141,11 +187,12 @@ svg{fill:currentColor}
 .stat b{display:inline-block;transform-origin:center}
 .hgoal{flex:1 1 220px;max-width:400px;padding:7px 14px;display:flex;flex-direction:column;justify-content:center;gap:3px}
 .hgoal .gl{display:flex;justify-content:space-between;font-size:13px;font-weight:700}
-.hgoal .gl b{color:var(--gold2)}
+.hgoal .gl b{color:var(--gold-text)}
 .hgoal .gbar{position:relative;height:10px;border-radius:6px;background:light-dark(#efe2c2,#463a26);overflow:hidden}
 .hgoal .gbar i{position:absolute;inset-block:0;inset-inline-start:0;display:block;background:linear-gradient(90deg,var(--gold),#3ccf8a);border-radius:6px;transition:width .7s cubic-bezier(.3,1.3,.5,1)}
-.hgoal .gbar em{position:absolute;inset-inline-end:6px;top:-2px;font-size:9px;font-style:normal;font-weight:800;color:var(--mut);line-height:14px}
-.hgoal .gsub{font-size:11px;color:var(--mut);text-align:end;overflow:hidden;text-overflow:ellipsis}
+.hgoal .gbar em{position:absolute;inset-inline-end:6px;top:0;font-size:var(--fs-cap);font-style:normal;font-weight:800;color:var(--ink);line-height:16px}
+.hgoal .gbar:has(em){height:16px}
+.hgoal .gsub{font-size:var(--fs-cap);color:var(--mut);text-align:end;overflow:hidden;text-overflow:ellipsis}
 .hgoal.done .gbar i{background:linear-gradient(90deg,#3ccf8a,#22d3ee);animation:glow 1.2s infinite alternate}
 @keyframes glow{to{filter:brightness(1.3)}}
 .htools{display:flex;gap:8px;align-items:center;margin-inline-start:auto}
@@ -210,7 +257,7 @@ svg{fill:currentColor}
 .ach .medal{flex:none;width:52px;height:52px;animation:medal 1.2s .3s}
 .ach .medal svg{width:100%;height:100%}
 @keyframes medal{30%{transform:rotate(-14deg) scale(1.15)}60%{transform:rotate(10deg)}}
-.ach small{display:block;font-size:12px;font-weight:800;color:var(--gold2);letter-spacing:.02em}
+.ach small{display:block;font-size:12px;font-weight:800;color:var(--gold-text);letter-spacing:.02em}
 .ach b{display:block;font:20px/1.15 var(--title)}
 .ach p{margin:2px 0 0;font-size:13px;color:var(--mut)}
 .banner{position:fixed;top:28%;left:50%;transform:translate(-50%,-50%);z-index:4;text-align:center;pointer-events:none;opacity:0;color:#fff;text-shadow:0 3px 18px rgba(0,0,0,.45)}
@@ -227,6 +274,8 @@ svg{fill:currentColor}
 /* ============================================================ event cards */
 #evCard .tag{color:var(--ink,#fff)}
 #evCard .tag{background:var(--c);color:var(--ink)}
+/* white-ink tile tags (e.g. "הזדמנות" #1f9d63 = 3.46:1): same hue, darkened in OKLCH until white text passes 4.5:1. Dark-ink tags keep their colour. */
+#evCard .tag[style*="--ink:#fff"]{background:oklch(from var(--c) min(l,.52) c h)}
 #evCard{position:relative}
 #evCard.working .acts button{pointer-events:none}
 #evCard.golden{background:linear-gradient(160deg,var(--paper) 55%,light-dark(#fff1c2,#3d3114));box-shadow:0 0 0 3px #f2c94c,0 20px 60px rgba(160,110,0,.45)}
@@ -267,7 +316,7 @@ button.sell{background:light-dark(#e3eeff,#22304d);color:var(--blue);font-weight
 .quizq{padding:12px;border-radius:14px;background:var(--paper2);margin:8px 0}
 .quizq b{font-size:18px}
 .acts.quiz .opt button{text-align:start}
-input[type=range]{width:100%;margin-top:12px;accent-color:var(--gold);min-height:32px;padding:0;border:0;background:transparent}
+input[type=range]{width:100%;margin-top:12px;accent-color:var(--gold);min-height:var(--tap);padding:0;border:0;background:transparent}
 .qty{display:flex;gap:6px;align-items:center;justify-content:center;margin:10px 0}
 .qty button{min-width:52px;padding:0 8px;font-size:14px}
 .qty.chips{flex-wrap:wrap}
@@ -281,7 +330,7 @@ input[type=range]{width:100%;margin-top:12px;accent-color:var(--gold);min-height
 #coach .ring{position:fixed;border-radius:16px;box-shadow:0 0 0 4px var(--gold),0 0 0 9999px rgba(10,6,0,.38);animation:ring 1.4s ease-in-out infinite}
 @keyframes ring{50%{box-shadow:0 0 0 8px var(--gold),0 0 0 9999px rgba(10,6,0,.38)}}
 #coach .bubble{position:fixed;pointer-events:auto;background:var(--paper);border-radius:18px;padding:14px 16px;box-shadow:0 18px 50px rgba(0,0,0,.4);border:2px solid var(--gold);animation:pop .4s cubic-bezier(.2,1.4,.4,1)}
-#coach .bubble small{color:var(--gold2);font-weight:800}
+#coach .bubble small{color:var(--gold-text);font-weight:800}
 #coach .bubble b{display:block;font:20px/1.2 var(--title);margin:2px 0}
 #coach .bubble p{margin:0 0 4px;font-size:15px}
 #coach .bubble .acts{margin-top:10px}
@@ -303,7 +352,7 @@ body[data-world=w2] .ld,body[data-world=w4] .ld{color:#fff}
 .fbworld small{font-weight:800;opacity:.8}.fbworld b{font:22px/1.1 var(--title)}.fbworld span{font-size:12px;opacity:.9}
 .fbworld.on{border-color:var(--gold);transform:translateY(-2px)}
 .fbworld:hover:not(:disabled){background:linear-gradient(160deg,var(--s1),var(--s2));filter:brightness(1.05)}
-.fbt{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:15px}
+.fbt{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:15px;min-height:var(--tap)}
 .fbt input{width:22px;height:22px;min-height:0;accent-color:var(--gold)}
 .fb .primary.wide{margin:6px 0}
 .fb.end{text-align:center;max-width:520px}
@@ -342,19 +391,19 @@ body[data-world=w2] .ld,body[data-world=w4] .ld{color:#fff}
   .hworld:not(.noind) b{display:none}
   .hind{font-size:12px}
   .hgoal{grid-area:goal;max-width:none;padding:5px 10px;flex-direction:row;align-items:center;gap:8px;border-radius:12px}
-  .hgoal .gl{flex-direction:column;font-size:11px;line-height:1.1;align-items:flex-start;flex:none}
+  .hgoal .gl{flex-direction:column;font-size:var(--fs-cap);line-height:1.1;align-items:flex-start;flex:none}
   .hgoal .gbar{flex:1;height:9px}
   .hgoal .gsub{display:none}
   .stat{padding:4px 7px}
-  .stat span{font-size:11px}
+  .stat span{font-size:var(--fs-cap)}
   .stat b{font-size:16px}
-  .stat b small{font-size:11px}
+  .stat b small{font-size:var(--fs-cap)}
   .stat+.stat::before{top:9px;bottom:9px}
   #mentor{padding:8px 10px;gap:8px;border-radius:16px}
   .av{width:36px;height:36px;font-size:14px}
-  #mentor .mt>b{font-size:12px}
+  #mentor .mt>b{font-size:var(--fs-cap)}
   #mText{font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  #mentor .ibtn.sm{width:36px;height:36px;min-height:36px}
+  #mentor .ibtn.sm{width:var(--tap);height:var(--tap);min-height:var(--tap)}
   #roll{font-size:17px;min-height:46px}
   #sheetBtn{padding:0 10px}
   #sheetBtn span{font-size:13px}
@@ -373,11 +422,26 @@ body[data-world=w2] .ld,body[data-world=w4] .ld{color:#fff}
 }
 @media (max-width:360px){ .stat{padding:4px 5px} .stat b{font-size:15px} .htools .ibtn{width:36px} }
 @media (max-height:560px) and (min-width:601px){ #mText{font-size:14px} .die{width:44px;height:44px} }
+/* reduced motion (T5 §7): js/motion.js sets <html data-motion="reduce|full"> to the EFFECTIVE value (in-app setting beats the OS).
+   Every rule exists twice: under the OS media query (unless the app says "full") and under data-motion=reduce. */
 @media (prefers-reduced-motion:reduce){
-  .card.pop,.die.spin,.die.land,#roll.ready,.ach .medal,#coach .ring,#coach .bubble,.banner.in,.banner.out,#evCard.golden h2{animation:none!important}
-  .banner.in{opacity:1}.banner.out{opacity:0}
-  #sheet{transition:none}
+  :root:not([data-motion=full]) :is(.card.pop,.die.spin,.die.land,.dice.land .die,.dice.shaking .die,#roll.ready,.ach .medal,#coach .ring,#coach .bubble,.banner.in,.banner.out,#evCard.golden h2,.hind .arr,.stat.up b,.stat.down b,.stat.bump b,.stat.tick b,.hgoal.done .gbar i,#mentor.talk .av,.st-card){animation:none!important}
+  :root:not([data-motion=full]) .hlife .lc.en.neg::before{animation:none}
+  :root:not([data-motion=full]) .banner.in{opacity:1}
+  :root:not([data-motion=full]) .banner.out{opacity:0}
+  :root:not([data-motion=full]) :is(#sheet,.track i,.hgoal .gbar i,.hgoal .gbar s,.hlife .lc .mb i){transition:none}
+  :root:not([data-motion=full]) :is(#toast,#toast.on,#verdict,#verdict.on){transform:translateX(-50%);transition:opacity var(--dur-1)}
+  :root:not([data-motion=full]) :is(.ach,.ach.in,.ach.out){transform:none;transition:opacity var(--dur-1)}
+  :root:not([data-motion=full]) :is(.np,.np.in,.np.out){transform:rotate(-1.5deg);transition:opacity var(--dur-1)}
 }
+:root[data-motion=reduce] :is(.card.pop,.die.spin,.die.land,.dice.land .die,.dice.shaking .die,#roll.ready,.ach .medal,#coach .ring,#coach .bubble,.banner.in,.banner.out,#evCard.golden h2,.hind .arr,.stat.up b,.stat.down b,.stat.bump b,.stat.tick b,.hgoal.done .gbar i,#mentor.talk .av,.st-card){animation:none!important}
+:root[data-motion=reduce] .hlife .lc.en.neg::before{animation:none}
+:root[data-motion=reduce] .banner.in{opacity:1}
+:root[data-motion=reduce] .banner.out{opacity:0}
+:root[data-motion=reduce] :is(#sheet,.track i,.hgoal .gbar i,.hgoal .gbar s,.hlife .lc .mb i){transition:none}
+:root[data-motion=reduce] :is(#toast,#toast.on,#verdict,#verdict.on){transform:translateX(-50%);transition:opacity var(--dur-1)}
+:root[data-motion=reduce] :is(.ach,.ach.in,.ach.out){transform:none;transition:opacity var(--dur-1)}
+:root[data-motion=reduce] :is(.np,.np.in,.np.out){transform:rotate(-1.5deg);transition:opacity var(--dur-1)}
 .ach .medal .emo{display:grid;place-items:center;width:100%;height:100%;font-size:34px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3b0,#f2b632 60%,#c98a12);box-shadow:0 3px 0 #a06d08}
 .hgoal .gbar s{position:absolute;inset-block:0;inset-inline-start:0;display:block;background:color-mix(in srgb,#ff7ab8 40%,transparent);border-radius:6px;transition:width .7s}
 @media (min-width:601px) and (max-width:820px){
@@ -426,8 +490,8 @@ body[data-world=w2] .ld,body[data-world=w4] .ld{color:#fff}
 /* bail-out card */
 h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 /* actionable toast (turbo offer) */
-#toast.act{pointer-events:auto;display:flex;align-items:center;gap:10px;padding:6px 6px 6px 16px}
-#toast .tbtn{min-height:34px;padding:0 14px;border-radius:999px;background:var(--gold);color:var(--gold-ink);font-weight:800}
+#toast.act{pointer-events:auto;display:flex;align-items:center;gap:10px;padding:4px 4px 4px 16px}
+#toast .tbtn{min-height:var(--tap);padding:0 14px;border-radius:999px;background:var(--gold);color:var(--gold-ink);font-weight:800}
 /* statement sheet totals */
 .cashrow span{font-weight:700}
 /* coach bubble: no arrow, placed by JS */
@@ -441,7 +505,7 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
   .htools .ibtn{width:34px;height:44px;min-height:44px}
   .htools .ibtn svg{width:19px;height:19px}
   .stat{padding:4px 5px}
-  .stat span{font-size:10.5px}
+  .stat span{font-size:var(--fs-cap)}
   .stat b{font-size:15px}
   .hworld{padding:4px 8px}
 }
@@ -480,19 +544,25 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 .hlife{display:flex;gap:6px;align-items:center;pointer-events:auto}
 .hlife[hidden]{display:none}
 .hlife .lc{display:inline-flex;align-items:center;gap:4px;min-height:34px;padding:0 9px;border-radius:999px;background:var(--glass);box-shadow:var(--shadow-s);font-size:13px;backdrop-filter:blur(8px)}
+/* touch target (T5 / UX§2.4): the hit box is 44px tall, the visible pill stays 34px (30px on phones) and negative block margins
+   keep the HUD row height unchanged. The pill is painted by ::before. */
+.hlife .lc{position:relative;isolation:isolate;min-height:var(--tap);margin-block:-5px;background:none;box-shadow:none;backdrop-filter:none}
+.hlife .lc::before{content:"";position:absolute;inset:5px 0;z-index:-1;border-radius:inherit;background:var(--glass);box-shadow:var(--shadow-s);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.hlife .lc:hover:not(:disabled){background:none}
+.hlife .lc:hover:not(:disabled)::before{background:var(--paper3)}
 .hlife .lc b{font-weight:800}
 .hlife .lc span{font-size:14px;line-height:1}
 .hlife .lc .mb{display:inline-block;width:42px;height:7px;border-radius:5px;background:light-dark(#e6dcc6,#463a26);overflow:hidden}
 .hlife .lc .mb i{display:block;height:100%;border-radius:5px;background:var(--green);transition:width .6s}
 .hlife .lc.warn .mb i{background:#f59e0b}.hlife .lc.neg .mb i{background:var(--red)}
-.hlife .lc.en.neg{animation:pulseR 1.6s infinite}
+.hlife .lc.en.neg::before{animation:pulseR 1.6s infinite}
 @keyframes pulseR{50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--red) 30%,transparent)}}
 .hlife .lc.cr.pos b{color:var(--green)}.hlife .lc.cr.neg b{color:var(--red)}
 .hlife .lc.plan b{font-weight:700;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hen{display:flex;align-items:center;gap:4px;padding:0 12px;min-height:44px;font-weight:800;border-radius:16px;pointer-events:auto}
 .hen[hidden]{display:none}
-.hen span{font-size:16px}.hen small{font-size:11px;color:var(--mut);font-weight:600}
-.hen.low b{color:#d97706}.hen.empty b{color:var(--red)}
+.hen span{font-size:16px}.hen small{font-size:var(--fs-cap);color:var(--mut);font-weight:600}
+.hen.low b{color:light-dark(#b45309,#fbbf24)}.hen.empty b{color:var(--red)}
 @media (min-width:601px){
   body.has-life .hud{flex-wrap:wrap}
   body.has-life .hlife{order:10;flex-basis:100%;justify-content:flex-start;margin-top:-2px}
@@ -500,7 +570,8 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 @media (max-width:600px){
   .hud{grid-template-areas:"home stats stats tools" "world world goal goal" "life life life life"}
   .hlife{grid-area:life;gap:4px;justify-content:space-between}
-  .hlife .lc{min-height:30px;padding:0 6px;font-size:12px;gap:3px}
+  .hlife .lc{min-height:var(--tap);margin-block:-7px;padding:0 6px;font-size:12px;gap:3px}
+  .hlife .lc::before{inset-block:7px}
   .hlife .lc .mb{width:26px}
   .hlife .lc.plan b{max-width:62px}
   .hen{grid-area:tools;display:none}
@@ -515,7 +586,7 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 .plan b{font-size:15px}
 .plan.cur{border-color:var(--gold);background:light-dark(#fff3d2,#33291a)}
 .plan.rec:not(.cur){border-color:color-mix(in srgb,var(--green) 55%,transparent)}
-.tagc{font-size:11px;font-weight:800;color:var(--gold2)}.tagc.rec{color:var(--green)}
+.tagc{font-size:var(--fs-cap);font-weight:800;color:var(--gold-text)}.tagc.rec{color:var(--green)}
 .fxs{display:flex;flex-wrap:wrap;gap:4px}
 .fx{font-style:normal;font-size:12px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--paper3)}
 .fx.pos{color:var(--green)}.fx.neg{color:var(--red)}
@@ -529,7 +600,7 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 .nego .mh{margin:0 0 8px;font-weight:700;font-size:14px}.nego .mh small{font-weight:500;color:var(--mut)}
 .nrow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .noff{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:58px;padding:6px}
-.noff b{font-size:17px}.noff small{font-size:11px;font-weight:700}
+.noff b{font-size:17px}.noff small{font-size:var(--fs-cap);font-weight:700}
 .chbar{display:block;width:80%;height:5px;border-radius:3px;background:var(--paper3);overflow:hidden}
 .chbar i{display:block;height:100%;background:var(--green)}
 .okmsg{margin:0 0 8px;padding:8px 12px;border-radius:12px;background:light-dark(#d9f3e6,#173a2a);color:var(--green);font-weight:700}
@@ -548,7 +619,7 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 .cbars div{display:flex;flex-direction:column;align-items:center;gap:2px}
 .cbars i{display:block;width:70%;background:linear-gradient(180deg,#3ccf8a,#178a55);border-radius:6px 6px 2px 2px;position:relative;overflow:hidden}
 .cbars i s{position:absolute;bottom:0;inset-inline:0;background:rgba(0,0,0,.28)}
-.cbars small{font-size:11px;color:var(--mut)}.cbars b{font-size:13px}
+.cbars small{font-size:var(--fs-cap);color:var(--mut)}.cbars b{font-size:13px}
 .mut{color:var(--mut);font-weight:500}
 .lesson{font-size:17px;line-height:1.55}
 /* history mode — "מכונת הזמן" */
@@ -560,7 +631,7 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 .hist[hidden]{display:none}
 .hist .hh{display:flex;justify-content:space-between;font-weight:800}
 .hist .spark{display:block;width:100%;height:38px}
-.hist .hv{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--mut)}
+.hist .hv{display:flex;gap:8px;flex-wrap:wrap;font-size:var(--fs-cap);color:var(--mut)}
 @media (max-width:820px){ .hist{top:auto;bottom:calc(200px + var(--safe-b));inset-inline-end:8px;width:180px;padding:6px 10px} .hist .spark{height:28px} }
 #paper{position:fixed;z-index:34;left:50%;top:28%;transform:translateX(-50%);pointer-events:none;width:min(420px,calc(100vw - 32px))}
 .np{background:#f6efdc;color:#2a2116;border:1px solid #cdb88c;box-shadow:0 18px 40px rgba(60,40,10,.35);padding:12px 16px 14px;transform:rotate(-2deg) scale(.6);opacity:0;transition:transform .45s cubic-bezier(.2,1.5,.4,1),opacity .3s;background-image:repeating-linear-gradient(0deg,rgba(0,0,0,.025) 0 2px,transparent 2px 4px)}
@@ -573,7 +644,7 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 .story[hidden]{display:none}.story.in{opacity:1}
 .st-card{width:min(440px,100%);background:var(--paper);border-radius:26px;padding:26px 22px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45);animation:pop .5s cubic-bezier(.2,1.4,.4,1)}
 .story.won .st-card{box-shadow:0 0 0 4px var(--gold),0 30px 80px rgba(160,110,0,.45)}
-.st-card>small{font-weight:800;color:var(--gold2);letter-spacing:.06em}
+.st-card>small{font-weight:800;color:var(--gold-text);letter-spacing:.06em}
 .st-age{display:flex;align-items:baseline;justify-content:center;gap:8px;margin:8px 0}
 .st-age b{font:84px/1 var(--title)}.st-age span{font-size:20px;color:var(--mut)}
 .st-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
@@ -599,8 +670,8 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 .cbars i.mid{background:linear-gradient(180deg,#7cc4f5,#2563eb)}
 .cbars i.hi{background:linear-gradient(180deg,#3ccf8a,#178a55)}
 .reality{margin:8px 0 4px;padding:7px 10px;border-radius:10px;background:color-mix(in srgb,var(--accent,#2f6fdb) 9%,transparent);border-inline-start:3px solid color-mix(in srgb,var(--accent,#2f6fdb) 55%,transparent);font-size:12.5px;line-height:1.45;color:var(--ink,inherit)}
-.row small.rw{display:block;font-size:11px;color:var(--mut);font-weight:400;margin-top:1px}
-.disclaimer{margin:14px 0 4px;padding-top:8px;border-top:1px dashed var(--line,rgba(0,0,0,.15));font-size:11px;color:var(--mut);text-align:center}
+.row small.rw{display:block;font-size:var(--fs-cap);color:var(--mut);font-weight:400;margin-top:1px}
+.disclaimer{margin:14px 0 4px;padding-top:8px;border-top:1px dashed var(--line,rgba(0,0,0,.15));font-size:var(--fs-cap);color:var(--mut);text-align:center}
 /* ≤360px: money stats must never clip (3 numbers + 3 tool buttons on one row) */
 @media (max-width:360px){ .stat{padding:4px 3px} .stat b{font-size:14px;letter-spacing:-.2px} .htools{gap:3px} .htools .ibtn{width:32px} }
 
@@ -613,12 +684,12 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 #verdict span{font-size:13px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 #verdict.pos{border-color:color-mix(in srgb,var(--green) 55%,transparent)}#verdict.pos .vs{background:var(--green)}#verdict.pos small{color:var(--green)}
 #verdict.ok{border-color:color-mix(in srgb,#0e7490 50%,transparent)}#verdict.ok .vs{background:#0e7490}#verdict.ok small{color:light-dark(#0e7490,#5ec8de)}
-#verdict.mid{border-color:color-mix(in srgb,#d97706 55%,transparent)}#verdict.mid .vs{background:#d97706}#verdict.mid small{color:light-dark(#b45309,#fbbf24)}
+#verdict.mid{border-color:color-mix(in srgb,#d97706 55%,transparent)}#verdict.mid .vs{background:#b45309}#verdict.mid small{color:light-dark(#b45309,#fbbf24)}
 #verdict.neg{border-color:color-mix(in srgb,var(--red) 55%,transparent)}#verdict.neg .vs{background:var(--red)}#verdict.neg small{color:var(--red)}
 .vline{display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:6px 10px;border-radius:12px;font-size:13px;line-height:1.35;background:var(--paper2)}
 .vline>b.num{flex:none;display:grid;place-items:center;min-width:30px;height:30px;border-radius:50%;color:#fff;background:var(--mut);font-size:13px}
-.vline.pos>b.num{background:var(--green)}.vline.ok>b.num{background:#0e7490}.vline.mid>b.num{background:#d97706}.vline.neg>b.num{background:var(--red)}
-.acts .opt button .net.sub{font-size:11.5px;font-weight:600;color:var(--mut)}
+.vline.pos>b.num{background:var(--green)}.vline.ok>b.num{background:#0e7490}.vline.mid>b.num{background:#b45309}.vline.neg>b.num{background:var(--red)}
+.acts .opt button .net.sub{font-size:var(--fs-cap);font-weight:600;color:var(--mut)}
 .acts .opt button.primary .net.sub{color:#5a4100}
 .choice.primary .tagc.rec{color:#0d5c37}
 .choice .tagc{display:block}
