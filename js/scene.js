@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON } from './render/vocab.js';
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref } from './render/quality.js';
-import { flattenModel, flatEnabled, LIT_RE } from './render/flatten.js';
+import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy } from './render/flatten.js';
 import { createKit } from './render/kit3d.js';
 
 let renderer, scene, camera, controls, hemi, sun, fill;
@@ -303,7 +303,7 @@ function disposeTree(root, { keepShared = null } = {}) {
     if (o.isInstancedMesh) { try { o.dispose(); } catch (e) { /* ignore */ } }
     if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose();
     for (const m of [].concat(o.material || [])) {
-      if (!m || keep.has(m)) continue;
+      if (!m || keep.has(m) || isSharedFlat(m)) continue;
       for (const k of ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'alphaMap', 'aoMap']) if (m[k]) m[k].dispose();
       m.dispose();
     }
@@ -1268,7 +1268,13 @@ function applyLevelParts(it) {
   // stage ≥ 1: windows lit (+0.2 emissive on the item's own copy of its "lit window" materials)
   const lit = !!(it.level && it.level.kind === 'biz' && it.level.n >= 1);
   it.obj.traverse((o) => {
-    if (!o.isMesh || !o.material || Array.isArray(o.material) || !LIT_RE.test(o.material.name || '')) return;
+    if (!o.isMesh || !o.material || Array.isArray(o.material) || o.userData.annexPart) return;
+    if (isSharedFlat(o.material) || (o.userData.ownMat && o.material.userData.uLit)) { // flattened: one uniform on a per-item copy
+      if (!lit && !o.userData.ownMat) return;
+      if (!o.userData.ownMat) { o.material = litCopy(o.material, 0.2); o.userData.ownMat = true; }
+      o.material.userData.uLit.value = lit ? 0.2 : 0; return;
+    }
+    if (!LIT_RE.test(o.material.name || '')) return;                                       // ?flat=0: the original material
     if (!o.userData.ownMat) { o.userData.baseEI = o.material.emissiveIntensity; o.material = o.material.clone(); o.userData.ownMat = true; }
     o.material.emissiveIntensity = o.userData.baseEI + (lit ? 0.2 : 0);
   });
@@ -1651,12 +1657,14 @@ export function pickAt(cx, cy) {
     if (!renderer || !city.size) return null;
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    // 1) within 22 px of an item's projected centre → the nearest centre wins (every item gets a 44 px target, overlaps resolved)
+    let best = null, bd = 22.5 * 22.5;
+    for (const k of city.keys()) { const p = project(k); const d = (p.x - cx) ** 2 + (p.y - cy) ** 2; if (d <= bd) { bd = d; best = k; } }
+    if (best) return best;
+    // 2) else the first pick proxy under the point (bounding box × 1.15, layer 1)
     camera.updateMatrixWorld(); raycaster.setFromCamera(ndc, camera);
     const hit = raycaster.intersectObjects(pickGroup.children, false)[0];
-    if (hit && hit.object.userData.key && city.has(hit.object.userData.key)) return hit.object.userData.key;
-    let best = null, bd = 22 * 22;
-    for (const k of city.keys()) { const p = project(k); const d = (p.x - cx) ** 2 + (p.y - cy) ** 2; if (d <= bd) { bd = d; best = k; } }
-    return best;
+    return hit && hit.object.userData.key && city.has(hit.object.userData.key) ? hit.object.userData.key : null;
   } catch (e) { console.warn('[scene] pickAt', e); return null; }
 }
 /** onPick(cb) → unsubscribe; cb(key, {x, y}) on a tap (one pointer, < 8 px, < 350 ms; drags/pinches/orbits never pick). */
@@ -1700,7 +1708,7 @@ export function perfStats() {
   return { calls: r.render.calls, triangles: r.render.triangles, geos: r.memory.geometries, textures: r.memory.textures, texMB: +(texBytes() / 1048576).toFixed(1),
     dpr: renderer.getPixelRatio(), tier, lowPower, shadows: renderer.shadowMap.enabled, antialias: !!renderer.getContextAttributes()?.antialias, framesRendered, lastTurnMs: Math.round(turnMs),
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
-    paused, hidden: pageHidden, reduced, glb: [...ready.keys()] };
+    paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), glb: [...ready.keys()] };
 }
 function perfOverlay() {
   perfEl = document.createElement('div'); perfEl.setAttribute('aria-hidden', 'true');
@@ -1728,4 +1736,17 @@ export async function perfRun(ms = 10000) {
   for (const k of [...city.keys()]) if (!keep.includes(k)) { dropObj(city.get(k).obj); city.delete(k); }
   relayout(false); setCameraMode(was);
   return { ms: Math.round(performance.now() - t0), ...out.fps, calls: out.calls, tier: out.tier };
+}
+/** debug (outside SCENE_API): approximate draw calls per group — visible renderables inside the camera frustum */
+export function perfBreakdown() {
+  const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const groups = { world: worldGroup, city: cityGroup, fx: fxGroup, kit: kit && kit.group, labels: labelGroup, other: null }; const out = {};
+  const seen = new Set();
+  for (const [k, g] of Object.entries(groups)) {
+    if (!g) continue; let n = 0; const names = {};
+    g.traverseVisible((o) => { if (!(o.isMesh || o.isSprite || o.isPoints)) return; seen.add(o); if (o.frustumCulled && !o.isInstancedMesh && !fr.intersectsObject(o)) return; const c = Array.isArray(o.material) ? o.material.length : 1; n += c; const nm = (o.name || o.parent?.name || o.type).slice(0, 24); names[nm] = (names[nm] || 0) + c; });
+    out[k] = { n, top: Object.entries(names).sort((a, b) => b[1] - a[1]).slice(0, 8) };
+  }
+  let other = 0; scene.traverseVisible((o) => { if ((o.isMesh || o.isSprite || o.isPoints) && !seen.has(o)) other++; }); out.other = other;
+  return out;
 }
