@@ -889,3 +889,8 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 /* T7 axe: contrast inside gold buttons and on the neutral verdict disc (dark mode) */
 .acts .opt button.primary .net.pos,.acts .opt button.primary .net.neg,.acts .opt button.primary .net{color:var(--gold-ink)}
 #verdict .vs{background:light-dark(#5f586c,#4a4458)}
+/* T5 CR-B2: asset info + keyboard path from the sheet */
+.alink{min-height:var(--tap);padding:0;margin:-6px 0;background:none!important;border:0;text-align:start;font:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
+.arow.flash{background:light-dark(#fff3d2,#33291a);transition:background .3s}
+.alevel{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
+.alevel small{flex-basis:100%;color:var(--mut)}

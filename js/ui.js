@@ -490,10 +490,10 @@ export function renderSheet(m, ctx) {
     if (a.upgrades) badges.push(`<em class="b">שודרג ×${a.upgrades}</em>`);
     if (a.impact) badges.push(`<em class="b pink">+${a.impact} השפעה</em>`);
     if (a.business) badges.push(a.business.manager || a.business.incomeKind === 'passive' ? '<em class="b ok">עם מנהל · פסיבי</em>' : '<em class="b warn">אתה עובד בו · אקטיבי</em>');
-    return `<div class="arow"><div><span>${esc(a.name)}</span>${badges.join('')}</div><div class="av2">${num(fmtM(a.value))}<small class="${cls(a.cf)}">${num(sgn(a.cf))} לחודש</small></div></div>`;
+    return `<div class="arow" data-asset="${esc(a.id)}"><div><button type="button" class="alink" data-asset-open="${esc(a.id)}">${esc(a.name)}</button>${badges.join('')}</div><div class="av2">${num(fmtM(a.value))}<small class="${cls(a.cf)}">${num(sgn(a.cf))} לחודש</small></div></div>`;
   }).join('');
-  const holdRows = m.holdings.map((h) => `<div class="arow"><div><span>${N(h.qty)} ${esc(h.unit)} ${esc(h.ticker)}</span><small class="note">${fmtP(h.price)} ליחידה</small></div><div class="av2">${num(fmtM(h.value))}${h.div ? `<small class="pos">${num(sgn(h.qty * h.div))} לחודש</small>` : ''}</div></div>`).join('');
-  const angelRows = m.angels.filter((x) => x.status === 'active').map((x) => `<div class="arow"><div><span>${esc(x.name)}</span><small class="note">${x.news ? escI(x.news) : `תוצאה עד חודש ${x.revealAt}`}</small></div><div class="av2">${num(fmtM(x.paper))}<small>על הנייר</small></div></div>`).join('');
+  const holdRows = m.holdings.map((h) => `<div class="arow" ${h.model ? `data-asset="h:${esc(h.model)}"` : ''}><div>${h.model ? `<button type="button" class="alink" data-asset-open="h:${esc(h.model)}">${N(h.qty)} ${esc(h.unit)} ${esc(h.ticker)}</button>` : `<span>${N(h.qty)} ${esc(h.unit)} ${esc(h.ticker)}</span>`}<small class="note">${fmtP(h.price)} ליחידה</small></div><div class="av2">${num(fmtM(h.value))}${h.div ? `<small class="pos">${num(sgn(h.qty * h.div))} לחודש</small>` : ''}</div></div>`).join('');
+  const angelRows = m.angels.filter((x) => x.status === 'active').map((x) => `<div class="arow" data-asset="${esc(x.id)}"><div><button type="button" class="alink" data-asset-open="${esc(x.id)}">${esc(x.name)}</button><small class="note">${x.news ? escI(x.news) : `תוצאה עד חודש ${x.revealAt}`}</small></div><div class="av2">${num(fmtM(x.paper))}<small>על הנייר</small></div></div>`).join('');
   const totA = m.totalAssets ?? null, totL = m.totalLiabilities ?? null; // engine sums (audit D3) — the UI only displays
   const done = m.angels.filter((x) => x.status !== 'active');
   const angelDone = done.length ? `<p class="note">${done.length} השקעות נסגרו: ${done.map((x) => `${esc(x.name)} ${x.mult ? '×' + x.mult : '✗'}`).join(' · ')}</p>` : '';
@@ -1434,14 +1434,14 @@ export function focusPicker(F, { level = 'hint', slot: slot0 = null } = {}) {
     .map(([n, t, v]) => `<button type="button" class="fslot" data-slot="${n}" aria-pressed="${slot === n}"><b>${t}</b><small>${esc(v)}</small></button>`).join('')}</div>`;
   const body = () => `${slots()}
     ${slot === 0 && F.locked ? `<p class="note">כבר בחרת מוקד לחודש הזה (${esc(F.current.label)}). אפשר לתכנן את החודשים הבאים — זה בחינם.</p>` : slot ? '<p class="note">תכנון לחודש שיבוא: בלי תשלום עכשיו. ביום המשכורת המוקד נכנס לתוקף ומשלמים עליו.</p>' : '<p class="note">משלמים עכשיו, והמוקד פועל עד יום המשכורת. מוקד אחד בחודש.</p>'}
-    <div class="ftiles">${F.options.filter((o) => slot === 0 || o.id !== 'none').map(tile).join('')}</div>
+    <div class="ftiles">${F.options.filter((o) => slot === 0 || o.id !== 'none').slice().sort((a, b) => (b.enabled ? 1 : 0) - (a.enabled ? 1 : 0)).map(tile).join('')}</div>
     ${slot ? `<button type="button" class="chip fnone" data-fid="none">ללא</button>` : ''}`;
   let root = null;
   const paint = (keep) => { if (!root) return; root.querySelector('.fbody').innerHTML = body(); if (keep) root.querySelector(keep)?.focus({ preventScroll: true }); const go = root.querySelector('.acts button[data-i="0"]'); if (go) { go.disabled = !sel; go.textContent = sel ? `לבחור: ${(F.options.find((o) => o.id === sel) || { label: 'ללא' }).label}` : 'לבחור'; } };
   return modal({ tag: 'מוקד החודש', color: '#0e7490', title: 'על מה תשים את הראש החודש?', wide: true, cls: 'fpick', dismissable: true,
     html: `<div class="fbody">${body()}</div>`,
     actions: [{ label: 'לבחור', cls: 'primary', v: 'go', dis: true }, { label: 'סגירה', v: null }],
-    onOpen: (c) => { root = c; },
+    onOpen: (c) => { root = c; setTimeout(() => { c.scrollTop = 0; c.querySelector('.fslot[aria-pressed="true"]')?.focus({ preventScroll: true }); }, 80); },
     onExtra: (e) => {
       const sl = e.target.closest('[data-slot]'); if (sl) { slot = +sl.dataset.slot; sel = null; sfx('click'); paint(`[data-slot="${slot}"]`); return; }
       const t = e.target.closest('[data-fid]'); if (!t || t.disabled) return;
@@ -1506,7 +1506,7 @@ export function endAnalysisHtml(end) {
     const parts = L.luck && L.luck.parts ? Object.entries(L.luck.parts).filter(([k, v]) => LUCK_L[k] && v) : [];
     const luck = parts.length ? `<p class="ea-l">🎲 מזל: ${parts.map(([k, v]) => `${LUCK_L[k]} ${num(sgn(v), cls(v))}`).join(' · ')}</p>` : '';
     const rv = (L.review || []).slice(); const list = pro ? rv : rv.slice().sort((a, b) => (a.score ?? 100) - (b.score ?? 100)).slice(0, 5);
-    const items = list.map((r) => `<li class="${(r.score ?? 100) < 60 ? 'low' : ''}"><span class="sc num">${Math.round(r.score ?? 0)}</span><span><b>${escI(r.c || '')}</b>${optName(r) ? ` · ${escI(optName(r))}` : ''}${r.hinted ? ' <em class="b">רמז</em>' : ''}<small>${VERD_L[r.verdict] ? esc(VERD_L[r.verdict]) + ' · ' : ''}${escI(r.why || '')}${r.best && (r.score ?? 100) < 85 ? ` · הכי טוב היה: ${escI(r.best)}` : ''}</small></span></li>`).join('');
+    const items = list.map((r) => `<li class="${(r.score ?? 100) < 60 ? 'low' : ''}"><span class="sc num">${Math.round(r.score ?? 0)}</span><span><b>${escI(r.c || '')}</b>${optName(r) ? ` · ${escI(optName(r))}` : ''}${r.hinted ? ' <em class="b">רמז</em>' : ''}<small>${VERD_L[r.verdict] ? esc(VERD_L[r.verdict]) + ' · ' : ''}${escI(r.why || '')}${r.best && (r.score ?? 100) < 85 && !/עדיף/.test(r.why || '') ? ` · הכי טוב היה: ${escI(r.best)}` : ''}</small></span></li>`).join('');
     out.push(`${hints}${lc}${luck}${items ? `<h4>${pro ? 'כל ההחלטות' : '5 ההחלטות ששווה לחשוב עליהן'}</h4><ol class="ea-rev">${items}</ol>` : ''}`);
   }
   if (R && R.length) {
@@ -1643,4 +1643,32 @@ export function lifeStory(sum, { won = false } = {}) {
     if (!calm) setTimeout(close, Math.max(4200, 1600 + sent.length * 45) * Math.max(0.7, speed));
     void yrs;
   });
+}
+
+/* ============================================================ T5 CR-B2: "פרטי הנכס" (tap a city item / Enter on a sheet row) */
+/** info = js/render/assetinfo.js assetInfo(key, metrics, {level}) — the UI only formats. → Promise<'sheet'|'ops'|undefined> */
+export function assetInfo(key, info, ctx = {}) {
+  if (!info) return Promise.resolve();
+  const val = (r) => r.kind === 'money' ? num(fmtM(r.value || 0)) : r.kind === 'signed' ? num(sgn(r.value || 0), cls(r.value || 0))
+    : r.kind === 'energy' ? `<span class="num neg">−${Math.abs(Math.round(r.value || 0))}</span> 🔋` : r.kind === 'count' ? `${num(N(r.value || 0))}${r.unit ? ' ' + esc(r.unit) : ''}` : escI(String(r.value ?? ''));
+  const L = info.level;
+  const pips = L && L.of ? `<span class="pips" role="img" aria-label="${esc(info.levelText || '')}">${Array.from({ length: L.of }, (_, i) => `<i class="${i < (L.n || 0) ? 'on' : ''}"></i>`).join('')}</span>` : '';
+  const html = `${info.rows && info.rows.length ? `<div class="grid">${info.rows.map((r) => `<div class="row"><span>${esc(r.label)}</span><span>${val(r)}</span></div>`).join('')}</div>` : ''}
+    ${info.levelText ? `<div class="alevel">${pips}<b>${esc(info.levelText)}</b>${info.levelHint ? `<small>${escI(info.levelHint)}</small>` : ''}</div>` : ''}
+    ${info.activity ? `<p class="chipline"><em class="b"><span aria-hidden="true">${esc(info.activity.emoji || '')}</span> ${esc(info.activity.text || '')}</em></p>` : ''}`;
+  const acts = [];
+  if (info.business && ctx.opsOpen) acts.push({ label: '🏪 לוח העסק', cls: 'primary', v: 'ops' });
+  if (info.sheetRow) acts.push({ label: 'לדוח הכספי', cls: acts.length ? '' : 'primary', v: 'sheet' });
+  acts.push({ label: 'סגירה', cls: acts.length ? '' : 'primary', v: undefined });
+  return modal({ tag: info.kindLabel || 'פרטי הנכס', color: '#0e7490', title: info.title || '', html, actions: acts, dismissable: true, cls: 'ainfo' }).then((v) => {
+    if (v === 'sheet') { toggleSheet(true); setTimeout(() => { const r = document.querySelector(`#sheet [data-asset="${CSS.escape(info.sheetRow)}"]`); if (r) { r.scrollIntoView({ block: 'center' }); r.classList.add('flash'); setTimeout(() => r.classList.remove('flash'), 1200); r.querySelector('button')?.focus({ preventScroll: true }); } }, 80); }
+    if (v === 'ops') bus.emit('asset:ops', { key });
+    return v;
+  });
+}
+/** T5 CR-B1: a business changed stage (the scene already animates the building). */
+export function feedback(kind, { level, name } = {}) {
+  if (!level) return;
+  if (kind === 'levelUp') { toast(`⬆️ ${name ? name + ': ' : ''}שלב ${level.n} מתוך ${level.of || 3}`, { kind: 'gold' }); announce(`${name || 'העסק'} עלה לשלב ${level.n}`); }
+  if (kind === 'levelDown') { toast(`⬇️ ${name ? name + ': ' : ''}ירד לשלב ${level.n}`, { kind: 'bad' }); announce(`${name || 'העסק'} ירד לשלב ${level.n}`); }
 }

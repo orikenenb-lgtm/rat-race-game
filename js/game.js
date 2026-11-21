@@ -17,6 +17,9 @@ import { flag } from './flags.js';
 import * as saves from './saves.js';
 import { initMotion, reducedMotion } from './motion.js';
 import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coaches, tour, practice chip
+import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data behind a tapped city item (reads metrics only)
+import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
+import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -218,6 +221,17 @@ function initShell() {
   const sync = () => { scene.setPaused(!start.hidden); if (start.hidden && stuck && S && CFG) recover(); };
   new MutationObserver(sync).observe(start, { attributes: true, attributeFilter: ['hidden'] });
   sync();
+  // T5 CR-B3: a tap on the board, Space or Enter while the dice / pawn animate finishes the animation at once
+  for (const el of [$('#c'), $('#board2d')]) if (el) el.addEventListener('pointerdown', () => { if (busy && rolling) scene.skip?.(); });
+  addEventListener('keydown', (e) => { if ((e.code === 'Space' || e.code === 'Enter') && busy && rolling && $('#start').hidden) { e.preventDefault(); scene.skip?.(); } });
+  // T5 CR-B4: the quality governor stepped down (or the player changed it in the lobby)
+  let qToast = false;
+  bus.on('quality:change', ({ tier, auto } = {}) => {
+    try { scene.setQuality?.(tier); } catch (e) { console.warn(e); }
+    if (auto && !qToast) { qToast = true; ui.toast('הורדנו את איכות הגרפיקה כדי שהמשחק ירוץ חלק. אפשר לשנות בהגדרות.'); }
+  });
+  // T5 CR-B7: no sound while the tab is hidden (the renderer already stops its loop)
+  document.addEventListener('visibilitychange', () => { if (document.hidden) suspendAudio(); else resumeAudio(); });
 }
 /** re-runnable: choose and start a renderer, then the world-1 board */
 async function initRenderer() {
@@ -226,6 +240,7 @@ async function initRenderer() {
   forced2d = null;
   const r = await loadRenderer({ want: ch.kind, reason: ch.reason, canvas: $('#c'), root: $('#board2d'), onSlow: () => emitInit({ type: 'slow' }) });
   scene = r.scene;
+  try { scene.onPick?.(onAssetPick); } catch (e) { console.warn(e); }   // T5 CR-B2
   rendererInfo = { kind: r.kind, reason: r.reason };
   initPhase = 'models';
   emitInit({ type: 'renderer', kind: r.kind });
@@ -233,18 +248,18 @@ async function initRenderer() {
   await Promise.race([Promise.all([document.fonts.load('800 40px Rubik'), document.fonts.load('40px "Secular One"')]), new Promise((res) => setTimeout(res, 2500))]).catch(() => {});
   const w1 = E.getWorld('w1');
   if (scene.kind === '3d') {
-    let wT = 0, wD = 0, dT = 0, dD = 0, pD = 0;
-    const upd = () => { initModels.total = wT + dT + 1; initModels.done = wD + dD + pD; emitInit({ type: 'model' }); };
+    // T5 CR-B6: no world models at boot — the world being started is loaded by startGame (its models stage); only the pawn here
+    let dT = 0, dD = 0, pD = 0;
+    const upd = () => { initModels.total = dT + 1; initModels.done = dD + pD; emitInit({ type: 'model' }); };
     upd();
     await Promise.all([
-      scene.preloadWorld(w1, (p, d) => { if (d) { wT = d.total; wD = d.done; } upd(); }),
       Promise.resolve(scene.setPawn('classic', '#e2483d')).catch((e) => console.warn(e)).finally(() => { pD = 1; upd(); }),
       scene.preloadDice((p, d) => { if (d) { dT = d.total; dD = d.done; } upd(); }),
     ]);
   } else await scene.setPawn('classic', '#e2483d');
   curPawn = 'classic|#e2483d';
   W = w1;
-  scene.buildWorld(w1); scene.placePawn(0);
+  if (scene.kind !== '3d') { scene.buildWorld(w1); scene.placePawn(0); }
   ui.applyTheme(w1);
   frame();
   if (!S) $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
@@ -357,6 +372,8 @@ function wireUI() {
   $('#sheetBtn').onclick = () => { sfx('click'); ui.toggleSheet(); };
   $('#sheetBack').onclick = () => ui.toggleSheet(false);
   $('#sheet').onclick = (e) => {
+    const ab = e.target.closest('[data-asset-open]');
+    if (ab) { sfx('click'); if (innerWidth <= 820) ui.toggleSheet(false); onAssetPick(ab.dataset.assetOpen); return; }   // T5 CR-B2 keyboard path
     const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
     if (b.dataset.act === 'close') { ui.toggleSheet(false); return; }
     sheetAction(b.dataset.act);
@@ -375,6 +392,39 @@ function wireUI() {
   addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { frame(); if (S) render(false); }, 120); });
 }
 function frame() { scene.frame(ui.freeRect()); }
+
+/* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
+const prevLevels = new Map();
+function levelOf(entry, m) {
+  const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
+  const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
+  if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
+  if (W && W.upgrade && W.upgrade.kinds && W.upgrade.kinds[a.kind]) return { kind: 'upgrade', n: a.upgrades || 0, of: W.upgrade.max };
+  return null;
+}
+function syncLevels(animate) {
+  if (!S || typeof scene.setLevel !== 'function') return;
+  const m = E.metrics(S);
+  for (const e of E.cityModels(S)) {
+    const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
+    if (!changed) continue;
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined }); } catch (x) { console.warn(x); }
+    const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
+    if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
+    if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
+    prevLevels.set(e.key, L);
+  }
+}
+/** T5 CR-B2: tap / click / Enter on a city item (3D or 2D) or a sheet row → "פרטי הנכס". Never over a card, modal, coach or the lobby. */
+function onAssetPick(key) {
+  const coach = document.querySelector('#coach:not([hidden])');
+  if (busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || coach || !S) { scene.highlight?.(key); setTimeout(() => scene.highlight?.(null), 600); return; }
+  const m = E.metrics(S);
+  const info = assetInfo(key, m, { level: prevLevels.get(key) });
+  if (info) ui.assetInfo?.(key, info, { world: W, opsOpen: !!(m.focus && m.focus.opsOpen) });
+}
+bus.on('asset:ops', () => openOps());
+let rolling = false;   // T5 CR-B3: dice / hops are animating — a tap or Space / Enter skips the animation (never the outcome)
 
 /* ============================================================ start */
 /**
@@ -424,6 +474,7 @@ async function noBackupModal(allowGo = true) {
 async function startInner(cfg, my) {
   initShell();
   if (endObs) { endObs.disconnect(); endObs = null; }
+  prevLevels.clear();
   busy = true; quotaWarned = false;
   closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
   // WebGL died while the lobby was up: this start uses the 2D board
@@ -456,7 +507,7 @@ async function startInner(cfg, my) {
       OV.stageDone('renderer');
       if (scene.kind !== '3d') { OV.stageDone('models'); OV.stageDone('life'); return; }
       if (ev.type === 'renderer' || ev.type === 'sync') {
-        const far = Wt && Wt.id !== 'w1' && Wt.mechanic !== 'history' && typeof scene.worldModelNames === 'function';
+        const far = Wt && typeof scene.worldModelNames === 'function'; // CR-B6: boot loads no world, so every world's files count here
         try { M.extraT = far ? scene.worldModelNames.call(scene, Wt).length : 0; } catch (e) { M.extraT = 0; } // 3D-only helper, outside SCENE_API
         M.pT = pawnKey !== 'classic|#e2483d' ? 1 : 0;
       }
@@ -540,8 +591,7 @@ async function startInner(cfg, my) {
   if (scene.kind === '3d') {
     const loads = [];
     // the init of THIS start already tried world 1's files (also used by history mode): don't wait for a failed one twice
-    const sameAsInit = initPending && (W.id === 'w1' || W.mechanic === 'history');
-    const needW = !scene.worldLoaded(W) && !sameAsInit, needP = pawnKey !== curPawn;
+    const needW = !scene.worldLoaded(W), needP = pawnKey !== curPawn; // CR-B6: boot no longer tries world 1's files
     if ((needW || needP) && !OV.hasStage('models')) OV.showStages([{ id: 'models', label: STR.L2(W.name), countable: true }, ...(lifeSettled ? [] : [{ id: 'life', label: STR.L3, countable: true }]), { id: 'board', label: STR.L4 }]);
     if (needP) M.pT = 1;
     if (needW) loads.push(scene.preloadWorld(W, (p, d) => { if (d) { M.wT = d.total; M.wD = d.done; } pushM(); }));
@@ -567,9 +617,12 @@ async function startInner(cfg, my) {
     scene.buildWorld(W);
     scene.placePawn(S.pos);
     scene.syncCity(E.cityModels(S), { silent: true });
+    syncLevels(false);
     OV.hideLoading();
     ui.resetHud();
     frame(); scene.resetCamera();
+    try { scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK); } catch (e) { console.warn(e); }   // T5 CR-B5
+    if (!resumed && !S.over && !onboard.worldCoached(W.id)) { try { scene.introWorld?.(); } catch (e) { console.warn(e); } } // first game in this world
     render(false);
     ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
     const intro = E.intro(S, resumed);
@@ -841,11 +894,11 @@ function wireHold() {
 /* ============================================================ turn */
 async function turn() {
   if (stuck || busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
-  const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false);
+  const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.();
   flows++; flowTick++;
   try { await turnBody(my); }
   catch (e) { if (my === gen && !stuck) enterStuck(e, 'turn'); }
-  finally { flows--; flowTick++; }
+  finally { flows--; flowTick++; rolling = false; }
 }
 async function turnBody(my) {
   const m0 = E.metrics(S);
@@ -867,6 +920,7 @@ async function turnBody(my) {
   ui.shakeDomDice(false);
   sfx('roll'); ui.vibrate(10);
   let bounces = 0;
+  rolling = true;
   await scene.throwDice(faces, { held: holdState.held, onBounce: () => { sfx('clack'); if (!bounces++) ui.vibrate(8); } });
   flowTick++;
   holdState.held = false;
@@ -884,6 +938,7 @@ async function turnBody(my) {
     const pd = (out.paydays || []).find((p) => p.step === i);
     if (pd) { cash += pd.amount; paydayFx(pd, cash); }
   }
+  rolling = false;
   // remaining roll results: news (exits, signals), auto-loans, achievements…
   const skip = (out.paydays || []).map((p) => (p.amount >= 0 ? 'coin' : 'loss'));
   await applyOut(out, { skipSounds: ['roll', ...skip], skipPawnCash: true });
@@ -1037,6 +1092,7 @@ async function applyOut(out, opts = {}) {
       case 'savings': if (e.amount) scene.floatLabel(`🛟 ${E.sgn(e.amount)}`, e.amount >= 0 ? 'green' : 'gold', 'pawn'); break;
       case 'impact': scene.hearts(scene.hasKey('f') ? 'f' : 'pawn'); scene.floatLabel(`+${Math.round(e.amount * 10) / 10} השפעה`, '#db2777', scene.hasKey('f') ? 'f' : 'pawn'); break;
       case 'exit': break; // handled with despawn
+      case 'bizPulse': scene.pulse?.(e.at, e.kind); break; // T5 CR-B1
       default: break;
     }
   }
@@ -1044,6 +1100,7 @@ async function applyOut(out, opts = {}) {
   for (const k of out.despawn || []) { const x = exits.get(k); if (x) scene.launch(k, x.mult > 0); else scene.despawn(k); }
   // spawns
   for (const s of out.spawn || []) { scene.spawn(s.key || s.assetId, s.model, { label: s.label, color: s.color, golden: s.golden }); ui.vibrate(14); }
+  syncLevels(true); // T5 CR-B1: stages / upgrades after the city changed
   if (out.lessons && out.lessons.length) {
     bus.emit('lesson', { ids: out.lessons.map((l) => l.id), list: out.lessons });
     ui.lessonToast(out.lessons, (l) => ui.lessonCard(l));
