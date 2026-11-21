@@ -521,7 +521,7 @@ const ONCARD = new Set(['s1', 'm1', 'homeRepair', 'f1', 'carBack']);
 export function storiesWorld(wid, n, pols = ['blindTapper', 'guideTapper', 'smart', 'sideHustler', 'owner']) {
   const w = E.getWorld(wid); const games = [];
   for (const pol of pols) for (let i = 0; i < n; i++) {
-    const ch = w.characters[i % w.characters.length]; const T = E.starThresholds(w, ch.id); const cap = Math.round(T.maxMonths * 1.6);
+    const ch = w.characters[i % w.characters.length]; const T = E.starThresholds(w, ch.id); const cap = T.maxMonths; // T3 review M8: rates of a time-limited game (the spec's mode), not 1.6× free play
     const seen = new Map(); let maxOpen = 0, maxChains = 0;
     const { st, end } = play(wid, ch.id, 1000 + i * 7 + wid.charCodeAt(1) * 100003, pol, cap, { onRoll: (x) => {
       for (const it of x.story.inbox) if (!seen.has(it.id)) seen.set(it.id, { kind: it.kind, m: it.createdM, chain: it.chain, step: it.step, assetId: it.assetId });
@@ -529,7 +529,7 @@ export function storiesWorld(wid, n, pols = ['blindTapper', 'guideTapper', 'smar
     } });
     const months = Math.max(1, st.month - 1);
     const items = [...seen.values()]; const chainItems = items.filter((x) => x.kind === 'chain'); const bizItems = items.filter((x) => x.kind === 'biz');
-    const bizMonths = st.assets.filter((a) => a.biz).reduce((x, a) => x + a.biz.month, 0) + (st.stats.sold ? 6 : 0);
+    const bizMonths = st.assets.filter((a) => a.biz).reduce((x, a) => x + ((a.biz.totals && a.biz.totals.months) || 0), 0) + (st.bizPast || []).reduce((x, b) => x + (b.months || 0), 0); // T3 review M8: months each business really ran (sold ones included)
     const stand = st.life.events.filter((e) => !e.id.startsWith('story:'));
     let repeats = 0; const last = {}; for (const e of stand) { if (e.id !== 'quiet' && last[e.id] != null && e.m - last[e.id] < 12) repeats++; last[e.id] = e.m; }
     const chains = Object.fromEntries(Object.entries(st.story.chains).map(([id, c]) => [id, { run: c.run, done: c.stage === 'done', steps: c.steps.length }]));

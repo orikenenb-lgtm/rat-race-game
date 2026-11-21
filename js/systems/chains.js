@@ -19,7 +19,7 @@ export const NAMES = { friend: ['יוסי', 'דני'], friendGender: 'm', manage
 export const CHAINS = {
   /* ------------------------------------------------------------------ 5.1 car, repairs and transport */
   car: {
-    id: 'car', title: 'רכב ותחבורה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 24, maxRuns: 2, entry: { card: 'car' },
+    id: 'car', title: 'רכב ותחבורה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 30, maxRuns: 2, entry: { card: 'car' },
     lessons: ['car_cost', 'total_cost'],
     steps: {
       s1: { title: 'הרכב התקלקל', onCard: true,
@@ -73,7 +73,7 @@ export const CHAINS = {
 
   /* ------------------------------------------------------------------ 5.2 home and cost of living */
   move: {
-    id: 'move', title: 'דירה ויוקר מחיה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 24, maxRuns: 2, entry: { card: 'moving' },
+    id: 'move', title: 'דירה ויוקר מחיה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 30, maxRuns: 2, entry: { card: 'moving' },
     lessons: ['inflation', 'negotiation', 'lifestyle_creep', 'housing_share'],
     steps: {
       m1: { title: 'החוזה נגמר', onCard: true,
@@ -187,7 +187,7 @@ export const CHAINS = {
 
   /* ------------------------------------------------------------------ 5.5 a loan or partnership with a friend */
   friend: {
-    id: 'friend', title: 'חבר מבקש עזרה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 18, maxRuns: 2, entry: { card: 'friend' },
+    id: 'friend', title: 'חבר מבקש עזרה', worlds: ['w1', 'w2', 'w3', 'w4', 'h'], cooldown: 30, maxRuns: 1, entry: { card: 'friend' },
     lessons: ['friend_loan', 'guarantor', 'sunk_cost', 'credit_score'],
     steps: {
       f1: { title: '{name} מבקש עזרה', onCard: true, remember: '{rememberFriend}',
@@ -223,7 +223,7 @@ export const CHAINS = {
 
   /* ------------------------------------------------------------------ 5.6 economic crisis and recovery (T2 cycle) */
   crisis: {
-    id: 'crisis', title: 'משבר כלכלי', worlds: ['w1', 'w2', 'w3', 'w4'], cooldown: 36, maxRuns: 2, entry: { trigger: true }, exempt: true,
+    id: 'crisis', title: 'משבר כלכלי', worlds: ['w1', 'w2', 'w3', 'w4'], cooldown: 36, maxRuns: 1, entry: { trigger: true }, exempt: true,
     lessons: ['emergency_fund', 'drawdown', 'panic_selling', 'time_in_market', 'unemployment'],
     steps: {
       c1: { title: 'כותרות: מיתון',
@@ -262,7 +262,10 @@ export const CHAINS = {
  * [TUNE] sealed trigger odds of the two trigger chains (T6 balance decision b, director: start in ≤ 80 % (career) / ≤ 85 % (crisis) of
  * games, the other chains unchanged). Each is compared with this payday's story seal (st.story.r[0] crisis, r[1] career).
  */
-export const TRIGGER = { crisisSignal: 0.4, crisisTile: 0.15, crisisIndex: 0.4, careerWarn: 0.35, careerDegree: 0.4, careerPromo: 0.25 };
+export const TRIGGER = { crisisSignal: 0.4, crisisTile: 0.15, crisisIndex: 0.4, careerWarn: 0.35, careerDegree: 0.4, careerPromo: 0.25, promoFrom: 24,
+  // T3 review M8: an entry card (car / moving / friend) opens its chain only at these sealed odds (a hash of the card's own draw, so the
+  // chain's 'entry' odds stay unconditioned); otherwise the usual substitution shows another card
+  entry: { car: 0.7, moving: 0.7, friend: 0.65 }, entryWorld: { w3: { friend: 1 } } }; // w3 (short game, fewer L tiles) keeps every friend card
 export const CHAIN_IDS = Object.keys(CHAINS);
 
 /** The standalone life cards' substitution order (§3.5) — the first eligible one that differs from the drawn card is shown. */

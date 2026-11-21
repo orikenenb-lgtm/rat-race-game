@@ -3536,7 +3536,8 @@ function storyLifeCard(st, card, r) {
   }
   let p = null;
   if (id === 'car' || id === 'moving' || id === 'friend') {
-    const e = chainEntryStep(st, id);
+    const gate = ((r * 9973) % 1) < (((CH.TRIGGER.entryWorld[st.worldId] || {})[id]) ?? CH.TRIGGER.entry[id] ?? 1); // T3 review M8 (sealed; never the raw draw the chain's odds use)
+    const e = gate ? chainEntryStep(st, id) : null;
     if (e) { const c = startChain(st, e.chain, 'card'); c.step = e.step; c.seal.entry = r; c.steps.push(e.step); p = { type: 'life', eventId: id, r, chain: { id: e.chain, step: e.step } }; }
   } else if (lifeEligible(st, id) && LIFE_EVENTS.some((x) => x.id === id)) p = { type: 'life', eventId: id, r };
   if (!p) {
@@ -3888,7 +3889,7 @@ function storyTriggers(st, out, o) {
     const dm = st.month - (L.study.doneMonth ?? st.month);
     const TG = CH.TRIGGER;
     const pick = !sub.warn && S.energyLow >= 3 && S.r[1] < TG.careerWarn ? 'warn' : !sub.degree && L.study.done && dm >= 1 && dm <= 2 && S.r[1] < TG.careerDegree ? 'degree' // [TUNE] warn: 3 low paydays; degree: within 2 months of graduating, at sealed odds (CH.TRIGGER)
-      : !sub.promo && S.r[1] < TG.careerPromo && ((st.month >= 18 && st.month % 12 === 6 && L.planMonths.work + L.planMonths.overtime >= 14 && st.month - L.lastRaise >= 12) || (S.loadSince != null && st.month - S.loadSince === 6)) ? 'promo' : null; // [TUNE] promo is reviewed once a year (month 18, 30, …) at sealed 50% odds
+      : !sub.promo && S.r[1] < TG.careerPromo && ((st.month >= TG.promoFrom && st.month % 12 === 6 && L.planMonths.work + L.planMonths.overtime >= 14 && st.month - L.lastRaise >= 12) || (S.loadSince != null && st.month - S.loadSince === 6)) ? 'promo' : null; // [TUNE] promo is reviewed once a year (month 18, 30, …) at sealed 50% odds
     if (pick) { const c = startChain(st, 'career', 'wait'); c.data.sub = { ...sub, [pick]: st.month }; createChainItem(st, 'career', pick, out); return; }
   }
   // side hustle milestones: side months 1 / 5 / 10 / graduation (15, or 12 after part time); reopens at the next unreached one
@@ -4122,7 +4123,7 @@ function bizStoryItems(st, out, reports) {
   for (const { a, r } of reports) {
     if (!a.biz.decide || !(r.decide || []).length) continue;
     const key = 'a' + a.id;
-    const ok = made === 0 && S.bizItemsM !== st.month + 1 && st.month - (S.lastBizItemM[key] ?? -99) >= 2 && openItems(st) < 3;
+    const ok = made === 0 && S.bizItemsM !== st.month + 1 && st.month - (S.lastBizItemM[key] ?? -99) >= (st.worldId === 'w1' ? 3 : 2) && openItems(st) < 3; // T3 review M8: w1 ≤ 4 business items a year
     if (!ok) { const id = a.biz.decide.id; const res = BIZ.resolveEvent(a.biz, a.biz.decide.key, BIZ.defaultChoice(id, a.biz)); if (res.ok) a.biz = res.business; out.news.push({ kind: 'business', assetId: key, text: `${a.n}: ${res.text || ''} (ברירת מחדל — לא היה זמן להחליט)` }); continue; }
     const item = { id: S.nextId++, kind: 'biz', assetId: key, key: a.biz.decide.key, ev: a.biz.decide.id, createdM: st.month + 1, due: st.month + 2, seal: { a: 0.5, b: 0.5 }, data: {} };
     S.inbox.push(item); S.lastBizItemM[key] = st.month; S.bizItemsM = st.month + 1; made++;
