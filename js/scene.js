@@ -1526,8 +1526,10 @@ function ensureDiceModels() {
 function refreshDice() {
   if (!diceStale || holding || diceObjs.some((d) => d.visible) || (hand && hand.visible)) return;
   diceStale = false;
+  const glbDie = ready.has(modelUrl('life', 'die'));
   for (const d of diceObjs) scene.remove(d); diceObjs = [];
-  if (hand) { scene.remove(hand); hand = null; handFingers = []; handGLB = false; }
+  if (glbDie && dieGeo) { dieGeo.dispose(); for (const m of dieMats) { m.map && m.map.dispose(); m.dispose(); } dieGeo = null; dieMats = null; } // procedural die no longer used (CR-17)
+  if (hand) { scene.remove(hand); if (!handGLB) disposeTree(hand); hand = null; handFingers = []; handGLB = false; }
 }
 
 function throwFrame() {
