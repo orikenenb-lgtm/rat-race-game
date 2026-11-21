@@ -11,6 +11,7 @@ SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
 fb = FB.FakeBackend(verify='replay', now=FB.clock_at(os.environ.get('RR_FAKE_NOW', '2026-12-09T09:00:00Z'))); SINKS = []
 async def new_ctx(b, **kw):
     ctx = await b.new_context(**FB.new_context_kwargs(), **kw); SINKS.append(await FB.install_mode(ctx, fb, MODE))
+    ctx.set_default_timeout(120000)   # 2 shared cores + the 13–20 s post-lobby freeze (CR-19): 30 s defaults time out under load
     await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')"); return ctx
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 res = []
