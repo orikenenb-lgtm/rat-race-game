@@ -10,6 +10,7 @@
 import * as E from './engine.js';
 import * as ui from './ui.js';
 import { bus } from './bus.js';
+import * as EN from './energy.js';   // review m-6: the legend's ⚡ row shows the real count
 
 /* ------------------------------------------------------------ trace (tests) */
 export function trace(screen) {
@@ -142,7 +143,7 @@ export async function tour(h) {
   const m = E.metrics(h.S); const pay = m.payslip || {};
   const net = pay.net ?? m.salary ?? 0; const exp = m.expenses || 0; const pct = exp ? Math.round(((m.passive || 0) / exp) * 100) : 0;
   const steps = [
-    { target: '#hCash', title: 'הדוח שלי', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — תציץ.` },
+    { target: '#hCash', title: '💰 מזומן ותזרים', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — תציץ.` },
     { target: '#hGoal', title: 'מד החופש', text: `הכנסה פסיבית ${fmt(m.passive || 0)} מתוך ${fmt(exp)} הוצאות: ${pct}%. כשהפס מלא — יצאת מהמירוץ.` },
     { target: '#hLife', title: 'החיים שלך', text: 'החיים שלך: גיל, 🔋 כוח, אושר, אשראי ועוד. לחיצה על כל סימן מסבירה אותו.' },
     { target: '#roll', title: 'מטילים קובייה', text: ROLL_TEXT() },
@@ -168,7 +169,7 @@ export function legend(h) {
     m.econ ? ['📊', 'מד הכלכלה', String(m.econ.label || ''), 'מתעדכן באיחור ועם רעש.'] : null,
     ['🛟', 'קרן חירום', e.months != null ? `${e.months} חודשים` : fmt(m.savings || 0), 'חודשי הוצאות שמורים בצד.'],
     L.plan ? ['📅', 'התוכנית', String((L.plans || []).find((p) => p.id === L.plan)?.label || L.plan), 'איך אתה מעביר את החודש.'] : null,
-    h.CFG && !h.CFG.learn && !h.CFG.resultId && (h.CFG.mode || 'free') !== 'daily' ? ['⚡', 'זריקות', '', 'כל הטלה במשחק רגיל עולה זריקה אחת.'] : null,
+    h.CFG && !h.CFG.learn && !h.CFG.resultId && (h.CFG.mode || 'free') !== 'daily' ? ['⚡', 'זריקות', (() => { try { return `${EN.get()}/${EN.MAX}`; } catch (e) { return ''; } })(), 'כל הטלה במשחק רגיל עולה זריקה אחת.'] : null,
     m.nextGoal ? ['🎯', 'המטרה הבאה', String(m.nextGoal.title || ''), ''] : m.dream ? ['🎯', 'החלום', `${m.dream.icon || ''} ${m.dream.name || ''}`, ''] : null,
   ].filter(Boolean);
   return ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: 'מה כל סימן אומר', dismissable: true,

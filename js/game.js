@@ -1011,7 +1011,7 @@ function resolveCard(ev, my) {
     sfx(jackpot ? 'golden' : ev.sound || 'card');
     if (ev.golden || jackpot) { scene.sparkle('pawn'); ui.vibrate([15, 40, 15]); }
     else if (ev.sound === 'loss' && ['market', 'bank', 'fx', 'shipping'].includes(ev.type)) fxShake(0.18, 380);
-    let cur = ev, working = false;
+    let cur = ev, working = false, closedRes = null;
     // T2 card API: the UI asks, the engine answers (no finance math in ui.js). A hint is an action (['H']): saved like a decision.
     const api = {
       mentor: () => (S ? E.metrics(S).mentor : null),
@@ -1052,7 +1052,6 @@ function resolveCard(ev, my) {
       working = false; ctl.busy(false);
     }
     card = { ctl, resolve };
-    let closedRes = null;
     function close() { if (card && card.ctl === ctl) card = null; ctl.close(); try { onboard.onCardClosed(cur, closedRes, hooks(my)); } catch (e) { console.warn(e); } setTimeout(() => ui.focusRoll(), 30); }
     try { onboard.onCard(cur, ctl, hooks(my)); } catch (e) { console.warn(e); } // T4 IR-T4-3: in-card coaches (ROI)
   });
