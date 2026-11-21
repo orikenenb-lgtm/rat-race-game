@@ -942,3 +942,50 @@ Run order: `node tests/t4_engine.test.mjs && node tests/t4_meta.test.mjs && pyth
 - **P1:** D-9/E-2 free tutorial rolls + C-zr; payday card reorder (§4.3); §6.3 profile badges (S-D12); §10 practice UI and E-10 engine; E-13 sim; S-B6.
 - **P2:** S-W5 restore link; `h:` character meta; library "practise now" outside a game.
 - Explicitly deferred: continue after win (T6).
+
+---
+
+## Implementation notes — LOBBY/META + SHELL part (T4 implementer, 2026-11-21)
+
+Files: `js/lobby.js`, `css/lobby.css`, `js/progress.js`, `js/library.js`, `js/energy.js`, `js/net.js` (N13), `js/main.js` (T5 CR-L2), `js/game.js` (IR-T4-1…9), new `js/onboard.js`, `js/practice.js`, `js/data/lessons-meta.js`, `js/data/characters-meta.js`. Tests: new `tests/t4_meta.test.mjs`, `tests/t4_lobby.py`; updated `tests/lobby_v3.py`, `tests/lobby_v3b.py`, `tests/stubs/js/game.js`. Not touched: `js/ui.js`, `css/game.css`, `js/engine.js` and its import graph, `index.html`, `js/scene.js`, `js/render/*`.
+
+**Works with or without the engine part.** Every engine feature is detected (§14.1): `ENG.DREAMS` (tests may set `window.__t4dreams`), `ENG.MENTOR_LEVELS || ENG.MN.LEVELS` (T2 is in, so the mentor row is live), `E.practiceDue`, `E.TUTORIAL_FREE_ROLLS`, `st.intro`. Until the engine lands: learning rolls cost no ⚡ through `game.js usesEnergy()` (`CFG.learn`), the first 10 rolls of the tutorial game are free through the same gate (only while `E.TUTORIAL_FREE_ROLLS` is absent), the tutorial runs today's roll → meter → ROI coaches (moved to `onboard.js`), and `onboard:done` fires when the tutorial game is on screen (the moment `lobby.js` used to call `setTutorialDone()` on launch).
+
+**Where the code differs from the spec, and why**
+1. Action code for practice is **`K`** (TASK_BOARD), not `Q` (T3's). `js/practice.js` is pure (no engine import): `pickPractice(st, memo, expenses, fmt)`, `checkAnswer`, `recordAnswer(st, qid, idx, turn)` (writes `st.practice.answered/turns` and `st.dq.transfer`). The engine wraps them (CR-E3).
+2. 77 lessons, not 75 (T2 added `due_diligence`, `business_cycle`); both got a teaser + hint. 11 practice-trigger lessons had no example in §9.5 (`drawdown, rate_risk, wage_lag, side_tax, bubble, panic_selling, negotiation_fail, time_scarce, rest_value, biz_owner_job, biz_inventory`); T-M2 requires one, so they were written here (hand-checked numbers).
+3. `w2:chef` "₪2,700": the bistro now makes ₪2,660 (variable rate after T2). T-M4 compares figures rounded to ₪100 (millions to 0.01), so the spec string stays; importer/exporter are checked against the character's nominal asset cash flow (the live one moves with the dollar).
+4. Streak copy S-S1 uses "יום" for n = 1 (`🔥 1 יום ברצף.`), "ימים" otherwise.
+5. Welcome S-W3 for a player who already played (reached via S-H8) goes home instead of starting a new w1 game.
+6. Character card: an `<article>` with the two sibling buttons (AC-C2); a tap on the card's plain area still plays (the old whole-card button behaviour, kept for pointer users and the existing suites). Keyboard: mode radio → dream → mentor → per card עוד פרטים → לשחק.
+7. Mentor row labels follow T4 (מדריך / רמזים / מקצוען), not T2's (מתחיל / מתקדם / מומחה). The tutorial game is always `guide`.
+8. The dream row collapses to S-D9 only after a pointer choice: arrow keys fire `change` on every step (A11Y-4), so keyboard users keep the open group.
+9. Lobby legend (S-H4) lists the signs without values (no game is running); the in-game legend (`onboard.legend`) shows current values.
+10. `--t4-*` tokens are defined in `css/lobby.css` scoped to `.lb-shell, #lbLesson` (same values) until `game.css :root` gets them (CR-U-T4-1).
+11. Phone world view is compacted (≤ 600 px: short hero, one goal row, 2-column mode group, one-line mentor row) so AC-C3 holds: first card's לשחק bottom at 753 px of 760 (360×760, dream row collapsed, mentor row shown).
+12. The quality group in settings appears only when `js/render/quality.js` loads (T5 rendering lane); מצב קל is a switch calling `game.setLite(on)` (off → page reload into 3D, T1).
+13. `rr2-reveal` migration also runs after a server merge / restore code that turns a "new" device into an existing player.
+
+### Change requests — engine lane (after T2/T3, same v4 save bump)
+- **CR-E1** E-1/E-2/E-9: `createGame({learn, dream, mentor})` (game.js already passes them, IR-T4-2); `rollCost(st)` → 0 when `st.learn`; export `TUTORIAL_FREE_ROLLS = 10` (game.js then stops its client fallback automatically); `replayConfig` adds `learn` and `dream`.
+- **CR-E2** E-3/E-4/E-5 intro card + goal chain + sized tutorial deal; give the intro options `data-intro-opt` hooks via the UI lane (CR-U-T4-5). `onboard.onCardClosed` emits `onboard:done` with `reason:'skip'` when `st.intro.step === 'skipped'`.
+- **CR-E3** E-10 with action **`K`**: `practiceDue(st, memo) = PR.pickPractice(st, memo, expensesOf(st), fmtM)`; `answerPractice(st, qid, idx)`: guard (ranked/history, unknown/answered qid, `phase !== 'roll'` → `{ok:false}`), `act(st, ['K', qid, idx])`, return `PR.recordAnswer(st, qid, idx, st.turn)`; `replay()` `case 'K'`; `CODES` gains `'K'`; `learningOf()` adds `transfer`.
+- **CR-E4** E-6 `num.value`: a pre-formatted string is shown as is; a number is shown as % for `tax_brackets / marginal_overtime / inflation` (≤ 1 → ×100), as a count for `diversification / index_fund`, else as ₪ (lobby `ctxValue`).
+- **CR-E5** E-7 `metrics().dream` and `end.dream` (game.js sends `E.metrics(S).dream` as `payload.dream`, IR-T4-5): `{id, missions:[{id, title, done}]}` — the lobby counts `done` and stores ids for badges.
+- **CR-E6** E-8 + N18 (`business.js:688` `−{n} 🔋 כוח בחודש`); re-check the `biz_*`, `due_diligence`, `business_cycle` hints in `js/data/lessons-meta.js`.
+
+### Change requests — in-game UI lane (`js/ui.js`, `css/game.css`)
+- **CR-U-T4-1** `game.css :root`: `--t4-pos: light-dark(#116a43,#3ccf8a); --t4-neg: light-dark(#a82d26,#ff7a6e); --t4-gold-ink: light-dark(#7a5000,#f2c14e); --t4-mut: light-dark(#5f5870,#aaa3b6);` then drop the scoped copy at the end of `css/lobby.css`.
+- **CR-U-T4-2** N14, `ui.js lifeDetails` `energy:` → `['🔋 כוח', \`🔋 כוח: ${Math.round(L.energy)} מתוך 100. זה הכוח של הדמות בסיפור — לא ⚡ זריקות. שעות נוספות, לימודים ועסק צדדי שוחקים; מנוחה ומשפחה ממלאות. מתחת ל־25 — סכנת שחיקה: חודש בלי משכורת.\`]`.
+- **CR-U-T4-3** N15, `renderRollEnergy`: title `⚡ ${v}/${max} זריקות — כל הטלה עולה זריקה אחת`; `$('#hEnergy').setAttribute('aria-label', \`זריקות: ${v} מתוך ${max}\`)` (replaces `אנרגיה להטלות` of `index.html:35` at runtime).
+- **CR-U-T4-4** F4: inject `<button id="helpBtn" class="ibtn" aria-label="איך משחקים">❓</button>` as the first child of `.htools`, `onclick = () => bus.emit('onboard:help')` (game.js + `onboard.help()` already handle it).
+- **CR-U-T4-5** `renderEvent` case `'intro'` (§4.2) with `introChips()`; option buttons carry `data-intro-opt="{id}"` (tests/t4_lobby.py waits for `[data-intro-opt="fix:pay"]`).
+- **CR-U-T4-6** §4.3 reveal: `renderHUD` / `renderLife` call `onboard.isRevealed(key)` (exported; today it returns true unless `S.ui.reveal` exists) and set `hidden`; `.t4-new` pulse; `#a11yLive`.
+- **CR-U-T4-7** §10.1: `export function practiceChip(q, onAnswer)` and `hidePractice()`; `onAnswer(idx)` returns `{ok, right, correct, why, sim}` (onboard.js already calls `ui.practiceChip` when it exists and emits bus `practice`).
+- **CR-U-T4-8** §6.4: `dreamToast(list)` (game.js calls it when it exists, IR-T4-4), `#hDream` chip + `dreamModal(m.dream)`.
+- **CR-U-T4-9** S-M7: world card tag `🎓 תרגול` when `ctx.cfg.learn`.
+- **CR-U-T4-10** `lessonCard(l)`: S-B2…S-B6 from `library.js` `meta(id)`, `contextOf(id)` / `l.ctx`, `practiceStats()` (the lobby's `lessonLines()` is the reference).
+- **CR-U-T4-11** A11Y-1/2: `trapFocus(root)` in `modal()` / `openEvent()`, document-level Escape for the topmost dialog, coach Escape = `הבנתי`, coach buttons ≥ 44 px; `.t4-legend` / `.t4-help` styles for the in-game legend and help modal.
+
+### Change requests — T7 (tests)
+- **CR-T7-T4-1** `tests/a11y_e2e.py` K-3 Tabs until `document.activeElement.matches('.wv-char')`; the card is now an article: match `.wv-char .wv-go` (3 Tabs from the focused mode radio when the mentor row is shown).

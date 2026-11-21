@@ -170,7 +170,7 @@ export function legend(h) {
     m.nextGoal ? ['🎯', 'המטרה הבאה', String(m.nextGoal.title || ''), ''] : m.dream ? ['🎯', 'החלום', `${m.dream.icon || ''} ${m.dream.name || ''}`, ''] : null,
   ].filter(Boolean);
   return ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: 'מה כל סימן אומר', dismissable: true,
-    html: `<table class="t4-legend"><tbody>${rows.map(([ic, n, v, t]) => `<tr><td aria-hidden="true">${ic}</td><th scope="row">${ui.esc(n)}</th><td class="num">${ui.esc(v)}</td><td>${ui.esc(t)}</td></tr>`).join('')}</tbody></table>`,
+    html: `<table class="t4-legend"><tbody>${rows.map(([ic, n, v, t]) => `<tr><td aria-hidden="true">${ic}</td><th scope="row">${ui.esc(n)}</th><td><bdi>${ui.esc(v)}</bdi></td><td>${ui.esc(t)}</td></tr>`).join('')}</tbody></table>`,
     actions: [{ label: 'סגירה', cls: 'primary' }] });
 }
 

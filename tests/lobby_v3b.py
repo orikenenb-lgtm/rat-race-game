@@ -293,7 +293,7 @@ async def learning_flow(b):
     check(e1 == 11, f'right quiz answer (reward:lesson) → +1⚡, wrong / other rewards → nothing ({e1})')
     await pg.evaluate("window.__stubEnd('lost', 50, { stats: { quizRight: 3, quizWrong: 1 }, learning: %s })" % json.dumps(LEARN1)); await pg.wait_for_selector('.end-learn'); await pg.wait_for_timeout(3500)
     e2 = await pg.evaluate("import('./js/energy.js').then(E => E.get())")
-    check(e2 == 13 and '+2⚡' in await pg.inner_text('.end-new'), f'end of game pays only the missing quiz ⚡ (+2 → {e2})')
+    check(e2 == 13 and '+2 זריקות ⚡' in await pg.inner_text('.end-new'), f'end of game pays only the missing quiz ⚡ (+2 → {e2}; T4 N11 label "+2 זריקות ⚡")')
     await pg.evaluate("window.__bus.emit('game:end', window.__lastEnd)"); await pg.wait_for_timeout(1200)
     check(await pg.evaluate("import('./js/energy.js').then(E => E.get())") == 13, 'the same game:end twice never pays twice')
     L = await pg.inner_text('.end-learn')

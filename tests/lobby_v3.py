@@ -118,7 +118,7 @@ async def social(b):
     await started(A, lambda: A.click('[data-act="daily"]'))
     await A.evaluate("window.__stubEnd('lost', 24)"); await A.wait_for_selector('.end-place, .end-rank .lb-board', timeout=20000); await A.wait_for_timeout(2500)
     en = await A.evaluate("import('./js/energy.js').then(E => E.get())")
-    check(en == 15 and '+10⚡' in await A.inner_text('.end-new'), f'daily gives +10⚡ ({en})')
+    check(en == 15 and '+10 זריקות ⚡' in await A.inner_text('.end-new'), f'daily gives +10⚡ ({en}; T4 N11 label "+10 זריקות ⚡")')
     await A.click('[data-act="end-lobby"]'); await A.wait_for_selector('.lb-home')
     await A.fill('#lbGname', 'טסט אנרגיה ' + TAG); await A.press('#lbGname', 'Enter'); await A.wait_for_selector('.gp-code', timeout=20000)
     link = await A.input_value('.gp-link input')

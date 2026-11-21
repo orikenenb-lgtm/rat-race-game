@@ -350,9 +350,28 @@ async def t_learnreal(b):
     await pg.screenshot(path=SHOT + 't4_25_learning_game_desk.png')
     await ctx.close()
 
+async def t_help(b):
+    ctx, pg = await page(b, vp=PHONE, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:1,tutorialDone:true}))", "localStorage.setItem('rr2-reveal', JSON.stringify({v:1,all:true,coached:[],tourNext:true}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    await pg.wait_for_selector('#coach:not([hidden]) .bubble', timeout=30000)
+    lbl = await pg.inner_text('#coach .bubble small')
+    check('סיור 1/5' in lbl, f'S-H7 queued tour starts in the next game ({lbl!r}) and clears tourNext: {(await ls(pg, "rr2-reveal")).get("tourNext")}')
+    await pg.screenshot(path=SHOT + 't4_26_tour_phone.png')
+    await pg.click('#coach [data-c=skip]'); await pg.wait_for_timeout(300)
+    await pg.evaluate("import('./js/bus.js').then(m=>m.bus.emit('onboard:help'))"); await pg.wait_for_selector('#gm:not([hidden]) .t4-help', timeout=10000)
+    check(await pg.locator('#gm .t4-help button').count() == 3, 'F4 help modal: tour / legend / tutorial replay')
+    await pg.screenshot(path=SHOT + 't4_27_help_modal_phone.png')
+    await pg.click('#gm [data-h=legend]'); await pg.wait_for_selector('#gm:not([hidden]) .t4-legend', timeout=10000)
+    t = await pg.inner_text('#gm')
+    check('🔋' in t and 'לא ⚡ זריקות' in t and '₪' in t, 'S-H4 in-game legend with current values')
+    await pg.screenshot(path=SHOT + 't4_28_legend_phone.png')
+    await ctx.close()
+
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('learnreal', t_learnreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('learnreal', t_learnreal), ('help', t_help)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:
