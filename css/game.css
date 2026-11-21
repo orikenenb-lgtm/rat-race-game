@@ -52,6 +52,8 @@
   --dur-1:120ms; --dur-2:200ms; --dur-3:350ms; --dur-4:480ms; --dur-max:600ms;
   --ease-out:cubic-bezier(.2,.8,.2,1); --ease-pop:cubic-bezier(.2,1.4,.4,1);
   --tap:44px;           /* minimum touch target */
+  /* T4 tokens (CR-U-T4-1; lobby.css keeps an identical scoped copy until the lobby lane drops it) */
+  --t4-pos:light-dark(#116a43,#3ccf8a); --t4-neg:light-dark(#a82d26,#ff7a6e); --t4-gold-ink:light-dark(#7a5000,#f2c14e); --t4-mut:light-dark(#5f5870,#aaa3b6);
   --safe-b:env(safe-area-inset-bottom,0px);
 }
 :root[data-theme=light]{color-scheme:light}
@@ -710,3 +712,180 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 @media (max-width:600px){ .hlife .lc.fund{display:none} .bizgrid{grid-template-columns:1fr} #verdict{max-width:calc(100vw - 16px)} #verdict span{font-size:12.5px} }
 .wbox .loans button{background:var(--paper);border:1px solid var(--line);font-weight:700}.wbox .loans button:hover:not(:disabled){background:var(--paper3)}
 #verdict{width:max-content}
+
+/* ============================================================ Next Level · in-game UI lane (T2 strategic depth, T4/T5/T7 CRs) */
+/* HUD life row: monthly focus + economy gauge */
+.hlife .lc.focus b{font-weight:700;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hlife .lc.focus.on::before{background:light-dark(#e3f4f7,#16323a)}
+.hlife .lc.focus.ops::before{background:light-dark(#fff1c2,#3d3114);box-shadow:0 0 0 2px var(--gold),var(--shadow-s)}
+.hlife .lc.econ{gap:5px}
+.hlife .lc.econ .gauge{flex:none;display:block}
+.hlife .lc.econ .tr{font-style:normal;font-weight:800;color:var(--mut)}
+.hlife .lc.econ.tu .tr{color:var(--green)}.hlife .lc.econ.td .tr{color:var(--red)}
+.hlife .lc.econ .sh{font-style:normal;font-size:12px}
+.hlife .lc[hidden]{display:none}
+#mentor .mt>b .mlv{font-weight:600;color:var(--mut)}
+#helpBtn{font-size:19px;line-height:1}
+#hCash.pulse{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+.t4-new{animation:t4new .6s ease-out}
+@keyframes t4new{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--gold) 70%,transparent)}100%{box-shadow:0 0 0 12px transparent}}
+#hWorld .b.learn{margin:2px 0 0;align-self:flex-start;background:light-dark(#e3f4f7,#16323a);color:light-dark(#0b5f78,#7fd6ea)}
+.hdream{display:flex;align-items:center;gap:6px;padding:0 12px;min-height:var(--tap);font-weight:800}
+.hdream[hidden]{display:none}
+/* phones: the life row keeps one line — 🎯 and the gauge need room, so age and inflation move to the legend / sheet and the
+   plan / focus / economy chips show their icon (the full label is one tap away) */
+@media (max-width:600px){
+  .hlife .lc.cpi,.hlife .lc.age{display:none}
+  .hlife .lc.econ b,.hlife .lc.econ .sh,.hlife .lc.focus b,.hlife .lc.plan b{display:none}
+  .hlife .lc.econ,.hlife .lc.focus,.hlife .lc.plan{padding:0 8px}
+  .htools #helpBtn{display:none}                     /* phones: the ❓ sits in the mentor bar (#helpBtnM) so the money stats keep their room */
+}
+#helpBtnM{display:none;font-size:18px}
+@media (max-width:600px){ #helpBtnM{display:grid} }
+
+/* event card head: tag + hint button */
+.taghead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.hintbtn{min-height:var(--tap);padding:0 12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;border-style:dashed}
+.hintbtn small{font-weight:600;color:var(--mut)}
+.hintbtn.on{background:light-dark(#fff3d2,#33291a);border-color:var(--gold2)}
+#evTitle:focus{outline:none}
+#evTitle:focus-visible{outline:3px solid var(--focus);outline-offset:3px;border-radius:6px;box-shadow:none}
+.hintp{margin:10px 0 2px;padding:10px 12px;border-radius:14px;border:2px dashed var(--gold2);background:light-dark(#fffaf0,#2a2533)}
+.hintp[hidden]{display:none}
+.hintp .hh{margin:0 0 4px;display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.hintp ul{margin:4px 0;padding-inline-start:20px;font-size:14px}
+.hintp:focus{outline:none}
+button.hinted{outline:2px dashed var(--gold2);outline-offset:3px;position:relative}
+.hbadge{display:inline-block;margin-inline-start:6px;padding:0 7px;border-radius:999px;border:1.5px dashed var(--gold2);font-size:var(--fs-cap);font-weight:800;color:var(--gold-text);background:var(--paper)}
+.plan .hbadge,.choice .hbadge{align-self:flex-start;margin:2px 0 0}
+
+/* T2 due diligence */
+.ddflags{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.ddflags .b{margin:0;font-size:13px;line-height:1.5;padding:2px 9px}
+.ddbox{margin:8px 0;padding:8px 10px;border-radius:14px;border:1px dashed var(--line)}
+.ddbox .mh{margin:0 0 6px;font-size:13px;font-weight:700}
+.b.warn,.b.ok{margin:0;margin-inline-start:6px;padding:0 7px;border-inline-start:0;border-radius:999px;font-size:var(--fs-cap);line-height:1.5}   /* the generic p.warn box must not leak into badges */
+.grid .row .b{white-space:nowrap}
+.ddflags .b.warn,.ddflags .b.ok{font-size:13px;padding:2px 9px}
+.ddins{margin-top:0;gap:8px}
+.ddins .opt{flex:1 1 150px}
+.ddins button.insp{display:flex;flex-direction:column;align-items:center;gap:1px;min-height:52px;background:var(--paper2);border:1px solid var(--line);font-weight:700}
+.ddins button.insp small{font-size:var(--fs-cap);font-weight:700}
+
+/* T2 impact panel */
+details.imp{margin:10px 0 2px;border-radius:14px;background:var(--paper2);padding:0 12px}
+details.imp>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:var(--tap);cursor:pointer;font-weight:800;list-style:none}
+details.imp>summary::-webkit-details-marker{display:none}
+details.imp>summary small{font-weight:600;color:var(--mut);font-size:var(--fs-cap);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+details.imp>summary::after{content:"▾";color:var(--mut)}details.imp[open]>summary::after{content:"▴"}
+.imp-tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:thin}
+.imp-tabs .chip{flex:none;font-size:13px;background:var(--paper)}
+.imp-body{padding-bottom:10px}
+table.ba{width:100%;border-collapse:collapse;font-size:14px}
+table.ba th,table.ba td{padding:4px 2px;border-bottom:1px dashed var(--line);text-align:start}
+table.ba thead th{font-size:var(--fs-cap);color:var(--mut);font-weight:700}
+table.ba td{text-align:end;white-space:nowrap}
+table.ba tbody th{font-weight:600}
+.imp-body .mh,.end-analysis h4{margin:10px 0 4px;font-size:13px;font-weight:800}
+.imp-body ul{margin:2px 0;padding-inline-start:20px;font-size:13px}
+.liab li{display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.risk{margin:8px 0 4px;padding:7px 10px;border-radius:10px;font-size:13.5px;background:light-dark(#fde2e1,#3a2020)}
+.risk.calm{background:var(--paper)}
+.branches{display:grid;gap:8px;margin:8px 0}
+.brow{display:grid;gap:3px}.brow .bl{display:flex;gap:8px;align-items:baseline;font-size:14px}
+.brow .chbar{width:100%;height:6px}.brow small{color:var(--mut)}
+details.more{margin-top:8px}details.more>summary{cursor:pointer;min-height:var(--tap);display:flex;align-items:center;font-weight:700;color:var(--blue)}
+.scen{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}
+.scol{padding:8px 10px;border-radius:12px;background:var(--paper)}
+.scol>b{display:block;font-size:13px;margin-bottom:2px}
+.scol .row{font-size:13px}
+.scol .warn{margin:4px 0 0;font-size:12.5px;color:var(--red);font-weight:700}
+.scol ul{padding-inline-start:16px;font-size:12.5px;color:var(--mut)}
+.disc{margin:8px 0 0;font-size:var(--fs-cap);color:var(--mut);text-align:center}
+@media (max-width:420px){ .scen{grid-template-columns:1fr} }
+
+/* T2 focus: payday / education card section + picker */
+.fsec{margin:12px 0 0;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:var(--paper)}
+.fsec .fh{display:flex;align-items:center;gap:10px}
+.fsec .fh>div{flex:1;display:flex;flex-direction:column;line-height:1.3}
+.fsec .fh small{color:var(--mut);font-size:var(--fs-cap)}
+.fsec .fi{font-size:22px}
+.fsec .chip{flex:none;font-weight:700}
+.fslots{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0 4px}
+.fslot{display:flex;flex-direction:column;align-items:center;gap:0;min-height:52px;padding:4px 6px;line-height:1.25;border:1.5px solid var(--line);background:var(--paper2)}
+.fslot small{font-size:var(--fs-cap);color:var(--mut);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fslot[aria-pressed=true]{border-color:var(--gold2);background:light-dark(#fff3d2,#33291a)}
+.ftiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:8px}
+.ftile{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:start;padding:9px 11px;border-radius:14px;line-height:1.3;background:var(--paper2);border:2px solid transparent;min-height:96px}
+.ftile .fhd{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ftile .fi{font-size:20px}
+.ftile b{font-size:15px}
+.ftile .fb{font-size:13px}
+.ftile .fn{font-size:12px;color:var(--mut)}
+.ftile .why{font-size:12px;color:var(--red);font-weight:700}
+.ftile.sel,.ftile[aria-pressed=true]{border-color:var(--gold2);background:light-dark(#fff3d2,#33291a)}
+.ftile.cur{border-color:color-mix(in srgb,var(--green) 55%,transparent)}
+.fnone{margin-top:8px}
+.card.fpick h2{font-size:24px}
+@media (max-width:600px){ .ftiles{grid-template-columns:1fr} .ftile{min-height:0} }
+
+/* T2 mentor level picker */
+.mlevels{display:grid;gap:8px}
+.mlevel{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:start;padding:10px 12px;border-radius:14px;line-height:1.35;border:2px solid transparent}
+.mlevel b{font-size:16px}.mlevel small{color:var(--mut)}
+.mlevel.cur{border-color:var(--gold2);background:light-dark(#fff3d2,#33291a)}
+
+/* T2 economy gauge (modal + sheet) */
+.econ{display:flex;align-items:center;gap:12px}
+.econ>div{display:flex;flex-direction:column;line-height:1.2}
+.econ b{font:20px/1.2 var(--title)}.econ.big b{font-size:26px}
+.econ small{color:var(--mut)}
+.espark{display:block;margin:6px 0 2px}
+.espark .g1,.espark .g2{stroke:var(--line);stroke-dasharray:3 3;stroke-width:1}
+.wbox.econbox{border-inline-start-color:var(--blue)}
+
+/* T2 end screen analysis (lives in the lobby's end card) */
+.end-analysis{margin:12px 0;padding:0 14px;border-radius:16px;background:var(--paper2);text-align:start}
+.end-analysis>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:var(--tap);cursor:pointer;font-weight:800;list-style:none}
+.end-analysis>summary::-webkit-details-marker{display:none}
+.end-analysis>summary small{font-weight:600;color:var(--mut);font-size:var(--fs-cap)}
+.end-analysis[open]{padding-bottom:12px}
+.ea-l{margin:4px 0;font-size:14px}
+.ea-rev{margin:4px 0;padding:0;list-style:none;display:grid;gap:6px}
+.ea-rev li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.35}
+.ea-rev li small{display:block;color:var(--mut)}
+.ea-rev .sc{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--green);color:#fff;font-weight:800;font-size:13px}
+.ea-rev li.low .sc{background:var(--red)}
+table.ea-dd{width:100%;border-collapse:collapse;font-size:13.5px}
+table.ea-dd th,table.ea-dd td{padding:4px 2px;border-bottom:1px dashed var(--line);text-align:start}
+table.ea-dd td{text-align:end;white-space:nowrap}
+.ea-econ{display:block;margin:4px 0}
+.ea-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:var(--fs-cap);color:var(--mut);margin:2px 0 0}
+.ea-legend i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-inline-end:4px;vertical-align:middle}
+.ea-legend i.ln{height:2px;background:var(--ink)}
+
+/* T4: intro card, practice chip, dream, legend / help */
+.linkbtn{display:block;margin:8px auto 0;min-height:var(--tap);background:none!important;color:var(--t4-gold-ink);text-decoration:underline;text-underline-offset:3px;font-weight:700}
+.nextgoal{margin:10px 0;padding:10px 12px;border-radius:14px;border:2px solid var(--gold);background:light-dark(#fff8e3,#2e2716)}
+.nextgoal p{margin:4px 0}
+.chip.practice{font-weight:700;border-color:var(--gold2);background:var(--glass)}
+.pans{display:grid;gap:8px;margin:8px 0}
+.pans button{min-height:48px;text-align:start;background:var(--paper2)}
+.pres .pos,.pres .neg{margin:8px 0 0}
+.dms{list-style:none;padding:0;margin:10px 0;display:grid;gap:6px}
+.dms li.ok{color:var(--green);font-weight:700}
+.lmore>summary{cursor:pointer;min-height:var(--tap);display:flex;align-items:center;font-weight:700;color:var(--blue)}
+.ls-line{margin:6px 0;font-size:14px}
+.t4-help{display:grid;gap:8px}
+.t4-help button{min-height:52px;text-align:start;font-weight:700;background:var(--paper2)}
+table.t4-legend{width:100%;border-collapse:collapse;font-size:14px}
+table.t4-legend th,table.t4-legend td{padding:6px 4px;border-bottom:1px dashed var(--line);text-align:start;vertical-align:top}
+table.t4-legend td:nth-child(3){white-space:nowrap;font-weight:800}
+table.t4-legend td:last-child{color:var(--mut);font-size:13px}
+#coach .bubble .acts button{min-height:var(--tap)}
+
+@media (prefers-reduced-motion:reduce){ :root:not([data-motion=full]) .t4-new{animation:none} }
+:root[data-motion=reduce] .t4-new{animation:none}
+/* T7 axe: contrast inside gold buttons and on the neutral verdict disc (dark mode) */
+.acts .opt button.primary .net.pos,.acts .opt button.primary .net.neg,.acts .opt button.primary .net{color:var(--gold-ink)}
+#verdict .vs{background:light-dark(#5f586c,#4a4458)}

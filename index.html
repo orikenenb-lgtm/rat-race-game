@@ -23,16 +23,16 @@
 <div id="board2d" hidden></div>
 
 <header class="hud" id="hud">
-  <button id="homeBtn" class="hbtn" aria-label="חזרה ללובי (המשחק נשמר)"></button>
+  <button id="homeBtn" class="hbtn" aria-label="לובי (המשחק נשמר)" title="חזרה ללובי — המשחק נשמר"></button>
   <div class="hcard hworld" id="hWorld"><b id="hWorldName">השכונה</b><span id="hInd" class="hind" aria-live="polite" hidden></span></div>
   <div class="hcard hstats">
     <div class="stat cash"><span>מזומן</span><b id="hCash" class="num">₪0</b></div>
     <div class="stat"><span>תזרים חודשי</span><b id="hCf" class="num">₪0</b></div>
     <div class="stat mon"><span>חודש</span><b id="hMonth" class="num">1</b></div>
   </div>
-  <div class="hcard hgoal" id="hGoal" role="meter" aria-label="מד החופש"></div>
+  <div class="hcard hgoal" id="hGoal" role="meter" aria-label="מד החופש" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0%"></div>
   <div class="hlife" id="hLife" hidden></div>
-  <button class="hcard hen" id="hEnergy" hidden aria-label="אנרגיה להטלות"><span>⚡</span><b class="num" id="hEnVal">25</b><small id="hEnT"></small></button>
+  <button class="hcard hen" id="hEnergy" hidden aria-label="זריקות"><span>⚡</span><b class="num" id="hEnVal">25</b><small id="hEnT"></small></button>
   <div class="htools">
     <button id="turboBtn" class="ibtn" aria-label="טורבו (מהירות כפולה)" aria-pressed="false"></button>
     <button id="muteBtn" class="ibtn" aria-label="השתקה" aria-pressed="false"></button>

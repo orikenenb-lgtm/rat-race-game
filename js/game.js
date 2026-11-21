@@ -257,7 +257,7 @@ async function initRenderer() {
       .catch(() => null).finally(() => { lifeSettled = true; });
     scene.onContextLost(onContext);
   } else { lifeP = Promise.resolve(); lifeSettled = true; }
-  const cam = $('#camBtn'); if (cam) cam.hidden = scene.kind !== '3d';
+  const cam = $('#camBtn'); if (cam) { cam.hidden = scene.kind !== '3d'; cam.dataset.kind = scene.kind; }
   syncLiteBtn();
   scene.setPaused(!$('#start').hidden);
 }
@@ -423,6 +423,7 @@ async function noBackupModal(allowGo = true) {
 }
 async function startInner(cfg, my) {
   initShell();
+  if (endObs) { endObs.disconnect(); endObs = null; }
   busy = true; quotaWarned = false;
   closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
   // WebGL died while the lobby was up: this start uses the 2D board
@@ -603,7 +604,7 @@ async function startInner(cfg, my) {
 // F4: the in-game ❓ button (injected by ui.js, in-game UI lane) only emits this; onboard.js owns the modal
 bus.on('onboard:help', () => { if (S && CFG && !S.over) onboard.help(hooks(gen)).catch((e) => console.warn(e)); });
 function hooks(my) {
-  return { S, CFG, W, my, gen: () => gen, persist, render, isBusy: () => busy,
+  return { S, CFG, W, my, gen: () => gen, persist, render, isBusy: () => busy, mentorMenu, mentorLabel: () => (S && E.metrics(S).mentor ? E.metrics(S).mentor.label : null),
     answerPractice: (qid, idx) => { if (typeof E.answerPractice !== 'function') return null; const r = E.answerPractice(S, qid, idx); render(); persist(); return r; } };
 }
 
@@ -615,13 +616,20 @@ function offerTurbo() {
 }
 
 /* ============================================================ render */
-function ctx() { return { world: W, st: S, cfg: CFG }; }
+function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed }; }
+let opsSeen = false;
 function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
   track(m);
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
+  if (typeof ui.worldTag === 'function') ui.worldTag(!!(CFG && CFG.learn));       // T4 S-M7
+  if (typeof ui.renderDream === 'function') ui.renderDream(m.dream || null);      // T4 §6.4 (feature-detected: needs the engine's E-7)
+  // T2: an "ops" focus from the agenda is ready → offer to open the business panel between rolls (once per month)
+  const ops = !!(m.focus && m.focus.opsOpen);
+  if (ops && !opsSeen && !busy && !ui.isEventOpen()) ui.toast('🏪 יום העבודה על העסק מחכה', { action: { label: 'לפתוח את לוח העסק', fn: () => openOps() } });
+  opsSeen = ops;
   const wi = m.worldIndicators || {};
   ui.historyStrip(wi.indexHist ? wi.indexHist.map((x) => ({ index: x })) : S.ui.hist, wi.ymText ? wi : null);
   syncLifeCity(m);
@@ -727,6 +735,12 @@ async function updateRollEnergy() {
 /* life chips: details, or change the monthly plan between events */
 async function lifeChip(kind) {
   const m = E.metrics(S);
+  if (kind === 'econ') { if (m.econ) ui.econModal(m.econ); return; }
+  if (kind === 'focus') {
+    if (m.focus && m.focus.opsOpen) { openOps(); return; }
+    if (busy || ui.isEventOpen()) { ui.toast('אפשר לבחור מוקד בין תורות, או בכרטיס המשכורת'); return; }
+    focusFlow({}); return;
+  }
   if (kind === 'plan') {
     if (busy || ui.isEventOpen() || typeof E.setPlan !== 'function') { ui.toast('אפשר לשנות תוכנית בין תורות, או ביום המשכורת'); return; }
     const L = m.life || {}; const plans = L.plans || [];
@@ -748,6 +762,57 @@ async function lifeChip(kind) {
   ui.modal({ tag: 'החיים שלך', color: '#0e7490', title: T[0], html: `<p class="d">${T[1]}</p>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
 }
 let chosenPlan = null;
+
+/* ============================================================ T2: monthly focus (E.setFocus) — HUD chip or the payday / education card */
+let focusBusy = false;
+async function focusFlow({ inCard = false, cur = null, update = null } = {}) {
+  if (!S || S.over || focusBusy || typeof E.setFocus !== 'function') return;
+  const F = E.metrics(S).focus; if (!F) return;
+  const my = gen; focusBusy = true;
+  try {
+    const pick = await ui.focusPicker(F, { level: (E.metrics(S).mentor || {}).level });
+    if (!pick || my !== gen || !S || S.over) return;
+    if (!inCard && (busy || ui.isEventOpen())) { ui.toast('אפשר לבחור מוקד בין תורות, או בכרטיס המשכורת'); return; }
+    let out;
+    try { out = E.setFocus(S, pick.id, pick.slot); } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); return; }
+    if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו', { kind: 'bad' }); return; }
+    sfx('card');
+    await applyOut(out, { inCard });
+    if (pick.slot) ui.toast(`🎯 ${pick.id === 'none' ? 'התכנון נוקה' : 'נשמר בתכנון'}: ${pick.slot === 1 ? 'בחודש הבא' : 'בעוד חודשיים'}`);
+    render(); persist(); checkpoint();
+    if (inCard && update && out.event) update(out.event);
+    else if (!inCard && out.event && S.pending) await runPending(my);   // 'ops' opened the business panel
+    if (out.end) { const my2 = gen; busy = true; ui.setRollEnabled(false); await endGame(out.end, my2); }
+  } finally { focusBusy = false; }
+}
+/** 'ops' from the agenda: open the business panel once, between rolls (E.setFocus('ops', 0)). */
+async function openOps() {
+  if (!S || S.over || busy || ui.isEventOpen() || typeof E.setFocus !== 'function') { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
+  let out; try { out = E.setFocus(S, 'ops', 0); } catch (e) { console.error(e); return; }
+  if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו'); return; }
+  await applyOut(out); render(); persist(); checkpoint();
+  if (S.pending) await runPending(gen);
+}
+/** Resolve a card the player opened between rolls (focus 'ops'): the normal landing flow, then the roll button again. */
+async function runPending(my) {
+  busy = true; ui.setRollEnabled(false);
+  await handleLanding(my);
+  if (my !== gen || stuck) return;
+  busy = false;
+  if (!S.over) { ui.setRollEnabled(true); ui.focusRoll(); }
+}
+/** T2 §15.1: the mentor level, from the ❓ menu (free and history games; ranked shows the fixed level). */
+async function mentorMenu() {
+  if (!S || S.over || typeof E.setMentorLevel !== 'function' || !E.MN) return;
+  const M = E.metrics(S).mentor; const locked = !(S.mode === 'free' || S.mode === 'history');
+  const lv = await ui.mentorPicker(M, { locked, levels: E.MN.LEVEL_TEXT });
+  if (!lv || !S || S.over) return;
+  let out; try { out = E.setMentorLevel(S, lv); } catch (e) { console.error(e); return; }
+  if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו'); return; }
+  render(); persist(); checkpoint();
+  ui.toast(`🧭 רמת המנטור: ${out.mentor || lv}`);
+  bus.emit('mentor:level', { level: lv });
+}
 
 /* ============================================================ hold-to-shake (touch & mouse) */
 const holdState = { down: false, held: false, t: 0 };
@@ -888,7 +953,19 @@ function resolveCard(ev, my) {
     if (ev.golden || jackpot) { scene.sparkle('pawn'); ui.vibrate([15, 40, 15]); }
     else if (ev.sound === 'loss' && ['market', 'bank', 'fx', 'shipping'].includes(ev.type)) fxShake(0.18, 380);
     let cur = ev, working = false;
-    const ctl = ui.openEvent(cur, ctx(), (optId, params) => onChoose(optId, params).catch((e) => {
+    // T2 card API: the UI asks, the engine answers (no finance math in ui.js). A hint is an action (['H']): saved like a decision.
+    const api = {
+      mentor: () => (S ? E.metrics(S).mentor : null),
+      hint: () => {
+        if (working || my !== gen || typeof E.requestHint !== 'function') return null;
+        const r = E.requestHint(S);
+        if (r && r.ok !== false) { persist(); checkpoint(); }
+        return r;
+      },
+      impact: (ref) => (typeof E.impactFor === 'function' ? E.impactFor(S, ref, { event: cur }) : null),
+      focus: () => { if (!working && my === gen) focusFlow({ inCard: true, cur: () => cur, update: (nev) => { cur = nev; ctl.update(nev); } }); },
+    };
+    const ctl = ui.openEvent(cur, { ...ctx(), api }, (optId, params) => onChoose(optId, params).catch((e) => {
       if (my !== gen || stuck) return;
       try { close(); } catch (x) { /* ignore */ }
       enterStuck(e, 'card'); resolve(null);
@@ -983,6 +1060,9 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'inflation' && n.reality && S && S.ui) S.ui.inflReality = n.reality;
     if (n.kind === 'goalHold') { ui.toast('⏳ ' + n.text, { kind: 'gold' }); continue; }
     if (n.kind === 'goal') { ui.toast('🎯 ' + n.text, { kind: 'gold' }); continue; } // T4 IR-T4-4: tutorial goal chain (E-4)
+    if (n.kind === 'econ') { ui.toast(`📰 ${n.text}${n.label ? ` · מד הכלכלה: ${n.label}` : ''}`); continue; }   // T2 cycle headline
+    if (n.kind === 'focus') { ui.toast('🎯 ' + n.text, { kind: n.disabled ? 'bad' : '' }); continue; }
+    if (n.kind === 'dd') { ui.toast('🔎 ' + n.text, { kind: n.repair > 0 || n.surprise ? 'bad' : '' }); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);
@@ -1028,6 +1108,22 @@ function sheetBody(act) {
     applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
     return;
   }
+  if ((act === 'loan' || act === 'repay' || act === 'credit') && typeof E.impactFor === 'function') { loanWithImpact(act); return; }
+  doLoan(act);
+}
+/** T2 §15.7: HUD money actions show the impact panel (act:* refs) before they happen. */
+async function loanWithImpact(act) {
+  const ref = act === 'loan' ? 'act:loan' : act === 'repay' ? 'act:repay' : 'act:payCredit';
+  let I = null; try { I = E.impactFor(S, ref); } catch (e) { I = null; }
+  if (!I) { doLoan(act); return; }
+  const m = E.metrics(S);
+  const title = act === 'loan' ? `לקחת הלוואה ${E.fmtM(m.loanUnit)}?` : act === 'repay' ? `להחזיר ${E.fmtM(m.loanUnit)} מההלוואה?` : 'לסגור את חוב האשראי?';
+  const v = await ui.modal({ tag: 'מה זה עושה לי?', color: '#2459b8', title, html: `<div class="imp-body">${ui.impactHtml(I)}</div>`,
+    actions: [{ label: act === 'loan' ? 'לקחת' : act === 'repay' ? 'להחזיר' : 'לסגור', cls: 'primary', v: 'go' }, { label: 'ביטול', v: null }], dismissable: true });
+  if (v !== 'go' || !S || S.over || busy || ui.isEventOpen()) return;
+  try { doLoan(act); } catch (e) { if (!stuck) enterStuck(e, 'sheet'); }
+}
+function doLoan(act) {
   let out;
   try { out = act === 'loan' ? E.takeLoan(S) : act === 'repay' ? E.repayLoan(S) : act === 'credit' ? E.payCredit(S) : null; }
   catch (e) { console.error(e); return; }
@@ -1113,5 +1209,23 @@ async function endGame(end, my) {
   };
   busy = false;
   bus.emit('game:end', payload);
+  attachEndAnalysis(end, my);
+}
+/** T2 §15.9: the "ניתוח" block (ui.endAnalysisHtml — learning review, hints, luck parts, claimed vs actual, the real cycle path)
+ *  goes into the lobby's end card, which the lobby lane renders (and may re-render). Stops at the next game.
+ *  CR for the lobby lane: call ui.endAnalysisHtml(e.end) inside renderEnd instead (then this observer finds it present). */
+let endObs = null;
+function attachEndAnalysis(end, my) {
+  if (endObs) { endObs.disconnect(); endObs = null; }
+  if (typeof ui.endAnalysisHtml !== 'function') return;
+  const html = ui.endAnalysisHtml(end); const start = $('#start'); if (!html || !start) return;
+  const put = () => {
+    if (my !== gen) { if (endObs) { endObs.disconnect(); endObs = null; } return; }
+    const card = start.querySelector('.lb-end .end-card') || start.querySelector('.fb.end'); if (!card || card.querySelector('.end-analysis')) return;
+    const at = card.querySelector('.end-learn') || card.querySelector('.end-stats');
+    if (at) at.insertAdjacentHTML('afterend', html); else (card.querySelector('.end-new, .end-lesson, .acts') || card.lastElementChild)?.insertAdjacentHTML('beforebegin', html);
+  };
+  endObs = new MutationObserver(put); endObs.observe(start, { childList: true, subtree: true });
+  put();
 }
 

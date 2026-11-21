@@ -163,7 +163,9 @@ export function legend(h) {
     L.energy != null ? ['🔋', 'כוח', `${Math.round(L.energy)}/100`, 'הכוח של הדמות בסיפור — לא ⚡ זריקות.'] : null,
     L.happiness != null ? ['😊', 'אושר', `${Math.round(L.happiness)}/100`, 'ל־★★★ צריך לפחות 60.'] : null,
     L.creditScore != null ? ['🏦', 'דירוג אשראי', String(L.creditScore), 'קובע כמה יעלו הלוואות.'] : null,
-    L.inflationYear != null ? ['🛒', 'אינפלציה', `${L.inflationYear}%`, 'כמה המחירים עולים השנה.'] : null,
+    L.inflationYear != null ? ['🛒', 'אינפלציה', `${L.inflationYear}%`, L.inflationLastYear != null ? 'כמה המחירים עלו בשנה שעברה.' : 'הצפי לשנה הראשונה.'] : null,
+    m.focus ? ['🎯', 'מוקד החודש', String(m.focus.current.label || ''), 'על מה שמים את הראש החודש. עולה קצת 🔋.'] : null,
+    m.econ ? ['📊', 'מד הכלכלה', String(m.econ.label || ''), 'מתעדכן באיחור ועם רעש.'] : null,
     ['🛟', 'קרן חירום', e.months != null ? `${e.months} חודשים` : fmt(m.savings || 0), 'חודשי הוצאות שמורים בצד.'],
     L.plan ? ['📅', 'התוכנית', String((L.plans || []).find((p) => p.id === L.plan)?.label || L.plan), 'איך אתה מעביר את החודש.'] : null,
     h.CFG && !h.CFG.learn && !h.CFG.resultId && (h.CFG.mode || 'free') !== 'daily' ? ['⚡', 'זריקות', '', 'כל הטלה במשחק רגיל עולה זריקה אחת.'] : null,
@@ -199,13 +201,17 @@ export function hidePractice() { practice.hide(); }
 /* ------------------------------------------------------------ F4 help modal (ui.js injects #helpBtn → bus 'onboard:help') */
 /** S-H0…S-H6: "איך משחקים" → tour / legend / full tutorial in the next w1 game. */
 export async function help(h) {
+  // T2 (in-game UI lane): the mentor level lives in this menu — game.js passes h.mentorMenu / h.mentorLabel
+  const ml = h && typeof h.mentorMenu === 'function' && typeof h.mentorLabel === 'function' ? h.mentorLabel() : null;
+  const mBtn = ml ? `<button data-h="mentor">🧭 רמת המנטור: ${ui.esc(ml)}</button>` : '';
   const v = await ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: 'מה תרצה לראות?', dismissable: true,
-    html: '<div class="t4-help"><button data-h="tour">🎬 סיור קצר במסך (5 צעדים)</button><button data-h="legend">📖 מה כל סימן אומר</button><button data-h="replay">🔄 הדרכה מלאה במשחק הבא בשכונה</button></div>',
+    html: `<div class="t4-help"><button data-h="tour">🎬 סיור קצר במסך (5 צעדים)</button><button data-h="legend">📖 מה כל סימן אומר</button>${mBtn}<button data-h="replay">🔄 הדרכה מלאה במשחק הבא בשכונה</button></div>`,
     onExtra: (e) => { const b = e.target.closest('[data-h]'); if (!b) return; pick = b.dataset.h; document.querySelector('#gm .acts button')?.click(); },
     actions: [{ label: 'סגירה', cls: 'primary', v: null }] });
   void v;
   const p = pick; pick = null;
-  if (p === 'tour') await tour(h);
+  if (p === 'mentor') await h.mentorMenu();
+  else if (p === 'tour') await tour(h);
   else if (p === 'legend') await legend(h);
   else if (p === 'replay') {
     try { const P = await import('./progress.js'); P.requestTutorialReplay(); } catch (e) { /* game-only copy without progress.js */ }
