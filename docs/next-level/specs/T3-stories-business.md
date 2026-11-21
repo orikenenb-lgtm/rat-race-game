@@ -952,3 +952,55 @@ Extend `tools/sim.mjs` and `tests/lib/random-player.mjs`:
 | 9 | Docs and pin: ENGINE.md "Changes v4 — stories & business", re-pin, task board | `docs/ENGINE.md`, `supabase/functions/verify-result/engine*` (generated), `docs/next-level/TASK_BOARD.md` |
 
 Steps 1 and 4 are independent and can be reviewed separately. Step 2 must land before steps 3 and 5. Step 6 depends on steps 3 and 5. Ship one engine re-pin for steps 1–6 together.
+
+---------------------------------------------------------------------------------------------------
+
+## Implementation notes (engine lane, 2026-11-21)
+
+**Done as specified (rules 4 only; rules 3 stays the exact v3 game — the 200-game golden fixture still passes):** stream 14 `story`
+(2 draws / payday) and one sealed story stream per business (2 draws / simulated month); `js/systems/chains.js` with the six chains and
+their texts; the interpreter in `engine.js` (L-card entries, inbox, pacing, expiry defaults, memory, cross-chain "זוכר?" lines,
+`lifeSummary.stories`); action `Q` in `replay` and `verify_core CODES` (re-pinned locally, not deployed); C1–C9; `ensureStoryState`
+in `v4Defaults` (save v4 stays, T2 saves and v3 saves load, `L.friend` migrates); the business layer inside `business.js` (setups,
+seasons + calendar, shock floor, general expansion, B2B terms + bad debt, decision events with previews, overload / buyerOffer /
+season prep, exact `why` bridges, growth stage, layered summary, `SIDE_GRAD`); 5 new lessons; evaluator classes; `publicView().inbox`.
+Contracts for the UI agent: `docs/ENGINE.md` "Changes v4 — T3". Tests: `tests/t3.test.mjs` (U1–U19 + §12 criteria; `tests/stories.test.mjs`
+is the alias `run_all.sh` names).
+
+**Deviations (each deliberate):**
+1. Expense tags are **derived from labels** (`tagOf`) unless a story effect stores one, instead of being written at createGame / load:
+   writing them at load broke the byte-identical save round-trip (a line created mid-game had no tag in continuous play).
+2. `st.bizStory[key]` is a plain uint32 per business (like `bizRng`), not `{v}`.
+3. The lease line is tagged `car` (so a later bus choice cuts it too) and remembered by id in the chain (`data.leaseId`).
+4. The guide pick on car / transport steps follows the director's A1 decision (option.guide, cushion-aware: an option that would leave
+   < 1 month of expenses falls back to the no-loan option that costs least now). Because of it the `m3commute` options are `mixed`, not
+   `personal` (personal options never carry a primary).
+5. Commute values (🔋 per work month): periphery −3, train −2, hybrid −1, car 0 (the spec gave the option deltas only).
+6. Crisis `job` → `look`: the +5% raise applies at once on success and 🔋 −6 now (instead of −3 × 2 months and a delayed raise).
+7. The app's `lateClient` is a one-shot corporate order of 3 × baseNew × 6 user-months on terms (no 6-month contract object).
+8. T3 businesses pay a breakdown's repair through the decision (`repair` = default, next month) instead of in the event month,
+   so `wait` / `replace` are real choices.
+9. Receivables on terms keep `due` public (+2); lateness / bad debt stay sealed until they happen (paid at +3 when late; written off
+   at +3 when bad) — showing `due + late` would have leaked the seal.
+10. Business previews are the deterministic, no-risk branch (on time, paid, agreed); the risky branch is shown as `odds` + `risk {p, amount}`
+    and the evaluator's money = `delta3 × 2 − p × amount`.
+11. L-card chain options keep `kind:'life'` (+ `story:true`) so today's UI renders them through the generic life path; inbox cards use
+    `type:'story'`, `kind:'story'`.
+12. [TUNE] anti-repeat: vacation cooldown 12 (not 8) and the substitution list rotates over health / course / parent / reserve (a pure
+    function of how many L cards were shown), then vacation, then quiet — with the spec's order vacation was everyone's fallback (2× the mean).
+13. [TUNE] trigger odds from this payday's sealed story draws: a crisis tile starts the crisis chain at 30%, a new recession label at 70%,
+    a −8% month only when the index is ≥ 15% under its peak; career warn needs 3 low paydays (+ 50% odds), the degree path is offered
+    within 2 months of graduating (50%), the promotion is reviewed once a year from month 18 (50%). Without them crisis and career started
+    in ~97–100% of games.
+14. Review M4 (c): in w1 (`lifeMoneyScale` 0.35, rules 4) the money of personal / values life cards and of the life chains (car, move,
+    friend) is scaled down.
+15. Standalone life cards keep T2's values band (1.5 E, floor 60) for `mixed`; story `mixed` steps use the spec's 1 E band (floor 60
+    without a flag).
+
+**Measured** (numbers in `tools/balance-report.md`, data in `tools/balance-data/`): replay byte-identical with and without `Q`, mid-chain
+round-trips, pre-existing streams identical with stories off, story draws = 2 × paydays, business story draws = 2 × months, why
+invariants over every simulated month, lateClient frequencies, hysteresis, stage 3 reached in 17 / 60 thirty-month lifetimes.
+
+**Not met / open:** chain-start frequencies for crisis (≈ 90%+) and career (≈ 85–90%) stay above the [TUNE] 85% / 80% ceilings, and
+chain items per 12 months have a median ≈ 1.4–1.7 (target 2–3) — lowering one raises the other; the spec ranges need a content /
+director decision (more chain steps, or accept). UI-1…UI-10 belong to the in-game UI lane.
