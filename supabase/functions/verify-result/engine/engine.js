@@ -1740,7 +1740,7 @@ const DESCRIBE = {
     ev.title = `העסק שלך: ${a.n}`; ev.text = a.bizHeadline || 'זמן להחליט: מחיר, עובדים, שיווק, משיכה — או למכור.'; ev.mentor = st.mentor === 'guide' ? o.suggest.why[0] : (mentorLine(st, 'bizAsk', {}) || o.suggest.why[0]);
     if (!ev.tag) ev.tag = 'העסק שלך';
     const base3 = bizMemo(bKey + '|base', () => BIZ.forecast(b, null, 3).netProfit);
-    ev.data = { mode: 'manage', assetId: 'a' + a.id, summary: clone(sm), options: clone({ ...o, suggest: undefined }), why: o.suggest.why.slice(), forecast3: base3, lastResult: st.flags['bz_' + p.id] || null };
+    ev.data = { mode: 'manage', assetId: 'a' + a.id, summary: clone(sm), options: clone({ ...o, suggest: undefined }), why: st.mentor === 'guide' ? o.suggest.why.slice() : [], forecast3: base3, lastResult: st.flags['bz_' + p.id] || null };
     const mk = (id, label) => { const d = bizDecision(b, id, o); if (!d || !Object.keys(d).length) return null;
       const r = bizMemo(bKey + '|' + JSON.stringify(d), () => { const x = BIZ.applyDecisions(b, d); return x.ok ? { ok: true, cashNeeded: x.cashNeeded, f: BIZ.forecast(x.business, null, 3).netProfit, energy: BIZ.ownerEnergy(x.business) } : { ok: false, error: x.errors[0] }; });
       if (!r.ok) return opt('biz:' + id, label, false, { kind: 'biz', reason: r.error }); return opt('biz:' + id, label, true, { kind: 'biz', decisions: d, cashNeeded: r.cashNeeded, effects: { netProfit3: r.f, delta3: r.f - base3, energy: -r.energy, note: '' } }); };
@@ -1820,7 +1820,7 @@ const DESCRIBE = {
     const prefix = !B ? '' : B.level === 0 ? 'לפי המוכר: ' : B.level === 1 ? 'לפי הבדיקה: ' : 'נבדק: ';
     // a buy option: label + the ONE number that matters (cashflow after the cost of any loan it needs); o.net = the EXPECTED net
     const buyOpt = (id, text, amount, pr) => {
-      const L = loanFor(st, amount); const cfC = assetCf(st, pr); const cfE = atBase(pr, B ? B.base : null); const net = cfE - L.monthly;
+      const L = loanFor(st, amount + (B && B.level === 2 ? B.rep || 0 : 0)); const cfC = assetCf(st, pr); const cfE = atBase(pr, B ? B.base : null); const net = cfE - L.monthly; // review m2: a verified repair is part of the money you need
       const shown = !B ? netLabel(net) : B.level === 0 ? prefix + netLabel(cfC - L.monthly) : B.level === 1 ? `${prefix}${fmtM(atBase(pr, B.lo) - L.monthly)} עד ${fmtM(atBase(pr, B.hi) - L.monthly)} בחודש` : prefix + netLabel(net);
       const label = L.need ? `הלוואה ${fmtM(L.need)} ו${text}` : (id === 'buy' && w.mechanic !== 'fx' ? `לקנות ב־${fmtM(amount)}` : `${text} ב־${fmtM(amount)}`);
       const basis = { cf: cfE, vf: B ? B.value / Math.max(1, value) : 1, rep: B ? B.rep : 0 };
@@ -2296,7 +2296,7 @@ function buyAsset(st, p, out, o) {
     if (c.noi != null) c.noi = t.base; else c.cf = t.base;
     c.value = t.value;
   }
-  const L = loanFor(st, c.down + fee);
+  const L = loanFor(st, c.down + fee + (p.dd && p.dd.level === 2 && R4(st) ? p.dd.repair || 0 : 0)); // review m2: the verified repair is borrowed with the buy, not forced later
   if (L.need) { st.loans += L.need; st.cash += L.need; st.stats.loansTaken += L.need; }
   st.cash -= c.down + fee;
   const a = addAsset(st, c, { fixed: o.id === 'buyFix', golden: p.golden, hedge: o.id === 'buyHedge' });
@@ -4051,7 +4051,8 @@ export function requestHint(st) {
   const ev = describe(st);
   if (ev.auto || ev.type === 'trade' || (ev.type === 'mystery' && ev.data.kind === 'quiz') || !scorePool(ev, null)) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
   const hint = hintFor(st, ev); if (!hint) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
-  if (!p.hinted) { act(st, ['H']); p.hinted = true; dqOf(st).hints = (dqOf(st).hints || 0) + 1; }
+  const hk = `${p.dd ? p.dd.level : '-'}|${p.negotiated ? JSON.stringify(p.negotiated) : ''}`; // review m1: after an inspection / offer the hint is new — count it
+  if (p.hinted !== hk) { act(st, ['H']); p.hinted = hk; dqOf(st).hints = (dqOf(st).hints || 0) + 1; }
   return { ...out, event: ev, hint, hintsUsed: dqOf(st).hints, end: null };
 }
 /** §5.5 change the mentor level mid-game (free and history only; presentation only, no money effect). Logged as ['M', level]. */

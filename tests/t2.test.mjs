@@ -524,5 +524,25 @@ test('review M1: the gauge is honest (lagged, noisy, correlated with the phase);
   assert.match(E.FC.FOCUS.research.benefit, /חודש/);
 });
 
+test('review minors: m1 a hint after an inspection is counted again; m2 a verified repair is in the buy loan (no forced loan); m3 no business recommendation in data at hint/pro', () => {
+  // m1
+  const card = { k: 're', n: 'x', d: 'x', cost: 90000, down: 9000, cf: 800 };
+  const st = dealState('w1', card, { mentor: 'hint', cash: 100000 });
+  E.requestHint(st); E.requestHint(st); assert.equal(st.dq.hints, 1, 'same card state: one hint');
+  E.choose(st, null, 'inspect:1'); E.requestHint(st); assert.equal(st.dq.hints, 2, 'after an inspection the hint is new');
+  assert.equal(st.actions.filter((a) => a[0] === 'H').length, 2);
+  // m2
+  const s2 = dealState('w1', card, { mentor: 'hint', cash: 9500, dd: { level: 2, repair: 3000, f: 1, vf: 1 } });
+  const ev = E.currentEvent(s2); const buy = ev.options.find((o) => o.id === 'buy'); assert.ok(buy.loanAmount >= 2500, 'the loan covers the verified repair: ' + buy.loanAmount);
+  const f0 = s2.stats.forcedLoans; E.choose(s2, ev, 'buy'); assert.equal(s2.stats.forcedLoans, f0, 'no forced loan'); assert.ok(s2.cash >= 0);
+  // m3
+  for (const level of ['hint', 'pro', 'guide']) {
+    const b = E.createGame({ worldId: 'w2', seed: 4, mode: 'free', mentor: level }); b.cash = 1e6;
+    b.pending = { id: 5, type: 'business', tile: 'K', pos: 3, mode: 'offer', typeId: 'coffee', seed: 9 }; b.phase = 'event'; E.choose(b, null, 'start');
+    const a = b.assets.find((x) => x.biz); b.pending = { id: 6, type: 'business', tile: 'K', pos: 3, mode: 'manage', assetId: a.id }; b.phase = 'event';
+    const e2 = E.currentEvent(b); assert.equal(e2.data.why.length > 0, level === 'guide', level);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
