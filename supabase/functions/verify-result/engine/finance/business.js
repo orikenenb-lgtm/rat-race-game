@@ -855,7 +855,7 @@ function teach(b, r, prev) {
     note('marketing', 52, `ה־${fmt(step)} הראשונים בשיווק מביאים פי ${Math.max(1, Math.round(first / Math.max(last, 1e-9)))} יותר לקוחות מה־${fmt(step)} האחרונים שהוצאת. תשואה פוחתת.`, 'biz_marketing');
   }
   if (r.toOwner.drawGross > 0) note('draw', 40, `משכת ${fmt(r.toOwner.drawGross)}: ${fmt(r.toOwner.divTax)} מס דיבידנד, ${fmt(r.toOwner.drawNet)} לכיס. מה שנשאר בעסק ממשיך לעבוד בשבילך.`, 'biz_draw');
-  if (!b.manager && p.ownerEnergy >= 8) note('owner_job', 45, `העסק עובד רק כשאתה שם: −${p.ownerEnergy} אנרגיה בחודש. מנהל יעלה ${fmt(rnd(p.managerWage * b.cpi))} — וישחרר לך את הזמן.`, 'biz_owner_job');
+  if (!b.manager && p.ownerEnergy >= 8) note('owner_job', 45, `העסק עובד רק כשאתה שם: −${p.ownerEnergy} 🔋 כוח בחודש. מנהל יעלה ${fmt(rnd(p.managerWage * b.cpi))} — וישחרר לך את הזמן.`, 'biz_owner_job');
   if (r.breakEven.units != null && !r.sub) note('breakeven', r.units < r.breakEven.units ? 72 : 38, `נקודת האיזון: ${r.breakEven.units} ${p.unit} בחודש. מכרת ${r.units}.`, 'biz_breakeven');
   else if (r.breakEven.units == null) note('no_breakeven', 85, r.breakEven.text, 'biz_breakeven');
   if (r.revenue > 0 && r.netMargin > -100) note('margin', 34, `רווח גולמי ${pctTxt(r.grossMargin)} · רווח נקי ${pctTxt(r.netMargin)} — מכל ₪100 הכנסה ${r.netMargin >= 0 ? `נשארו לך ${fmt(r.netMargin)}` : `הפסדת ${fmt(-r.netMargin)}`}.`, 'biz_gross_net');

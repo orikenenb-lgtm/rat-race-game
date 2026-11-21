@@ -709,7 +709,7 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix'
   if (args.includes('--stories')) {
     const wid = ONLY || 'w1'; const n = nArg || 60; const t0 = Date.now();
     const games = storiesWorld(wid, n); const sum = storiesSummary(wid, games);
-    writeFileSync(`tools/balance-data/stories-${wid}.json`, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), summary: sum, games }) + '\n');
+    writeFileSync(`tools/balance-data/stories-${wid}.json`, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), summary: sum, games: games.length }) + '\n');
     console.log(JSON.stringify(sum));
   }
   if (args.includes('--matrix')) {
