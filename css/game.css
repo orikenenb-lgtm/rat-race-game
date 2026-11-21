@@ -895,3 +895,76 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 .alevel{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
 .alevel small{flex-basis:100%;color:var(--mut)}
 .say{min-height:var(--tap)}   /* T7 AX-T: the mentor bubble on the card is a button too */
+
+/* ============================================================ T6: rivals, deal competition, practice rewind, the money graph (spec §6.3, §12) */
+/* the money graph (inline SVG; also used by the lobby end screen and the compare sheet) */
+.t6-graphbox{margin:10px 0 0;text-align:start}
+.t6-tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.t6-tabs button{min-height:44px;padding:4px 12px;border-radius:999px;font-size:14px;font-weight:700;background:var(--paper2,#f5efe2);border:1.5px solid var(--line);color:var(--ink)}
+.t6-tabs button[aria-selected=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.t6-tabs .t6-tog{margin-inline-start:auto;background:transparent}
+.t6-graph{display:block;width:100%;height:auto;max-height:200px;margin-top:6px;overflow:visible}
+.t6-graph .g-grid{stroke:color-mix(in srgb,var(--mut) 30%,transparent);stroke-width:1}
+.t6-graph .g-zero{stroke:var(--mut);stroke-width:1;stroke-dasharray:3 3}
+.t6-graph .g-ax{fill:var(--mut);font:12px/1 Rubik,system-ui,sans-serif;direction:ltr;unicode-bidi:isolate}
+.t6-graph .g-nw{fill:none;stroke:var(--blue);stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round}
+.t6-graph .g-liq{fill:color-mix(in srgb,var(--green) 22%,transparent);stroke:color-mix(in srgb,var(--green) 70%,transparent);stroke-width:1}
+.t6-graph .g-low{fill:color-mix(in srgb,var(--red) 16%,transparent)}
+.t6-graph .g-rec{fill:color-mix(in srgb,var(--mut) 18%,transparent)}
+.t6-graph .g-hap{fill:none;stroke:#d97706;stroke-width:2.4}
+.t6-graph .g-en{fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:5 3}
+.t6-graph .g-cmp{fill:none;stroke:var(--ink);stroke-width:2;stroke-dasharray:6 4;opacity:.75}
+.t6-graph circle.g-nw,.t6-graph circle.g-hap{fill:var(--blue)}
+.t6-graph .g-pin circle{fill:var(--gold);stroke:var(--paper);stroke-width:1.5}
+.t6-graph .g-pin text{fill:var(--gold-ink,#2b1d00);font:700 12px/1 Rubik,sans-serif}
+.t6-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:4px 0 0;font-size:12px;color:var(--mut)}
+.t6-legend i{display:inline-block;width:14px;height:8px;border-radius:3px;margin-inline-end:4px;vertical-align:middle}
+.t6-legend .lg-nw{background:var(--blue);height:3px}.t6-legend .lg-liq{background:color-mix(in srgb,var(--green) 40%,transparent)}
+.t6-legend .lg-low{background:color-mix(in srgb,var(--red) 30%,transparent)}.t6-legend .lg-rec{background:color-mix(in srgb,var(--mut) 30%,transparent)}
+.t6-legend .lg-hap{background:#d97706;height:3px}.t6-legend .lg-en{background:var(--green);height:3px}.t6-legend .lg-cmp{border-top:2px dashed var(--ink);height:0}
+.t6-notes{margin:4px 0 0;padding-inline-start:20px;font-size:13px;color:var(--mut)}
+.t6-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.t6-table caption{text-align:start;font-weight:800;padding:4px 0}
+.t6-table th,.t6-table td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:start;white-space:nowrap}
+.t6-table thead th{font-size:12px;color:var(--mut)}
+.t6-allrows{margin-top:6px;min-height:44px}
+/* HUD chips */
+.hlife .lc.t6rv b,.hlife .lc.t6mo b,.hlife .lc.t6aw b{font-size:13px}
+/* deal competition (§12.1) */
+.rvrow{margin:0 0 8px;padding:8px 10px;border-radius:14px;background:color-mix(in srgb,#6b4fd8 8%,var(--paper));border:1px solid color-mix(in srgb,#6b4fd8 25%,transparent)}
+.rvrow .rvt{margin:0;font-weight:700;font-size:15px;line-height:1.5}
+.rvwho{display:inline-flex;flex-wrap:wrap;gap:6px;vertical-align:middle}
+.rvp{min-height:44px;padding:2px 12px;border-radius:999px;font-size:14px;font-weight:700;border:1.5px solid color-mix(in srgb,#6b4fd8 45%,transparent);background:var(--paper);color:var(--ink)}
+.rvp[aria-expanded=true]{background:#6b4fd8;color:#fff}
+.rvnote{margin:4px 0 0;font-size:13px;color:var(--mut)}
+.rvpop{margin-top:6px;padding:8px 10px;border-radius:12px;background:var(--paper);font-size:14px}
+.rvpop p{margin:4px 0 0}
+.rvchip{display:block;font-size:12px;font-weight:700;color:light-dark(#4b35a8,#c4b5ff)}
+/* rivals sheet */
+.t6-sheet .t6rp{display:grid;gap:8px;margin:8px 0}
+.t6rp-row{padding:8px 10px;border-radius:14px;background:var(--paper2,#f5efe2);text-align:start}
+.t6rp-h{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;font-size:14px}
+.t6rp-row small{font-size:12px;color:var(--mut)}
+.t6bar{display:block;height:6px;border-radius:3px;background:color-mix(in srgb,var(--mut) 20%,transparent);margin:4px 0 2px;overflow:hidden}
+.t6bar i{display:block;height:100%;background:var(--green);border-radius:3px}
+.t6rp-rule summary,.t6mo-list button{min-height:44px}
+.t6rp-rule summary{display:flex;align-items:center;cursor:pointer;font-size:13px;font-weight:700}
+.t6rp-rule p,.t6rp-rule ul{margin:4px 0;font-size:13px}
+.t6rp-lost{margin:4px 0;padding-inline-start:18px;font-size:13px}
+.t6mo-list{list-style:none;margin:8px 0;padding:0;display:grid;gap:6px;max-height:55dvh;overflow:auto}
+.t6mo-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:12px;background:var(--paper2,#f5efe2);text-align:start;font-size:14px}
+.t6mo-list li small{display:block;font-size:12px;color:var(--mut)}
+.t6mo-list button{flex:none;padding:4px 10px;border-radius:999px;font-weight:700}
+/* reveal news (not timed) + branch banner */
+#t6news{position:fixed;top:calc(140px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:32;display:flex;align-items:center;gap:8px;max-width:min(520px,calc(100vw - 24px));padding:6px 8px 6px 14px;border-radius:16px;background:var(--paper);border:2px solid color-mix(in srgb,#6b4fd8 45%,transparent);box-shadow:var(--shadow-s);font-size:14px}
+#t6news[hidden]{display:none}
+#t6branch{position:fixed;bottom:calc(84px + var(--safe-b,0px));left:50%;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);padding:4px 6px 4px 12px;border-radius:16px;background:light-dark(#e6f6f2,#123b35);border:1.5px solid #0f766e;box-shadow:var(--shadow-s);font-size:14px;font-weight:700}
+#t6branch[hidden]{display:none}
+#t6branch button{min-height:44px;padding:2px 12px;border-radius:999px;font-weight:700}
+.t6-limits{margin-top:10px;text-align:start;font-size:14px}
+.t6-limits summary{min-height:44px;display:flex;align-items:center;font-weight:800;cursor:pointer}
+.t6-limits ol{margin:4px 0;padding-inline-start:20px}
+@media (max-width:600px){
+  #t6branch{bottom:auto;top:calc(128px + env(safe-area-inset-top,0px));font-size:13px}
+  .t6-sheet .t6rp-h{font-size:13px}
+}

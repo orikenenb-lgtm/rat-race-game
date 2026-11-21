@@ -5,6 +5,7 @@ import { fmt, fmtM, sgn, fmtP } from './engine.js';
 import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
+import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
 
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -100,12 +101,21 @@ function pumpOv() {
   clearTimeout(ovT);
   if (ovBusy || !ovq.length) return;
   if (coachOpen() || (ovq[0].kind === 'verdict' && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
+  // T6 (UI fix): on phones a verdict pill never floats over an open card / dialog / life story (it covered the options):
+  // it waits for the board; a verdict that waited > 9 s is about a decision long gone and is dropped
+  if (ovq[0].kind === 'verdict' && coversContent()) {
+    if (performance.now() - ovq[0].t > 9000) { ovq.shift(); ovT = setTimeout(pumpOv, 50); return; }
+    ovT = setTimeout(pumpOv, 400); return;
+  }
   const it = ovq.shift(); ovBusy = it.kind;
   let fin = false;
   const done = () => { if (fin) return; fin = true; ovBusy = null; ovT = setTimeout(pumpOv, 220); };
   try { it.show(done); } catch (e) { console.error(e); done(); }
 }
 const toastOn = () => { const t = $('#toast'); return !!t && t.className.includes('on'); };
+const shown = (sel) => { const el = $(sel); return !!el && !el.hidden; };
+/** something interactive fills the phone screen: an event card, a dialog, the life story or the lobby */
+const coversContent = () => !!evState || shown('#gm') || shown('#story') || lobbyOpen();
 
 const aq = []; let aBusy = false;
 /** Celebratory slide-in card with sound (used for achievements and unlocks). */
@@ -350,11 +360,20 @@ function renderLife(m, ctx) {
     ${m.emergency ? `<button class="lc fund ${m.emergency.covered ? 'pos' : ''}" data-life="fund" title="קרן חירום: ${m.emergency.months} חודשי הוצאות"><span>🛟</span><b class="num">${m.emergency.months}</b></button>` : ''}
     <button class="lc plan" data-life="plan" title="התוכנית החודשית — לשנות"><span>${PLAN_ICON[L.plan] || '📅'}</span><b>${esc(L.planLabel || '')}</b></button>
     ${F ? `<button class="lc focus ${F.opsOpen ? 'ops' : ''} ${F.current.id !== 'none' ? 'on' : ''}" data-life="focus" aria-label="${F.opsOpen ? 'לפתוח את לוח העסק' : `מוקד החודש: ${esc(F.current.label)}`}" title="מוקד החודש"><span aria-hidden="true">${fIcon}</span><b>${esc(F.opsOpen ? 'לוח העסק' : F.current.id === 'none' ? 'מוקד' : F.current.label)}</b></button>` : ''}
-    ${X ? `<button class="lc econ t${X.trend > 0 ? 'u' : X.trend < 0 ? 'd' : 'f'}" data-life="econ" aria-label="מד הכלכלה: ${esc(X.label)}, ${X.signal} מתוך 100" title="${esc(X.text || 'מד הכלכלה')}">${gaugeSvg(X.signal, 26)}<b>${esc(X.label)}</b><i class="tr" aria-hidden="true">${X.trend > 0 ? '↗' : X.trend < 0 ? '↘' : '→'}</i>${X.sharp ? '<i class="sh" aria-hidden="true">🔬</i>' : ''}</button>` : ''}`;
+    ${X ? `<button class="lc econ t${X.trend > 0 ? 'u' : X.trend < 0 ? 'd' : 'f'}" data-life="econ" aria-label="מד הכלכלה: ${esc(X.label)}, ${X.signal} מתוך 100" title="${esc(X.text || 'מד הכלכלה')}">${gaugeSvg(X.signal, 26)}<b>${esc(X.label)}</b><i class="tr" aria-hidden="true">${X.trend > 0 ? '↗' : X.trend < 0 ? '↘' : '→'}</i>${X.sharp ? '<i class="sh" aria-hidden="true">🔬</i>' : ''}</button>` : ''}${t6Chips(ctx && ctx.t6)}`;
   const rev = ctx && ctx.isRevealed;
   if (rev) for (const [k, sel] of [['age', '.lc.age'], ['energy', '.lc.en'], ['happy', '.lc.hp'], ['credit', '.lc.cr'], ['cpi', '.lc.cpi'], ['fund', '.lc.fund'], ['plan', '.lc.plan'], ['focus', '.lc.focus'], ['focus', '.lc.econ']]) {
     const el = box.querySelector(sel); if (el) { el.hidden = !rev(k); revealPulse(k, el); }
   }
+}
+/** T6 HUD chips (game.js ctx.t6): 👥 rivals panel (flag rivals), ⏪ decision moments (flag rewind, free / learn), 🌴 after the win */
+function t6Chips(T) {
+  if (!T) return '';
+  const out = [];
+  if (T.rivals) out.push(`<button class="lc t6rv" data-life="rivals" aria-label="יריבים על אותו לוח" title="יריבים על אותו לוח"><span aria-hidden="true">👥</span><b>יריבים</b></button>`);
+  if (T.moments) out.push(`<button class="lc t6mo" data-life="moments" title="לחזור לרגע של החלטה (ענף תרגול)"><span aria-hidden="true">⏪</span><b>רגעי החלטה</b></button>`);
+  if (T.afterWin) out.push(`<button class="lc t6aw" data-life="afterwin" title="אחרי החופש — אפשר לפרוש"><span aria-hidden="true">🌴</span><b>אחרי החופש · ${num(String(T.afterWin.n))} חודשים</b></button>`);
+  return out.join('');
 }
 const FOCUS_ICON = { scout: '🔍', debt: '🏦', ops: '🏪', frugal: '✂️', network: '🤝', research: '📊', none: '🎯' };
 const FOCUS_ICON_ID = { search: '🔍', bank: '🏦', shop: '🏪', scissors: '✂️', people: '🤝', gauge: '📊', calendar: '📅' };
@@ -733,6 +752,7 @@ function onCardClick(e) {
   const roi = e.target.closest('[data-roi]');
   if (roi) { evState.roi = true; const b = $('#roiBox'); if (b) b.hidden = false; roi.setAttribute('aria-expanded', 'true'); sfx('click'); hideCoach(); return; }
   if (e.target.closest('[data-hint]')) { askHint(); return; }
+  const rv = e.target.closest('[data-rv]'); if (rv) { sfx('click'); rivalPop(rv); return; }
   const it = e.target.closest('[data-imp]');
   if (it) { evState.imp.ref = it.dataset.imp; sfx('click'); paintImpact(); return; }
   if (e.target.closest('[data-focus-open]')) { sfx('click'); evState.ctx.api && evState.ctx.api.focus && evState.ctx.api.focus(); return; }
@@ -904,7 +924,7 @@ function effectChoices(ev) {
 function offerRow(offers) {
   return `<div class="nego"><p class="mh">🤝 להציע מחיר נמוך יותר? <small>אם המוכר יסרב — העסקה נסגרת.</small></p><div class="nrow">${offers.map((o) => {
     const pct = +o.id.split(':')[1]; const ch = o.chance != null ? Math.round(o.chance * 100) : null;
-    return `<button class="noff" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}><b>${iso('−' + pct + '%')}</b>${ch != null ? `<small class="${ch >= 60 ? 'pos' : ch >= 35 ? '' : 'neg'}">סיכוי ${iso(ch + '%')}</small><i class="chbar"><i style="width:${ch}%"></i></i>` : ''}</button>`;
+    return `<button class="noff" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}><b>${iso('−' + pct + '%')}</b>${ch != null ? `<small class="${ch >= 60 ? 'pos' : ch >= 35 ? '' : 'neg'}">סיכוי ${iso(ch + '%')}</small><i class="chbar"><i style="width:${ch}%"></i></i>` : ''}${rvChip(o)}</button>`;
   }).join('')}</div></div>`;
 }
 
@@ -974,6 +994,29 @@ function renderEvent(first) {
   if (first) c.scrollTop = 0;
 }
 
+/* ---------- T6 §12.1 deal competition (engine ev.data.rivals / o.rivalRisk; nothing is drawn when the engine sends none) */
+const personas = () => { try { return T6S.PERSONAS_FALLBACK && (globalThis.__rrRivals || T6S.PERSONAS_FALLBACK); } catch (e) { return {}; } };
+export function setPersonas(p) { if (p && p.saver) globalThis.__rrRivals = p; }
+function rivalsRow(ev) {
+  const R = ev.data && ev.data.rivals; if (!R || !R.text) return '';
+  const who = (R.who || []).filter((w) => w && w.id);
+  const head = who.length && R.text.includes(':') ? R.text.slice(0, R.text.indexOf(':') + 1) : R.text;
+  const chips = who.map((w) => `<button type="button" class="rvp" data-rv="${esc(w.id)}" aria-expanded="false" aria-controls="rvPop">${esc(w.icon || '')} ${esc(w.name || '')}</button>`).join('');
+  return `<div class="rvrow ${R.n ? 'on' : ''}"><p class="rvt">${escI(head)}${chips ? ` <span class="rvwho">${chips}</span>` : ''}</p>${R.n >= 1 && R.note ? `<p class="rvnote">${escI(R.note)}</p>` : ''}<div class="rvpop" id="rvPop" hidden></div></div>`;
+}
+/** the delay chip on inspect / lower-offer buttons: icon + text, never colour only; it is part of the button's name */
+const rvChip = (o) => (o && o.rivalRisk > 0 ? `<small class="rvchip">👥 ${num(Math.round(o.rivalRisk * 100) + '%')} שיקדימו אותך</small>` : '');
+function rivalPop(btn) {
+  const pop = $('#rvPop'); if (!pop) return;
+  const id = btn.dataset.rv; const open = btn.getAttribute('aria-expanded') === 'true';
+  $('#evCard')?.querySelectorAll('.rvp[aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+  if (open) { pop.hidden = true; return; }
+  const P = personas()[id] || null;
+  if (!P) { pop.hidden = true; return; }
+  pop.innerHTML = `<b>${esc(P.icon)} ${esc(P.name)} · ${esc(P.label)}</b><p>${esc(P.rule)}</p><p><b>חזקים כש:</b> ${esc(P.strong)}</p><p><b>חלשים כש:</b> ${esc(P.weak)}</p>`;
+  pop.hidden = false; btn.setAttribute('aria-expanded', 'true');
+}
+
 /* ---------- T2 due diligence: claimed vs range vs verified + the two inspections (card stays open, ctl.update) */
 const REPAIR = { none: 'אין', small: 'קטנים', big: 'גדולים' };
 function ddBox(ev) {
@@ -983,7 +1026,7 @@ function ddBox(ev) {
     const i1 = o.id === 'inspect:1';
     const base = i1 ? 'לבדוק בעצמי' : shortLabel(o);
     const cost = i1 ? (D.inspect1.free ? 'חינם החודש' : `−${D.inspect1.energy} 🔋`) : `${fmtM(D.inspect2.fee)}${D.inspect2.half ? ' · ½ מחיר' : ''}`;
-    return `<div class="opt"><button class="insp" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="dwhy${i}"`}><span><span aria-hidden="true">${i1 ? '🔍' : '🧾'}</span> ${esc(base)}</span><small class="net ${(i1 && D.inspect1.free) || (!i1 && D.inspect2.half) ? 'pos' : ''}">${iso(cost)}</small></button>${!o.enabled && o.reason ? `<small class="why" id="dwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
+    return `<div class="opt"><button class="insp" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="dwhy${i}"`}><span><span aria-hidden="true">${i1 ? '🔍' : '🧾'}</span> ${esc(base)}</span><small class="net ${(i1 && D.inspect1.free) || (!i1 && D.inspect2.half) ? 'pos' : ''}">${iso(cost)}</small>${rvChip(o)}</button>${!o.enabled && o.reason ? `<small class="why" id="dwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
   };
   return `<div class="ddbox lv${D.level}"><p class="mh">🔎 ${D.level === 0 ? 'לבדוק לפני שקונים?' : 'בדיקה מקצועית — מספרים מדויקים'}</p><div class="acts ddins">${ins.map(insBtn).join('')}</div></div>`;
 }
@@ -1077,7 +1120,7 @@ const BODY = {
       <div class="roi" id="roiBox" ${evState.roi ? '' : 'hidden'}>תשואה על ההון = תזרים שנתי ÷ הון עצמי<br>${roiEq(d)}<br><span class="note">התזרים כבר כולל את תשלומי ה${esc(d.debtLabel)}.${d.roiFix != null ? ` בריבית קבועה: ${iso(d.roiFix + '%')} בשנה.` : ''}</span>${d.roiVsLoan ? `<p class="vs">${escI(d.roiVsLoan)}</p>` : ''}</div>` : '';
     const cash = `<p class="note">יש לך ${num(fmtM(d.cash))} במזומן.${short ? ` חסרים ${num(fmtM(short))}${d.loanNeeded ? ` — הבנק ילווה ${num(fmtM(d.loanNeeded))} (עולה ${num(fmtM(d.loanMonthly))} בחודש)` : ''}.` : ''}</p>`;
     const neg = d.negotiated ? `<p class="okmsg">🤝 המוכר הסכים: ${iso('−' + d.negotiated.pct + '%')} — חסכת ${num(fmtM(d.negotiated.saved), 'pos')}</p>` : '';
-    return neg + grid(rows) + ddBox(ev) + extra + roiBtn + cash;
+    return neg + rivalsRow(ev) + grid(rows) + ddBox(ev) + extra + roiBtn + cash;
   },
   doodad(ev) {
     const d = ev.data; const canSkip = ev.options.some((o) => o.id === 'skip');
@@ -1642,8 +1685,8 @@ export function lifeStory(sum, { won = false } = {}) {
     const close = () => { if (done) return; done = true; clearInterval(ty); release(); el.classList.remove('in'); setTimeout(() => { el.hidden = true; res(); }, calm ? 0 : 350); };
     $('#stGo').onclick = close;
     setTimeout(() => $('#stGo')?.focus({ preventScroll: true }), 60); // UX§2.5: focus moves to the button
-    if (!calm) setTimeout(close, Math.max(4200, 1600 + sent.length * 45) * Math.max(0.7, speed));
-    void yrs;
+    void yrs; // T6 §6.1 / A11Y-13: no timed dismissal — the button closes it
+
   });
 }
 
@@ -1673,4 +1716,93 @@ export function feedback(kind, { level, name } = {}) {
   if (!level) return;
   if (kind === 'levelUp') { toast(`⬆️ ${name ? name + ': ' : ''}שלב ${level.n} מתוך ${level.of || 3}`, { kind: 'gold' }); announce(`${name || 'העסק'} עלה לשלב ${level.n}`); }
   if (kind === 'levelDown') { toast(`⬇️ ${name ? name + ': ' : ''}ירד לשלב ${level.n}`, { kind: 'bad' }); announce(`${name || 'העסק'} ירד לשלב ${level.n}`); }
+}
+
+/* ============================================================ T6: rivals panel, deal competition outcomes, practice rewind chrome */
+const RP = {
+  title: 'היריבים על אותו לוח', sub: 'אותן קוביות ואותם קלפים — כל אחד מחליט אחרת. רואים רק עד החודש שלך.', you: 'אתה',
+  row: 'שווי נקי {nw} · הכנסה פסיבית {pas}', pct: '{p}% מהדרך לחופש', foot: 'מה יקרה להם הלאה — בסוף המשחק.',
+  computing: 'היריבים משחקים…', noworker: 'היריבים יופיעו בסוף המשחק.', unavailable: 'היריבים לא זמינים כרגע.',
+  lost: 'עסקאות שהלכו ליריבים', revealIn: 'נשמע איך זה הלך בעוד {n} חודשים', rules: 'הכללים של {name}',
+};
+const fillT = (t, v) => String(t).replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+const MARK_TXT = { buy: 'קנה', sell: 'מכר', forced: 'הלוואה כפויה', crisis: 'משבר', burnout: 'שחיקה', win: 'יצא מהמירוץ', bailout: 'הבנק נכנס', jobless: 'פיטורים', recession: 'מיתון', crash: 'נפילה במדד', story: 'החלטה בחיים', rivalLost: 'הפסיד עסקה', rivalReveal: 'שמע איך הלך' };
+/** body of the rivals sheet. d = {me:{nw, pas, pct}, view (ghosts.view(month)), personas, lost:[…]|null, month} */
+export function rivalsPanelHtml(d) {
+  const V = d.view || { state: 'off', ghosts: {} }; const P = d.personas || personas();
+  const bar = (p) => `<i class="t6bar" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, p))}%"></i></i>`;
+  const rowHtml = (who, nw, pas, p, extra = '', open = '') => `<div class="t6rp-row"><div class="t6rp-h"><b>${who}</b><span>${iso(fillT(RP.row, { nw: fmtM(nw), pas: fmtM(pas) }))}</span></div>${bar(p)}<small>${iso(fillT(RP.pct, { p }))}${extra}</small>${open}</div>`;
+  const me = d.me || {};
+  const rows = [rowHtml(esc(RP.you), me.nw || 0, me.pas || 0, me.pct || 0)];
+  const state = V.state === 'noworker' ? RP.noworker : V.state === 'unavailable' ? RP.unavailable : V.state === 'computing' ? RP.computing : '';
+  for (const id of T6S.ARCH_IDS) {
+    const p = P[id]; const g = (V.ghosts || {})[id] || {}; const r = (g.rows || [])[(g.rows || []).length - 1];
+    const who = `${esc(p.icon)} ${esc(p.name)} · ${esc(p.label)}`;
+    const marks = (g.marks || []).slice(-3).map((k) => `<li>${num('חודש ' + k[0])} ${esc(MARK_TXT[k[1]] || '')}${k[4] ? ' · ' + escI(k[4]) : ''}</li>`).join('');
+    const det = `<details class="t6rp-rule"><summary>${esc(fillT(RP.rules, { name: p.name }))}</summary><p>${esc(p.rule)}</p><p><b>חזקים כש:</b> ${esc(p.strong)}</p><p><b>חלשים כש:</b> ${esc(p.weak)}</p>${marks ? `<ul>${marks}</ul>` : ''}</details>`;
+    if (g.error || !r) { rows.push(`<div class="t6rp-row"><div class="t6rp-h"><b>${who}</b><span>${esc(g.error ? '—' : state ? '…' : '—')}</span></div>${det}</div>`); continue; }
+    const esc2 = g.escaped && g.escaped.status === 'won' ? ` · ${esc(T6S.escapedVerb(p))} מהמירוץ בחודש ${num(String(g.escaped.m))}` : '';
+    rows.push(rowHtml(who, r[1] * 100, r[4], Math.floor(r[6] / 10), esc2, det));
+  }
+  const lost = Array.isArray(d.lost) && d.lost.length ? `<h3 class="t6rp-lh">${esc(RP.lost)}</h3><ul class="t6rp-lost">${d.lost.map((x) => `<li>${escI(x.text || x.name || '')}${x.revealed ? '' : x.revealAt ? ` <small>${esc(fillT(RP.revealIn, { n: Math.max(0, x.revealAt - (d.month || 0)) }))}</small>` : ''}</li>`).join('')}</ul>` : '';
+  return `<p class="d">${esc(RP.sub)}</p>${state ? `<p class="note" role="status">${esc(state)}</p>` : ''}<div class="t6rp">${rows.join('')}</div>${lost}<p class="note">${esc(RP.foot)}</p>`;
+}
+/** the 👥 bottom sheet (dialog: focus trap + Escape). Live: game.js calls rivalsPanelUpdate while it is open. */
+export function rivalsPanel(d) {
+  return modal({ tag: '👥 יריבים', color: '#6b4fd8', title: RP.title, html: `<div id="t6rpBody">${rivalsPanelHtml(d)}</div>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true, cls: 't6-sheet' });
+}
+export function rivalsPanelOpen() { return !!document.getElementById('t6rpBody') && shown('#gm'); }
+export function rivalsPanelUpdate(d) { const b = document.getElementById('t6rpBody'); if (b && shown('#gm')) { const open = [...b.querySelectorAll('details[open]')].map((x) => [...b.querySelectorAll('details')].indexOf(x)); b.innerHTML = rivalsPanelHtml(d); const all = b.querySelectorAll('details'); open.forEach((i) => all[i] && (all[i].open = true)); } }
+
+/** §12.1 lost to a rival: an outcome panel (no timed dismissal). r = choose().rival {lost, by:{icon,name}, how, text, sub} */
+export function rivalLost(r) {
+  if (!r) return Promise.resolve();
+  return modal({ tag: '👥 תחרות על עסקה', color: '#6b4fd8', title: r.text || '', html: `<div role="status" aria-live="polite">${r.sub ? `<p class="d">${escI(r.sub)}</p>` : ''}${r.dd ? `<p class="note">${escI(r.dd)}</p>` : ''}</div>`, actions: [{ label: 'הבנתי', cls: 'primary' }] });
+}
+/** a reveal line ("שמעת מעומר: …"): stays until tapped or until the next roll (clearStickyNews), never timed */
+export function stickyNews(text) {
+  if (!text) return;
+  let el = document.getElementById('t6news');
+  if (!el) { el = document.createElement('div'); el.id = 't6news'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+  el.innerHTML = `<span>${escI(text)}</span><button type="button" class="ibtn sm" aria-label="סגירה">✕</button>`;
+  el.querySelector('button').onclick = () => clearStickyNews();
+  el.hidden = false; el.className = 'on';
+}
+export function clearStickyNews() { const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; } }
+
+/** §7.5 banner in a practice branch. info = {back(), compare()} | null */
+export function branchBanner(info) {
+  let el = document.getElementById('t6branch');
+  if (!info) { if (el) el.hidden = true; document.body.classList.remove('t6-inbranch'); return; }
+  if (!el) { el = document.createElement('div'); el.id = 't6branch'; el.setAttribute('role', 'region'); el.setAttribute('aria-label', 'ענף תרגול'); document.body.appendChild(el); }
+  el.innerHTML = `<span>🧪 ענף תרגול — המשחק המקורי שמור</span><button type="button" data-b="back">חזרה למקור</button><button type="button" data-b="compare">השוואה</button>`;
+  el.onclick = (e) => { const b = e.target.closest('[data-b]'); if (!b) return; sfx('click'); if (b.dataset.b === 'back') info.back(); else info.compare(); };
+  el.hidden = false; document.body.classList.add('t6-inbranch');
+}
+/** §7.4 "רגעי החלטה": newest first; → Promise<k0 | undefined> */
+export function momentsSheet(points, { title = 'רגעי החלטה', note = '' } = {}) {
+  const list = (points || []).slice().reverse().slice(0, 40);
+  const VW = { strong: 'החלטה חזקה', ok: 'החלטה סבירה', mixed: 'יש מה לשפר', risky: 'החלטה מסוכנת', costly: 'החלטה יקרה' };
+  let pick;
+  const rows = list.map((p) => {
+    const chose = optName({ o: p.o, type: p.type }) || '';
+    const line = chose ? fillT('חודש {m} · {title} · בחרת: {chose}', { m: p.m, title: p.c || '', chose }) : fillT('חודש {m} · {title}', { m: p.m, title: p.c || '' });
+    return `<li><span>${escI(line)}${VW[p.v] ? `<small>${esc(VW[p.v])}</small>` : ''}</span><button type="button" data-k0="${p.k0 | 0}">🔁 לחזור לכאן</button></li>`;
+  }).join('');
+  return modal({ tag: '🧪 תרגול', color: '#0f766e', title, html: `${note ? `<p class="d">${esc(note)}</p>` : ''}<p class="note">נפתח ענף תרגול. המשחק המקורי נשמר.</p><ol class="t6mo-list">${rows || '<li>אין עדיין החלטות לחזור אליהן.</li>'}</ol>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true, cls: 't6-sheet',
+    onExtra: (e) => { const b = e.target.closest('[data-k0]'); if (!b) return; pick = +b.dataset.k0; document.querySelector('#gm .acts button')?.click(); } }).then(() => pick);
+}
+/** §7.5 "השוואה": both lines on one graph (original dashed) over the months both played, the facts at that month, the limits */
+export function compareSheet({ branchTl, originTl, month }) {
+  const o = T6S.tlUpTo(originTl, month); const b = branchTl;
+  const ro = T6S.tlRows(o).pop(), rb = T6S.tlRows(b).pop();
+  const id = 'cmp';
+  const opts = { id, compareTl: o, compareLabel: 'המקור', alt: `המקור מול הענף עד חודש ${month}` };
+  const fact = (lab, a, c) => `<tr><th scope="row">${esc(lab)}</th><td>${a}</td><td>${c}</td></tr>`;
+  const facts = ro && rb ? `<table class="t6-table"><caption>${esc(`בחודש ${month}`)}</caption><thead><tr><th scope="col"></th><th scope="col">המקור</th><th scope="col">הענף</th></tr></thead><tbody>
+    ${fact('שווי נקי', num(fmtM(ro[1] * 100)), num(fmtM(rb[1] * 100)))}${fact('מזומן וחיסכון', num(fmtM(ro[2] * 100)), num(fmtM(rb[2] * 100)))}${fact('הכנסה פסיבית', num(fmtM(ro[4])), num(fmtM(rb[4])))}${fact('😊 אושר', num(String(ro[7])), num(String(rb[7])))}</tbody></table>` : '';
+  return modal({ tag: '🧪 ענף תרגול', color: '#0f766e', title: 'המקור מול הענף', wide: true, cls: 't6-sheet',
+    html: `${b && T6S.tlRows(b).length ? T6S.graphBlock(b, opts) : ''}${facts}${T6S.limitsHtml(true)}`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    onOpen: (c) => T6S.wireSummary(c, (gid) => (gid === id ? { tl: b, opts } : null)) });
 }

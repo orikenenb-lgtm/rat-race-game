@@ -13,7 +13,10 @@ import { net } from './net.js';
 import * as nullScene from './render/null.js';
 import { loadRenderer, preferredChoice, prefetch3D } from './render/select.js';
 import * as OV from './render/overlay.js';
-import { flag } from './flags.js';
+import { flag, flagFor } from './flags.js';
+import * as ghosts from './ghosts.js';                    // T6 §2: ghost players (worker + cache + the clamped view)
+import * as rewind from './rewind.js';                    // T6 §7: practice rewind (branches; never ranked)
+import { tlNew, tlPush, tlRowOf, tlOf, dimsOf, endLite } from './summary.js';   // T6 timeline + success dimensions
 import * as saves from './saves.js';
 import { initMotion, reducedMotion } from './motion.js';
 import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coaches, tour, practice chip
@@ -113,6 +116,7 @@ addEventListener('unhandledrejection', (ev) => onGlobalError(ev.reason, (ev.reas
 /** localStorage key for a config: free → rr2-save-free-<world>; learning → rr2-save-learn-<world>; ranked → rr2-save-<resultId>. */
 export function saveKeyFor(cfg) {
   if (!cfg) return null;
+  if (cfg.slot === 'branch' && (cfg.mode === 'free' || !cfg.mode)) return rewind.branchKey(cfg.worldId || 'w1'); // T6 §7.2: the practice branch's own slot
   if ((cfg.mode === 'free' || !cfg.mode) && cfg.learn) return `rr2-save-learn-${cfg.worldId || 'w1'}`; // T4 IR-T4-1: learning mode's own slot
   if (cfg.mode === 'free' || !cfg.mode) return `rr2-save-free-${cfg.worldId || 'w1'}`;
   if (cfg.mode === 'history') return cfg.scenarioId ? `rr2-save-history-${cfg.scenarioId}` : `rr2-save-history-seed-${cfg.seed >>> 0}`;
@@ -156,6 +160,7 @@ async function pumpCheckpoint() {
   catch (e) {
     const code = e && e.code;
     if (code === 'stale_checkpoint') { /* a newer state is already on the server */ }
+    else if (code === 'diverged_checkpoint') { ckNext = null; ckBusy = false; divergedFromServer(e); return; } // T6 §8.1 (server trigger awaiting the owner)
     else if (!code) retry = true; // network / no answer
     else console.warn('checkpoint rejected', code);
   }
@@ -164,6 +169,14 @@ async function pumpCheckpoint() {
   if (ckNext) pumpCheckpoint();
 }
 addEventListener('online', () => pumpCheckpoint());
+/** T6 §8.1: the server refused a checkpoint that does not extend its log — stop this line, the next resume loads the server state
+ *  (the V3 rule below prefers the server unless the local log extends it). */
+function divergedFromServer(e) {
+  gen++; busy = false; closeCard(); ui.setRollEnabled(false);
+  ui.toast((e && e.message) || 'המשחק הזה המשיך במכשיר אחר — טוענים את השמירה מהשרת', { kind: 'bad', ms: 6000 });
+  bus.emit('lobby:open', {});
+}
+export const { isPrefix, pickRankedState } = rewind;   // T6 §8.1 V3 (pure, tested in tests/t6_client.test.mjs)
 /** Saved unfinished game for a key (or cfg) → {cfg, month, worldId, charName, future?} | null. */
 export function savedGame(k) {
   const c = saves.peek(keyOf(k));
@@ -549,7 +562,7 @@ async function startInner(cfg, my) {
       let srv = null;
       try { srv = E.deserialize(cfg.state); } catch (e) { console.warn('bad server checkpoint', e); }
       if (!srv || !srv.worldId) return rankedFail();
-      st = local && local.seed === srv.seed && ((local.ui && local.ui.seq) || 0) > ((srv.ui && srv.ui.seq) || 0) ? local : srv;
+      st = rewind.pickRankedState(local, srv);
       if (st === local && lr.status === 'migrated') note = 'migrated';
     } else {
       st = local;
@@ -586,6 +599,7 @@ async function startInner(cfg, my) {
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
   ui.applyTheme(W);
+  t6Start();
 
   /* ---------- world models (lazy) + pawn + life models */
   if (scene.kind === '3d') {
@@ -672,7 +686,7 @@ function offerTurbo() {
 }
 
 /* ============================================================ render */
-function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed }; }
+function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed, t6: t6Hud() }; }
 let opsSeen = false;
 function render(animate = true) {
   if (!S) return;
@@ -693,6 +707,9 @@ function render(animate = true) {
 /** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
 function track(m) {
   const u = S.ui; if (u.trackMonth === m.month) return; u.trackMonth = m.month;
+  // T6 §4.1 fallback: no engine st.tl yet → the same row per month in S.ui.tl (saved with the slot); then the ghosts may advance
+  if (!S.tl) { if (!(u.tl && Array.isArray(u.tl.m))) u.tl = tlNew(m.month); tlPush(u.tl, tlRowOf(m)); }
+  try { if (!S.over) ghosts.advance(S); } catch (e) { console.warn(e); }
   if (m.life && m.life.pension != null) { (u.pensionHist ||= []).push(Math.round(m.life.pension)); if (u.pensionHist.length > 120) u.pensionHist.shift(); }
   const wi = m.worldIndicators || {};
   if (wi.ymText) { (u.hist ||= []).push({ ym: wi.ym, index: wi.index }); if (u.hist.length > 240) u.hist.shift(); }
@@ -791,6 +808,9 @@ async function updateRollEnergy() {
 }
 /* life chips: details, or change the monthly plan between events */
 async function lifeChip(kind) {
+  if (kind === 'rivals') { openRivals(); return; }          // T6 §12.2
+  if (kind === 'moments') { openMoments(); return; }        // T6 §7.4
+  if (kind === 'afterwin') { retireFlow(); return; }        // T6 §9.2
   const m = E.metrics(S);
   if (kind === 'econ') { if (m.econ) ui.econModal(m.econ); return; }
   if (kind === 'focus') {
@@ -894,7 +914,7 @@ function wireHold() {
 /* ============================================================ turn */
 async function turn() {
   if (stuck || busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
-  const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.();
+  const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.(); ui.clearStickyNews?.();
   flows++; flowTick++;
   try { await turnBody(my); }
   catch (e) { if (my === gen && !stuck) enterStuck(e, 'turn'); }
@@ -1047,6 +1067,7 @@ function resolveCard(ev, my) {
       if (res.done) close();
       await applyOut(res, { inCard: !res.done });
       render(); persist();
+      if (res.done && res.rival && res.rival.lost) await ui.rivalLost(res.rival);   // T6 §12.1: no timed dismissal
       if (res.done) resolve(res);
       else { cur = res.event; ctl.update(cur); }
       working = false; ctl.busy(false);
@@ -1123,6 +1144,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'econ') { ui.toast(`📰 ${n.text}${n.label ? ` · מד הכלכלה: ${n.label}` : ''}`); continue; }   // T2 cycle headline
     if (n.kind === 'focus') { ui.toast('🎯 ' + n.text, { kind: n.disabled ? 'bad' : '' }); continue; }
     if (n.kind === 'dd') { ui.toast('🔎 ' + n.text, { kind: n.repair > 0 || n.surprise ? 'bad' : '' }); continue; }
+    if (n.kind === 'rival') { ui.stickyNews?.(n.text); continue; }   // T6 §12.1: stays until tapped or the next roll
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);
@@ -1245,6 +1267,109 @@ function goLobby() {
   bus.emit('lobby:open', {});
 }
 
+/* ============================================================ T6: ghosts, practice rewind, after the win (spec §2, §7, §9) */
+function t6Start() {
+  try { if (E.RIVALS) ui.setPersonas?.(E.RIVALS); } catch (e) { /* ignore */ }
+  try { if (S && !S.over) ghosts.start(S); else ghosts.stop(); } catch (e) { console.warn('ghosts', e); }
+  const br = S && S.ui && S.ui.branch;
+  ui.branchBanner?.(br ? { back: () => backToOrigin(), compare: () => openCompare() } : null);
+}
+function t6Hud() {
+  if (!S || S.over) return null;
+  const aw = S.afterWin ? { n: Math.max(0, (S.month | 0) - (S.afterWin.m | 0)) } : null;
+  return { rivals: ghosts.enabledFor(S) && ghosts.status().state !== 'unavailable', moments: !!(CFG && rewind.allowed(CFG)), afterWin: aw && flagFor('afterwin', CFG) ? aw : null };
+}
+function rivalsData() {
+  const m = E.metrics(S); const parts = m.goalParts || [];
+  const pct = Math.max(0, Math.min(100, Math.floor((parts.length ? Math.min(...parts.map((p) => p.progress)) : m.goalProgress || 0) * 100)));
+  return { me: { nw: m.netWorth, pas: m.passive, pct }, view: ghosts.view(S.month), personas: ghosts.personas(), lost: m.rivals && m.rivals.deals, month: S.month };
+}
+function openRivals() { if (!S || S.over) return; sfx('click'); ui.rivalsPanel(rivalsData()); }
+bus.on('ghosts:update', () => { if (S && !S.over && ui.rivalsPanelOpen?.()) ui.rivalsPanelUpdate(rivalsData()); });
+bus.on('ghosts:state', () => { if (S && !S.over) { try { render(false); } catch (e) { /* ignore */ } } });
+/** in-game "רגעי החלטה" (free / learn only) */
+async function openMoments() {
+  if (!S || S.over || !CFG || !rewind.allowed(CFG)) return;
+  if (busy || ui.isEventOpen()) { ui.toast('אפשר לחזור לרגע של החלטה בין תורות'); return; }
+  sfx('click');
+  const k0 = await ui.momentsSheet(rewind.decisionPoints(S));
+  if (k0 == null || !S || S.over) return;
+  for (let i = 0; i < 40 && busy; i++) await new Promise((r) => setTimeout(r, 100));   // a flow that was finishing under the sheet
+  if (busy) { ui.toast('אפשר לחזור לרגע של החלטה בין תורות'); return; }
+  await branchFrom({ origin: 'live', k0 });
+}
+/** create a branch and start it. origin 'live' = this game (saved first), 'last' = rr2-last-game. Never ranked (rewind.js throws). */
+export async function branchFrom({ origin = 'live', k0 }) {
+  try {
+    if (origin === 'live') { if (!S || !CFG || !rewind.allowed(CFG)) throw new Error('rewind_ranked'); persist(); }
+    else if (!flag('rewind')) return false;
+    const confirmReplace = async () => { ui.hideLoading(); const ok = await ui.confirmBox(rewind.STR.replaceQ, { yes: rewind.STR.replace, no: rewind.STR.cancel }); if (ok) ui.showLoading(rewind.STR.overlay); return ok; };
+    ui.showLoading(rewind.STR.overlay);
+    await new Promise((r) => setTimeout(r, 30));   // paint the overlay before the replay
+    const r = await rewind.createBranch(origin === 'live' ? { origin, w: S.worldId, k0, originKey: saveKeyFor(CFG), cfg: CFG } : { origin: 'last', k0 }, { confirmReplace });
+    ui.hideLoading();
+    window.__t6branchErr = r.ok ? null : r.error;   // read by tests/t6_e2e.py
+    if (!r.ok) { if (r.error !== 'cancelled') ui.toast(r.error === 'quota' ? rewind.STR.errQuota : rewind.STR.errFail, { kind: 'bad' }); return false; }
+    window.__t6branchMs = r.ms;
+    return startGame(r.cfg);
+  } catch (e) { ui.hideLoading(); console.warn('rewind', e); window.__t6branchErr = String(e && e.message); ui.toast(rewind.STR.errFail, { kind: 'bad' }); return false; }
+}
+bus.on('t6:rewind', ({ k0, origin = 'last' } = {}) => { branchFrom({ origin, k0: +k0 }); });
+bus.on('t6:moments', async ({ origin = 'last' } = {}) => {
+  const L = origin === 'last' ? rewind.lastGame() : null; if (!L || !flag('rewind')) return;
+  let st = null; try { st = E.replay(L.rcfg, L.actions); } catch (e) { st = null; }
+  if (!st) { ui.toast(rewind.STR.errFail, { kind: 'bad' }); return; }
+  const k0 = await ui.momentsSheet(rewind.decisionPoints(st));
+  if (k0 != null) branchFrom({ origin: 'last', k0 });
+});
+function backToOrigin() {
+  const b = S && S.ui && S.ui.branch; if (!b) return;
+  persist();
+  const sv = b.origin === 'live' ? savedGame(b.originKey) : null;
+  if (sv && sv.cfg) startGame({ ...sv.cfg, resume: true }); else goLobby();
+}
+function openCompare() {
+  const d = S ? rewind.compareData(S) : null;
+  if (!d || !d.originTl) { ui.toast('אין נתונים של המקור להשוואה'); return; }
+  ui.compareSheet({ branchTl: tlOf(S), originTl: d.originTl, month: S.month });
+}
+/** T6 §9.2: keep living after the win (engine W) — only when the engine exports it and the flag is on (free / learn) */
+bus.on('game:afterwin', () => {
+  if (!S || S.over !== 'won' || !CFG || typeof E.continueAfterWin !== 'function' || !flagFor('afterwin', CFG)) return;
+  let r; try { r = E.continueAfterWin(S); } catch (e) { r = { ok: false, error: e.message }; }
+  if (!r || r.ok === false) { ui.toast((r && r.error) || 'לא אפשרי עכשיו'); return; }
+  persist();
+  startGame({ ...CFG, resume: true });
+});
+async function retireFlow() {
+  if (!S || S.over || !S.afterWin || typeof E.retire !== 'function') return;
+  if (busy || ui.isEventOpen()) { ui.toast('אפשר לפרוש בין תורות'); return; }
+  const ok = await ui.confirmBox('לסיים כאן ולראות מה החופש נתן לך?', { yes: 'לסיים', no: 'להמשיך לשחק' });
+  if (!ok || !S || S.over || busy) return;
+  let r; try { r = E.retire(S); } catch (e) { r = null; }
+  if (!r || r.ok === false || !r.end) { ui.toast('לא אפשרי עכשיו'); return; }
+  persist(); const my = gen; busy = true; ui.setRollEnabled(false);
+  endGame(r.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); });
+}
+/** end-of-game T6 data for the lobby: timeline, the five dimensions, ghost state, rewind / after-win gates; rr2-last-game */
+function t6End(end) {
+  const out = { tl: null, dims: null, rivals: 'off', rewindAllowed: false, afterwinAllowed: false, branchTl: null };
+  try {
+    const m = E.metrics(S);
+    if (!S.tl) { if (!(S.ui.tl && Array.isArray(S.ui.tl.m))) S.ui.tl = tlNew(m.month); tlPush(S.ui.tl, tlRowOf(m)); }   // the graph ends where the game ended
+    out.tl = tlOf(S);
+    out.dims = dimsOf(end, { m, tl: out.tl, worldId: S.worldId, charId: S.charId });
+    const branch = !!(S.ui && S.ui.branch);
+    out.rewindAllowed = rewind.allowed(CFG);
+    out.afterwinAllowed = end.status === 'won' && !S.afterWin && !end.afterWin && typeof E.continueAfterWin === 'function' && flagFor('afterwin', CFG) && CFG.mode === 'free';
+    if (ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
+    if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; }
+    else if (out.rewindAllowed || flag('rewind')) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: endLite(end, out), ghostsKey: out.ghostsKey || null });
+    persist();
+  } catch (e) { console.warn('t6 end', e); }
+  return out;
+}
+
 /* ============================================================ end of game */
 const safe0 = (fn) => { try { return fn(); } catch (e) { return null; } };
 async function endGame(end, my) {
@@ -1253,9 +1378,11 @@ async function endGame(end, my) {
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
   await scene.celebrate(win);
   if (my !== gen) return;
-  if (end.lifeSummary) { await ui.lifeStory(end.lifeSummary, { won: win }); if (my !== gen) return; }
+  // T6 §6.1: with the new summary (flag recap2) the life story is a section of the end screen, not an overlay
+  if (end.lifeSummary && !flag('recap2')) { await ui.lifeStory(end.lifeSummary, { won: win }); if (my !== gen) return; }
   await pause(win ? 350 : 250);
   persist();
+  const t6 = t6End(end);
   settings.games = (settings.games || 0) + 1; writeSettings({ games: settings.games });
   const payload = {
     status: end.status, stars: end.stars || 0, months: end.months, netWorth: end.netWorth, passive: end.passive, expenses: end.expenses,
@@ -1266,11 +1393,13 @@ async function endGame(end, my) {
     bailoutUsed: !!(S.flags && S.flags.bailoutUsed),
     lifeSummary: end.lifeSummary || null, benchmark: end.benchmark || null, scenarioId: (S.history && S.history.scenarioId) || CFG.scenarioId || null, seed: S.seed >>> 0,
     learn: !!CFG.learn, dream: S.dream ? safe0(() => E.metrics(S).dream) : null, // T4 IR-T4-5
+    t6, saveKey: saveKeyFor(CFG), branch: !!(S.ui && S.ui.branch), afterWin: end.afterWin || null,   // T6 (lobby: end summary, which slot to clear)
   };
   busy = false;
   bus.emit('game:end', payload);
-  attachEndAnalysis(end, my);
+  if (!hasLobby()) attachEndAnalysis(end, my);   // the lobby's renderEnd calls ui.endAnalysisHtml itself (T6 brief); main.js fallback too
 }
+const hasLobby = () => !!document.querySelector('#start .lb-shell, #lobby-root .lb-shell') || !!window.__rrLobby;
 /** T2 §15.9: the "ניתוח" block (ui.endAnalysisHtml — learning review, hints, luck parts, claimed vs actual, the real cycle path)
  *  goes into the lobby's end card, which the lobby lane renders (and may re-render). Stops at the next game.
  *  CR for the lobby lane: call ui.endAnalysisHtml(e.end) inside renderEnd instead (then this observer finds it present). */
