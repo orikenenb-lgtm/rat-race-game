@@ -16,7 +16,7 @@ export const FOCUS = Object.freeze({
     notBest: 'לא כדאי כשהאושר כבר נמוך: קשה יותר להגיע ל־★★★.', cost: { energy: 1, happiness: 3 }, minEnergy: 1 }),
   network: Object.freeze({ id: 'network', icon: 'people', label: 'קשרים', desc: 'פגישות, קפה, טלפונים.', benefit: 'יותר סיכוי במשא ומתן ובבקשת העלאה החודש.',
     notBest: 'לא כדאי כשאין עסקה או העלאה באופק.', cost: { energy: 4, happiness: -1 }, minEnergy: 14 }),
-  research: Object.freeze({ id: 'research', icon: 'gauge', label: 'מעקב אחרי הכלכלה', desc: 'קוראים נתונים ודוחות.', benefit: 'מד הכלכלה מדויק יותר ל־3 חודשים.',
+  research: Object.freeze({ id: 'research', icon: 'gauge', label: 'מעקב אחרי הכלכלה', desc: 'קוראים נתונים ודוחות.', benefit: 'ל־3 חודשים: מד מדויק יותר, הנתון הרשמי מגיע אחרי חודש במקום 3, ודוח אם השלב הנוכחי כבר ארוך (שינוי יכול לבוא בכל חודש).',
     notBest: 'לא כדאי כשאין לך עדיין כסף לפעול לפי זה.', cost: { energy: 3, happiness: 0 }, minEnergy: 3 }),
   none: Object.freeze({ id: 'none', icon: 'calendar', label: 'חודש רגיל', desc: 'בלי מוקד מיוחד.', benefit: '+3 🔋 בסוף החודש.', notBest: '—', cost: { energy: 0, happiness: 0 }, minEnergy: 0 }),
 });

@@ -624,7 +624,7 @@ export function metrics(st) {
     loanUnit: loanUnit(st), loanUnitCost: Math.round((loanUnit(st) * loanPct(st)) / 100),
     loanPct: loanPct(st), creditPct: W(st).creditPct, loanCap: Number.isFinite(loanCap(st)) ? loanCap(st) : null,
     loanRoom: Number.isFinite(loanCap(st)) ? Math.max(0, loanCap(st) - st.loans) : null, canBorrow: st.loans + loanUnit(st) <= loanCap(st),
-    mentor: mentorBlock(st), focus: focusBlock(st), econ: R4(st) ? CY.econPublic(st.econ, st.month) : null, rules: st.rules || 3,
+    mentor: mentorBlock(st), focus: focusBlock(st), econ: R4(st) ? CY.econPublic(st.econ, st.month, st.worldId) : null, rules: st.rules || 3,
     ...(T3(st) ? { calendar: calendarOf(st), inbox: { open: st.story.inbox.length, urgent: st.story.inbox.filter((i) => i.due <= st.month + 1).length }, story: { noCar: !!st.story.flags.noCar, area: st.story.flags.area, commute: st.story.flags.commute || 0 } } : {}),
   };
 }
@@ -2362,7 +2362,7 @@ function pubCtx(st) {
   return { cash: st.cash, savings: st.savings || 0, E, energy: L.energy, happiness: happyNow(st), happyBase: L.happiness, loans: st.loans, credit: st.credit,
     netWorth: netWorthOf(st), baseNet: baseNet(st), goalType: g, nwWeight: g === 'passive' ? 0.25 : 1,
     study: { done: L.study.done, months: L.study.months, need: L.study.need }, idxPeak: L.idxPeak || st.prices.IDX, idxPrice: st.prices.IDX,
-    worldId: st.worldId, econ: CY.econPublic(st.econ, st.month), loanPct: loanPct(st), creditPct: W(st).creditPct, month: st.month, monthsLeft: st.maxMonths - st.month,
+    worldId: st.worldId, econ: CY.econPublic(st.econ, st.month, st.worldId), loanPct: loanPct(st), creditPct: W(st).creditPct, month: st.month, monthsLeft: st.maxMonths - st.month,
     fundMonths: (st.savings || 0) / E };
 }
 /** One cushion rule (§10.2): months of expenses left in cash + fund after an action; a deal that quickly rebuilds it is OK. */
@@ -3245,7 +3245,7 @@ function calendarOf(st) {
   const season = own.map((a) => (BIZ.SEASONS[a.biz.type] || {})[m]).find(Boolean);
   return { m, label: BIZ.MONTH_HE[m - 1], season: season ? season[1] : null };
 }
-function econLabel(st) { return st.econ && R4(st) ? CY.econPublic(st.econ, st.month).label : null; }
+function econLabel(st) { return st.econ && R4(st) ? CY.econPublic(st.econ, st.month, st.worldId).label : null; }
 const chainOf = (st, id) => st.story.chains[id] || null;
 const chainOpen = (c) => !!c && !['idle', 'done'].includes(c.stage);
 const openChains = (st) => CH.CHAIN_IDS.filter((id) => id !== 'crisis' && chainOpen(st.story.chains[id])).length;
@@ -4083,7 +4083,7 @@ export function publicView(st, { freeze = true, event } = {}) {
   const m = metrics(st); const L = m.life;
   const life = { ...L, inflationLastYear: L.inflationLastYear }; delete life.inflationYear;
   const pv = { v: st.v, worldId: st.worldId, charId: st.charId, mode: st.mode, mentor: st.mentor, rules: st.rules || 3, month: st.month, maxMonths: st.maxMonths, turn: st.turn, phase: st.phase,
-    metrics: { ...m, life }, event: event && st.pending && event.id === st.pending.id ? event : currentEvent(st), econ: CY.econPublic(st.econ, st.month), focus: m.focus, hintsUsed: (st.dq && st.dq.hints) || 0,
+    metrics: { ...m, life }, event: event && st.pending && event.id === st.pending.id ? event : currentEvent(st), econ: CY.econPublic(st.econ, st.month, st.worldId), focus: m.focus, hintsUsed: (st.dq && st.dq.hints) || 0,
     inbox: inbox(st) };
   return freeze ? deepFreeze(JSON.parse(JSON.stringify(pv))) : pv;
 }

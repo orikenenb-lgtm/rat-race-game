@@ -1,7 +1,10 @@
 // T2 — the economic cycle: a 4-phase Markov chain driven by the appended 'cycle' stream (rules 4).
 // 2 draws in createGame, then exactly 2 draws per payday ([rT transition, rN signal noise]) in every mode — history and the
 // _dev.noCycle ablation included, where the values are ignored. Effects are multipliers only (no extra draws).
-// The true phase is SEALED: the public signal is lagged one month and noisy; the "official" figure arrives 3 months late.
+// The phase is never output, but it is INFERABLE (review M1, accepted): bank rates, the loan cap and deal prices react to it, as
+// in the real economy. The gauge stays honest — lagged one month, noisy, correlated — and the official figure arrives 3 months
+// late. The research focus buys what public data cannot give: whether the current phase has run past its minimum length (a
+// transition may come any month — an early warning, never the timing) and the official figure 2 months earlier.
 // Pure data + helpers; no engine imports, no DOM, no Math.random, no approximated math.
 import { next, makeStreams } from '../rng.js';
 
@@ -82,13 +85,21 @@ export function mult(econ, worldId, key) {
 }
 
 export const GAUGE_TEXT = 'מד הכלכלה מתעדכן באיחור ועם רעש. הנתון הרשמי מתפרסם אחרי 3 חודשים.';
-/** What a player may see (§8.4). The current phase is never here; the official figure lags ≥ 3 months. */
-export function econPublic(econ, month) {
+export const RIPE_TEXT = Object.freeze({ ripe: 'לפי הדוחות: השלב הנוכחי כבר ארוך — שינוי כיוון יכול להגיע בכל חודש.', young: 'לפי הדוחות: השלב הנוכחי עוד צעיר — שינוי כיוון לא צפוי בחודשים הקרובים.' });
+/**
+ * What a player may see (§8.4). The current phase is never output (it is inferable from rates and prices — accepted, review M1).
+ * Research (sharp) adds `report` {ripe, text}: has the current phase passed its minimum length? — and the official figure lags 1
+ * month instead of 3. worldId is needed for the minimum lengths (without it no report is given).
+ */
+export function econPublic(econ, month, worldId) {
   if (!econ) return null;
-  return { signal: econ.signal, label: econ.label, trend: econ.trend, labelChangedAt: econ.lc ?? null, sharp: econ.sharpUntil >= month, sharpUntil: econ.sharpUntil,
+  const sharp = econ.sharpUntil >= month; const lag = sharp ? 1 : 3;
+  const out = { signal: econ.signal, label: econ.label, trend: econ.trend, labelChangedAt: econ.lc ?? null, sharp, sharpUntil: econ.sharpUntil,
     hist: econ.hist.slice(-24).map((x) => ({ m: x.m, s: x.s })),
-    official: econ.truth.filter((x) => x.m <= month - 3).slice(-12).map((x) => ({ m: x.m, label: PHASE_LABEL[x.phase] })),
-    text: GAUGE_TEXT };
+    official: econ.truth.filter((x) => x.m <= month - lag).slice(-12).map((x) => ({ m: x.m, label: PHASE_LABEL[x.phase] })), officialLag: lag,
+    report: null, text: GAUGE_TEXT };
+  if (sharp && worldId) { const ripe = econ.m + 1 >= cycleCfg(worldId).minLen[econ.phase]; out.report = { ripe, text: ripe ? RIPE_TEXT.ripe : RIPE_TEXT.young }; }
+  return out;
 }
 
 /** Headlines (§17), picked deterministically by (label, month % n); no numbers that would reveal the truth. */

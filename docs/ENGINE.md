@@ -647,3 +647,15 @@ never draws `story`, never gets a chain, an inbox item or a T3 business — test
 * `js/systems/rules.js`: `RULES4_FROM`, `dayOf`, `rulesForDay`. `createGame({mode: ranked, dateKey})` → `st.rules = rulesForDay(dateKey)`
   (daily key, weekly key `YYYY-Www`, or the Israel date the challenge was created); `dailyConfig()` returns `dateKey` + `rules`.
   `verify_core.js rulesFor` is a tested duplicate; `index.ts` challenge_day = `created_at AT TIME ZONE 'Asia/Jerusalem'`.
+
+### Review fixes on T2 (2026-11-21, `docs/next-level/reviews/T2-review.md`)
+* **B1** `RULES4_FROM = 2026-12-07` (a Monday) in `js/systems/rules.js` and `verify_core.js`; `verifyGame` retries a failed rules-3
+  replay once with rules 4 (`result.rulesFallback`, stored in `detail`), never 4 → 3; `createGame({dateKey})` stores `st.dateKey`
+  (in `replayConfig`; `migrateV3` gives a dated ranked save `rulesForDay(dateKey)`). The lobby / shell must pass `dateKey`.
+* **M1 (accepted)** the cycle phase is never output but IS inferable from public data (bank-loan rate, loan cap, deal price ÷ value,
+  asset cashflow) — rates and prices are public signals, as in reality. The evaluator / hints read those public numbers. The gauge stays
+  honest (one month late, ±12 noise, correlated). `research` now buys what public data cannot give, for 3 paydays: a sharper gauge,
+  the official figure with a 1-month lag instead of 3 (`econ.officialLag`), and `econ.report = {ripe, text}` — has the current phase
+  passed its minimum length (a transition may come any month; never the timing).
+* **M2** level-1 inspection range widths come from the CLAIMED cashflow / value (`DD.rangeOf({width, valueWidth})`); only the
+  position inside the range is sealed.

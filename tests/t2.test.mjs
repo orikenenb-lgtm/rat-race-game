@@ -202,7 +202,7 @@ function scramble(st, r) {
   }
   if (st.world.coin) st.world.coin.path = st.world.coin.path.map(() => r() * 9);
   for (const x of st.angels) if (x.status === 'active') x.mult = Math.round(r() * 30);
-  if (st.econ) { st.econ.m = Math.floor(r() * 9); for (const x of st.econ.truth) if (x.m > st.month - 3) x.phase = ['exp', 'slow', 'rec', 'recov'][Math.floor(r() * 4)]; }
+  if (st.econ) { const sharp = st.econ.sharpUntil >= st.month; if (!sharp) st.econ.m = Math.floor(r() * 9); for (const x of st.econ.truth) if (x.m > st.month - (sharp ? 1 : 3)) x.phase = ['exp', 'slow', 'rec', 'recov'][Math.floor(r() * 4)]; } // research (review M1) legitimately shows the phase age and a 1-month official lag
 }
 test(`T8 no info leak: publicView frozen + key scan; scramble of every sealed field leaves describe / scoreOptions / hint / impactFor byte-identical (${N(300)} states); optionU never reads rng/pending`, () => {
   const pv = E.publicView(E.createGame({ worldId: 'w4', seed: 3 }));
@@ -438,7 +438,7 @@ test('T14 cycle: min lengths, w1 never starts in recession, signal 0..100, offic
     const st = E.createGame({ worldId: w.id, seed, mode: 'free' }); const r = prng(seed);
     for (let t = 0; t < 60 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { const en = ev.options.filter((o) => o.enabled); const o = en.find((x) => ['pass', 'ok', 'done', 'skip'].includes(x.id)) || en[0]; ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}).event; } void r; }
     const path = CY.cyclePath(seed, w.id, st.month - 1); assert.deepEqual(st.econ.truth, path.slice(0, st.econ.truth.length));
-    const pub = E.metrics(st).econ; assert.ok(pub.signal >= 0 && pub.signal <= 100); assert.ok(pub.official.every((x) => x.m <= st.month - 3)); assert.equal(pub.phase, undefined);
+    const pub = E.metrics(st).econ; assert.ok(pub.signal >= 0 && pub.signal <= 100); assert.ok(pub.official.every((x) => x.m <= st.month - pub.officialLag) && pub.officialLag === (pub.sharp ? 1 : 3)); assert.equal(pub.phase, undefined);
   }
   // research: a sharper signal
   const err = (sharp) => { let e = 0, n = 0; for (let seed = 1; seed <= 25; seed++) { const ec = CY.initEcon(0.3, 0.5, 'w2'); const h = { c: seed * 7919 }; for (let m = 2; m <= 41; m++) { if (sharp) ec.sharpUntil = m; const rT = (Math.sin(seed * m) + 1) / 2 % 1; const rN = ((seed * 31 + m * 17) % 100) / 100; CY.stepEcon(ec, rT, rN, 'w2', m); e += Math.abs(ec.signal - CY.SCORE[ec.phase]); n++; void h; } } return e / n; };
@@ -502,6 +502,26 @@ test('review M2: the level-1 inspection range widths come from the CLAIMED numbe
     }
     assert.ok(widths.size <= 2 && vws.size <= 2, `${w.id} widths ${[...widths]} / ${[...vws]} (only rounding may differ)`);
   }
+});
+
+test('review M1: the gauge is honest (lagged, noisy, correlated with the phase); research gives a real, limited edge — the phase-age report and the official figure 2 months earlier', () => {
+  const CYm = E.CY; let agree = 0, n = 0, ripeOk = 0, reps = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const ec = CYm.initEcon(((seed * 37) % 100) / 100, ((seed * 53) % 100) / 100, 'w2'); let s = seed * 9973;
+    const R = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    for (let m = 2; m <= 60; m++) {
+      const sharp = m % 9 === 0; if (sharp) ec.sharpUntil = m;
+      const phase0 = ec.phase; CYm.stepEcon(ec, R(), R(), 'w2', m);
+      const pub = CYm.econPublic(ec, m, 'w2'); n++;
+      if ((pub.signal >= 50) === (phase0 === 'exp' || phase0 === 'slow')) agree++; // the gauge reads LAST month's phase, with noise
+      assert.equal(pub.phase, undefined); assert.equal(JSON.stringify(pub).includes('"m":' + ec.m + ',"phase"'), false);
+      if (sharp) { reps++; assert.ok(pub.report && pub.officialLag === 1); if (pub.report.ripe === (ec.m + 1 >= CYm.cycleCfg('w2').minLen[ec.phase])) ripeOk++; }
+      else { assert.equal(pub.report, null); assert.equal(pub.officialLag, 3); }
+    }
+  }
+  assert.ok(agree / n > 0.65 && agree / n < 0.99, `gauge correlated but not exact: ${(agree / n).toFixed(2)}`);
+  assert.equal(ripeOk, reps, 'the report is true');
+  assert.match(E.FC.FOCUS.research.benefit, /חודש/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
