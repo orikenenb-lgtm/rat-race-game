@@ -95,7 +95,7 @@ if [ $DRY = 0 ]; then
   command -v node >/dev/null || miss+=" node"; command -v python3 >/dev/null || miss+=" python3"
   python3 -c "import playwright" 2>/dev/null || miss+=" python-playwright"
   [ -x /usr/bin/google-chrome ] || miss+=" /usr/bin/google-chrome"
-  [ -d /tmp/t/node_modules/three ] || miss+=" three.js (mkdir -p /tmp/t && cd /tmp/t && npm i three@0.170.0 — run_all never installs)"
+  [ -d /tmp/t/node_modules/three ] || miss+=" three.js at /tmp/t/node_modules/three (see serve_copies.sh; run_all never installs)"
   [ -f tests/vendor/axe-core/axe.min.js ] || miss+=" tests/vendor/axe-core/axe.min.js"
   if [ -n "$miss" ]; then echo "PREFLIGHT FAILED, missing:$miss"; exit 2; fi
   if [ $SERVE = 1 ] && [ "$TIER" -ge 1 -o -n "$LANES$ONLY" ]; then
