@@ -1093,9 +1093,9 @@ function whyOf(b, r, prev, c) {
     const waste = -(r.cogs.waste - (prev.waste || 0));
     const volume = (r.grossProfit - prev.grossProfit) - priceEff - unitCost - waste;
     const pl = [];
-    if (priceEff) pl.push({ k: 'price', amount: priceEff, text: `שינית מחיר ל־${fmt(r.price)}` });
+    if (priceEff) pl.push({ k: 'price', amount: priceEff, text: `שינוי המחיר ל־${fmt(r.price)}` });
     if (volume) { const f = volumeFactor(b, r, prev, c); pl.push({ k: f.k, amount: volume, text: f.text }); }
-    if (unitCost) pl.push({ k: 'unitCost', amount: unitCost, text: unitCost < 0 ? 'עלות המוצר עלתה' : 'עלות המוצר ירדה' });
+    if (unitCost) pl.push({ k: 'unitCost', amount: unitCost, text: unitCost < 0 ? 'עלייה בעלות המוצר' : 'ירידה בעלות המוצר' });
     if (waste) pl.push({ k: 'waste', amount: waste, text: r.cogs.wasteLabel });
     const NAMES = { wages: 'שכר עובדים', manager: 'שכר מנהל', rent: 'שכירות', fixed: 'הוצאות קבועות', marketing: 'שיווק', royalty: 'תמלוגים לרשת', fees: 'עמלות', depreciation: 'פחת', oneOff: 'הוצאה חד־פעמית', badDebt: 'חוב אבוד' };
     let small = 0;
@@ -1105,8 +1105,9 @@ function whyOf(b, r, prev, c) {
     void small; if (other) pl.push({ k: 'other', amount: other, text: 'ועוד' });
     profit.push(...pl);
   }
-  const arNow = r.receivables; const dAr = arNow - c.arPrevT;
+  const arNow = r.receivables; const bad = (r.opex && r.opex.badDebt) || 0; const dAr = arNow - c.arPrevT + bad; // T3 review M6: a write-off is not a collection
   add('depreciation', r.opex.depreciation, 'פחת — הוצאה בלי כסף שיצא');
+  add('badDebt', bad, 'חוב אבוד — הוצאה שלא יצאה מהקופה');
   add('stock', -r.cash.inventoryBought, `קנית מלאי ב־${fmt(r.cash.inventoryBought)} — ייכנס להכנסות כשתמכור`);
   add('cogsStock', c.cogsFromStock, 'סחורה שנמכרה שולמה כבר');
   add('ar', -dAr, dAr > 0 ? `${fmt(dAr)} עוד אצל לקוחות` : `נכנסו ${fmt(-dAr)} מלקוחות של החודשים הקודמים`);
@@ -1122,8 +1123,11 @@ function whyOf(b, r, prev, c) {
   if (!prev) sentence = tc ? `החודש הראשון: ${tc.text}.` : 'החודש הראשון של העסק.';
   else if (Math.abs(dNp) < 200 && Math.abs(dc - r.netProfit) < 200) sentence = 'חודש יציב — כמעט בלי שינוי.';
   else {
-    const p1 = Math.abs(dNp) < 200 ? 'הרווח כמעט לא זז' : `הרווח ${dNp > 0 ? 'עלה' : 'ירד'} ב־${fmt(Math.abs(dNp))}${tp ? ` בעיקר בגלל ${tp.text}` : ''}`;
-    const p2 = tc ? `${(dc >= 0) !== (dNp >= 0) ? ', אבל' : ', ו'}הקופה ${dc >= 0 ? 'עלתה' : 'ירדה'} ב־${fmt(Math.abs(dc))} כי ${tc.text}` : '';
+    // T3 review M6: noun-phrase reasons; the cash clause compares the cash change with the PROFIT (the profit is most of it)
+    const p1 = Math.abs(dNp) < 200 ? 'הרווח כמעט לא זז' : `הרווח ${dNp > 0 ? 'עלה' : 'ירד'} ב־${fmt(Math.abs(dNp))}${tp ? `, בעיקר בגלל ${tp.k === 'other' ? 'שינויים קטנים בהוצאות' : tp.text}` : ''}`;
+    const gap = dc - r.netProfit; const glue = (dc >= 0) !== (dNp >= 0) ? ', אבל ' : ', ו';
+    const moved = `הקופה ${dc >= 0 ? 'עלתה' : 'ירדה'} ב־${fmt(Math.abs(dc))}`;
+    const p2 = Math.abs(gap) < 500 ? `${glue}${moved} — בערך כמו הרווח` : `${glue}${moved} — ${fmt(Math.abs(gap))} ${gap > 0 ? 'יותר' : 'פחות'} מהרווח${tc ? `, בעיקר כי ${tc.text}` : ''}`;
     sentence = `${p1}${p2}.`;
   }
   return { profit, cash: items, sentence };
@@ -1135,11 +1139,11 @@ function volumeFactor(b, r, prev, c) {
   const econ = b.effects.some((e) => e.kind === 'demand' && e.until >= b.month && econIds.has(e.id));
   const dem = Math.max(1, r.demand || r.units || 1);
   const f = [
-    { k: 'season', v: rat(sNow, sPrev), text: c.season ? `${c.season.label}: ביקוש פי ${c.season.mult}` : 'העונה נגמרה' },
+    { k: 'season', v: rat(sNow, sPrev), text: c.season ? `${c.season.label} (ביקוש פי ${c.season.mult})` : 'סוף העונה' },
     { k: econ ? 'econ' : 'event', v: rat(c.demShock, prev.demShock ?? c.demShock), text: econ ? 'מצב הכלכלה' : r.events.length ? r.events[0].title : 'השפעה של אירוע קודם' },
     { k: 'marketing', v: rat(1 + c.lift, 1 + (prev.lift ?? c.lift)), text: `שיווק ${fmt(r.opex.marketing)} בחודש` },
-    { k: 'capacity', v: Math.abs((r.lostSales.capacity || 0) - (prev.lostCap || 0)) / dem, text: r.lostSales.capacity > (prev.lostCap || 0) ? 'לא היו מספיק ידיים או מכונות' : 'יותר קיבולת' },
-    { k: 'stock', v: Math.abs((r.lostSales.stock || 0) - (prev.lostStock || 0)) / dem, text: r.lostSales.stock > (prev.lostStock || 0) ? 'המלאי נגמר' : 'יש שוב מלאי' },
+    { k: 'capacity', v: Math.abs((r.lostSales.capacity || 0) - (prev.lostCap || 0)) / dem, text: r.lostSales.capacity > (prev.lostCap || 0) ? 'לקוחות שלא קיבלו שירות (חסרו ידיים או מכונות)' : 'פחות לקוחות שלא קיבלו שירות' },
+    { k: 'stock', v: Math.abs((r.lostSales.stock || 0) - (prev.lostStock || 0)) / dem, text: r.lostSales.stock > (prev.lostStock || 0) ? 'מלאי שנגמר' : 'מלאי שחזר למדפים' },
     { k: 'noise', v: rat(c.noise, prev.noise ?? c.noise), text: c.noise >= (prev.noise ?? c.noise) ? 'חודש חזק מהרגיל' : 'חודש חלש מהרגיל' },
   ];
   return f.sort((x, y) => y.v - x.v)[0];

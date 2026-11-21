@@ -384,7 +384,7 @@ function bizRun(type, seed, months, o = {}) {
   return { b, reps };
 }
 test('U16 / §12.21 business why: Σ profit bridge = Δ net profit and net profit + Σ cash bridge = cash change, all integers (every month of 300 lifetimes per type × scale)', () => {
-  let months = 0;
+  let months = 0; let vatMax = 0; let otherMax = 0;
   for (const t of T3TYPES) for (let i = 0; i < N(60); i++) {
     const { reps } = bizRun(t, 1000 + i * 31, 30, { each: (b, m) => (m === 4 ? BIZ.applyDecisions(b, { marketing: b.p.mktHalf, draw: 1500 }).business : m === 8 && b.p.stock === 'inventory' ? BIZ.applyDecisions(b, { order: 300 }).business : b) });
     let prev = null;
@@ -394,10 +394,18 @@ test('U16 / §12.21 business why: Σ profit bridge = Δ net profit and net profi
       if (prev != null) assert.equal(R.why.profit.reduce((x, y) => x + y.amount, 0), R.netProfit - prev, `${t} profit bridge m${R.month}`);
       for (const it of [...R.why.profit, ...R.why.cash]) assert.ok(Number.isInteger(it.amount));
       assert.ok(typeof R.why.sentence === 'string' && R.why.sentence.length > 5);
+      // review M6/M9: labels that tell the truth — a glued conjunction never appears, a write-off is never called a collection,
+      // and the remainder lines stay small (the bridges are not just closed by a plug)
+      assert.ok(!/אבלהקופה|,ו |\s{2}/.test(R.why.sentence), R.why.sentence);
+      const bad = (R.opex && R.opex.badDebt) || 0; const ar = R.why.cash.find((x) => x.k === 'ar');
+      if (bad) { assert.ok(R.why.cash.some((x) => x.k === 'badDebt' && x.amount === bad), 'a write-off has its own non-cash line'); if (ar && /^נכנסו/.test(ar.text)) assert.ok(ar.amount > 0 && ar.amount <= Math.max(0, ar.amount)); }
+      const vat = R.why.cash.find((x) => x.k === 'vat'); vatMax = Math.max(vatMax, vat ? Math.abs(vat.amount) : 0);
+      const other = R.why.profit.find((x) => x.k === 'other'); if (other && prev != null) otherMax = Math.max(otherMax, Math.abs(other.amount) / Math.max(2000, Math.abs(R.revenue || 0)));
       prev = r.business.last ? r.business.last.netProfit : R.netProfit;
     }
   }
   assert.ok(months > N(60) * 5 * 10, 'months ' + months);
+  assert.equal(vatMax, 0, 'the cash bridge needs no VAT / timing plug'); assert.ok(otherMax <= 0.1, `the profit "other" line (small opex) stays ≤ 10% of revenue (${otherMax.toFixed(3)})`);
 });
 test('U14 / §12.22 setups create valid businesses; simulate uses exactly 3 + 2 draws; every type has seasons and its season-prep decision appears leadTime + 1 months ahead', () => {
   for (const t of T3TYPES) {
