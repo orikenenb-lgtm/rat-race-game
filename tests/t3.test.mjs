@@ -569,5 +569,13 @@ test('review M4: the career warn card shows the real next-payday burnout chance 
     assert.equal(flagged, Math.max(+m[1], +m[2]) >= 25, `${plan}/${energy}: the flag follows the shown odds`);
   }
 });
+test('review M5: side s2 "take" shows the real cash now (−materials), the payment as next month\'s income, and a loan when it forces one', () => {
+  const st = forced('w2', 'side', 's2', { cash: 500, prep: (s) => { s.life.plan = 'side'; s.life.side.months = 5; } });
+  const o = E.inbox(st)[0].options.find((x) => x.id === 'take');
+  assert.ok(o.effects.cash < 0 && o.effects.flow > 0 && o.effects.months === 1, JSON.stringify(o.effects));
+  assert.ok(o.loanAmount > 0, 'a loan warning when the cash cannot pay the materials');
+  const c0 = st.cash, l0 = st.loans; resolveForced(st, 'side', 's2', 'take');
+  assert.equal(st.cash - c0 - (st.loans - l0), o.effects.cash, 'the chip = the applied cash change (net of the forced loan)');
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
