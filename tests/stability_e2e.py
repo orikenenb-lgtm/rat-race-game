@@ -5,7 +5,10 @@
 import asyncio, json, re, sys, time, traceback
 from playwright.async_api import async_playwright
 
-BASE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--base=')), 'http://localhost:8772/index.html')
+import os
+# --base= wins, then $STAB_BASE, then $PORT_BASE (serve_copies.sh: the real copy is PORT_BASE+2), else the shared 8772
+BASE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--base=')), None) or os.environ.get('STAB_BASE') or \
+    f"http://localhost:{int(os.environ.get('PORT_BASE', '8770')) + 2}/index.html"
 ONLY = next((a.split('=', 1)[1].split(',') for a in sys.argv if a.startswith('--only=')), None)
 SLOW = '--slow' in sys.argv
 SHOTS = '/tmp/rrshots'
@@ -27,6 +30,7 @@ S = {  # exact Hebrew strings from the spec
     'L6': 'התלת־ממד מתעכב, עוברים למצב קל…',
     'R1t': 'משהו נתקע באמצע התור', 'R1b': 'ההתקדמות שלך שמורה, ואפשר להמשיך בדיוק מאותה נקודה.',
     'R2b': 'זה קורה שוב. אפשר לנסות במצב קל, או לחזור ללובי.',
+    'R2b2d': 'זה קורה שוב. אפשר להמשיך מהשמירה, או לחזור ללובי.',
     'R3t': 'התצוגה התלת־ממדית נעצרה',
     'R4': 'משהו השתבש. אפשר לחזור ללובי ולהמשיך מהשמירה.',
     'S1t': 'המשחק הזה נשמר בגרסה חדשה יותר',
@@ -491,6 +495,24 @@ async def s7(p):
     check(sc, 'A-17 page errors = 3 (one per injection)', len(c.pageerrors) == 3, str(len(c.pageerrors)))
     await ctx.close(); await b.close()
     b = await launch(p, NOGL)
+    # A-17 in 2D (review B-1): S-R2 without the lite button; its primary button resumes a playable game
+    ctx, pg, c = await open_page(b, sc + '-17-2d', init=[NO_GL_INIT])
+    await pg.goto(BASE); await picker_start_w1(pg)
+    for k in (1, 2, 3):
+        await to_roll(pg); await readd_diesr(pg); await inject_stuck(pg)
+        await pg.wait_for_selector('#recover:not([hidden])', timeout=30000)
+        rt = await pg.inner_text('#recover')
+        if k < 3:
+            await click_text(pg, '#recover button', 'להמשיך מהשמירה'); await wait_playable(pg); continue
+        check(sc, 'A-17 2D: 3rd stuck → S-R2 (2D text, no lite button)', S['R2b2d'] in rt and 'להמשיך במצב קל' not in rt, rt[:160])
+        await shot(pg, 'recover_r2_2d')
+        await pg.locator('#recover button.primary').first.click()
+        s = await wait_playable(pg)
+        check(sc, 'A-17 2D: primary button → playable game', not s['rec'] and (s['roll'] or s['card']) and s['renderer'] == '2d', json.dumps(s, ensure_ascii=False))
+        check(sc, 'A-17 2D: not stuck afterwards', await pg.evaluate("async () => !(await import('/js/game.js')).isStuck()"))
+    await readd_diesr(pg)
+    n = await play_turns(pg, 1, sc); check(sc, 'A-17 2D: a turn after recovery', n == 1)
+    await ctx.close()
     # A-18: from the stuck state, lobby → "חזרה למשחק" (resume-active only hides #start) recovers without a reload
     ctx, pg, c = await open_page(b, sc + '-18', init=[NO_GL_INIT])
     await pg.goto(BASE); await picker_start_w1(pg); await to_roll(pg)
@@ -513,10 +535,24 @@ async def s7(p):
     # A-19: an error from a non-game script while the game is idle does not show #recover
     ctx, pg, c = await open_page(b, sc + '-19', init=[NO_GL_INIT])
     await pg.goto(BASE); await picker_start_w1(pg); await to_roll(pg)
-    await pg.add_script_tag(content="setTimeout(() => { throw new Error('extension-origin test error'); }, 10)")
+    for _ in range(12):  # the first-visit world coach marks open ~1 s after the start: the stuck rule stays quiet while they show
+        await pg.wait_for_timeout(500)
+        if await pg.is_visible('#coach .bubble'): await pg.click('#coach [data-c="next"]')
+        elif _ >= 5: break
+    await to_roll(pg)
+    check(sc, 'A-19 setup: no card / modal / coach open', await pg.evaluate("() => document.querySelector('#coach').hidden && document.querySelector('#gm').hidden && document.querySelector('#evm').hidden"))
+    await pg.evaluate("() => { document.querySelector('#roll').disabled = true; }")  # idle game with a dead roll button
+    await pg.add_script_tag(content="setTimeout(() => { throw new Error('extension-origin test error'); }, 10)\n//# sourceURL=chrome-extension://abcdefgh/content.js")
     await pg.evaluate("() => { const s = document.createElement('script'); s.src = 'data:text/javascript,throw new Error(\"lobby-like\")'; document.body.appendChild(s); }")
-    await pg.wait_for_timeout(4000)
-    check(sc, 'A-19 foreign error → no #recover', not (await st(pg))['rec'])
+    await pg.wait_for_timeout(4500)
+    check(sc, 'A-19 foreign-origin errors (roll disabled) → no #recover', not (await st(pg))['rec'])
+    # positive control: the same situation with an error from a /js/game.js frame → the recover bar comes
+    origin = BASE.split('/index.html')[0]
+    await pg.add_script_tag(content=f"setTimeout(() => {{ throw new Error('own-origin test error'); }}, 10)\n//# sourceURL={origin}/js/game.js")
+    ok = True
+    try: await pg.wait_for_selector('#recover:not([hidden])', timeout=8000)
+    except Exception: ok = False
+    check(sc, 'A-19 control: the same error from /js/game.js → #recover (so the filter decided)', ok)
     await b.close()
 
 # ------------------------------------------------------------------ S8: low-end מצב קל + the lite switch
@@ -653,4 +689,5 @@ async def main():
     for e in ERRS: print('ERR', e[:300])
     sys.exit(1 if fails or ERRS else 0)
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -214,5 +214,52 @@ const bakOf = (s, k = K) => JSON.parse(s.m.get(SV.BAK + k) || 'null');
   eq(SV.classifyState(JSON.stringify(game(1, { v: V + 1 }))).status, 'future', 'classifyState string future');
 }
 
+/* ---------- review fixes */
+{ // m-1: the soft caps never evict future backups or quarantined data
+  const s = mkStore(); SV._setStorage(s);
+  const fr = wrap(game(70, { v: V + 1 })); SV.backup('rr2-save-free-w2', fr, 'future');
+  s.m.set(SV.QUAR + 'rr-player', JSON.stringify({ v: 1, at: 1, raw: '{oops' }));
+  const st = game(71); st.pad = 'p'.repeat(270 * 1024);
+  SV.backup(K, wrap(st), 'overwrite');
+  ok(SV.listBackups().some((b) => b.reason === 'future' && b.key === 'rr2-save-free-w2'), 'm-1 byte cap keeps the future backup');
+  ok(s.m.has(SV.QUAR + 'rr-player'), 'm-1 byte cap keeps quarantined rr-player');
+  const s2 = mkStore(); SV._setStorage(s2);
+  for (let i = 0; i < 10; i++) SV.backup('rr2-save-free-f' + i, wrap(game(80 + i)), 'future');
+  eq(SV.listBackups().length, 10, 'm-1 item cap never evicts future backups');
+  const s3 = mkStore(); SV._setStorage(s3);
+  SV.backup(K, wrap(game(90)), 'future'); SV.backup(K, wrap(game(91)), 'future'); SV.backup(K, wrap(game(92)), 'overwrite');
+  eq(SV.listBackups(K).filter((b) => b.reason === 'future').length, 2, 'per-slot cap never drops a future item');
+}
+{ // m-2: storage that throws on access (blocked site data)
+  const blocked = new Proxy({}, { get() { const e = new Error('blocked'); e.name = 'SecurityError'; throw e; } });
+  SV._setStorage(blocked);
+  let threw = false, r = null, w = null;
+  try { r = SV.sweep(); w = SV.write(K, { worldId: 'w1' }, game(1)); } catch (e) { threw = true; }
+  ok(!threw, 'm-2 sweep/write never throw on blocked storage');
+  eq(r, { quarantined: [], corruptSlots: 0, pendingItems: 0 }, 'm-2 sweep result on blocked storage');
+  ok(w && w.ok === false && !w.quota && !w.future, 'm-2 write → {ok:false} (not quota, not future)');
+  eq(SV.load(K).status, 'empty', 'm-2 load on blocked storage → empty');
+}
+{ // m-3: an unloadable save is never overwritten without a backup (same seed or not)
+  const s = mkStore({ throwFor: (k) => k.startsWith(SV.BAK) }); SV._setStorage(s);
+  const raw = wrap(game(7, { worldId: 'w9' })); s.m.set(K, raw);
+  eq(SV.load(K).status === 'incompatible' || SV.load(K).status === 'corrupt', true, 'm-3 unloadable save');
+  ok(s.m.get(K) === raw, 'm-3 slot kept when its backup fails');
+  const c = SV.claimSlot(K, 7);
+  ok(!c.ok && c.keep, 'm-3 claimSlot same seed on an unloadable save without room → keep ' + JSON.stringify(c));
+  const s2 = mkStore(); SV._setStorage(s2); s2.m.set(K, raw);
+  const c2 = SV.claimSlot(K, 7); ok(c2.ok && c2.reason === 'incompatible', 'm-3 claimSlot backs up an unloadable same-seed save ' + JSON.stringify(c2));
+  ok(JSON.parse(s2.m.get(SV.BAK + K)).items[0].raw === raw, 'm-3 backup raw identical');
+}
+{ // write() refuses to overwrite a future save whose backup fails; clear() keeps a slot whose backup fails
+  const s = mkStore({ throwFor: (k) => k.startsWith(SV.BAK) }); SV._setStorage(s);
+  const fr = wrap(game(7, { v: V + 1 })); s.m.set(K, fr);
+  const w = SV.write(K, { worldId: 'w1' }, game(8));
+  ok(!w.ok && w.future && s.m.get(K) === fr, 'write refuses over a future save without a backup');
+  const s2 = mkStore({ throwFor: (k) => k.startsWith(SV.BAK) }); SV._setStorage(s2);
+  const raw = wrap(game(9)); s2.m.set(K, raw);
+  ok(SV.clear(K) === false && s2.m.get(K) === raw, 'clear keeps the slot when its backup fails');
+}
+
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

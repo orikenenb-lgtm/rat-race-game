@@ -21,7 +21,7 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
   overflow:hidden;text-align:center;box-shadow:inset 0 -2px 0 rgba(0,0,0,.14);min-width:0;min-height:0}
 .b2d-corner{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),inset 0 -2px 0 rgba(0,0,0,.18)}
 .b2d-ti{font-size:calc(var(--cell) * .42);line-height:1}
-.b2d-tn{display:block;max-width:100%;padding:0 2px;font-size:max(8px,calc(var(--cell) * .16));font-weight:700;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b2d-tn{display:block;max-width:100%;padding:0 2px;font-size:max(12px,calc(var(--cell) * .16));font-weight:700;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .b2d-sm .b2d-tn{display:none}
 .b2d-sm .b2d-ti{font-size:calc(var(--cell) * .5)}
 .b2d-center{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;margin:4px;padding:6px;
@@ -31,11 +31,11 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
 .b2d-card{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;border-radius:10px;
   background:rgba(255,255,255,.82);box-shadow:var(--shadow-s);color:#1d1a2b;min-width:0;overflow:visible}
 .b2d-ce{font-size:calc(var(--cell) * 3.2 / var(--n));line-height:1}
-.b2d-cl{display:block;max-width:100%;padding:0 2px;font-size:max(8px,calc(var(--cell) * 1.1 / var(--n)));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b2d-cl{display:block;max-width:100%;padding:0 2px;font-size:max(12px,calc(var(--cell) * 1.1 / var(--n)));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .b2d-sm .b2d-cl{display:none}
 .b2d-shield{position:absolute;inset:-6%;border-radius:14px;border:3px solid #38bdf8;box-shadow:0 0 14px #38bdf8;pointer-events:none}
 .b2d-pawn{position:absolute;left:0;top:0;width:calc(var(--cell) * .82);height:calc(var(--cell) * .82);border-radius:50%;--pawn:#e2483d;
-  display:grid;place-items:center;background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--pawn) 55%,#fff),var(--pawn) 70%);
+  display:grid;place-items:center;background:var(--pawn);background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--pawn) 55%,#fff),var(--pawn) 70%);
   box-shadow:0 0 0 3px #fff,0 4px 10px rgba(0,0,0,.35);z-index:3;will-change:transform}
 .b2d-glyph{font-size:calc(var(--cell) * .48);line-height:1;filter:drop-shadow(0 1px 0 rgba(255,255,255,.6))}
 .b2d-fx{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:visible}

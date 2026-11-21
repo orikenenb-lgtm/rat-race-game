@@ -28,6 +28,7 @@ export const STR = {
   S6b: 'לפני שמעדכנים משחק שמור אנחנו שומרים עותק של המקור, אבל אין מספיק מקום במכשיר. אפשר להמשיך בלי גיבוי או לחזור ללובי.',
   S6go: 'להמשיך בלי גיבוי',
   S7: 'אין מקום במכשיר לשמור את המשחק. אפשר להמשיך לשחק, אבל אם תסגור את הדף ההתקדמות תאבד. כדאי לפנות מקום בדפדפן או לצאת מגלישה בסתר.',
+  S7b: 'הדפדפן לא מאפשר לשמור את המשחק במכשיר הזה. אפשר להמשיך לשחק, אבל אם תסגור את הדף ההתקדמות תאבד. כדאי לאפשר שמירת נתונים לאתר הזה או לצאת מגלישה בסתר.',
   S8: 'נתוני ההתקדמות במכשיר נפגמו. שמרנו עותק שלהם. אם יש לך כינוי, הכוכבים וההישגים יחזרו מהשרת.',
   S9: 'פרטי הכינוי במכשיר נפגמו. שמרנו עותק שלהם. אפשר לשחזר את החשבון עם קוד השחזור.',
   S10: 'תוצאה של אתגר שעוד לא נשלחה לשרת נפגמה. שמרנו עותק שלה במכשיר.',
@@ -44,9 +45,11 @@ function get(k) { try { return store().getItem(k); } catch (e) { return null; } 
 function del(k) { try { store().removeItem(k); return true; } catch (e) { return false; } }
 /** throws (quota) — callers decide */
 function put(k, v) { store().setItem(k, v); }
+const storageOk = () => { try { return !!store(); } catch (e) { return false; } };
 function keys() {
-  const s = store(); const out = [];
-  try { const n = s.length; for (let i = 0; i < n; i++) { const k = s.key(i); if (k != null) out.push(k); } } catch (e) { /* ignore */ }
+  const out = [];
+  // store() itself may throw (SecurityError: blocked site data)
+  try { const s = store(); const n = s.length; for (let i = 0; i < n; i++) { const k = s.key(i); if (k != null) out.push(k); } } catch (e) { /* ignore */ }
   return out;
 }
 const engV = () => Number(E.SAVE_VERSION) || 0;
@@ -126,14 +129,13 @@ function evictionList({ keep = null, protectSlotFuture = null, withQuarantine = 
   return out;
 }
 function evictOne(c) { return c.kind === 'quar' ? del(c.key) : dropItem(c.bk, c.item); }
-/** Enforce the global caps (items and bytes); never evicts `keep`. */
+/** Enforce the voluntary caps (items and bytes); never evicts `keep`. These are soft limits: they only drop ordinary
+ *  backups, never 'future' backups or quarantined data — those go only under real quota pressure (write/backup paths). */
 function enforceCaps(keep) {
   for (let guard = 0; guard < 64; guard++) {
     const total = allItems().length;
     if (total <= MAX_BAK_TOTAL && bytesUsed() <= BAK_BYTES_SOFT) return;
-    const overItems = total > MAX_BAK_TOTAL;
-    // too many items → evict backup items only; too many bytes → backups, then quarantine
-    const list = evictionList({ keep, withQuarantine: !overItems });
+    const list = evictionList({ keep, withQuarantine: false, withFuture: false });
     if (!list.length) return;
     evictOne(list[0]);
   }
@@ -147,10 +149,11 @@ export function backup(key, raw, reason) {
   let items = rec.items.filter((x) => x.raw !== raw); // same content backed up again → one item, newest reason
   items.unshift(item);
   while (items.length > MAX_BAK_PER_SLOT) {
-    // per-slot cap: drop the oldest non-future item first; future items go last
+    // per-slot cap: drop the oldest older non-future item; future items are never dropped by the cap (the slot may
+    // then hold more than MAX_BAK_PER_SLOT items)
     let idx = -1;
     for (let i = items.length - 1; i > 0; i--) if (items[i].reason !== 'future') { idx = i; break; }
-    if (idx < 0) idx = items.length - 1;
+    if (idx < 0) break;
     items.splice(idx, 1);
   }
   const val = JSON.stringify({ v: 1, items });
@@ -247,13 +250,17 @@ export function claimSlot(key, seed) {
   checked.add(key);
   if (c.status === 'empty' || c.status === 'over') return { ok: true };
   let reason = null;
+  // a state that does not load (unknown world, broken migration…) counts as unreadable, whatever its seed
+  let readable = c.status !== 'corrupt';
+  if (readable && c.status !== 'future') { try { E.deserialize(c.state); } catch (e) { readable = false; } }
   if (c.status === 'future') reason = 'future';
-  else if (c.status === 'corrupt') reason = 'corrupt';
+  else if (!readable) reason = c.status === 'corrupt' ? 'corrupt' : 'incompatible';
   else if (seed != null && (c.state.seed >>> 0) === (seed >>> 0)) return { ok: true };
   else reason = 'overwrite';
   const ok = backup(key, raw, reason);
   if (!ok) checked.delete(key);
-  return { ok, reason, future: reason === 'future' };
+  // unreadable or future content whose backup failed must be kept: the caller may not overwrite it (review m-3)
+  return { ok, reason, future: reason === 'future', keep: !ok && (reason === 'future' || !readable) };
 }
 /** Back up (reason 'clear', or 'future') then remove. Finished games are removed without a backup. → boolean removed */
 export function clear(key) {
@@ -271,6 +278,7 @@ export function clear(key) {
 /** Quarantine unparsable data before any module reads it. → {quarantined:[keys], corruptSlots, pendingItems} */
 export function sweep() {
   const res = { quarantined: [], corruptSlots: 0, pendingItems: 0 };
+  if (!storageOk()) return res; // storage blocked: nothing to sweep (and nothing can be read)
   for (const k of keys()) {
     if (!k.startsWith(SLOT)) continue;
     const raw = get(k);
