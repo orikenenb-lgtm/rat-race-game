@@ -280,7 +280,7 @@ NONAME = """() => [...document.querySelectorAll('button, a[href], [role=button],
   .filter(e => { const lb = (e.getAttribute('aria-labelledby') || '').split(/\\s+/).map(i => document.getElementById(i)).filter(Boolean).map(x => x.textContent).join('');
     const lab = (e.getAttribute('aria-label') || e.getAttribute('title') || lb || (e.labels && e.labels[0] && e.labels[0].textContent) || e.getAttribute('placeholder') || e.getAttribute('alt') || '').trim();
     return !lab && !(e.innerText || e.value || '').trim() && !e.querySelector('img[alt]:not([alt=""])'); })
-  .map(e => (e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + String(e.className).split(' ')[0]))"""
+  .map(e => { const p = e.closest('[id]'); return (e.id ? '#' + e.id : e.tagName.toLowerCase() + (e.className ? '.' + String(e.className).split(' ')[0] : '')) + ' in #' + (p ? p.id : '?') + ' ' + e.outerHTML.replace(/\s+/g, ' ').slice(0, 70); })"""
 OVER = """() => { const r = document.querySelector('#roll'); const rr = r && r.getBoundingClientRect(); const vis = r && !document.querySelector('#start').hidden ? null : rr;
   const chips = [...document.querySelectorAll('#hud .chip, #hud [id^="h"], #evCard h2, #evCard button')].filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.id || e.className).slice(0, 5);
   return { hOverflow: document.documentElement.scrollWidth > innerWidth + 1, docW: document.documentElement.scrollWidth, vw: innerWidth,
