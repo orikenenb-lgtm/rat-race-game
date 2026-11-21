@@ -1032,3 +1032,55 @@ The stage colours and pip geometry follow from these tables, so the 3D and 2D re
 | P0 | P1 | P2 (cut if needed, and list it) |
 |---|---|---|
 | tokens and contrast · `.num` ₪ fix · 12 px floor · stars outline · non-colour cues · icon set (functional) · world identity data · char portrait and pawn ring · feedback durations · overlay queue · turn budget and skip · plinths, pips, stage kit, activity badges (3D + 2D) · `setLevel`/`pulse`/`syncLevels` · asset info (3D pick, 2D buttons, sheet rows, modal) · `motion.js` and reduced-motion variants and settings · audio suspend when hidden · tiers with DPR cap and shadows · tile instancing · model flattening · label pool · pause hidden · dispose on world change · `perfStats`/`?perf` · tests §13 | px → rem font tokens · SVG life-chip icons · "לנהל את העסק" action · governor · lazy life-model loading · texMB budget gate · manual device FPS | self-hosted fonts with `unicode-range` and Frank Ruhl Libre · Blender `stage_kit.glb` · T3 activity props (rival stall, smoke, shelves) · SVG character portraits · GLB quantization |
+
+---
+
+## Implementation notes — part A (visual identity foundations; U1/L1 CSS side + `js/motion.js`)
+
+Files: `css/game.css`, `css/lobby.css`, new `js/motion.js`, new `tests/contrast.test.mjs`. No other file was touched. Commits `style(tokens)…`, `style(lobby)…`, `feat(motion)…`, `test(tokens)…`, `style(lobby): settings radios…`, `docs(T5)…`.
+
+### What landed
+- **Tokens (§2.1–2.4)** in `game.css :root`: every value of the §2.1 table (light `--mut #5f586c`, `--green #13744a`, `--red #b8322a`, `--blue #2459b8`, `--pink #be185d`; dark `--mut #b3acbf`, `--blue #8ab2ff`, `--pink #ff8cc2`), new `--gold-text`, `--focus`, `--accent-ink`, `--fs-*`, `--sp-*`, `--r-*`, `--shadow-l`, `--z-*`, `--dur-*`, `--ease-*`, `--tap` (44px).
+- **`--accent-ink` per world is set in CSS** (`body[data-world=w2|w3|w4|h]`), not by `ui.applyTheme` — `applyTheme` already sets `body.dataset.world`, so no JS change is needed. `body[data-world=h]` also sets the §3 accent fill `#c8a24a` (overrides the inline `#a8763e` from `applyTheme`, because `body` declares its own value).
+- **Gold text** never uses `--gold2` any more (HUD meter %, achievement `small`, coach step, `.tagc`, story kicker, mission kicker, ranks, star thresholds, `pf-total`, `gp-st`, end-news, library count) → `--gold-text`.
+- **White-ink tags.** `.tag` (modal / fallback picker) and `#evCard .tag[style*="--ink:#fff"]` use `oklch(from var(--c) min(l,.52) c h)`: same hue, lightness capped. Measured in Chrome 153 on all 37 tile colours: white ≥ 4.88:1 (worst w2 "הזדמנות" #10b981). Dark-ink tags (payday, life, w2 bank/upgrade) are untouched. Browsers without relative colours keep the old colour (fallback declaration first).
+- **₪ rule (CSS half):** `.num, .lb-num { font-family: var(--font) }`, weight 800 inside titles. The engine-text half needs `ui.js` (CR-U1 below).
+- **12 px floor:** no `font-size` < 12px in either file (19 declarations raised to `--fs-cap`), plus `small { font-size: max(.75rem, .8333em) }` for unstyled `<small>` under 14px text. `.hgoal .gbar:has(em)` grows to 16px so the w4 bar labels fit at 12px.
+- **Non-colour cues in CSS:** stars = filled gold + `--gold-text` stroke vs transparent fill + `--mut` stroke (`.lb-stars`, `.end-star`, fallback `.stars`); new `.pips i` / `.pips i.on` (hollow ring vs filled disc, for the asset-info modal and level-up card of U2); tag text, lock text, signs were already in markup.
+- **Touch targets:** `.chip`, `.lb-shell .chip`, `.ibtn.sm` / `#voiceBtn`, `.lb-mini-player`, `.lb-mission-go`, `.lb-wa.sm`, `.end-more .chip`, `.pf-col`, `#toast .tbtn`, range inputs → 44px. HUD life chips: 44px hit box with an unchanged visible pill (34px desktop / 30px phone, painted by `::before`, negative block margins keep the HUD height).
+- **Focus:** `:focus-visible` = 3px `--focus` ring + 7px `--paper` halo (keeps ≥ 3:1 on the 3D board, sky gradients and gold); `.primary`/`.hbtn` keep their gold edge while focused.
+- **Reduced motion:** every `@media (prefers-reduced-motion: reduce)` rule is scoped `:root:not([data-motion=full])` and mirrored as `:root[data-motion=reduce]` (game.css 1 block, lobby.css 3 blocks; a few DOM animations added: dice land/shake, HUD arrows/flashes, meter glow, energy pulse, mentor nod, story card, toast/verdict/achievement slides → 120 ms fades, welcome/duel/history/sheet pops).
+- **Settings radios CSS ready** for L1 (§7.3): `fieldset.lb-radios > legend + label > input[type=radio]` — each option a ≥ 44px pill, checked state = native radio dot + border, focus ring on the label.
+- **`js/motion.js`**: exactly `motionPref()`, `reducedMotion()`, `setMotionPref(p)`, `initMotion()`. `rr2-settings.motion` merged like `audio.js`; `<html data-motion>` = effective value (`reduce|full`); bus `'motion:change' {pref, reduced}`; follows OS changes only while `auto`; no DOM at import; private mode keeps the choice in memory.
+
+### Measured (tests/contrast.test.mjs, 144 checks; ratios on paper / paper2 / paper3)
+| Token | Light | Dark |
+|---|---|---|
+| `--ink` | 16.35 / 14.73 / 13.48 | 14.60 / 12.87 / 11.13 |
+| `--mut` | 6.51 / 5.87 / 5.37 | 7.69 / 6.78 / 5.86 |
+| `--green` | 5.57 / 5.02 / 4.59 | 8.43 / 7.43 / 6.42 |
+| `--red` | 5.72 / 5.16 / 4.72 | 6.64 / 5.86 / 5.06 |
+| `--blue` | 6.32 / 5.69 / 5.21 | 7.95 / 7.01 / 6.06 |
+| `--pink` | 5.80 / 5.23 / 4.79 | 7.86 / 6.93 / 5.99 |
+| `--gold-text` (= w1 accent-ink) | 5.70 / 5.13 / 4.70 | 9.25 / 8.16 / 7.05 |
+| accent-ink w2 / w3 / w4 / h (worst surface) | 5.76 / 5.70 / 5.63 / 5.29 | 4.51 / 6.01 / 7.12 / 5.34 |
+| non-text: `--focus` / star+pip strokes (`--gold-text`, `--mut`) worst | 3.77 / 4.70 / 5.37 | 5.39 / 7.05 / 5.86 |
+| `--gold-ink` on gold · `--ink` on accents w1…h | 9.01 · 9.32 / 5.96 / 6.14 / 9.41 / 7.06 | |
+| white on badges t0 / t1 / t2 / t3 / "new" | 5.32 / 5.36 / 4.75 / 5.87 / 5.95 | |
+
+Rendered audit (12-ish screens: lobby, library, char select, HUD, first deal card, end; desktop light+dark, 390 light+dark, 360, 820; Supabase → local 503): contrast failures **155 → 3**, text < 12px **90 → 0**, ₪ in Secular One **0 → 0**, targets < 44px **154 → 26**. Remaining: 2 × the `🔒` emoji over map art (not text), 1 × the earned end-screen star fill (non-text; its stroke is 4.70); targets: the four HUD tool buttons on phones (40×46 at 390, 32×44 at 360) and the home button at 360 (42×44) — see CR-S2.
+
+### Change requests for other lanes (precise; not done here)
+- **CR-U1 (in-game UI, `js/ui.js`) — ₪ in titles (A-5).** `escI` is used for HTML titles/text (e.g. `<h2 id="evTitle">${escI(ev.title)}</h2>`), so engine text like "MOON נסחר ב־₪1" keeps Secular One. Replace
+  `const escI = (t) => iso(esc(t));`
+  with
+  `const escI = (t) => String(esc(t)).replace(/→/g, '←').replace(NUMRE, (m) => '<span class="num">' + m.replace(/^([+−-])(?=[₪$])/, '$1⁠') + '</span>');`
+  (`.num` already isolates LTR, so the LRI/PDI marks are not needed in HTML; keep `iso()` as is for `textContent` callers such as `nextToast`).
+- **CR-U2 (`js/ui.js`) — motion.** `flyCoins`: replace `const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;` with `const reduce = reducedMotion();` and per §7.2 `if (reduce) return;` (no coin flyers, A-23) plus a 120 ms outline pulse on `#hCash`. Import: `import { reducedMotion } from './motion.js';`. Same in `lifeStory()` (the `ty` typewriter interval): when `reducedMotion()` show the text at once, do not auto-close, focus the button.
+- **CR-L1 (lobby, `js/lobby.js`).** `animateEnd`: `const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;` → `const reduce = reducedMotion();` (import from `./motion.js`). Settings section next to `muteToggle()` (§7.3), markup for the ready CSS:
+  `<fieldset class="lb-radios"><legend>תנועה במשחק</legend>${[['auto','לפי המכשיר'],['reduce','מופחתת'],['full','מלאה']].map(([v,l]) => `<label><input type="radio" name="motion" value="${v}" ${motionPref()===v?'checked':''}>${l}</label>`).join('')}<p class="lb-note">מופחתת: בלי רעידות, קונפטי וקפיצות. הקוביות והחייל זזים מיד.</p></fieldset>` with `change` → `setMotionPref(e.target.value)`. The quality group uses the same structure.
+- **CR-S1 (shell, `js/game.js` G-3).** In `doInit()` before `await initRenderer();` add `initMotion();` and after it `scene.setMotion?.(reducedMotion()); bus.on('motion:change', ({ reduced }) => { scene.setMotion?.(reduced); ui.setMotion?.(reduced); });` (import `{ initMotion, reducedMotion }` from `./motion.js`). `lobby.js`/`main.js` pages that run without `game.js` should also call `initMotion()` once so `<html data-motion>` exists; until then CSS falls back to the OS media query (both rule sets are present).
+- **CR-S2 (shell/T1, `index.html` + `css/stability.css`) — phone HUD row 1 overflows.** Since `#liteBtn` (🪶) joined `.htools`, row 1 holds home + 3 stats + 4 tools; at 390px the stats get ~135px and the labels/numbers overlap (visible in `/tmp/t5a/before/ph390-light_04_hud.png`, before any T5 change; the 12px label floor makes it slightly worse). It also keeps the tool buttons at 40px (390) / 32px (360). Proposal: at `max-width:600px` hide `#liteBtn` in the HUD (`@media (max-width:600px){ #liteBtn{display:none} }` in the T1 CSS) and keep the lite switch in the S-N7 offer toast and the lobby settings (§7.3); then this lane can set `.htools .ibtn` to 44×44 on phones. Needs the T1 owner's decision.
+- **CR-R1 (rendering, `js/render/board2d.js`).** `const reduced = () => …matchMedia(…)` → `import { reducedMotion as reduced } from '../motion.js'`. `COLORS` → `LABEL_COLORS` from `vocab.js` (§2.1 values; the current `#178a55/#d23b30/#2f6fdb/#a8740a` fail on the pill).
+- **CR-W1 (data, optional).** The tile colours in `js/worlds/*.js` can stay: the tag darkening is done in CSS so the 3D/2D tile faces keep today's bright colours.
+- **Fonts.** Rubik + Secular One are already loaded by `index.html`; nothing new was requested (A-35 unchanged). P2 self-hosting with `unicode-range` would also cover ₪ inside untouched engine strings.
