@@ -4,7 +4,7 @@
 export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actions; generous cap keeps replay < 1 s CPU
 export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
-const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q']); // = the cases of engine.js replay() (Q = T3 story inbox)
+export const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X']); // = the cases of engine.js replay() (Q = T3 story inbox, K = T4 practice, W/X = T6 continue after win / retire — K, W, X are refused in ranked replays)
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
  *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
 export const RULES4_FROM = '2026-12-07'; // a Monday (review B1): a weekly never straddles the cut-over

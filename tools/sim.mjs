@@ -7,7 +7,7 @@
 // Policies carry a mentor level (default 'hint'); the T2 policies decide from E.publicView only (tools/policies.mjs).
 import * as E from '../js/engine.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { facade, claimedNet, adaptiveFocus, runFocus, ddRule, medianDown } from './policies.mjs';
+import { facade, claimedNet, adaptiveFocus, runFocus, ddRule, medianDown, archPolicy } from './policies.mjs';
 import { collect, bundleText, sha256 } from './build-edge.mjs';
 /** T7 CR-21: every sim JSON names the exact engine it measured. */
 export const ENGINE_SHA = sha256(bundleText(collect()));
@@ -246,66 +246,9 @@ Object.assign(POLICIES, {
     },
     between(st) { if (PV(st).metrics.life.plan !== 'work') E.setPlan(st, 'work'); },
   },
-  // archetypes (gameplay.md §7d), played as the player — the same code T6 rivals will reuse
-  saver: {
-    mentor: 'hint', story: 'smart', quiz: 'cautious',
-    decide(st, ev, ctx) {
-      const pv = PV(st, ev); const f = facade(pv); const m = pv.metrics; const d = ev.data;
-      if (ev.type === 'deal') { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled && !o.loanAmount).sort((x, y) => y.net - x.net)[0]; if (!b || b.net <= 0) return ['pass']; const ins = ddRule('flagged', pv, ev, b.id); if (ins && ctx.n < 2) return [ins]; return [m.cash + m.savings - d.down >= 6 * m.expenses ? b.id : 'pass']; }
-      if (ev.type === 'doodad') return [has(ev, 'skip') ? 'skip' : (has(ev, 'inst3') ? 'inst3' : 'pay')];
-      if (ev.type === 'trade') return ['done'];
-      return POLICIES.cautious.decide(f, ev, ctx);
-    },
-    between(st) {
-      const m = PV(st).metrics; const want = Math.round(m.expenses * 3.1) - m.savings;
-      if (want > 300 && m.cash - want > m.expenses) E.moveSavings(st, want);
-      const dca = Math.max(0, Math.round(Math.max(0, m.cashflow) * 0.2 / 100) * 100); if (Math.abs(dca - (m.life.autoInvest || 0)) > Math.max(300, dca * 0.3)) E.setAutoInvest(st, dca);
-      if (m.credit && m.cash >= m.credit) E.payCredit(st);
-      if (!st.over) E.setPlan(st, planFor(facade(PV(st)), 'cautious'));
-    },
-  },
-  founder: {
-    mentor: 'hint', story: 'smart', quiz: 'smart',
-    decide(st, ev, ctx) {
-      const pv = PV(st, ev); const f = facade(pv); const w = E.getWorld(pv.worldId); const d = ev.data;
-      if (ev.type === 'business') { if (d.mode === 'offer') return [has(ev, 'start') ? 'start' : 'pass']; return [ctx.n === 0 && has(ev, 'biz:suggest') ? 'biz:suggest' : 'ok']; }
-      if (ev.type === 'deal' && !(w.kinds[d.kind] || {}).rent) { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0]; if (b && b.net > 0) { const ins = ddRule('flagged', pv, ev, b.id); return [ins && ctx.n < 2 ? ins : b.id]; } return ['pass']; }
-      return greedyLike(f, ev, ctx, true, { dd: 'flagged' });
-    },
-    between(st) { betweenCommon(st, 0.8, true); if (!st.over) E.setPlan(st, planFor(facade(PV(st)), 'smart')); if (!st.over) runFocus(st, (PV(st).metrics.focus || { options: [] }).options.find((o) => o.id === 'ops' && o.enabled) ? 'ops' : 'adaptive'); },
-  },
-  diversified: {
-    mentor: 'hint', story: 'smart', quiz: 'smart',
-    decide(st, ev, ctx) {
-      const pv = PV(st, ev); const f = facade(pv); const m = pv.metrics; const d = ev.data;
-      if (ev.type === 'deal') { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0]; if (!b || b.net <= 0) return ['pass']; const ins = ddRule('flagged', pv, ev, b.id); if (ins && ctx.n < 2) return [ins]; const haveKind = m.assets.some((a) => a.kind === d.kind); if (b.loanAmount > 2 * Math.max(0, m.cashflow) * 4) return ['pass']; return [(!haveKind || b.net >= 0.1 * m.expenses) ? b.id : 'pass']; }
-      return greedyLike(f, ev, ctx, true, { dd: 'flagged' });
-    },
-    between(st) {
-      const m = PV(st).metrics; const want = Math.round(m.expenses * 3.1) - m.savings;
-      if (want > 300 && m.cash - want > m.expenses * 0.5) E.moveSavings(st, want);
-      const m2 = PV(st).metrics; const spare = m2.cash - 2 * m2.expenses; const px = m2.index.price;
-      if (spare > 0 && px > 0) { const qn = Math.floor(spare * 0.4 / px); if (qn > 0) E.invest(st, 'buy', qn); }
-      if (m2.credit && m2.cash >= m2.credit) E.payCredit(st);
-      if (!st.over) E.setPlan(st, planFor(facade(PV(st)), 'smart'));
-    },
-  },
-  gambler: {
-    mentor: 'hint', quiz: 'reckless',
-    decide(st, ev, ctx) {
-      const pv = PV(st, ev); const f = facade(pv); const d = ev.data;
-      switch (ev.type) {
-        case 'deal': { const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => claimedNet(ev, y) - claimedNet(ev, x))[0]; return [b && claimedNet(ev, b) > -0.05 * pv.metrics.expenses ? b.id : 'pass']; }
-        case 'trade': if (ctx.n === 0 && d.maxBuy > 0 && (d.kind === 'crypto' || d.kind === 'stock')) return ['buy', { qty: d.maxBuy }]; if (d.qty > 0 && d.avg && d.price >= d.avg * 2) return ['sell', { qty: d.qty }]; return ['done'];
-        case 'pitch': return [firstEnabled(ev, ['inv:2', 'inv:1', 'inv:0']) || 'pass'];
-        case 'doodad': return [firstEnabled(ev, ['credit', 'inst3', 'pay'])];
-        case 'business': if (d.mode === 'offer') return [has(ev, 'start') ? 'start' : 'pass']; return ['ok'];
-        default: return greedyLike(f, ev, ctx, false);
-      }
-    },
-    between(st) { const L = PV(st).metrics.life; E.setPlan(st, L.energy > 35 ? 'overtime' : 'work'); },
-  },
 });
+// archetypes (gameplay.md §7d, T6 §2.3) — the ONE copy lives in js/systems/archetypes.js (also the ghost players' policies)
+Object.assign(POLICIES, { saver: archPolicy('saver', 'cautious'), founder: archPolicy('founder', 'smart'), diversified: archPolicy('diversified', 'smart'), gambler: archPolicy('gambler', 'reckless') });
 // review M4 (c): smart with a fixed money habit on personal / values life cards — the escape-rate gap between them measures the
 // cards' money swing (target ≤ 10 pp in w1). cheap = the option with the most money over 24 months, dear = the least.
 const lifeMoney = (o) => (o.effects.total24 != null ? o.effects.total24 : lifeValue(o));

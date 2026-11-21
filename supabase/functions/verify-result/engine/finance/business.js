@@ -562,6 +562,9 @@ export function simulate(b0, decisions, rng, opts = {}) {
   const lostCapS = lostCap, lostStockS = lostStock;
   const t = b.totals; t.revenue += revenue; t.netProfit += netProfit; t.drawnGross += drawGross; t.drawnNet += drawNet;
   t.vat += vatPayable; t.corpTax += corpTax; t.divTax += divTax; t.duty += dutyPaid; t.months += 1;
+  // T6 §5.1 / §11.3: the whole life of the business (beyond HIST_MAX) for the end summary — bookkeeping only
+  if (netProfit > 0) t.profitMonths = (t.profitMonths || 0) + 1; else t.lossMonths = (t.lossMonths || 0) + 1;
+  if (!t.worst || netProfit < t.worst.np) t.worst = { np: netProfit, m: b.month };
   const be = breakEven(b);
   const grossMargin = revenue ? grossProfit / revenue : 0, netMargin = revenue ? netProfit / revenue : 0;
   const report = {

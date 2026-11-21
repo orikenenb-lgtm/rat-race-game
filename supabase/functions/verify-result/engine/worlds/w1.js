@@ -57,7 +57,7 @@ export default {
       expenses: [['שכירות', 2900], ['רכב', 1200], ['אוכל ושוטף', 2700], ['החזר כרטיס אשראי', 600]] },
     { id: 'dev', gender: 'm', age: 29, family: { partner: 'together', kids: 0 }, name: 'מתכנת', icon: 'laptop', maxMonths: 66, stars: { t2: 45, t3: 36 }, desc: 'מרוויח יפה — ומוציא יפה. הרבה מזומן לקנות, אבל קו סיום רחוק.', salary: 22000, cash: 30000,
       expenses: [['משכנתא', 7500], ['ליסינג', 2800], ['אוכל ומסעדות', 5200], ['מנויים ובילויים', 2300], ['הלוואת רכב', 1200]] },
-    { id: 'doctor', gender: 'f', age: 35, family: { partner: 'married', kids: 2 }, name: 'רופאה', icon: 'stethoscope', maxMonths: 76, stars: { t2: 53, t3: 38 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 45000,
+    { id: 'doctor', gender: 'f', age: 35, family: { partner: 'married', kids: 2 }, name: 'רופאה', icon: 'stethoscope', maxMonths: 76, maxMonths4: 82, stars: { t2: 53, t3: 38 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 45000,
       expenses: [['משכנתא', 11000], ['רכב יוקרה', 3800], ['אוכל ומסעדות', 6000], ['בית ספר פרטי', 3500], ['הלוואות לימודים', 2400]] },
   ],
 

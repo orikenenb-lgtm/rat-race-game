@@ -26,6 +26,7 @@ function randomChoice(ev, r, n) {
 }
 /** Play one turn with a decision function. Returns {sig, end}. */
 function turn(st, decide) {
+  if (st.pending) { let ev0 = E.currentEvent(st); let k = 0; while (ev0 && !st.over) { const [id, p] = decide(ev0, k); ev0 = E.choose(st, ev0, id, p).event; k++; } if (st.over) return { sig: 'over', end: st.result }; } // T4: the tutorial intro card
   const roll = E.rollDice(st);
   let ev = E.landing(st);
   // the K tile shows YOUR business (decision-dependent text, same draws); T3: a life card may be substituted / a car repair swapped
@@ -168,6 +169,7 @@ for (const w of E.WORLDS) {
         if (r() < 0.05 && st.loans) E.repayLoan(st);
         if (!st.over && r() < 0.05 && st.credit) E.payCredit(st);
         if (st.over) break;
+        if (st.pending) { let ev = E.currentEvent(st); let k = 0; while (ev && !st.over) { const [id, p] = randomChoice(ev, r, k); ev = E.choose(st, ev, id, p).event; k++; } if (st.over) break; } // T4: the tutorial intro card opens the game
         const roll = E.rollDice(st);
         assert.ok(roll.die >= 2 && roll.die <= 12 && roll.dice.length === 2 && roll.dice[0] + roll.dice[1] === roll.die && roll.dice.every((d) => d >= 1 && d <= 6));
         assert.equal(roll.steps.length, roll.die);
@@ -307,10 +309,10 @@ test('checkEnd: win / time-out / bankrupt results are complete', () => {
   assert.ok(endings.bankrupt > 0, 'bankruptcy should be reachable by random play');
 });
 
-test('tutorial (free only): first roll lands on a deal = the starter deal (no loan needed), no crisis in 3 turns, RNG not shifted', () => {
+test('tutorial (free only, rules 3 = the v3 tutorial; rules 4: tests/t4_engine.test.mjs): first roll lands on a deal = the starter deal (no loan needed), no crisis in 3 turns, RNG not shifted', () => {
   for (const w of E.WORLDS) for (const ch of w.characters) for (const seed of [1234, 77, 9001]) {
-    const a = E.createGame({ worldId: w.id, charId: ch.id, seed, tutorial: true });
-    const b = E.createGame({ worldId: w.id, charId: ch.id, seed });
+    const a = E.createGame({ worldId: w.id, charId: ch.id, seed, tutorial: true, rules: 3 });
+    const b = E.createGame({ worldId: w.id, charId: ch.id, seed, rules: 3 });
     const ra = E.rollDice(a); E.rollDice(b);
     const ev = E.landing(a);
     assert.equal(ev.type, 'deal', `${w.id}/${ch.id}: tutorial first card is ${ev.type}`);
@@ -607,7 +609,7 @@ test('two dice: both drawn every roll (also in the tutorial), doubles give a sma
     assert.ok(r.dice[0] >= 1 && r.dice[0] <= 6 && r.dice[1] >= 1 && r.dice[1] <= 6 && r.die === r.dice[0] + r.dice[1]);
     assert.deepEqual(st.lastRoll.dice, r.dice);
     if (r.dice[0] === r.dice[1]) { doubles++; assert.ok(r.double && r.news.some((n) => n.kind === 'double')); if (r.double.kind === 'energy') assert.ok(st.life.energy >= Math.min(100, e0)); else assert.equal(st.life.peek, true); } else assert.equal(r.double, null);
-    const t = E.createGame({ worldId: 'w1', seed, tutorial: true }); E.rollDice(t); assert.equal(t.rng.dice, st.rng.dice, 'tutorial consumes both dice');
+    const t = E.createGame({ worldId: 'w1', seed, tutorial: true }); E.choose(t, null, 'skip'); E.rollDice(t); assert.equal(t.rng.dice, st.rng.dice, 'tutorial consumes both dice');
   }
   assert.ok(doubles > 25 && doubles < 80, 'about 1 in 6 rolls is a double: ' + doubles);
   for (const w of E.WORLDS) { const b = E.boardInfo(w.id); assert.equal(b.length, 40); assert.deepEqual(b.corners, [0, 10, 20, 30]); assert.ok(b.every((t) => t.type && t.color && t.icon && t.name)); }
@@ -625,6 +627,7 @@ test('negotiation: the seller\'s answer is sealed with the card; offering never 
       if (off) {
         tried++;
         const res = E.choose(a, ea, 'offer:10');
+        if (res.rival && res.rival.lost) { tried--; ea = null; eb = null; b.pending = null; b.phase = 'roll'; continue; } // T6: another investor closed first (the offer is not evaluated)
         assert.equal(res.negotiation.accepted, a.pending ? true : false);
         if (res.negotiation.accepted) { acc++; assert.ok(res.event && !res.event.options.some((o) => o.kind === 'offer') && res.event.data.negotiated.pct === 10); assert.ok(res.event.data.cost < eb.data.cost); ea = res.event; } else ea = null;
         assert.equal(res.negotiation.accepted, b.pending.negR < off.chance, 'same answer for everyone with this card');

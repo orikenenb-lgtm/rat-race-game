@@ -2,6 +2,34 @@
 // A policy never reads st.* directly: it reads E.publicView(st) (metrics + the described event) plus static world data and the
 // js/systems tables. Actions (setFocus, moveSavings, takeLoan…) are applied to the real state by the caller.
 import * as E from '../js/engine.js';
+import { ARCHETYPES, ARCH_V, ARCH_API, ARCH_IDS } from '../js/systems/archetypes.js';
+// T6 §2.3: the four archetype policies live in js/systems/archetypes.js (pure, browser-importable, publicView only); re-exported here.
+export { ARCHETYPES, ARCH_V, ARCH_API, ARCH_IDS };
+/** Apply one archetype between-rolls action through the public engine API (the same mapping as js/ghost-worker.js). */
+export function applyArchAction(st, a) {
+  if (!Array.isArray(a) || st.over) return;
+  switch (a[0]) {
+    case 'loan': E.takeLoan(st, a[1] || undefined); break;
+    case 'repay': E.repayLoan(st, a[1] || undefined); break;
+    case 'payCredit': E.payCredit(st); break;
+    case 'plan': E.setPlan(st, a[1]); break;
+    case 'focus': E.setFocus(st, a[1], a[2] ?? 0); break;
+    case 'save': E.moveSavings(st, a[1]); break;
+    case 'auto': E.setAutoInvest(st, a[1]); break;
+    case 'invest': E.invest(st, a[1], a[2]); break;
+    default: break;
+  }
+}
+const TABLES = { dd: E.DD, cycle: E.CY, focus: E.FC, rivals: E.RIVALS };
+/** A tools/sim.mjs policy (decide(st, ev, ctx) → [id, params]; between(st, ctx)) driving an archetype from the public view only. */
+export function archPolicy(id, quiz) {
+  const A = ARCHETYPES[id];
+  return {
+    mentor: 'hint', quiz, arch: id,
+    decide(st, ev, ctx) { const r = A.decide(E.publicView(st, { freeze: false, event: ev }), { rnd: ctx.r, n: ctx.n, tables: TABLES }); return r ? [r.id, r.params] : [ev.options.find((o) => o.enabled).id]; },
+    between(st, ctx) { for (const a of A.between(E.publicView(st, { freeze: false }), { rnd: ctx && ctx.r, n: 0, tables: TABLES }) || []) applyArchAction(st, a); },
+  };
+}
 
 const has = (ev, id) => ev.options.find((o) => o.id === id && o.enabled);
 export const firstEnabled = (ev, ids) => ids.find((id) => has(ev, id));

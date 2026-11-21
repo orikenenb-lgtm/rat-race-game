@@ -1042,3 +1042,33 @@ New sim switches: `--rivals` (report G6, G9 and lost-deal breakdown by tier and 
 - **P0:** S1–S8 (deal competition + its UI, logging data, recap, ghosts in summary and panel), S9 rewind core (end-screen and in-game entry points), S10, the V3 client fix.
 - **P1:** S11 group reference lines; lobby "last game" rewind entry; timeline backfill for migrated saves; the passed-deals recap.
 - **P2:** rivals variant M (shared listings, stream `listing`, action `B`); personas in the 3D city; `replayFrom` snapshot cache; practising a closed daily (RS§5.1 V5); aligning deal-competition personas with their ghosts.
+
+## Implementation notes — ENGINE part (engine lane, 2026-11-22)
+Files: `js/engine.js`, new `js/systems/rivals.js`, `js/systems/recap.js`, `js/systems/archetypes.js` (the director moved the policies
+here instead of `js/rivals/policies.js` so the browser worker can import them from the engine lane's folder), `js/finance/business.js`
+(totals), `tools/policies.mjs` (re-export + `archPolicy`), `tools/sim.mjs` (archetypes via the adapter), `verify_core.js` (`CODES` += K, W, X,
+exported), re-pin. Tests: new `tests/t6_engine.test.mjs` (AC-1…14, 16, 30, recap, ghost worker with the real module); `tests/t2.test.mjs`
+T8 scramble / key scan extended (`close`, `taker`, unrevealed `truth`), T9 accepts the rival branch.
+1. **Path A**: competition is part of rules 4 (save 4). Draws: 4 per deal / mystery landing (also history), none under rules 3; the
+   tutorial deal and starter cards get no `p.rv`. `pub.cfClaim` = the claimed cf exactly as printed (`assetCf` of the card at the world's
+   public rate / dollar / cycle — no player term), so AC-6 holds.
+2. **Interest line for n = 0** is shown too (`data.rivals` exists on every competed card); `data.rivals.chip` is the §14.3 chip text.
+   `o.rivalRisk` only when n ≥ 1. The lost panel data is `out.rival = {lost, by:{id, icon, name, label, g}, how, text, sub, button}`.
+3. **Evaluator**: the hazard multiplies the whole T2 offer formula (incl. its refusal term), so n = 0 is T2 exactly; inspect =
+   `(1 − h)(base + EVI) − stepCost`. `impactFor` branches carry `lost: true` on the rival branch; offers: `[rival, accepted, refused]`.
+4. **Luck** `rival`: logged in `luckLog` on a loss or when |amount| ≥ 0.25 E (spec §3.7). `luckLog` k: the deciding action (CUR_K);
+   friend / angel luck links to the stored decision index.
+5. **Timeline**: a start row at month 1 (so the graph and `alt` have a start), then one row per payday; at the end the final state
+   replaces the row of the same month (or is appended). Halving keeps the first row. Migrated saves: empty `tl` from the load month.
+6. **Recap** in `js/systems/recap.js` (pure). Business facts include sold businesses (`st.bizPast`). Crisis responses use forced-loan /
+   sale marks, plan and frugal/debt focus decisions and the story memory lines (loans taken / repaid are not logged with a month, so they
+   are not listed). Suggestion rule 1 uses `gap ≥ 1` (months of expenses) as the "|v| ≥ 1 E" size of a weak decision.
+7. **W / X**: `retire` builds the result directly (`buildEnd`), `continueAfterWin` clears `over/result/pending`. The after-win result's
+   `afterWin.lines` are the §14.9 engine lines (+ cap / broke line).
+8. **Archetypes**: ARCH_API 2. They do not set `quiz` (the worker would then route quizzes to `decide`); the drivers answer quizzes with
+   `quizSkill` (saver 0.8, founder / diversified 0.95, gambler 0.4). Rule-card truths enforced by construction: saver never buys with a
+   loan nor a flagged deal uninspected (passes when it cannot inspect); gambler never inspects and offers 15 % first; diversified's
+   auto-invest = ceil100(40 % of the surplus it sees); founder buys a rent asset only after a non-rent asset / business. Ghost stories
+   are left to their defaults (as P0 says), and the sim adapter does the same.
+9. Not done here (other lanes / later): `--rivals` sim report and the G1–G9 gates (only lost-deal counts were spot-checked: ~1.4 per
+   game for smart-like random play), `tools/balance-t6.md`.

@@ -659,3 +659,73 @@ never draws `story`, never gets a chain, an inbox item or a T3 business — test
   passed its minimum length (a transition may come any month; never the timing).
 * **M2** level-1 inspection range widths come from the CLAIMED cashflow / value (`DD.rangeOf({width, valueWidth})`); only the
   position inside the range is sealed.
+
+## Changes v4 — T4 engine part (opening, learning mode, dreams, lesson context, practice) — engine contract
+Spec: `docs/next-level/specs/T4-opening-modes-library.md` §13 + CR-E1…E6 (implementation notes at its end). Same save version 4;
+`v4Defaults` fills every new field (idempotent, no randomness). Nothing here changes money except the intro's glitch choice and the
+sized tutorial deal (rules 4 tutorial games only).
+* **CR-E1** `createGame({learn, dream, tutorialFree, mentor})` — free mode only (`st.learn`, `st.dream`, `st.tutorialFree`; ranked /
+  history ignore them). `rollCost(st)`: ranked 0 · `st.learn` 0 · `st.tutorialFree && st.turn < TUTORIAL_FREE_ROLLS` (export, 10) 0 · else 1.
+  `replayConfig` adds `learn: true`, `dream: id`, `tutorialFree: true` when set (and T6 `self`).
+* **CR-E2** intro card `type:'intro'` (w1, rules 4, `tutorial`): the pending event of a new game (`k0: 0`, no draw). `ev.data.step`
+  salary → glitch → result; options `next`/`skip` · `fix:pay`/`fix:inst`/`fix:diy` (no primary, `data.note`) · `go`. Money: pay = −cost,
+  inst = a 3-month line `תשלומים: מכונת כביסה` (`until = month + 2`), diy = −diy and −10 🔋. `st.intro = {step, glitch:{cost, inst, fee, diy},
+  choice, before, goal}`; no decision record, no log entry. Goal chain `metrics().nextGoal = {id, title, value, target, unit, done:false}`
+  (cushion → asset → fund → done; checked after choose / moveSavings / takeLoan and at payday; news `{kind:'goal'}` with the spec texts).
+  Tutorial deal (rules 4): eligible iff w1 && not drawn && `floor500(cash + savings − E) ∈ [1000, 5000]`; card `עגלת הקפה של השכן`
+  (k biz, cf = round10(down × 0.09), `tutorialDeal`, starter-like: no dd, no offers, no competition, reality line "🎲 מספר של משחק…");
+  the dice remap fires on the first roll at which it is eligible (both dice still drawn); a payday that makes it eligible after turn 0 says
+  `השכן מוכר עגלת קפה — שווה לבדוק בהטלה הבאה.` Rules 3 keeps the v3 starter deal (old saves).
+* **CR-E3** `practiceDue(st, memo)` = `practice.js pickPractice(st, memo, expensesOf(st), fmtM)` (free only, no RNG); `answerPractice(st, qid, idx)`
+  guards (not free / history, unknown or answered qid, not between rolls → `{ok:false}`), logs **`['K', qid, idx]`**, returns
+  `recordAnswer(...)` (changes only `st.practice`, `st.dq.transfer`, `st.actions`). `replay` case `K`; verifier `CODES` has `K`;
+  `checkEnd().learning.transfer`.
+* **CR-E4** `lesson()` writes `st.lessonCtx[id] = {m, ev, num}` and pushes `{id, title, text, ctx:{month, worldId, event, num}}`;
+  `event` = the open card's name, `יום המשכורת` / `סוף שנה` for payday / yearly lessons; `num = {label, value}` (value a number:
+  `tax_brackets` / `marginal_overtime` a fraction ≤ 1, `inflation` %, counts for `diversification` / `index_fund`, else ₪) or null.
+* **CR-E5** `metrics().dream` / `checkEnd().dream` = `{id, icon, name, line, missions:[{id, title, progress, done, doneMonth}], done}`;
+  new completions in `out.dream = [{id, title}]` (choose, payday, moveSavings, takeLoan, payCredit). `js/systems/dreams.js` (`E.DREAMS`,
+  `E.DR`). Same seed + log with any dream ⇒ identical metrics (minus `dream`), end result and RNG (tested).
+* **CR-E6** `time_in_market`: index units held through a −8 % month and still held 3 paydays later with no index sale between;
+  `benchmark`: added at the end of every history game (`res.lessons`, `st.lessons`). N18 was already done.
+* `metrics().learn`, `checkEnd().learn` (learning games).
+
+## Changes v4 — T6 engine part (deal competition, logging data, recap, continue after win) — engine contract
+Spec: `docs/next-level/specs/T6-rivals-summary.md` (implementation notes at its end). Path A: part of rules 4, save version 4.
+* **Stream 12 `rival`**: exactly 4 draws on every deal and every mystery landing under rules 4 (history included), whatever the card
+  is and whatever the player does; rules 3 never. `listing` stays at 0. `js/systems/rivals.js` (`E.RV`, `E.RIVALS` = the four personas).
+* **Competition** on asset deals with dd (not golden-less starter / tutorial cards): `p.rv = {n, who, steps, close, taker}` — `n` / `who`
+  from the card's public data only (claimed cf as printed, down, kind / rent, golden, warn flags → tier → eligible personas), `close` /
+  `taker` sealed. `ev.data.rivals = {n, who:[{id, icon, name, label, g}], steps, hazardNext, text, note, chip}`; every delay option
+  (`inspect:*`, `offer:*`) gets `o.rivalRisk = hazardNext` when n ≥ 1. A delay step that reaches `close` → `out.rival = {lost, by, how,
+  text, sub, button}`, news `{kind:'rival'}`, the card closes; the player paid only for the step (inspection result still shown in
+  `out.mentor`; a lost offer is not evaluated). Buying is never a delay step. `st.rivalDeals` (≤ 12; truth sealed until the reveal at the
+  first payday with `month ≥ m + 6`, news `{kind:'rival', text, by, name}`), `st.stats.rivalLost`, `metrics().rivals = {lost, deals}`.
+  Evaluator: `U(inspect) = (1 − h)(base + EVI) − stepCost`, `U(offer) = (1 − h) · U_T2`, reason key `rival`; `impactFor` adds the rival
+  branch (inspect 2 branches, offer 3; p sums to 1; `lost: true` on the rival branch); hints re-count after a survived step; luck part
+  `rival` (expected 0). `_dev.noRival` (sim ablation, refused in ranked) keeps the draws.
+* **Logging data** (outcome-neutral): `st.tl` (start row + one row per payday, columns m nw liq debt pas exp pg hap en, ₪100 units for
+  money, cap 240 by halving; the final state replaces / appends the last row at the end; not in `summaryForServer`), `st.marks`
+  (`[m, kind, amount, k, label]`, cap 40), `st.dq.luckLog` (`[m, part, amount, k]`, cap 40), decision records carry `k`, `k0` (card
+  start; `p.k0` on every pending) and `a` (bought asset id). `E.decisionPoints(st)` → `[{k0, k, m, t, type, c, o, v}]` (records without
+  `k0` are completed by one replay of the log). Business totals `profitMonths / lossMonths / worst {np, m}`; sold businesses are kept in
+  `st.bizPast` for the summary.
+* **`checkEnd().recap`** (`js/systems/recap.js`, built once at the end): `{v, dims:{speed, resilience, decisions, happiness, business}
+  (each {facts, headline, short, id, icon, title, orderText}), graph:{tl, recessions, lowCushion, notes, alt}, grid, crisis, suggestion,
+  decisions, rivalDeals, happiness}`. `E.DIM_META`.
+* **Continue after win** `continueAfterWin(st)` (`['W']`, free incl. learn, not history, once) and `retire(st)` (`['X']`): after the win
+  the goal no longer ends the game; it ends on bankruptcy (`lost`, `afterWinBroke`), retire (`retired`, `retired`) or 120 months
+  (`retired`, `cap`); the result keeps the win's stars and adds `afterWin {winMonths, winStars, months, nwDelta, passiveDelta,
+  happinessDelta, stillFree, reason, title, lines}`; no achievements while `st.afterWin`; `metrics().afterWin = {m, sinceMonths}`.
+  Ranked logs with K / W / X fail replay.
+* `createGame({self})` (ghost games; outcome-neutral), `E.OUTCOME_REV` (= 1, bump with every outcome-changing release; part of the
+  ghost cache key — add to the re-pin checklist).
+* **Archetypes** (`js/systems/archetypes.js`, ARCH_API 2, ARCH_V 1): pure, no imports, decide from `publicView` only;
+  `tools/policies.mjs` re-exports them and `archPolicy(id)` adapts them for `tools/sim.mjs`. Ghost drivers answer quizzes themselves
+  (`P.quizSkill`).
+
+### Balance decisions (director, rules 4 only; tools/balance-report.md)
+* (a) per-character limits for rules 4: `maxMonths4` w1 doctor 82 (was 76), w4 engineer 69 (was 60). `starThresholds(world, charId,
+  rules = 4)`; rules 3 keeps the old limits (ranked games before `RULES4_FROM`). ★★ / ★★★ thresholds unchanged.
+* (b) `CH.TRIGGER` sealed trigger odds of the crisis and career chains lowered (crisis: recession signal 0.4, crisis tile 0.15,
+  index drop 0.4; career: warn 0.35, degree 0.4, promo 0.25); other chains unchanged.

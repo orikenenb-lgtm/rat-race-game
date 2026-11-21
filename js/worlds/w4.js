@@ -67,7 +67,7 @@ export default {
   characters: [
     { id: 'founder', gender: 'f', age: 34, family: { partner: 'married', kids: 1 }, name: 'יזמית אחרי אקזיט', icon: 'rocket', maxMonths: 70, stars: { t2: 44, t3: 33 }, desc: 'מכרת את החברה שלך. הרבה מזומן, כמעט בלי משכורת — הכסף צריך לעבוד.', salary: 12000, cash: 3200000,
       expenses: [['משכנתא', 12000], ['רכב', 3500], ['אוכל ובילויים', 6000], ['ילדים וחוגים', 3500]] },
-    { id: 'engineer', gender: 'm', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 60, stars: { t2: 45, t3: 37 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
+    { id: 'engineer', gender: 'm', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 60, maxMonths4: 69, stars: { t2: 45, t3: 37 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
       expenses: [['משכנתא', 12000], ['שני רכבים', 5000], ['אוכל ובילויים', 8000], ['גן ובית ספר', 7000]] },
     { id: 'social', gender: 'm', age: 28, family: { partner: 'together', kids: 0 }, name: 'יזם חברתי', icon: 'heart', maxMonths: 84, stars: { t2: 52, t3: 40 }, desc: 'פחות כסף, אבל כבר יש לך השפעה ורשת של אנשים טובים.', salary: 22000, cash: 1300000, impact: 20,
       expenses: [['שכירות', 7000], ['רכב', 2000], ['אוכל ושוטף', 4500], ['ביטוחים', 1500]] },

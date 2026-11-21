@@ -1002,3 +1002,25 @@ Files: `js/lobby.js`, `css/lobby.css`, `js/progress.js`, `js/library.js`, `js/en
   - Nit 1 tour step 1 → title `💰 מזומן ותזרים`.
   - Nit 2 `game.js resolveCard`: move `let closedRes = null;` up next to `let cur = ev, working = false;`.
   - These sit next to the in-game UI lane's open hunks, so they were not touched here.
+
+## Implementation notes — ENGINE part (engine lane, 2026-11-22)
+Files: `js/engine.js`, new `js/systems/dreams.js`, `js/practice.js` imported as is (T4 owns it), `supabase/functions/verify-result/verify_core.js`
+(`CODES` += `K`, exported), re-pin. Tests: new `tests/t4_engine.test.mjs` (T-E1…T-E9); `tests/engine.test.mjs` / `tests/t2.test.mjs` updated
+for the intro card (the v3 tutorial test now runs with `rules: 3`). Contract summary in `docs/ENGINE.md` "Changes v4 — T4 engine part".
+1. **CR-E1** as specified, including the review M-2 update: `rollCost` is 0 only for `st.tutorialFree && st.turn < 10`; a replayed tutorial
+   pays ⚡. `learn` / `dream` / `tutorialFree` are honoured in mode `free` only; `replayConfig` carries each only when set.
+2. **CR-E2** intro card only in **rules 4** w1 tutorial games (a rules-3 game is the exact v3 game). The card's options carry `kind:'intro'`
+   and `effects:{cash, monthly, months, energy, happy}` (+ `fee` on `fix:inst`); `skip` has `link: true`. Beat 3 adds `data.goalHeading`.
+   `decisionRecord` returns null and nothing is logged in `st.log` for the intro. `goalTick` also runs after `takeLoan`.
+3. **E-5** the tutorial deal is a w1 rules-4 feature (other worlds never get it); it is drawn on the landing where it is eligible (the
+   dice remap targets that landing). It is starter-like: no dd, no inspection, no negotiation, no deal competition.
+4. **CR-E3** action `K`; `answerPractice` also refuses an out-of-range answer index (`PR.checkAnswer` null). `practiceDue` returns null
+   in ranked / history / over games and while the intro is open (practice.js rule).
+5. **CR-E4** `num.value` is always a number (or `num` is null); `tax_brackets` / `marginal_overtime` are fractions (≤ 1 → the lobby
+   multiplies by 100), `inflation` is last year's published %, counts for `diversification` / `index_fund`, ₪ otherwise.
+6. **CR-E5** `metrics().dream` and `checkEnd().dream` share one block (`DR.dreamBlock`); `out.dream` carries new completions and the
+   first one sets `out.mentor` (S-D17) when nothing else did. Dreams never tick while `st.afterWin`.
+7. **CR-E6** `time_in_market` (the hold is recorded at the −8 % month, `L.idxSells` counts index sales) and `benchmark` (every history
+   end). `life.js` is untouched (its lesson-count comment belongs to the content lane; the count is now 82 in `E.LESSONS`).
+8. Verified: AC-T6 guarantee (4 characters × 3 choices × 20 seeds), AC-D2 (5 dream variants, same log ⇒ same metrics / end / RNG),
+   AC-P1…P4, replay with `K`, ranked `K` fails replay, v3 fixtures and pre-T4 v4 saves load.

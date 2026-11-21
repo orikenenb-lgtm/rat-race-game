@@ -257,6 +257,11 @@ export const CHAINS = {
     },
   },
 };
+/**
+ * [TUNE] sealed trigger odds of the two trigger chains (T6 balance decision b, director: start in ≤ 80 % (career) / ≤ 85 % (crisis) of
+ * games, the other chains unchanged). Each is compared with this payday's story seal (st.story.r[0] crisis, r[1] career).
+ */
+export const TRIGGER = { crisisSignal: 0.4, crisisTile: 0.15, crisisIndex: 0.4, careerWarn: 0.35, careerDegree: 0.4, careerPromo: 0.25 };
 export const CHAIN_IDS = Object.keys(CHAINS);
 
 /** The standalone life cards' substitution order (§3.5) — the first eligible one that differs from the drawn card is shown. */

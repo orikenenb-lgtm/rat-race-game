@@ -19,7 +19,20 @@ import * as DD from './systems/dd.js';
 import * as CY from './systems/cycle.js';
 import { RULES4_FROM, rulesForDay, dayOf } from './systems/rules.js';
 import * as CH from './systems/chains.js';
-export { MN, FC, DD, CY, CH };
+import * as RV from './systems/rivals.js';
+import * as DR from './systems/dreams.js';
+import { recapOf, DIM_META } from './systems/recap.js';
+import * as PR from './practice.js';
+export { MN, FC, DD, CY, CH, RV, DR };
+/** T6 §1: the four rival personas (the UI and the ghost policies read this table). */
+export const RIVALS = RV.ARCH;
+/** T4 E-7: the four dreams (texts exactly spec §6.1). */
+export const DREAMS = DR.DREAMS;
+export { DIM_META };
+/** T6 §2.6: bumped with every outcome-changing engine release (part of the ghost cache key; add to the re-pin checklist). */
+export const OUTCOME_REV = 1;
+/** T4 E-2: the first N rolls of a brand-new player's first game cost no ⚡ (st.tutorialFree). */
+export const TUTORIAL_FREE_ROLLS = 10;
 /** CR-29: the rule set a ranked game is created (and verified) with, from its date key — shared with verify_core.js rulesFor. */
 export { RULES4_FROM, rulesForDay, dayOf as rulesDayOf };
 export const cyclePath = CY.cyclePath;
@@ -39,7 +52,13 @@ export { WORLDS, getWorld, PLANS, slip as payslipFor };
 /** Scenarios for מכונת הזמן ([] until js/data/real.js is available). */
 export function scenarioList() { return histScenarios(); }
 /** ⚡ cost of one roll: ranked modes are free (the lobby lead's js/energy.js owns the real-time limit). */
-export function rollCost(st) { return ['daily', 'weekly', 'challenge'].includes(st && st.mode) ? 0 : 1; }
+export function rollCost(st) {
+  if (!st) return 1;
+  if (['daily', 'weekly', 'challenge'].includes(st.mode)) return 0;
+  if (st.learn) return 0;                                                          // T4 learning mode: no ⚡
+  if (st.tutorialFree && (st.turn || 0) < TUTORIAL_FREE_ROLLS) return 0;           // T4 review M-2: a new player's first 10 rolls
+  return 1;
+}
 
 /* ============================================================ formatting (exported for the UI) */
 const groups = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -78,11 +97,13 @@ export function createGame(o = {}) {
   const w = getWorld(history ? 'h' : (o.worldId || 'w1'));
   const ch = w.characters.find((c) => c.id === o.charId) || w.characters[0];
   const seed = ((o.seed ?? 1) >>> 0) || 1;
+  const mode0 = history ? 'history' : (o.mode || 'free');
+  const rules0 = RANKED_MODES.includes(mode0) && o.dateKey != null ? rulesForDay(o.dateKey) : (o.rules === 3 ? 3 : 4);
   let scen = null;
   if (history) { if (!hasRealData()) throw new Error('history data not loaded'); scen = scenarioById(o.scenarioId); }
   const st = {
     v: SAVE_VERSION, worldId: w.id, charId: ch.id, charName: ch.name, gender: o.gender === 'f' || o.gender === 'm' ? o.gender : (ch.gender || 'm'), seed, mode: history ? 'history' : (o.mode || 'free'),
-    maxMonths: history ? scen.months : (o.maxMonths ?? ch.maxMonths ?? w.maxMonths),
+    maxMonths: history ? scen.months : (o.maxMonths ?? charMaxMonths(w, ch, rules0)),
     tutorial: !!o.tutorial && (o.mode || 'free') === 'free', bailout: !!o.bailout,
     rng: makeStreams(seed),
     phase: 'roll', pos: 0, month: 1, turn: 0, nextId: 1, nextEventId: 1,
@@ -118,18 +139,36 @@ export function createGame(o = {}) {
   if (history) initHistory(st, scen);
   // T2: rules gate, mentor level, dev-only ablation switches (sim), the economic cycle (2 'cycle' draws, rules 4 only)
   // CR-29: a ranked game takes its rules from its date key exactly as the verifier will (js/systems/rules.js = verify_core rulesFor)
-  st.rules = RANKED_MODES.includes(st.mode) && o.dateKey != null ? rulesForDay(o.dateKey) : (o.rules === 3 ? 3 : 4);
+  st.rules = rules0;
   if (RANKED_MODES.includes(st.mode) && o.dateKey != null) st.dateKey = String(o.dateKey); // kept for migration / replayConfig (review B1)
   st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, mentor: o.mentor, worldId: st.worldId });
-  if (o._dev && (o._dev.noCycle || o._dev.noDD)) {
+  if (o._dev && (o._dev.noCycle || o._dev.noDD || o._dev.noRival)) {
     if (RANKED_MODES.includes(st.mode)) throw new Error('dev flags are not allowed in ranked modes');
     st._dev = { noCycle: !!o._dev.noCycle, noDD: !!o._dev.noDD };
+    if (o._dev.noRival) st._dev.noRival = true;
   }
+  // T4 E-1 (outcome-neutral inputs): learning mode, the dream, the free tutorial rolls — free mode only
+  const free = st.mode === 'free';
+  st.learn = free && !!o.learn;
+  st.dream = free && o.dream ? DR.newDream(o.dream) : null;
+  st.tutorialFree = free && !!o.tutorialFree;
+  // T6 §2.1: a ghost game names its own archetype (the persona slot equal to it becomes "another investor"; outcome-neutral)
+  st.self = RV.ARCH[o.self] ? o.self : null;
   st.econ = null;
   if (R4(st)) { const r1 = next(st.rng, 'cycle'), r2 = next(st.rng, 'cycle'); if (!history && !(st._dev && st._dev.noCycle)) st.econ = CY.initEcon(r1, r2, st.worldId); }
   v4Defaults(st);
+  // T4 E-3: the tutorial intro card (w1, rules 4, free) is the first pending event — no draw
+  if (st.tutorial && st.worldId === 'w1' && R4(st)) {
+    const E0 = expensesOf(st); const cost = clamp(r100(0.12 * E0), 600, 3500); const inst = Math.ceil(cost * 1.05 / 3 / 10) * 10;
+    st.intro = { step: 'salary', glitch: { cost, inst, fee: 3 * inst - cost, diy: r100(0.3 * cost) }, choice: null, before: null, goal: null };
+    st.pending = { id: st.nextEventId++, type: 'intro', tile: null, pos: st.pos, month: st.month, k0: 0 };
+    st.phase = 'event';
+  }
+  tlPush(st, true); // T6 §4.1: the starting row (month 1), then one row per payday
   return st;
 }
+/** T6 balance decision (a): the time limit of a character — rules 4 may give a character a gentler limit (`maxMonths4`). */
+function charMaxMonths(w, ch, rules) { return (rules >= 4 && ch && ch.maxMonths4) || (ch && ch.maxMonths) || w.maxMonths; }
 
 /**
  * Every field a v4 save must have, filled only where missing (idempotent; run by createGame, migrateV3 and every load).
@@ -157,6 +196,25 @@ function v4Defaults(st) {
   for (const k of ['inspections', 'inspectSpent', 'ddRepairs', 'ddAvoided', 'ddPassed']) if (st.stats[k] == null) st.stats[k] = 0;
   if (D.luck.story == null) D.luck.story = 0;
   ensureStoryState(st); // T3: story state, expense tags, the v3 friend loan → the friend chain, business T3 upgrade (rules 4)
+  // T4 E-11 (no randomness; outcome-neutral unless chosen in createGame)
+  if (st.learn === undefined) st.learn = false;
+  if (st.dream === undefined) st.dream = null;
+  if (st.intro === undefined) st.intro = null;
+  if (st.tutorialFree === undefined) st.tutorialFree = false;
+  if (!st.practice || typeof st.practice !== 'object') st.practice = { answered: {} };
+  if (!st.practice.answered) st.practice.answered = {};
+  if (!D.transfer) D.transfer = {};
+  if (!st.lessonCtx) st.lessonCtx = {};
+  // T6 §10.1
+  if (!st.tl) st.tl = { v: 1, step: 1, from: st.month, m: [], nw: [], liq: [], debt: [], pas: [], exp: [], pg: [], hap: [], en: [] };
+  if (!Array.isArray(st.marks)) st.marks = [];
+  if (!Array.isArray(D.luckLog)) D.luckLog = [];
+  if (D.luck.rival == null) D.luck.rival = 0;
+  if (!Array.isArray(st.rivalDeals)) st.rivalDeals = [];
+  if (st.stats.rivalLost == null) st.stats.rivalLost = 0;
+  if (st.afterWin === undefined) st.afterWin = null;
+  if (st.self === undefined) st.self = null;
+  if (!Array.isArray(st.bizPast)) st.bizPast = [];
   return st;
 }
 
@@ -526,6 +584,13 @@ export function metrics(st) {
   const cashflow = salary + sideIncome + activeBiz + passive + extra - expenses;
   const netWorth = netWorthOf(st);
   const g = w.goal;
+  const { goalProgress, goalText, goalParts } = goalOf(st, netWorth, passive, expenses);
+  const incomeLines = [{ label: ps.jobless ? 'דמי אבטלה' : st.salaryUsd ? `משכורת נטו (ברוטו $${groups(Math.round(st.life.grossUsd * PLANS[st.life.plan].grossMult))})` : 'משכורת נטו', amount: salary, id: 'salary' }];
+  return metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, activeBiz, cashflow, netWorth, goalProgress, goalText, goalParts, incomeLines);
+}
+/** Goal progress (ranking-safe), the goal text and parts — shared by metrics() and the timeline. */
+function goalOf(st, netWorth, passive, expenses) {
+  const w = W(st); const g = w.goal; const L0 = st.life;
   let goalProgress, goalText, goalParts;
   const holdCap = (x) => (x >= 1 && (L0.goalStreak || 0) < GOAL_HOLD ? 0.99 + 0.003 * (L0.goalStreak || 0) : x); // 1 only once the goal held
   if (g.type === 'benchmark') {
@@ -552,7 +617,9 @@ export function metrics(st) {
     }
   }
   goalProgress = holdCap(goalProgress);
-  const incomeLines = [{ label: ps.jobless ? 'דמי אבטלה' : st.salaryUsd ? `משכורת נטו (ברוטו $${groups(Math.round(st.life.grossUsd * PLANS[st.life.plan].grossMult))})` : 'משכורת נטו', amount: salary, id: 'salary' }];
+  return { goalProgress, goalText, goalParts };
+}
+function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, activeBiz, cashflow, netWorth, goalProgress, goalText, goalParts, incomeLines) {
   if (sideIncome) incomeLines.push({ label: 'עסק צדדי (משוער)', amount: sideIncome, id: 'side' });
   for (const a of managedOf(st)) if (!a.biz.manager) incomeLines.push({ label: `${a.n} (אתה עובד בו — לא פסיבי)`, amount: a.bizDraw || 0, id: 'biz:a' + a.id, active: true });
   for (const a of st.assets) if (!a.biz || a.biz.manager) incomeLines.push({ label: a.biz ? `${a.n} (עם מנהל — פסיבי)` : a.n, amount: assetCf(st, a), assetId: 'a' + a.id });
@@ -626,6 +693,10 @@ export function metrics(st) {
     loanRoom: Number.isFinite(loanCap(st)) ? Math.max(0, loanCap(st) - st.loans) : null, canBorrow: st.loans + loanUnit(st) <= loanCap(st),
     mentor: mentorBlock(st), focus: focusBlock(st), econ: R4(st) ? CY.econPublic(st.econ, st.month, st.worldId) : null, rules: st.rules || 3,
     ...(T3(st) ? { calendar: calendarOf(st), inbox: { open: st.story.inbox.length, urgent: st.story.inbox.filter((i) => i.due <= st.month + 1).length }, story: { noCar: !!st.story.flags.noCar, area: st.story.flags.area, commute: st.story.flags.commute || 0 } } : {}),
+    // T4 / T6 (presentation only)
+    learn: !!st.learn, nextGoal: nextGoalOf(st), dream: dreamMetrics(st),
+    rivals: { lost: (st.stats && st.stats.rivalLost) || 0, deals: (st.rivalDeals || []).map(rivalPublic) },
+    afterWin: st.afterWin ? { m: st.afterWin.m, sinceMonths: st.month - st.afterWin.m } : null,
   };
 }
 /** T3: this month's temporary extra income (st.incomeExtra, with optional from / until). */
@@ -712,6 +783,7 @@ function newOut() { return { ok: true, effects: [], mentor: null, toast: null, s
 const sound = (out, name) => out.effects.push({ type: 'sound', name });
 function cashFx(out, amount, label, at = 'pawn') { if (Math.round(amount)) out.effects.push({ type: 'cash', amount: Math.round(amount), label: label || sgn(amount), at }); }
 function ach(st, out, type, payload = {}) {
+  if (st.afterWin) return; // T6 §9.1: nothing to farm after the win
   const got = checkAchievements(st, type, { ...payload, m: metrics(st), world: W(st) });
   for (const a of got) {
     if (st.ach.includes(a.id)) continue;
@@ -746,7 +818,9 @@ function ensureCash(st, out, why = '') {
   const unit = autoUnit(st);
   const need = Math.ceil(-st.cash / unit) * unit;
   st.loans += need; st.cash += need; st.stats.autoLoan += need; st.stats.forcedLoans += need; st.stats.autoLoans++;
-  if (st.life) { creditScore(st, BK.CREDIT_DELTAS.forcedLoan); st.life.forcedFlag = true; lesson(st, out, 'forced_loan'); if (T3(st)) st.life.forcedM = st.month; }
+  if (st.life) { creditScore(st, BK.CREDIT_DELTAS.forcedLoan); st.life.forcedFlag = true; lesson(st, out, 'forced_loan', need); if (T3(st)) st.life.forcedM = st.month; }
+  mark(st, 'forced', need, CUR_K, MARK_WHY[why] || '');
+  if (st.dream && st.dream.track) st.dream.track.cleanSince = st.month;
   st.stats.maxLoans = Math.max(st.stats.maxLoans, st.loans);
   if (why === 'crisis') st.flags.crisisLoan = true;
   out.effects.push({ type: 'loan', amount: need, auto: true }); sound(out, 'loss');
@@ -773,7 +847,7 @@ export function rollDice(st) {
   act(st, ['r']);
   // v3: two dice, both always drawn (determinism)
   let a = 1 + Math.floor(next(st.rng, 'dice') * 6), b = 1 + Math.floor(next(st.rng, 'dice') * 6);
-  if (st.tutorial && st.turn === 0) { // tutorial: the very first roll lands on a deal tile (the seeded draws are still consumed)
+  if (st.tutorial && (R4(st) ? tutorialDealOk(st) : st.turn === 0)) { // tutorial: the first roll at which the tutorial deal is eligible lands on a deal tile (rules 3: the very first roll); the seeded draws are still consumed
     const ok = []; for (let d = 2; d <= 12; d++) if (w.tiles[w.board[(st.pos + d) % w.board.length]].type === 'deal') ok.push(d);
     if (ok.length) { const sum = ok[(a + b) % ok.length]; a = Math.max(1, sum - 6); b = sum - a; }
   }
@@ -803,6 +877,10 @@ export function rollDice(st) {
 }
 
 function payday(st, out, step, landed) {
+  const ev0 = LESSON_EV; LESSON_EV = 'יום המשכורת';
+  try { paydayImpl(st, out, step, landed); } finally { LESSON_EV = ev0; }
+}
+function paydayImpl(st, out, step, landed) {
   const w = W(st); const L = st.life; const C = LIFE_CFG;
   const m0 = metrics(st);
   const ps = m0.payslip;
@@ -845,6 +923,7 @@ function payday(st, out, step, landed) {
   out.paydays.push(pd);
   if (landed) st.lastPayday = pd;
   if (burnout) {
+    mark(st, 'burnout', -medical, -1, '');
     out.burnout = { medical, text: mentorLine(st, 'burnout', {}) };
     out.news.push({ kind: 'burnout', text: `נשחקת: חודש בלי משכורת והוצאות רפואיות של ${fmtM(medical)}. התוכנית עברה ל"מנוחה ומשפחה".`, cost: medical });
     out.mentor = out.burnout.text;
@@ -852,7 +931,7 @@ function payday(st, out, step, landed) {
   monthlyLife(st, out, { burnout, cf });
   monthlyIndex(st, out);
   monthlyWorld(st, out);
-  if (R4(st)) { econStep(st, out); focusRollover(st, out); } // T2: 2 'cycle' draws every payday (rules 4), then the monthly focus
+  if (R4(st)) { econStep(st, out); focusRollover(st, out); rivalReveal(st, out); } // T2: 2 'cycle' draws every payday (rules 4), then the monthly focus; T6: lost-deal reveals
   if (T3(st)) storyMonth(st, out, { burnout });
   ensureCash(st, out, 'payday');
   if (st.cash > 0 && L.autoInvest > 0 && st.prices.IDX > 0) {
@@ -887,7 +966,13 @@ function payday(st, out, step, landed) {
   if (L.pension >= Math.max(12 * baseNet(st), 1) && n >= 12) lesson(st, out, 'compound_interest');
   if (L.creditScore < 650) lesson(st, out, 'credit_score');
   if (L.creditScore >= 760) lesson(st, out, 'credit_excellent');
+  // T4 E-8: time in the market — held index units through a −8% month and, 3 paydays later, still hold at least as many (no index sale)
+  if (L.timHold && st.month >= L.timHold.m + 3) { const h = st.holdings.IDX; if (h && h.qty >= L.timHold.qty && (L.idxSells || 0) === L.timHold.sells) lesson(st, out, 'time_in_market'); L.timHold = null; }
+  // T4 presentation-only ticks: the tutorial goal chain, dream missions, the "the neighbour sells a cart" line
+  goalTick(st, out); dreamTickSt(st, out, { payday: true, restPayday: pd.plan === 'rest' && cf >= 0 });
+  if (st.tutorial && st.turn >= 1 && !st.flags.tdHint && tutorialDealOk(st)) { st.flags.tdHint = true; out.mentor = 'השכן מוכר עגלת קפה — שווה לבדוק בהטלה הבאה.'; }
   ach(st, out, 'payday', { cf });
+  tlPush(st); // T6 §4.1: one timeline row at the very end of every payday
 }
 
 /* ---------------------------------------------------------------- T2: economic cycle step + monthly focus rollover (inside payday) */
@@ -906,6 +991,7 @@ function econStep(st, out) {
     for (const a of managedOf(st)) a.biz = BIZ.applyShock(a.biz, r.to === 'rec' ? { id: 'cycle_rec', demand: 1 - CY.MULT.bizShock.rec * amp, months: 4 } : { id: 'cycle_exp', demand: 1 + CY.MULT.bizShock.exp * amp, months: 6 });
   }
   if (r.labelChanged || st.stats.paydays % 3 === 0) out.news.push({ kind: 'econ', text: CY.headline(e.label, st.month), label: e.label, signal: e.signal });
+  if (r.labelChanged && e.label === 'מיתון') mark(st, 'recession', 0, -1, ''); // T6 §4.2: the PUBLIC label, never the sealed phase
   if (r.labelChanged && (e.label === 'מיתון' || e.label === 'צמיחה')) lesson(st, out, 'business_cycle');
 }
 /** The month's focus ends at payday: `none` gives +3 🔋; the agenda pops and its first entry is activated (paid) if possible. */
@@ -992,7 +1078,7 @@ function monthlyLife(st, out, o) {
   // a friend's loan / guarantee resolves
   if (L.friend && st.month >= L.friend.at) {
     const f = L.friend; L.friend = null;
-    addLuck(st, 'friend', f.kind === 'lend' ? (f.ok ? f.amount * 0.4 : -f.amount * 0.6) : (f.ok ? f.amount * 0.35 : -f.amount * 0.65));
+    addLuck(st, 'friend', f.kind === 'lend' ? (f.ok ? f.amount * 0.4 : -f.amount * 0.6) : (f.ok ? f.amount * 0.35 : -f.amount * 0.65), f.k ?? -1);
     if (f.kind === 'lend') {
       if (f.ok) { st.cash += f.amount; cashFx(out, f.amount, '+' + fmtM(f.amount)); out.news.push({ kind: 'lifeNews', text: `החבר החזיר את ההלוואה: ${fmtM(f.amount)}. וגם הזמין אותך לפתיחה של העסק.`, cash: f.amount }); }
       else { L.happiness = clamp(L.happiness - 3, 0, 100); out.news.push({ kind: 'lifeNews', text: `העסק של החבר נסגר. את ${fmtM(f.amount)} כנראה לא תראה שוב.`, cash: 0 }); }
@@ -1006,7 +1092,7 @@ function monthlyLife(st, out, o) {
     const H = st.history; const c = seriesAt('cpiIL', addYm(H.ym, 1));
     if (c) L.cpi = c / H.base.cpi;
   } else L.cpi = L.cpi * BK.dpow(1 + L.inflationYear / 100, 1 / 12); // bank.js dpow: bit-identical in every JS engine (server replay)
-  if ((st.month - 1) % 12 === 0 && st.month > 1) yearlyPrices(st, out);
+  if ((st.month - 1) % 12 === 0 && st.month > 1) { const ev0 = LESSON_EV; LESSON_EV = 'סוף שנה'; try { yearlyPrices(st, out); } finally { LESSON_EV = ev0; } }
 }
 /* ---------------------------------------------------------------- managed businesses (js/finance/business.js) */
 /** One simulated month for every managed business: owner cash, energy, taxes, lessons, news. Returns the owner's net cash. */
@@ -1135,7 +1221,7 @@ function monthlyIndex(st, out) {
   { const h = st.holdings.IDX; if (h && h.qty > 0) addLuck(st, 'index', h.qty * p0 * (r - 0.0033)); } // vs the expected monthly price move
   L.pension = Math.round(L.pension * (1 + r + div));
   L.severance = Math.round(L.severance * (1 + r + div));
-  if (r <= -0.08) { L.lastCrash = st.month; if (st.story) st.story.idxDropM = st.month; out.news.push({ kind: 'indexDrop', text: `המדד צנח ${pct(-r * 100, 1)} החודש. גם הפנסיה שלך ירדה — על הנייר.`, change: round2(r * 100) }); }
+  if (r <= -0.08) { const hq = st.holdings.IDX ? st.holdings.IDX.qty : 0; if (hq > 0) { mark(st, 'crash', hq * (st.prices.IDX - p0), -1, ''); if (!L.timHold) L.timHold = { m: st.month, qty: hq, sells: L.idxSells || 0 }; } L.lastCrash = st.month; if (st.story) st.story.idxDropM = st.month; out.news.push({ kind: 'indexDrop', text: `המדד צנח ${pct(-r * 100, 1)} החודש. גם הפנסיה שלך ירדה — על הנייר.`, change: round2(r * 100) }); }
   L.idxPeak = Math.max(L.idxPeak || p0, st.prices.IDX);
   if (st.prices.IDX <= L.idxPeak * 0.8) lesson(st, out, 'drawdown');
 }
@@ -1143,11 +1229,15 @@ function homeRatio(st) { const H = st.history; if (!H) return 1; const v = serie
 function benchNW(st) { const H = st.history; return H ? Math.round(H.bench.units * st.prices.IDX) : 0; }
 
 /** Unlock a library lesson (once per game). */
-function lesson(st, out, id) {
+function lesson(st, out, id, extra) {
   if (!st.lessons || st.lessons.includes(id) || !LESSON_BY_ID[id]) return;
   st.lessons.push(id);
   const l = LESSON_BY_ID[id];
-  (out.lessons ||= []).push({ id, title: l.title, text: l.text });
+  // T4 E-6: where you learned it (the first context wins) — presentation only. Any trigger change must update js/data/lessons-meta.js hints.
+  let num = null; try { num = numFor(st, id, extra); } catch (e) { num = null; }
+  const ev = eventTitleOf(st);
+  if (st.lessonCtx) st.lessonCtx[id] = { m: st.month, ev, num };
+  (out.lessons ||= []).push({ id, title: l.title, text: l.text, ctx: { month: st.month, worldId: st.worldId, event: ev, num } });
 }
 
 /** First-ever bankruptcy with createGame({bailout:true}): the bank restructures instead of ending the game. Once. */
@@ -1156,7 +1246,7 @@ function bailout(st, out) {
   if (st.life) creditScore(st, BK.CREDIT_DELTAS.bailout);
   const leaks = leaksOf(st);
   const sold = [];
-  for (const a of st.assets.slice()) if (assetCf(st, a) < 0) { st.cash += assetValue(st, a) - a.debt; sold.push(a.n); st.assets = st.assets.filter((x) => x !== a); out.despawn.push('a' + a.id); }
+  for (const a of st.assets.slice()) if (assetCf(st, a) < 0) { bizArchive(st, a); st.cash += assetValue(st, a) - a.debt; sold.push(a.n); st.assets = st.assets.filter((x) => x !== a); out.despawn.push('a' + a.id); }
   const creditFolded = st.credit; st.loans += st.credit; st.credit = 0;
   if (st.cash > 0) { const pay = Math.min(st.cash, st.loans); st.loans -= pay; st.cash -= pay; }
   if (st.cash < 0) { st.loans += -st.cash; st.cash = 0; }
@@ -1172,6 +1262,7 @@ function bailout(st, out) {
     leaks, sold, writtenOff, creditFolded,
   };
   out.bailout = b; out.news.push(b); out.mentor = b.mentor; sound(out, 'card');
+  mark(st, 'bailout', writtenOff + creditFolded, -1, '');
 }
 
 /* ============================================================ end-of-game explanations */
@@ -1270,7 +1361,7 @@ function setRate(st, r) {
 function revealAngel(st, x, out) {
   const cash = Math.round(x.amount * x.mult);
   x.status = x.mult > 0 ? 'exited' : 'failed'; x.cashOut = cash; x.paper = 0;
-  addLuck(st, 'angels', cash - x.amount * (x.ev ?? 1));
+  addLuck(st, 'angels', cash - x.amount * (x.ev ?? 1), x.k ?? -1);
   st.cash += cash;
   out.despawn.push('v' + x.id);
   const big = x.mult >= 10;
@@ -1334,6 +1425,7 @@ export function landing(st) {
     default: throw new Error('unknown tile type ' + tile.type);
   }
   p.id = st.nextEventId++; p.tile = ch; p.pos = st.pos; p.month = st.month;
+  p.k0 = st.actions.length; // T6 §4.4: the card start (replay of actions.slice(0, k0) has this card open, nothing chosen)
   st.pending = p; st.phase = 'event';
   return describe(st);
 }
@@ -1347,14 +1439,20 @@ function createDeal(st, forceGolden = null) {
   const gIdx = w.golden && w.golden.length ? int(st.rng, 'deal', 0, w.golden.length - 1) : (next(st.rng, 'deal'), 0);
   const negR = next(st.rng, 'deal'); // v3: the seller's answer to a lower offer is sealed with the card
   const rs = ddDraws(st); // T2: exactly 6 'dd' draws on every deal landing (rules 4), whatever the card turns out to be
+  const rv = rivalDraws(st); // T6: exactly 4 'rival' draws on every deal landing (rules 4), whatever the card turns out to be
   let card = base; let golden = false; let starter = false;
-  if (st.tutorial && !st.flags.tutorialDone && w.starterDeal) {
+  if (R4(st) && st.tutorial) { // T4 E-5: the tutorial deal sized to the player's cushion (once, when eligible)
+    if (tutorialDealOk(st)) { card = tutorialCard(st); st.flags.tutorialDone = true; starter = true; }
+    else if (w.golden && w.golden.length && (forceGolden || gRoll < w.goldenChance)) { card = w.golden[gIdx]; golden = true; }
+  }
+  else if (st.tutorial && !st.flags.tutorialDone && w.starterDeal) {
     card = clone(w.starterDeal); st.flags.tutorialDone = true; starter = true;
     if (st.cash < card.down) card.down = Math.max(0, Math.floor(st.cash / 100) * 100); // never needs a loan
   }
   else if (forceGolden || (w.golden && w.golden.length && gRoll < w.goldenChance)) { card = w.golden[gIdx]; golden = true; }
   const p = dealPending(st, card, golden, 'deal', starter); p.negR = negR;
   attachDD(st, p, rs, { golden, starter });
+  attachRival(st, p, rv);
   return p;
 }
 /** The 6 dd draws (rules 4 only; rules 3 never touches the stream). */
@@ -1429,7 +1527,8 @@ function createMystery(st) {
   const gIdx = int(st.rng, 'mystery', 0, Math.max(0, (w.golden || []).length - 1));
   const negR = next(st.rng, 'mystery');
   const rs = ddDraws(st); // T2: 6 'dd' draws on every mystery landing too (used only if it turns into an asset deal)
-  if (card.kind === 'golden' && w.golden && w.golden.length) { const p = dealPending(st, w.golden[gIdx], true, 'mystery'); p.mysteryTitle = card.title; p.negR = negR; attachDD(st, p, rs, { golden: true }); return p; }
+  const rv = rivalDraws(st); // T6: 4 'rival' draws on every mystery landing too (used only if it turns into an asset deal)
+  if (card.kind === 'golden' && w.golden && w.golden.length) { const p = dealPending(st, w.golden[gIdx], true, 'mystery'); p.mysteryTitle = card.title; p.negR = negR; attachDD(st, p, rs, { golden: true }); attachRival(st, p, rv); return p; }
   return { type: 'mystery', card };
 }
 function createBank(st) {
@@ -1547,6 +1646,7 @@ function loanFor(st, amount) {
 /** "⚠ במשחק / 🌍 במציאות" line for a deal card (the game exaggerates on purpose — label it). */
 function dealReality(st, c, d) {
   const w = W(st); const kind = (w.kinds[c.k] || {});
+  if (c.tutorialDeal) return '🎲 מספר של משחק: עגלה כזאת במציאות מחזירה את עצמה הרבה יותר לאט.';
   const parts = [];
   if (kind.rent) parts.push(`⚠ מספרי משחק: ${d.roi}% בשנה על ההון. 🌍 בישראל דירה להשקעה מניבה בערך 2.5%–4% בשנה על המחיר לפני הוצאות, משקיע צריך הון עצמי של 50% לפחות ועוד מס רכישה של כ־8%.`);
   else if (c.k === 'biz' || kind.label === 'עסק') parts.push('⚠ במשחק לעסק תזרים קבוע. 🌍 בעסק אמיתי הכנסות ≠ רווח: שכירות, שכר, מע״מ ומלאי — ורוב העסקים הקטנים לא מחזירים את ההשקעה מהר.');
@@ -1896,9 +1996,15 @@ const DESCRIBE = {
       }
     }
     // v3 negotiation: offer less; the seller's answer was sealed when the card was drawn (p.negR)
-    if (best && !p.negotiated && p.negR != null && c.cost > 0) {
+    if (best && !p.negotiated && p.negR != null && c.cost > 0 && !c.tutorialDeal) {
       const offers = [5, 10, 15].map((k) => { const ch = negChance(st, p, k); const saved = r100(c.cost * k / 100); return opt('offer:' + k, `להציע ${k}% פחות (${fmtM(saved)}) · סיכוי ${Math.round(ch * 100)}%`, true, { kind: 'offer', chance: round2(ch), saved }); });
       ev.options.splice(ev.options.length - 1, 0, ...offers);
+    }
+    // T6 §3.4: who else wants this card (public) and the per-step risk on every delay option
+    if (p.rv && R4(st)) {
+      const h = RV.round2(RV.hazard(st.worldId, p.rv.n, p.rv.steps + 1));
+      d.rivals = { n: p.rv.n, who: p.rv.who.map(personaPub), steps: p.rv.steps, hazardNext: h, text: RV.interestText(p.rv), note: p.rv.n ? RV.TEXT.explain : null, chip: p.rv.n ? RV.tplR(RV.TEXT.chip, { p: Math.round(h * 100) }) : null };
+      if (p.rv.n >= 1) for (const o of ev.options) if (o.kind === 'inspect' || o.kind === 'offer') o.rivalRisk = h;
     }
     if (c.usdLinked) d.usdLinked = true;
     d.reality = dealReality(st, c, d);
@@ -2232,7 +2338,8 @@ function trimOffers(st) {
  * @param params e.g. {qty} for trade buy/sell
  * @returns {ok, effects, mentor, toast, spawn, despawn, achievements, news, event, done, end, error?}
  */
-export function choose(st, event, optionId, params = {}) {
+export function choose(st, event, optionId, params = {}) { return withK(st, () => chooseImpl(st, event, optionId, params)); }
+function chooseImpl(st, event, optionId, params = {}) {
   if (st.over) throw new Error('game over');
   const p = st.pending;
   if (!p) throw new Error('no pending event');
@@ -2247,14 +2354,16 @@ export function choose(st, event, optionId, params = {}) {
   if (!o) throw new Error('unknown option ' + optionId + ' for ' + p.type);
   const out = newOut();
   if (!o.enabled) return { ...out, ok: false, error: o.reason || 'האפשרות לא זמינה כרגע', event: ev, done: false, end: null };
-  const cash0 = st.cash;
+  const cash0 = st.cash; const nA = st.assets.length;
   const dq = decisionRecord(st, ev, o, params);
   const close = CHOOSE[p.type](st, p, o, params, out);
   if (out.ok === false) return { ...out, event: describe(st), done: false, end: null };
+  if (dq && o.kind === 'buy' && st.assets.length > nA) dq.a = st.assets[st.assets.length - 1].id; // T6 §4.4: the asset a buy created
   if (dq) recordDecision(st, dq, out);
+  goalTick(st, out); dreamTickSt(st, out); // T4 E-4 / E-7 (presentation only)
   out.mentor = gz(st, out.mentor);
   act(st, params && params.qty != null ? ['c', optionId, Math.floor(Number(params.qty)) || 0] : ['c', optionId]);
-  if (!ev.auto && !(p.type === 'payday' && o.id === 'ok') && !(o.id === 'done' && p.type === 'trade')) {
+  if (!ev.auto && p.type !== 'intro' && !(p.type === 'payday' && o.id === 'ok') && !(o.id === 'done' && p.type === 'trade')) {
     logDecision(st, ev.title, p.type === 'trade' ? `${o.id === 'buy' ? 'קנה' : o.id === 'sell' ? 'מכר' : 'הוראת קבע'} ${Math.floor(Number(params.qty)) || ''}`.trim() : o.label.replace(/\s*\(.*\)$/, ''), decisionValue(st, p, o, out, cash0));
   }
   st.stats.maxLoans = Math.max(st.stats.maxLoans, st.loans);
@@ -2269,11 +2378,14 @@ export function choose(st, event, optionId, params = {}) {
 
 function finalize(st, end, out) {
   st.over = end.status; st.result = end; st.phase = 'over';
+  tlPush(st, true); // T6 §4.1: the final state ends the timeline
+  if (end.status === 'won') mark(st, 'win', end.netWorth, -1, '');
+  if (st.history) { lesson(st, out, 'benchmark'); end.lessons = st.lessons.slice(); }
   ach(st, out, 'end', { end });
   end.achievements = st.ach.slice();
   sound(out, end.status === 'won' ? 'win' : 'lose');
   if (end.status === 'won') out.effects.push({ type: 'confetti' });
-  out.mentor = end.status === 'won' ? mentorLine(st, 'won', {}) : end.reason === 'bankrupt' ? mentorLine(st, 'bankrupt', {}) : mentorLine(st, 'lostTime', { pct: Math.round(end.progress * 100) + '%' });
+  out.mentor = end.afterWin ? end.afterWin.lines[end.afterWin.lines.length - 1] : end.status === 'won' ? mentorLine(st, 'won', {}) : end.reason === 'bankrupt' ? mentorLine(st, 'bankrupt', {}) : mentorLine(st, 'lostTime', { pct: Math.round(end.progress * 100) + '%' });
 }
 
 /** T2 §7.3: an inspection opens more information on the same card (non-closing). No draw: the truth was sealed with the card. */
@@ -2336,9 +2448,10 @@ function buyAsset(st, p, out, o) {
   if (ddInfo && Math.abs(ddInfo.claimedCf - cf) >= 10) line += ` מוצהר ${fmtM(ddInfo.claimedCf)} · בפועל ${fmtM(cf)}.`;
   out.mentor = line.trim();
   if (ddInfo) { const m0 = out.mentor; ensureCash(st, out, 'deal'); if (out.mentor !== m0) out.mentor = m0 + ' ' + out.mentor; }
-  lesson(st, out, 'asset_liability');
-  if (L.need && cf - L.monthly > 0) lesson(st, out, 'good_debt');
-  if (a.debt > 3 * Math.max(1, c.down)) lesson(st, out, 'leverage');
+  mark(st, 'buy', c.down + fee, CUR_K, a.n); // T6 §4.2
+  lesson(st, out, 'asset_liability', cf);
+  if (L.need && cf - L.monthly > 0) lesson(st, out, 'good_debt', cf - L.monthly);
+  if (a.debt > 3 * Math.max(1, c.down)) lesson(st, out, 'leverage', a.debt);
   if (isRent(st, a) && cf > 0 && rentTaxOf(st) > 0) lesson(st, out, 'rental_tax');
   if (new Set([...st.assets.map((x) => x.k), ...Object.keys(st.holdings).filter((tk) => st.holdings[tk].qty > 0)]).size >= 3) lesson(st, out, 'diversification');
   if (o.id === 'buyVar') lesson(st, out, 'rate_risk');
@@ -2438,18 +2551,22 @@ function optionU(ctx, ev, o, params) {
       const buys = ev.options.filter((x) => x.kind === 'buy' && x.enabled);
       if (o.kind === 'buy') { const r = dealBuy(ctx, ev, o); return { U: r.U, flags: r.flags, reasons: r.reasons }; }
       const best = buys.map((x) => dealBuy(ctx, ev, x)).sort((a, b) => b.U - a.U)[0];
+      // T6 §3.6: a delay step survives with (1 − h) — h is the public per-step hazard printed on the card (0 without interest: T2 unchanged)
+      const h = d.rivals && d.rivals.n ? d.rivals.hazardNext || 0 : 0;
+      const rivalR = (base) => (h > 0 ? [R('rival', RV.tplR(RV.TEXT.reason, { n: d.rivals.n, p: Math.round(h * 100) }), -h * Math.max(0, base))] : []);
       if (o.kind === 'offer') {
         const k = +o.id.split(':')[1];
         const disc = buys.map((x) => dealBuy(ctx, ev, x, k)).sort((a, b) => b.U - a.U)[0] || { U: 0 };
-        const U = o.chance * Math.max(0, disc.U) - (1 - o.chance) * 0.5 * Math.max(0, best ? best.U : 0); // a refused offer loses a scarce good deal (tuned, knob 5)
-        return { U, flags: [], reasons: [R('risk', `סיכוי ${Math.round((1 - o.chance) * 100)}% שהמוכר יסרב — ואז העסקה אבודה`, -(1 - o.chance) * Math.max(0, best ? best.U : 0)), R('price', `אם יסכים: ${fmtM(o.saved)} פחות`, o.chance * Math.max(0, disc.U))] };
+        const U = (1 - h) * (o.chance * Math.max(0, disc.U) - (1 - o.chance) * 0.5 * Math.max(0, best ? best.U : 0)); // a refused offer loses a scarce good deal (tuned, knob 5)
+        return { U, flags: [], reasons: [R('risk', `סיכוי ${Math.round((1 - o.chance) * 100)}% שהמוכר יסרב — ואז העסקה אבודה`, -(1 - o.chance) * Math.max(0, best ? best.U : 0)), R('price', `אם יסכים: ${fmtM(o.saved)} פחות`, o.chance * Math.max(0, disc.U)), ...rivalR(best ? best.U : 0)] };
       }
       if (o.id === 'inspect:1' || o.id === 'inspect:2') {
         const base = Math.max(0, best ? best.U : 0); const evi2 = best ? best.evi2 : 0;
-        const U = o.id === 'inspect:1' ? base + 0.7 * evi2 - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : base + evi2 - (o.cost ? o.cost.cash || 0 : 0) / E;
+        const U = o.id === 'inspect:1' ? (1 - h) * (base + 0.7 * evi2) - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : (1 - h) * (base + evi2) - (o.cost ? o.cost.cash || 0 : 0) / E;
         const k = d.dd ? d.dd.flags.filter((f) => f.kind === 'warn').length : 0;
         reasons.push(R('evi', evi2 > 0.3 ? 'העסקה גבולית: בדיקה שווה יותר ממה שהיא עולה' : 'הבדיקה כנראה לא תשנה את ההחלטה', evi2 - 0.1));
         if (k) reasons.push(R('flags', `יש ${k} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
+        reasons.push(...rivalR(base));
         return { U, flags: [], reasons };
       }
       return { U: 0, flags: [], reasons: [R('net', best && best.U > 0 ? 'לוותר זה לוותר גם על התזרים שהעסקה מביאה' : 'העסקה לא מוסיפה כסף לפי מה שידוע — לוותר לא עולה כלום', best && best.U > 0 ? -best.U : 0.3)] };
@@ -2521,7 +2638,7 @@ function scorePool(ev, o) {
   if (!ev || ev.auto) return null;
   if (o && /^q:/.test(o.id)) return null; // T3: inbox items on the manage card are scored by resolveStory
   const en = ev.options.filter((x) => x.enabled && !/^q:/.test(x.id));
-  if (en.length < 2 || ['crisis', 'giving', 'shipping'].includes(ev.type)) return null;
+  if (en.length < 2 || ['crisis', 'giving', 'shipping', 'intro'].includes(ev.type)) return null;
   if (ev.type === 'trade' && (!o || o.id === 'done')) return null;
   if (ev.type === 'business' && o && o.id === 'ok') return null;
   if (ev.type === 'market' && !ev.options.some((x) => x.kind === 'sell')) return null;
@@ -2550,8 +2667,9 @@ function primaryFromScores(ev, sc) {
 }
 const NON_CLOSING = /^(inspect:|offer:|biz:(?!sell)|sell:|auto:|report$)/;
 function decisionRecord(st, ev, o, params) {
-  if (!st.life) return null;
-  if (ev.type === 'life' && ev.data && ev.data.chain) return storyDecision(st, { ...ev, chain: ev.data.chain.id, step: ev.data.chain.step, kind: 'chain' }, o); // T3 §9 classes
+  if (!st.life || ev.type === 'intro') return null; // T4 E-3: the intro card has no verdict, no dq entry, no mastery change
+  const k0 = st.pending && st.pending.k0 != null ? st.pending.k0 : -1; // T6 §4.4 card start (-1: unknown → decisionPoints scans the log)
+  if (ev.type === 'life' && ev.data && ev.data.chain) { const r = storyDecision(st, { ...ev, chain: ev.data.chain.id, step: ev.data.chain.step, kind: 'chain' }, o); if (r) r.k0 = k0; return r; } // T3 §9 classes
   const pool = scorePool(ev, o); if (!pool) return null;
   const ctx = pubCtx(st);
   const qtyFor = (x) => (x.id === o.id ? params : x.needsQty ? { qty: 1 } : undefined);
@@ -2574,19 +2692,71 @@ function decisionRecord(st, ev, o, params) {
   if (mine.flags.includes('panicSell') || (ev.type === 'trade' && ev.data.ticker === 'IDX')) pr.push('time_in_market');
   if (ev.type === 'bank' || o.id === 'buyVar' || o.id === 'buyFix') pr.push('rate_risk');
   if (/^inspect:/.test(o.id) || (ev.data.dd && ev.data.dd.level === 0 && o.kind === 'buy')) pr.push('knowledge');
-  const rec = { t: st.turn, m: st.month, k: (st.actions || []).length, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) };
+  const rec = { t: st.turn, m: st.month, k: (st.actions || []).length, k0, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) };
   if (st.pending && st.pending.hinted) rec.h = 1;
   return rec;
 }
 function recordDecision(st, r, out) {
   const D = dqOf(st);
+  if (r.k0 == null) r.k0 = r.k; // between-roll decisions (focus, story inbox): the card start is the action itself
   D.decisions.push(r); if (D.decisions.length > 120) D.decisions.shift();
   D.sum += r.s; D.n++;
   for (const p of r.p) { const m = D.mastery[p] || { v: 0.5, n: 0 }; m.v = round2(m.n ? m.v * 0.7 + 0.3 * r.s / 100 : r.s / 100); m.n++; D.mastery[p] = m; }
   if (st.mentor !== 'pro') out.decision = { score: r.s, verdict: r.v, why: r.why, principles: r.p }; // pro: the verdict waits for the end-of-game review
 }
 const dqOf = (st) => (st.dq ||= { decisions: [], sum: 0, n: 0, mastery: {}, luck: { index: 0, angels: 0, crypto: 0, negotiation: 0, raise: 0, friend: 0, dd: 0, cycle: 0 }, hints: 0, levelChanges: [] });
-function addLuck(st, part, amount) { const D = dqOf(st); D.luck[part] = Math.round((D.luck[part] || 0) + amount); }
+/**
+ * Luck bookkeeping. Event parts also go to dq.luckLog = [[m, part, amount, k]] (T6 §4.3, cap 40, smallest |amount| evicted);
+ * k = the action index of the decision that caused it (CUR_K while a choose / resolveStory runs; a stored index for delayed reveals).
+ */
+function addLuck(st, part, amount, k = CUR_K, log = true) {
+  const D = dqOf(st); D.luck[part] = Math.round((D.luck[part] || 0) + amount);
+  if (!log || !LUCK_EVENT.has(part) || !Array.isArray(D.luckLog) || !Math.round(amount)) return;
+  D.luckLog.push([st.month, part, Math.round(amount), k == null ? -1 : k]);
+  if (D.luckLog.length > 40) { let j = 0; for (let i = 1; i < D.luckLog.length; i++) if (Math.abs(D.luckLog[i][2]) < Math.abs(D.luckLog[j][2])) j = i; D.luckLog.splice(j, 1); }
+}
+const LUCK_EVENT = new Set(['negotiation', 'raise', 'angels', 'crypto', 'friend', 'dd', 'story', 'rival']);
+/** The index st.actions will give the action being applied now (choose / resolveStory), else -1 (rolls, paydays). Outcome-neutral. */
+let CUR_K = -1;
+const withK = (st, f) => { const k0 = CUR_K; CUR_K = (st.actions || []).length; try { return f(); } finally { CUR_K = k0; } };
+
+/* ---------------------------------------------------------------- T6 §4.1–4.2 logging data (outcome-neutral, deterministic) */
+const TL_COLS = ['m', 'nw', 'liq', 'debt', 'pas', 'exp', 'pg', 'hap', 'en'];
+const TL_CAP = 240;
+/** One timeline row = metrics() of this moment, in integers (money in ₪100 units, goal progress in permille). */
+function tlRow(st) {
+  const nw = netWorthOf(st); const pas = passiveOf(st); const exp = expensesOf(st);
+  return [st.month, Math.round(nw / 100), Math.round((st.cash + (st.savings || 0)) / 100), Math.round((st.loans + st.credit + st.assets.reduce((x, a) => x + a.debt, 0)) / 100),
+    Math.round(pas), Math.round(exp), Math.round(goalOf(st, nw, pas, exp).goalProgress * 1000), Math.round(happyNow(st)), Math.round(st.life.energy)];
+}
+/** Push a row (end of every payday; force = the start row / the final row). Cap 240: keep every 2nd row (the first always), step × 2. */
+function tlPush(st, force = false, t = st.tl) {
+  if (!t || !st.life) return;
+  if (!force && t.step > 1 && st.stats.paydays % t.step !== 0) return;
+  const r = tlRow(st); const n = t.m.length;
+  if (n && t.m[n - 1] === r[0]) { TL_COLS.forEach((c, i) => { t[c][n - 1] = r[i]; }); return; } // same month (the final row): the latest state
+  if (n && r[0] < t.m[n - 1]) return;
+  TL_COLS.forEach((c, i) => t[c].push(r[i]));
+  if (t.m.length >= TL_CAP) { for (const c of TL_COLS) t[c] = t[c].filter((_, i) => i % 2 === 0); t.step *= 2; }
+}
+const MARK_EVICT = new Set(['buy', 'sell', 'story', 'recession', 'crash', 'rivalReveal']);
+const MARK_WHY = { crisis: 'משבר', payday: 'יום המשכורת', deal: 'קנייה', doodad: 'הוצאה', life: 'אירוע חיים', market: 'שוק', mystery: 'הפתעה', story: 'סיפור', business: 'עסק', sell: 'מכירה', intro: 'הדרכה' };
+/** st.marks = [[m, kind, amount, k, label]] (cap 40: evict the smallest |amount| of buy/sell/story/recession/crash/rivalReveal, else the oldest). */
+function mark(st, kind, amount, k = CUR_K, label = '') {
+  if (!Array.isArray(st.marks)) return;
+  st.marks.push([st.month, kind, Math.round(amount || 0), k == null ? -1 : k, String(label || '').slice(0, 24)]);
+  if (st.marks.length > 40) {
+    let j = -1; for (let i = 0; i < st.marks.length; i++) if (MARK_EVICT.has(st.marks[i][1]) && (j < 0 || Math.abs(st.marks[i][2]) < Math.abs(st.marks[j][2]))) j = i;
+    st.marks.splice(j < 0 ? 0 : j, 1);
+  }
+}
+/** A business that leaves the books keeps its record for the end summary (T6 §5.1 business totals). */
+function bizArchive(st, a) {
+  if (!a || !a.biz || !Array.isArray(st.bizPast)) return;
+  const t = a.biz.totals || {}; let stage = ''; try { stage = BIZ.summary(a.biz).stageName || ''; } catch (e) { stage = ''; }
+  st.bizPast.push({ name: a.n, months: t.months || 0, profitMonths: t.profitMonths || 0, lossMonths: t.lossMonths || 0, worstNp: t.worst ? t.worst.np : null, worstM: t.worst ? t.worst.m : null, stage });
+  if (st.bizPast.length > 8) st.bizPast.shift();
+}
 /** checkEnd's learning block: decision quality, luck, mastery per principle. */
 function learningOf(st) {
   const D = dqOf(st);
@@ -2604,7 +2774,8 @@ function learningOf(st) {
   const byHint = { withHint: grp(D.decisions.filter((r) => r.h)), without: grp(D.decisions.filter((r) => !r.h)) };
   const review = D.decisions.slice(-40).map((r) => ({ t: r.t, m: r.m, c: r.c, o: r.o, score: r.s, verdict: r.v, why: r.why, best: r.b || null, hinted: !!r.h, type: r.type }));
   return { decisionQuality: q, decisions: D.n, verdicts: counts, principles, luck, top, sentence: gz(st, sentence),
-    mentor: st.mentor || 'guide', hints: D.hints || 0, byHint, levelChanges: (D.levelChanges || []).slice(), review };
+    mentor: st.mentor || 'guide', hints: D.hints || 0, byHint, levelChanges: (D.levelChanges || []).slice(), review,
+    transfer: JSON.parse(JSON.stringify(D.transfer || {})) }; // T4 CR-E3: practice results per principle
 }
 
 /* ---------------------------------------------------------------- v3 choose helpers */
@@ -2690,11 +2861,11 @@ function applyLife(st, p, E, o, eff, out) {
   if (E.id === 'car') lesson(st, out, 'car_cost');
   if (E.id === 'reserve') lesson(st, out, 'reserve_duty');
   if (o.study && !L.study.done) { L.study.months = Math.min(L.study.need, L.study.months + o.study); if (L.study.months >= L.study.need) studyDone(st, out); }
-  if (o.jobless) { L.jobless = { until: st.month + o.jobless - 1 }; lesson(st, out, 'unemployment'); }
+  if (o.jobless) { L.jobless = { until: st.month + o.jobless - 1 }; lesson(st, out, 'unemployment'); mark(st, 'jobless', 0, CUR_K, ''); }
   if (o.severance === 'withdraw') { const sev = Math.round(L.severance); L.pension = Math.max(0, L.pension - sev); L.severance = 0; }
   if (o.severance) lesson(st, out, 'severance');
-  if (o.friend === 'lend') { L.friend = { kind: 'lend', amount: -eff.cash, at: st.month + 6, ok: p.r < 0.6 }; lesson(st, out, 'friend_loan'); }
-  if (o.friend === 'guarantee') { L.friend = { kind: 'guarantee', amount: r100(1.5 * S), at: st.month + 6, ok: p.r >= 0.35 }; lesson(st, out, 'guarantor'); }
+  if (o.friend === 'lend') { L.friend = { kind: 'lend', amount: -eff.cash, at: st.month + 6, ok: p.r < 0.6, k: CUR_K }; lesson(st, out, 'friend_loan'); }
+  if (o.friend === 'guarantee') { L.friend = { kind: 'guarantee', k: CUR_K, amount: r100(1.5 * S), at: st.month + 6, ok: p.r >= 0.35 }; lesson(st, out, 'guarantor'); }
   L.events.push({ m: st.month, id: E.id, o: o.id });
   out.mentor = o.after || (eff.note ? `${o.label}: ${eff.note}` : null);
   if (eff.cash < 0) ensureCash(st, out, 'life');
@@ -2748,7 +2919,7 @@ const CHOOSE = {
       const a = addBusiness(st, p.typeId, p.seed, undefined, setup);
       st.stats.deals++;
       out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, 'biz'), label: a.n, color: 'green' });
-      cashFx(out, -capital); sound(out, 'buy');
+      cashFx(out, -capital); sound(out, 'buy'); mark(st, 'buy', capital, CUR_K, a.n);
       out.mentor = A.lesson; lesson(st, out, 'biz_owner_job');
       return true;
     }
@@ -2757,6 +2928,7 @@ const CHOOSE = {
     if (o.id === 'biz:sell') {
       const { sale } = BIZ.sell(a.biz);
       st.cash += sale.net; st.taxes.capGains += sale.tax; st.stats.sold++; st.stats.soldProfit += sale.net - a.biz.invested;
+      bizArchive(st, a); mark(st, 'sell', sale.net, CUR_K, a.n);
       st.assets = st.assets.filter((x) => x !== a); delete st.bizRng['a' + a.id];
       out.despawn.push('a' + a.id); cashFx(out, sale.net, '+' + fmtM(sale.net)); sound(out, 'sell');
       out.mentor = sale.text; out.tax = sale.tax; lesson(st, out, 'biz_valuation');
@@ -2788,8 +2960,16 @@ const CHOOSE = {
 
   deal(st, p, o, params, out) {
     const c = p.card; const qAfter = () => { if (st.mentor !== 'guide' && c.q) out.mentor = (c.q + ' ' + (out.mentor || '')).trim(); }; // §7.5: the trap question comes back as reflection
-    if (o.id === 'inspect:1' || o.id === 'inspect:2') { inspect(st, p, o, out); return false; }
-    if (o.id.startsWith('offer:')) { const closed = negotiate(st, p, +o.id.slice(6), o, out); if (closed) qAfter(); return closed; }
+    if (o.id === 'inspect:1' || o.id === 'inspect:2') { // T6 §3.5: a delay step — paid either way; a rival may close first
+      const pre = rivalPre(st, p);
+      inspect(st, p, o, out);
+      if (p.rv) { p.rv.steps++; const lost = !!(p.rv.close && p.rv.steps >= p.rv.close); rivalLuck(st, pre, lost); if (lost) { loseToRival(st, p, out, 'inspect'); qAfter(); return true; } }
+      return false;
+    }
+    if (o.id.startsWith('offer:')) {
+      if (p.rv) { const pre = rivalPre(st, p); p.rv.steps++; const lost = !!(p.rv.close && p.rv.steps >= p.rv.close); rivalLuck(st, pre, lost); if (lost) { loseToRival(st, p, out, 'offer'); qAfter(); return true; } }
+      const closed = negotiate(st, p, +o.id.slice(6), o, out); if (closed) qAfter(); return closed;
+    }
     if (o.id === 'pass') {
       const cf = assetCf(st, { k: c.k, noi: c.noi, cf: c.cf, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd });
       out.mentor = mentorLine(st, cf < 0 ? 'passBad' : cf === 0 ? 'passZero' : 'passGood', {});
@@ -2833,7 +3013,8 @@ const CHOOSE = {
       const low = h.lowBuy; if (!h.qty) { h.lowBuy = null; h.basis = 0; }
       st.stats.tradeProfit += gain - tax;
       if (t.kind === 'crypto') addLuck(st, 'crypto', gain + 0.124 * cut);
-      if (p.tk === 'IDX' && gain < 0) { st.life.idxSold++; st.life.idxSoldLoss += -gain; lesson(st, out, 'panic_selling'); }
+      if (p.tk === 'IDX') st.life.idxSells = (st.life.idxSells || 0) + 1; // T4 E-8 (time in the market: no index sale in between)
+      if (p.tk === 'IDX' && gain < 0) { st.life.idxSold++; st.life.idxSoldLoss += -gain; lesson(st, out, 'panic_selling', -gain); }
       sound(out, gain >= 0 ? 'sell' : 'loss'); cashFx(out, proceeds - tax, null);
       out.tax = tax;
       if (Math.abs(gain) >= 1) out.effects.push({ type: 'float', text: sgn(gain), color: gain >= 0 ? 'green' : 'red', at: 'pawn' });
@@ -2884,6 +3065,7 @@ const CHOOSE = {
       st.cash += offer.net; st.stats.sold++; st.stats.soldProfit += offer.profit;
       if (offer.tax) { if (a.biz) st.taxes.capGains += offer.tax; else { st.taxes.betterment += offer.tax; lesson(st, out, 'betterment_tax'); } }
       out.tax = offer.tax;
+      bizArchive(st, a); mark(st, 'sell', offer.net, CUR_K, a.n);
       st.assets = st.assets.filter((x) => x !== a); if (a.biz) delete st.bizRng['a' + a.id];
       out.despawn.push('a' + id); sound(out, 'sell'); cashFx(out, offer.net, '+' + fmtM(offer.net));
       out.mentor = mentorLine(st, 'sold', { profit: fmtM(offer.profit), cf: fmtM(offer.cf) });
@@ -2928,6 +3110,7 @@ const CHOOSE = {
       h.qty = 0; h.basis = 0; h.lowBuy = null; holdingModelDiff(st, before, out); sound(out, 'sell');
       ach(st, out, 'tradeSell', { tk: 'GOLD', gain, crisis: true });
     }
+    mark(st, 'crisis', d.amount, CUR_K, c.n); // T6 §4.2 (amount = − paid)
     const loan = ensureCash(st, out, 'crisis');
     if (!loan) st.stats.crisisNoLoan++;
     out.mentor = loan ? mentorLine(st, 'crisisLoan', {}) : (o.id === 'okSellGold' ? mentorLine(st, 'crisisGold', {}) : mentorLine(st, 'crisisOk', {}));
@@ -3040,7 +3223,7 @@ const CHOOSE = {
     st.cash -= amt;
     const h = p.hidden;
     const x = { id: st.nextId++, n: p.card.n, sector: p.card.sector, amount: amt, paper: amt, mult: h.mult, revealAt: st.month + h.revealIn, signalAt: st.month + h.signalIn, signalMult: h.signalMult, status: 'active', month: st.month, cpi: st.life.cpi, ev: round2(pitchEV(st.worldId, p.card)) };
-    st.angels.push(x); st.stats.angels++;
+    x.k = CUR_K; st.angels.push(x); st.stats.angels++; // T6 §4.3: the angel luck links to this investment
     out.spawn.push({ assetId: 'v' + x.id, key: 'v' + x.id, model: w.models.angel, label: x.n, color: 'blue' });
     cashFx(out, -amt); sound(out, 'buy');
     out.mentor = mentorLine(st, 'pitchIn', { n: String(st.angels.filter((y) => y.status === 'active').length) });
@@ -3092,6 +3275,7 @@ export function takeLoan(st, amount) {
   cashFx(out, amt); sound(out, 'coin');
   out.mentor = mentorLine(st, 'loanTaken', { amount: fmtM(amt), cost: fmtM(Math.round(amt * loanPct(st) / 100)) });
   logDecision(st, 'הלוואה', 'לקחת ' + fmtM(amt));
+  dreamTickSt(st, out); goalTick(st, out);
   return { ...out, event: currentEvent(st), end: null };
 }
 /** Repay one loan unit (or the whole remainder if smaller, or `amount`). */
@@ -3116,7 +3300,7 @@ export function payCredit(st) {
   act(st, ['C']);
   cashFx(out, -st.credit); st.cash -= st.credit; st.credit = 0; sound(out, 'buy'); creditScore(st, BK.CREDIT_DELTAS.loanRepaid);
   out.mentor = mentorLine(st, 'creditPaid', {});
-  ach(st, out, 'creditPaid', {});
+  ach(st, out, 'creditPaid', {}); dreamTickSt(st, out);
   return { ...out, event: currentEvent(st), end: endIfIdle(st, out) };
 }
 /** v3: choose the monthly plan any time between rolls (applies from the next payday). */
@@ -3136,6 +3320,7 @@ export function moveSavings(st, amount) {
   st.cash -= a; st.savings += a;
   cashFx(out, -a, a > 0 ? `${fmtM(a)} לקרן החירום` : `${fmtM(-a)} מקרן החירום`); sound(out, a > 0 ? 'buy' : 'coin');
   if (a > 0) { lesson(st, out, 'emergency_fund'); out.mentor = mentorLine(st, 'savingsIn', { months: String(emergencyOf(st, expensesOf(st)).months) }); }
+  goalTick(st, out); dreamTickSt(st, out); // T4 E-4 / E-7
   return { ...out, event: currentEvent(st), end: null };
 }
 /** v3: report the side hustle to the tax authority (open a file, pay monthly advances — no year-end penalty). */
@@ -3520,7 +3705,7 @@ function applyStoryFx(st, fx, x) {
   if (fx.grossTemp) st.story.flags.payCut = { mult: fx.grossTemp.mult, until: st.month + fx.grossTemp.months - 1, label: 'קיצוץ זמני בשכר' };
   if (fx.workLoad) L.workLoad = Math.max(0, L.workLoad + fx.workLoad);
   if (fx.planLock) { st.story.flags.planLock = { prev: L.plan === fx.planLock.plan ? 'work' : L.plan, plan: fx.planLock.plan, until: st.month + fx.planLock.months - 1 }; applyPlan(st, fx.planLock.plan, out); }
-  if (fx.jobless) { L.jobless = { until: st.month + fx.jobless - 1 }; st.story.jobChangeM = st.month; lesson(st, out, 'unemployment'); }
+  if (fx.jobless) { L.jobless = { until: st.month + fx.jobless - 1 }; st.story.jobChangeM = st.month; lesson(st, out, 'unemployment'); mark(st, 'jobless', 0, CUR_K, ''); }
   if (fx.sideReport && !L.sideReport) { L.sideReport = true; lesson(st, out, 'side_tax'); }
   if (fx.study && !L.study.done) { L.study.months = Math.min(L.study.need, L.study.months + fx.study); if (L.study.months >= L.study.need) studyDone(st, out); }
   if (fx.set) Object.assign(st.story.flags, fx.set);
@@ -3540,12 +3725,13 @@ function applyStoryOption(st, chainId, stepId, o, ctx, out) {
   const v = Math.round(st.cash - cash0 + (eff.flow || 0) * Math.min(eff.months || 24, 24) + (eff.salary || 0) * Math.min(eff.salaryMonths || 24, 24));
   const t = o.memo ? gz(st, tpl(o.memo, vars)) : `${C.title}: ${o.label}`;
   const S0 = st.story; S0.memory.push({ m: st.month, chain: chainId, step: stepId, o: o.id, v, t }); if (S0.memory.length > 40) S0.memory.shift();
+  if (Math.abs(v) >= Math.max(1, expensesOf(st))) mark(st, 'story', v, CUR_K, C.title); // T6 §4.2
   c.hist.push({ m: st.month, step: stepId, o: o.id, v }); if (c.hist.length > 8) c.hist.shift();
   for (const id of o.lesson || []) lesson(st, out, id);
   st.life.events.push({ m: st.month, id: 'story:' + chainId, o: (stepId + ':' + o.id).slice(0, 24) });
   if (chainId === 'career' && stepId === 'promo' && o.id === 'accept') { c.data.net0 = baseNet(st) - (eff.salary || 0); c.data.promo6 = st.month + 6; }
   if (chainId === 'crisis' && stepId === 'c1') { c.data.choice = o.id; }
-  if (chainId === 'friend' && stepId === 'f1') { c.data.path = o.id; }
+  if (chainId === 'friend' && stepId === 'f1') { c.data.path = o.id; c.data.k = CUR_K; } // T6 §4.3: the friend luck links to this decision
   scheduleNext(st, chainId, stepId, o, hit, out);
   out.mentor = o.after || (eff.note ? `${o.label}: ${eff.note}` : out.mentor);
   if (st.cash < 0) ensureCash(st, out, 'story');
@@ -3649,7 +3835,7 @@ function storyTriggers(st, out, o) {
   // crisis (w1–w4, not history): recession signal, a crisis tile, or a monthly index drop ≤ −8%
   if (!st.history && CH.CHAINS.crisis.worlds.includes(W0) && chainCanStart(st, 'crisis')) {
     // [TUNE] a crisis tile starts the chain at this payday's sealed story odds: every tile and every −8% month starting it put it in ~97% of games
-    const lb = econLabel(st); const trig = (lb === 'מיתון' && S.lastEcon !== 'מיתון' && S.lastEcon != null && S.r[0] < 0.7) || (st.stats.crises > S.crisesSeen && S.r[0] < 0.3) || (S.idxDropM === st.month && st.prices.IDX <= 0.85 * (L.idxPeak || st.prices.IDX)); // [TUNE] tile 30%; a monthly drop counts once the index is ≥ 15% under its peak // (a crisis tile also marks lastCrash: only the market's own monthly drop counts here)
+    const TG = CH.TRIGGER; const lb = econLabel(st); const trig = (lb === 'מיתון' && S.lastEcon !== 'מיתון' && S.lastEcon != null && S.r[0] < TG.crisisSignal) || (st.stats.crises > S.crisesSeen && S.r[0] < TG.crisisTile) || (S.idxDropM === st.month && st.prices.IDX <= 0.85 * (L.idxPeak || st.prices.IDX) && S.r[0] < TG.crisisIndex); // [TUNE] tile 30%; a monthly drop counts once the index is ≥ 15% under its peak // (a crisis tile also marks lastCrash: only the market's own monthly drop counts here)
     if (trig) { const c = startChain(st, 'crisis', 'wait'); c.data.trig = lb === 'מיתון' && S.lastEcon !== 'מיתון' ? 'signal' : S.idxDropM === st.month ? 'index' : 'tile'; c.data.idxAtStart = st.prices.IDX; c.data.peakAtStart = L.idxPeak || st.prices.IDX; createChainItem(st, 'crisis', 'c1', out); return; }
   }
   // career: warn / degree / promo (not jobless, not in a burnout month, not in short history games)
@@ -3657,8 +3843,9 @@ function storyTriggers(st, out, o) {
   if (longEnough && !isJobless(st) && !o.burnout && chainCanStart(st, 'career')) {
     const c0 = chainOf(st, 'career'); const sub = (c0 && c0.data.sub) || {};
     const dm = st.month - (L.study.doneMonth ?? st.month);
-    const pick = !sub.warn && S.energyLow >= 3 && S.r[1] < 0.5 ? 'warn' : !sub.degree && L.study.done && dm >= 1 && dm <= 2 && S.r[1] < 0.5 ? 'degree' // [TUNE] warn: 3 low paydays; degree: within 2 months of graduating, at sealed 50% odds
-      : !sub.promo && S.r[1] < 0.5 && ((st.month >= 18 && st.month % 12 === 6 && L.planMonths.work + L.planMonths.overtime >= 14 && st.month - L.lastRaise >= 12) || (S.loadSince != null && st.month - S.loadSince === 6)) ? 'promo' : null; // [TUNE] promo is reviewed once a year (month 18, 30, …) at sealed 50% odds
+    const TG = CH.TRIGGER;
+    const pick = !sub.warn && S.energyLow >= 3 && S.r[1] < TG.careerWarn ? 'warn' : !sub.degree && L.study.done && dm >= 1 && dm <= 2 && S.r[1] < TG.careerDegree ? 'degree' // [TUNE] warn: 3 low paydays; degree: within 2 months of graduating, at sealed odds (CH.TRIGGER)
+      : !sub.promo && S.r[1] < TG.careerPromo && ((st.month >= 18 && st.month % 12 === 6 && L.planMonths.work + L.planMonths.overtime >= 14 && st.month - L.lastRaise >= 12) || (S.loadSince != null && st.month - S.loadSince === 6)) ? 'promo' : null; // [TUNE] promo is reviewed once a year (month 18, 30, …) at sealed 50% odds
     if (pick) { const c = startChain(st, 'career', 'wait'); c.data.sub = { ...sub, [pick]: st.month }; createChainItem(st, 'career', pick, out); return; }
   }
   // side hustle milestones: side months 1 / 5 / 10 / graduation (15, or 12 after part time); reopens at the next unreached one
@@ -3677,7 +3864,7 @@ function friendResolve(st, out) {
   const c = chainOf(st, 'friend'); const d = c.data; const path = c.path || d.path;
   const vars = storyVars(st, 'friend');
   if (path === 'lend') {
-    addLuck(st, 'friend', d.ok ? d.amount * 0.4 : -d.amount * 0.6);
+    addLuck(st, 'friend', d.ok ? d.amount * 0.4 : -d.amount * 0.6, d.k ?? -1);
     if (d.partner) {
       if (d.ok) { const cf = r10(0.06 * storyS(st, 'friend')); const a = addAsset(st, { k: 'stake', n: `20% מהעסק של ${d.name || vars.name}`, cost: d.amount, down: d.amount, cf, value: r100(1.2 * d.amount) }, {}); out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, 'stake') || modelFor(st, 'biz'), label: a.n, color: 'green' }); d.cf = cf; endChain(st, 'friend', out, 'partnerOk', { ...vars, cf: fmtM(cf) }); }
       else endChain(st, 'friend', out, 'partnerBad');
@@ -3688,7 +3875,7 @@ function friendResolve(st, out) {
     return;
   }
   if (path === 'guarantee') {
-    addLuck(st, 'friend', !d.called ? (d.risk || 0) * 0.35 : -(d.risk || 0) * 0.65);
+    addLuck(st, 'friend', !d.called ? (d.risk || 0) * 0.35 : -(d.risk || 0) * 0.65, d.k ?? -1);
     if (!d.called) { endChain(st, 'friend', out, 'guaranteeOk', vars); return; }
     if (canCreateChainItem(st)) createChainItem(st, 'friend', 'f3b', out); else c.nextAt = st.month + 1;
     return;
@@ -3850,6 +4037,7 @@ function resolveBizItem(st, item, choiceId, out, isDefault = false) {
   if (r.sale) {
     const { sale } = BIZ.sell(a.biz, { price: r.sale.price });
     st.cash += sale.net; st.taxes.capGains += sale.tax; st.stats.sold++; st.stats.soldProfit += sale.net - a.biz.invested;
+    bizArchive(st, a); mark(st, 'sell', sale.net, CUR_K, a.n);
     st.assets = st.assets.filter((x) => x !== a); delete st.bizRng['a' + a.id]; delete st.bizStory['a' + a.id];
     st.story.inbox = st.story.inbox.filter((i) => i.assetId !== 'a' + a.id);
     out.despawn.push('a' + a.id); cashFx(out, sale.net, '+' + fmtM(sale.net)); lesson(st, out, 'biz_valuation');
@@ -3862,7 +4050,8 @@ function resolveBizItem(st, item, choiceId, out, isDefault = false) {
  * Resolve a story-inbox item (any time the game is not over, also with a tile card open). Logged as ['Q', itemId, optionId].
  * → {ok, error?, effects, mentor, toast, news, lessons, decision, spawn, despawn, event (the pending tile card or null), inbox, end?}
  */
-export function resolveStory(st, itemId, optionId) {
+export function resolveStory(st, itemId, optionId) { return withK(st, () => resolveStoryImpl(st, itemId, optionId)); }
+function resolveStoryImpl(st, itemId, optionId) {
   if (st.over) throw new Error('game over');
   const out = newOut(); const S = st.story;
   const item = S && S.inbox.find((i) => i.id === +itemId);
@@ -3953,7 +4142,7 @@ function activateFocus(st, id, out, o = {}) {
 /** ops focus: the business panel opens now, as a pending card with NO draw (the pawn does not move; closing returns to 'roll'). */
 function openOps(st) {
   const a = managedOf(st).filter((x) => BIZ.canDecide(x.biz)).sort((x, y) => (x.biz.lastDecisionMonth ?? -1) - (y.biz.lastDecisionMonth ?? -1))[0] || managedOf(st)[0];
-  st.pending = { type: 'business', mode: 'manage', assetId: a.id, source: 'focus', id: st.nextEventId++, tile: 'K', pos: st.pos, month: st.month };
+  st.pending = { type: 'business', mode: 'manage', assetId: a.id, source: 'focus', id: st.nextEventId++, tile: 'K', pos: st.pos, month: st.month, k0: (st.actions || []).length };
   st.phase = 'event';
 }
 /** guide only: the focus the mentor would pick (§6.4). */
@@ -4058,7 +4247,7 @@ export function requestHint(st) {
   const ev = describe(st);
   if (ev.auto || ev.type === 'trade' || (ev.type === 'mystery' && ev.data.kind === 'quiz') || !scorePool(ev, null)) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
   const hint = hintFor(st, ev); if (!hint) return fail('אין כאן רמז — זו לא החלטה עם תשובה');
-  const hk = `${p.dd ? p.dd.level : '-'}|${p.negotiated ? JSON.stringify(p.negotiated) : ''}`; // review m1: after an inspection / offer the hint is new — count it
+  const hk = `${p.dd ? p.dd.level : '-'}|${p.negotiated ? JSON.stringify(p.negotiated) : ''}${p.rv && p.rv.steps ? '|' + p.rv.steps : ''}`; // review m1: after an inspection / offer the hint is new — count it
   if (p.hinted !== hk) { act(st, ['H']); p.hinted = hk; dqOf(st).hints = (dqOf(st).hints || 0) + 1; }
   return { ...out, event: ev, hint, hintsUsed: dqOf(st).hints, end: null };
 }
@@ -4110,7 +4299,9 @@ function shadowOf(st, o = {}) {
     if (p.raiseR != null) p.raiseR = o.raiseR ?? 0.5;
     if (p.r != null) p.r = o.r ?? 0.5;
     if (p.hidden) p.hidden = { mult: 1, revealIn: 99, signalIn: 99, signalMult: 1 };
+    if (p.rv) { p.rv.close = o.rvClose || 0; p.rv.taker = o.rvClose ? (p.rv.who[0] || 'other') : null; } // T6: sealed close / taker never reach a dry run
   }
+  if (sh.rivalDeals) sh.rivalDeals = sh.rivalDeals.map((d) => (d.revealed ? d : { ...d, truth: { cf: d.claimedCf, value: d.claimedValue, repair: 0 } }));
   if (sh.life) { sh.life.raiseR = 0.5; sh.life.sideSeed = 1; }
   if (sh.world && sh.world.coin) sh.world.coin.path = sh.world.coin.path.map(() => 1);
   return sh;
@@ -4182,6 +4373,16 @@ export function impactFor(st, ref, params = {}) {
     imp.basis = 'branches';
   } else if (ddB && ddB.level < 2) imp.basis = 'expected';
   else if (bizStart) imp.basis = 'expected';
+  // T6 §3.6: a delay step on a card others want — the rival branch (paid for the step, no deal); p sums to 1
+  const rvP = st.pending && st.pending.rv; const delay = o && (o.kind === 'inspect' || o.kind === 'offer');
+  if (delay && rvP && rvP.n >= 1 && R4(st)) {
+    const h = RV.round2(RV.hazard(st.worldId, rvP.n, rvP.steps + 1));
+    const lostRun = run({ rvClose: rvP.steps + 1, negR: 0, raiseR: 0, r: 0 }); const mL = lostRun ? metrics(lostRun.sh) : ma;
+    const lostB = { p: h, label: RV.TEXT.branchLost, cashAfter: mL.cash, cfAfter: mL.cashflow, netWorthDelta: mL.netWorth - mb.netWorth, lost: true };
+    if (isOffer && imp.branches) { const [acc, ref] = imp.branches; const pa = RV.round2((1 - h) * acc.p); imp.branches = [{ ...lostB }, { ...acc, p: pa }, { ...ref, p: RV.round2(1 - h - pa) }]; }
+    else imp.branches = [{ p: RV.round2(1 - h), label: RV.TEXT.branchOpen, cashAfter: ma.cash, cfAfter: ma.cashflow, netWorthDelta: ma.netWorth - mb.netWorth }, lostB];
+    imp.basis = 'branches';
+  }
   // scenarios (deals, business start, loans, refinancing, installments): base and hard, 6 months, no draws
   const wantScen = (o && (o.kind === 'buy' && ev.type === 'deal')) || bizStart || ref === 'act:loan' || ref === 'refi' || ref === 'inst3';
   if (wantScen) {
@@ -4217,37 +4418,296 @@ export function impactFor(st, ref, params = {}) {
   return imp;
 }
 
+/* ============================================================ T4 engine part: intro card, goal chain, dreams, lesson context, practice */
+const INTRO_TEXT = {
+  tag1: 'חודש 1 · יום המשכורת', title1: 'המשכורת נכנסה 🎉', next: 'ממשיכים ←', skip: 'דלג על ההדרכה',
+  mentor1: '{who}, ככה נראה חודש: כסף נכנס, כסף יוצא. מה שנשאר — איתו בונים חופש.',
+  tag2: 'תקלה', title2: 'מכונת הכביסה התקלקלה', text2: 'הטכנאי אומר: {cost} לתיקון. איך משלמים?', note2: 'אין כאן תשובה נכונה אחת. כל דרך עולה משהו אחר.',
+  mentor2: 'תקלות קורות לכולם. השאלה היא מה הן לוקחות ממך: מזומן, תזרים או זמן.',
+  pay: 'לשלם עכשיו {cost}', inst: '3 תשלומים של {inst}', diy: 'לתקן עם חבר לפי סרטון ({diy})',
+  tag3: 'מה השתנה', title3: 'ככה זה השפיע', next3: '🎯 המטרה הבאה', go: 'להטיל קובייה ראשונה 🎲',
+  goalCushion: 'לשים בצד חודש הוצאות ({E}). ככה התקלה הבאה לא תיקח לך הלוואה.', goalAsset: 'לקנות נכס ראשון שמכניס כסף כל חודש.',
+  mentorCushion: 'קודם כרית, אחר כך נכסים. בוא נתחיל לזוז.', mentorAsset: 'יש לך כרית. עכשיו מחפשים נכס שעובד בשבילך.',
+  instLine: 'תשלומים: מכונת כביסה',
+};
+const GOAL_CHAIN = { cushion: { title: 'חודש הוצאות בצד', next: 'asset' }, asset: { title: 'נכס ראשון שמכניס כסף', next: 'fund' }, fund: { title: '🛟 חודש הוצאות בקרן החירום', next: 'done' } };
+/** E-4 metrics().nextGoal: {id, title, value, target, unit, done:false} while the tutorial goal chain runs. */
+function nextGoalOf(st) {
+  const I = st.intro; if (!I || !GOAL_CHAIN[I.goal] || st.afterWin) return null;
+  const E0 = Math.max(1, expensesOf(st));
+  if (I.goal === 'cushion') return { id: 'cushion', title: GOAL_CHAIN.cushion.title, value: Math.round(st.cash + (st.savings || 0)), target: E0, unit: '₪', done: false };
+  if (I.goal === 'asset') return { id: 'asset', title: GOAL_CHAIN.asset.title, value: st.assets.length, target: 1, unit: 'count', done: false };
+  return { id: 'fund', title: GOAL_CHAIN.fund.title, value: Math.round(st.savings || 0), target: E0, unit: '₪', done: false };
+}
+/** E-4 check (end of payday, after choose() / moveSavings()): completed goals → news, next goal. No RNG, no money. */
+function goalTick(st, out) {
+  const I = st.intro; if (!I || st.afterWin) return;
+  for (let guard = 0; guard < 4 && GOAL_CHAIN[I.goal]; guard++) {
+    const g = nextGoalOf(st); if (!g || g.value < g.target) return;
+    const nx = GOAL_CHAIN[I.goal].next; I.goal = nx;
+    out.news.push({ kind: 'goal', id: g.id, text: nx === 'done' ? `הושג: ${g.title}. סיימת את ההדרכה! 🎓` : `הושג: ${g.title}. הבא: ${GOAL_CHAIN[nx].title}` });
+  }
+}
+function introGoalOf(st) {
+  const I = st.intro; const E0 = Math.max(1, expensesOf(st));
+  if (I.goal === 'cushion') return { id: 'cushion', title: GOAL_CHAIN.cushion.title, text: tpl(INTRO_TEXT.goalCushion, { E: fmtM(E0) }), value: Math.round(st.cash + (st.savings || 0)), target: E0 };
+  if (I.goal === 'asset') return { id: 'asset', title: GOAL_CHAIN.asset.title, text: INTRO_TEXT.goalAsset, value: st.assets.length, target: 1 };
+  return null;
+}
+DESCRIBE.intro = function (st, p, ev) {
+  const I = st.intro || { step: 'done', glitch: { cost: 0, inst: 0, fee: 0, diy: 0 } }; const g = I.glitch; const m = metrics(st); const E0 = expensesOf(st);
+  const fx = (cash = 0, monthly = 0, months = 0, energy = 0) => ({ cash, monthly, months, energy, happy: 0 });
+  ev.data = { step: I.step, payslip: { net: m.salary, expenses: E0, cashflow: m.cashflow, cash: st.cash } };
+  ev.sound = 'card';
+  if (I.step === 'glitch') {
+    ev.tag = INTRO_TEXT.tag2; ev.title = INTRO_TEXT.title2; ev.text = tpl(INTRO_TEXT.text2, { cost: fmtM(g.cost) }); ev.mentor = INTRO_TEXT.mentor2;
+    ev.data.glitch = { ...g }; ev.data.note = INTRO_TEXT.note2;
+    ev.options = [opt('fix:pay', tpl(INTRO_TEXT.pay, { cost: fmtM(g.cost) }), true, { kind: 'intro', effects: fx(-g.cost) }),
+      opt('fix:inst', tpl(INTRO_TEXT.inst, { inst: fmtM(g.inst) }), true, { kind: 'intro', effects: { ...fx(0, g.inst, 3), fee: g.fee } }),
+      opt('fix:diy', tpl(INTRO_TEXT.diy, { diy: fmtM(g.diy) }), true, { kind: 'intro', effects: fx(-g.diy, 0, 0, -10) })];
+    ev.noPrimary = true; return;
+  }
+  if (I.step === 'result') {
+    const b = I.before || { cash: st.cash, cf: m.cashflow, energy: Math.round(st.life.energy) };
+    ev.tag = INTRO_TEXT.tag3; ev.title = INTRO_TEXT.title3; ev.mentor = I.goal === 'cushion' ? INTRO_TEXT.mentorCushion : INTRO_TEXT.mentorAsset;
+    ev.data.result = { cashBefore: b.cash, cashAfter: st.cash, cfBefore: b.cf, cfAfter: m.cashflow, energyBefore: b.energy, energyAfter: Math.round(st.life.energy), instMonths: I.choice === 'fix:inst' ? 3 : 0, choice: I.choice };
+    ev.data.goal = introGoalOf(st); ev.data.goalHeading = INTRO_TEXT.next3;
+    ev.options = [opt('go', INTRO_TEXT.go, true, { kind: 'intro', primary: true, effects: fx() })]; ev.forcePrimary = 'go'; return;
+  }
+  ev.tag = INTRO_TEXT.tag1; ev.title = INTRO_TEXT.title1; ev.text = `בקופה עכשיו: ${fmtM(st.cash)}`; ev.mentor = tpl(INTRO_TEXT.mentor1, { who: st.charName });
+  ev.options = [opt('next', INTRO_TEXT.next, true, { kind: 'intro', primary: true, effects: fx() }), opt('skip', INTRO_TEXT.skip, true, { kind: 'intro', link: true, effects: fx() })];
+  ev.forcePrimary = 'next';
+};
+CHOOSE.intro = function (st, p, o, params, out) {
+  const I = st.intro; if (!I) return true;
+  out.mentor = null;
+  if (o.id === 'next') { I.step = 'glitch'; return false; }
+  if (o.id === 'skip') { I.step = 'skipped'; I.goal = null; return true; }
+  if (o.id === 'go') { I.step = 'done'; return true; }
+  const g = I.glitch; const m0 = metrics(st);
+  I.before = { cash: st.cash, cf: m0.cashflow, energy: Math.round(st.life.energy) }; I.choice = o.id;
+  if (o.id === 'fix:pay') { st.cash -= g.cost; cashFx(out, -g.cost); sound(out, 'loss'); }
+  else if (o.id === 'fix:inst') { st.expenses.push({ id: 'x' + st.nextId++, label: INTRO_TEXT.instLine, amount: g.inst, trim: false, cut: false, until: st.month + 2 }); sound(out, 'card'); }
+  else if (o.id === 'fix:diy') { st.cash -= g.diy; cashFx(out, -g.diy); st.life.energy = clamp(st.life.energy - 10, 0, 100); sound(out, 'card'); }
+  ensureCash(st, out, 'intro');
+  I.goal = st.cash + (st.savings || 0) < expensesOf(st) ? 'cushion' : 'asset';
+  I.step = 'result';
+  return false;
+};
+/** E-5: the tutorial deal's down payment — floor500(cash + savings − E) in [0, 5000]. */
+function tutorialDown(st) { return clamp(Math.floor((st.cash + (st.savings || 0) - expensesOf(st)) / 500) * 500, 0, 5000); }
+/** Eligible iff the tutorial deal was not drawn yet and the player can put ≥ ₪1,000 into it while keeping a month of expenses. */
+function tutorialDealOk(st) { return !!(st.tutorial && st.worldId === 'w1' && R4(st) && !st.flags.tutorialDone && tutorialDown(st) >= 1000); }
+function tutorialCard(st) {
+  const down = tutorialDown(st); const cf = r10(down * 0.09);
+  return { k: 'biz', n: 'עגלת הקפה של השכן', d: 'השכן עובר דירה ומוכר את העגלה. בלי הלוואה.', cost: down, down, cf, value: down, tutorialDeal: true,
+    q: `עסקה ראשונה: ${fmtM(down)} שמכניסים ${fmtM(cf)} כל חודש. כמה חודשים עד שהכסף חוזר אליך?` };
+}
+
+/* ---- E-7 dreams (presentation only) */
+function dreamView(st, extra = {}) {
+  const L = st.life; let bizCf = 0, hasBiz = !!(L && L.side && L.side.months >= 1), posAsset = false;
+  for (const a of st.assets) { const cf = assetCf(st, a); if (cf > 0) posAsset = true; if (a.biz || a.k === 'biz' || a.k === 'side' || a.k === 'mall') { hasBiz = true; bizCf += cf; } }
+  return { month: st.month, cash: st.cash, savings: st.savings || 0, E: expensesOf(st), passive: passiveOf(st), energy: L ? L.energy : 0, credit: st.credit, bizCf, hasBiz, posAsset, restPayday: !!extra.restPayday };
+}
+function dreamTickSt(st, out, o = {}) {
+  if (!st.dream || st.afterWin || st.over) return;
+  const got = DR.dreamTick(st.dream, dreamView(st, o), o);
+  if (got.length) { (out.dream ||= []).push(...got); const D = DR.DREAM_BY_ID[st.dream.id]; out.mentor = out.mentor || `${got[0].title} — צעד אמיתי לכיוון ${D.name}.`; }
+}
+function dreamMetrics(st) { return st.dream ? DR.dreamBlock(st.dream, dreamView(st)) : null; }
+
+/* ---- E-6 lesson context */
+let LESSON_EV = null; // the event a payday / yearly roll-over lesson belongs to (set around those calls; outcome-neutral)
+function eventTitleOf(st) {
+  if (LESSON_EV) return LESSON_EV;
+  const p = st.pending; if (!p) return null;
+  return (p.card && p.card.n) || p.title || p.mysteryTitle || null;
+}
+function numFor(st, id, extra) {
+  const L = st.life; const N = (label, value) => (value == null || Number.isNaN(value) ? null : { label, value });
+  if (extra != null) {
+    const lab = { forced_loan: 'הלוואה כפויה', good_debt: 'תזרים אחרי ההלוואה', leverage: 'חוב על הנכס', asset_liability: 'הנכס מכניס', hedonic: 'הוצאת על פיתוי', panic_selling: 'ההפסד במכירה', capital_gains: 'מס ששילמת', burnout: 'עלות השחיקה', side_hustle: 'הכנסה מהצד', biz_revenue_profit: 'רווח נקי החודש' }[id];
+    if (lab) return N(lab, Math.round(extra));
+  }
+  switch (id) {
+    case 'gross_net': return N('נטו', baseNet(st));
+    case 'bituah_leumi': return N('ביטוח לאומי ומס בריאות', payslipOf(st).bl);
+    case 'tax_brackets': case 'marginal_overtime': return N('המדרגה השולית שלך', round2(marginalRate(grossBase(st))));
+    case 'cashflow': return N('התזרים שלך', metrics(st).cashflow);
+    case 'passive_income': return N('הכנסה פסיבית', passiveOf(st));
+    case 'emergency_fund': return N('בקרן החירום', Math.round(st.savings || 0));
+    case 'credit_card_debt': return N('חוב באשראי', st.credit);
+    case 'compound_interest': return N('בפנסיה', Math.round(L.pension));
+    case 'inflation': return L.infl.length ? N('אינפלציה השנה', L.infl[L.infl.length - 1]) : null;
+    case 'diversification': return N('סוגי נכסים', new Set([...st.assets.map((x) => x.k), ...Object.keys(st.holdings).filter((tk) => st.holdings[tk].qty > 0)]).size);
+    case 'opportunity_cost': return N('ויתרת על פיתויים ב־', st.stats.toysResisted || 0);
+    case 'index_fund': return N('יחידות בקרן', st.holdings.IDX ? st.holdings.IDX.qty : 0);
+    default: return null;
+  }
+}
+
+/* ---- E-10 practice ('K'): js/practice.js is pure; the engine guards, logs and records */
+/** The next practice offer (no RNG, no state change) or null. memo = {lastTurn, offered:[qid], doneA:[topic]} kept by the UI. */
+export function practiceDue(st, memo = {}) { if (!st || st.mode !== 'free' || st.history || st.over) return null; return PR.pickPractice(st, memo, expensesOf(st), fmtM); }
+/** Answer a practice question (free / learn only, between rolls). Changes only st.practice, st.dq.transfer and st.actions. */
+export function answerPractice(st, qid, idx) {
+  const fail = (error) => ({ ok: false, error });
+  if (!st || st.over) return fail('המשחק נגמר');
+  if (st.mode !== 'free' || st.history) return fail('אין שאלות תרגול במשחק הזה');
+  if (!PR.PRACTICE_BY_ID[qid]) return fail('אין שאלה כזו');
+  if (st.practice && st.practice.answered && qid in st.practice.answered) return fail('כבר ענית על השאלה הזו');
+  if (st.phase !== 'roll' || st.pending) return fail('אפשר לענות בין התורות');
+  if (!PR.checkAnswer(qid, idx)) return fail('אין תשובה כזו');
+  act(st, ['K', qid, Math.floor(+idx)]);
+  return PR.recordAnswer(st, qid, Math.floor(+idx), st.turn);
+}
+
+/* ============================================================ T6 engine part: deal competition, decision points, after-win */
+/** Exactly RIVAL_DRAWS draws from 'rival' on every deal / mystery landing under rules 4 (none under rules 3). */
+function rivalDraws(st) { if (!R4(st)) return null; const rs = []; for (let i = 0; i < RV.RIVAL_DRAWS; i++) rs.push(next(st.rng, 'rival')); return rs; }
+/** The card's PUBLIC data the investors see (same for every player who lands on it). */
+function rivalPub(st, p) {
+  const c = p.card; const kind = W(st).kinds[c.k] || {};
+  const cfClaim = assetCf(st, { k: c.k, noi: c.noi, cf: c.cf, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd });
+  return { kind: c.k, rent: !!kind.rent, golden: !!p.golden, cfClaim, down: c.down, warn: p.dd && !p.dd.golden ? (p.dd.flags || []).length : 0 };
+}
+function attachRival(st, p, rs) {
+  if (!rs || p.type !== 'deal' || !p.dd || p.dd.starter) return;
+  if (!RV.rivalCfg(st.worldId).enabled || (st._dev && st._dev.noRival)) { p.rv = null; return; }
+  const r = RV.drawRival(rs, rivalPub(st, p), st.worldId, st.self);
+  p.rv = { n: r.n, who: r.who, steps: 0, close: r.close, taker: r.taker };
+}
+const personaPub = (id) => { const a = RV.persona(id); return { id: a.id, icon: a.icon, name: a.name, label: a.label, g: a.g }; };
+/** metrics().rivals.deals entry: public fields; the truth only once revealed. */
+function rivalPublic(d) {
+  const o = { m: d.m, name: d.name, by: personaPub(d.by), how: d.how, claimedCf: d.claimedCf, claimedValue: d.claimedValue, revealAt: d.revealAt, revealed: !!d.revealed };
+  if (d.revealed) { o.cf = d.truth.cf; o.repair = d.truth.repair || 0; o.text = RV.revealText(d, fmtM); }
+  return o;
+}
+/** Before a delay step: the public hazard and the public value of continuing (₪). */
+function rivalPre(st, p) {
+  if (!p.rv || !p.rv.n) return null;
+  const h = RV.hazard(st.worldId, p.rv.n, p.rv.steps + 1);
+  const ev = describe(st); const ctx = pubCtx(st);
+  const best = ev.options.filter((x) => x.kind === 'buy' && x.enabled).map((x) => dealBuy(ctx, ev, x).U).sort((a, b) => b - a)[0];
+  return { h, V: Math.max(0, best || 0) * ctx.E, E: ctx.E };
+}
+function rivalLuck(st, pre, lost) {
+  if (!pre) return;
+  const amt = lost ? -(1 - pre.h) * pre.V : pre.h * pre.V;
+  addLuck(st, 'rival', amt, CUR_K, lost || Math.abs(amt) >= 0.25 * pre.E);
+}
+/** §3.5: a rival closed first. The player paid only for the step taken; nothing else changes (no money creation). */
+function loseToRival(st, p, out, how) {
+  st.stats.rivalLost = (st.stats.rivalLost || 0) + 1;
+  const c = p.card; const t = ddTruthOf(c, p.dd); const pr = { k: c.k, debt: c.cost - c.down, sens: c.sens, ref: st.world.usd };
+  const cfAt = (base) => assetCf(st, c.noi != null ? { ...pr, noi: base } : { ...pr, cf: base });
+  const d = { m: st.month, k0: p.k0 != null ? p.k0 : -1, name: c.n, by: p.rv.taker, how, claimedCf: cfAt(c.noi != null ? c.noi : c.cf), claimedValue: c.value ?? c.cost, level: p.dd.level,
+    truth: { cf: cfAt(t.base), value: t.value, repair: t.repair || 0 }, revealAt: st.month + RV.RIVAL_REVEAL, revealed: false };
+  st.rivalDeals.push(d); if (st.rivalDeals.length > 12) st.rivalDeals.shift();
+  mark(st, 'rivalLost', d.claimedValue, CUR_K, c.n);
+  const tx = RV.lostTexts(p.rv.taker, how);
+  out.rival = { lost: true, by: personaPub(p.rv.taker), how, text: gz(st, tx.text), sub: gz(st, tx.sub), button: RV.TEXT.lostButton };
+  out.news.push({ kind: 'rival', text: out.rival.text });
+  out.mentor = RV.TEXT.mentorLost; sound(out, 'loss');
+}
+/** payday: "how it turned out for them" — the first payday at or after revealAt. */
+function rivalReveal(st, out) {
+  for (const d of st.rivalDeals || []) {
+    if (d.revealed || st.month < d.revealAt) continue;
+    d.revealed = true; const text = gz(st, RV.revealText(d, fmtM));
+    out.news.push({ kind: 'rival', text, by: d.by, name: d.name });
+    mark(st, 'rivalReveal', (d.truth.cf - d.claimedCf) * 12, -1, d.name);
+  }
+}
+
+/**
+ * T6 §4.4: the decision points of this game for the rewind sheet → [{k0, k, m, t, type, c, o, v}] (newest last, ≤ 120).
+ * k0 = the card start (replay(cfg, actions.slice(0, k0)) has the card open, nothing chosen); k = the action that recorded it.
+ * Records without k0 (saves migrated mid-game) are completed by one replay of the log.
+ */
+export function decisionPoints(st) {
+  const D = (st.dq && st.dq.decisions) || [];
+  let scan = null;
+  if (D.some((r) => r.k0 == null || r.k0 < 0)) scan = k0Scan(st);
+  return D.map((r) => ({ k0: r.k0 != null && r.k0 >= 0 ? r.k0 : scan && scan.get(r.k) != null ? scan.get(r.k) : r.k, k: r.k, m: r.m, t: r.t, type: r.type, c: r.c, o: r.o, v: r.v }))
+    .filter((x) => x.k0 != null && x.k0 >= 0).slice(-120);
+}
+/** k → k0 for every action of the log, by one replay (the card a 'c' answers started right after the action that opened it). */
+function k0Scan(st) {
+  const map = new Map();
+  try {
+    const s2 = createGame(replayConfig(st)); let open = s2.pending ? 0 : null; let pid = s2.pending ? s2.pending.id : null;
+    const A = st.actions || [];
+    for (let i = 0; i < A.length; i++) {
+      if (s2.pending && s2.pending.id === pid) map.set(i, open);
+      else if (A[i][0] === 'Q' || A[i][0] === 'F') map.set(i, i);
+      replayStep(s2, A[i], i);
+      if (s2.pending && s2.pending.id !== pid) { pid = s2.pending.id; open = i + 1; }
+      if (!s2.pending) { pid = null; open = null; }
+    }
+  } catch (e) { /* a broken log: no scan */ }
+  return map;
+}
+
+/** §9 continue after the win (free / learn only). Logged as ['W']. */
+export function continueAfterWin(st) {
+  const out = newOut();
+  if (!(st.over === 'won' && st.mode === 'free' && !st.history && !st.afterWin)) return { ...out, ok: false, error: 'אפשר להמשיך רק אחרי ניצחון במשחק חופשי', event: null, end: null };
+  const m = metrics(st); const r = st.result || {};
+  st.afterWin = { m: st.month, months: r.months ?? st.month, stars: r.stars || 0, nw0: m.netWorth, pas0: m.passive, exp0: m.expenses, hap0: Math.round(st.life.happiness) };
+  st.over = null; st.result = null; st.phase = 'roll'; st.pending = null;
+  mark(st, 'afterWin', 0, (st.actions || []).length, '');
+  act(st, ['W']);
+  out.mentor = 'יצאת מהמירוץ. עכשיו נראה אם החופש מחזיק — בלי כוכבים חדשים, רק החיים.';
+  return { ...out, event: null, end: null };
+}
+/** §9 retire (only while continuing after a win, between rolls). Logged as ['X']. */
+export function retire(st) {
+  const out = newOut();
+  if (!(st.afterWin && !st.over && st.phase === 'roll' && !st.pending)) return { ...out, ok: false, error: 'אפשר לפרוש רק אחרי היציאה, בין התורות', end: null };
+  act(st, ['X']);
+  const end = buildEnd(st, { aw: 'retired' }); finalize(st, end, out);
+  return { ...out, end };
+}
+
 /**
  * Re-run a game from its config + st.actions (server-side verification of ranked results). Pure & deterministic.
  * cfg = {worldId, charId, seed, mode, maxMonths, scenarioId, bailout, tutorial}. Throws {message:'replay_mismatch …'} on an impossible action.
  */
 export function replay(cfg, actions) {
   const st = createGame(cfg);
-  (actions || []).forEach((a, i) => {
-    let r = null;
-    try {
-      switch (a[0]) {
-        case 'r': rollDice(st); break;
-        case 'l': landing(st); break;
-        case 'c': r = choose(st, null, a[1], a.length > 2 ? { qty: a[2] } : {}); break;
-        case 'L': r = takeLoan(st, a[1] || undefined); break;
-        case 'R': r = repayLoan(st, a[1] || undefined); break;
-        case 'C': r = payCredit(st); break;
-        case 'P': r = setPlan(st, a[1]); break;
-        case 'A': r = setAutoInvest(st, a[1]); break;
-        case 'I': r = invest(st, a[1], a[2]); break;
-        case 'S': r = moveSavings(st, a[1]); break;
-        case 'T': r = setSideReport(st, a[1]); break;
-        case 'F': r = setFocus(st, a[1], a[2] ?? 0); break;
-        case 'H': r = requestHint(st); break;
-        case 'M': r = setMentorLevel(st, a[1]); break;
-        case 'Q': r = resolveStory(st, a[1], a[2]); break;
-        default: throw new Error('unknown action');
-      }
-    } catch (e) { throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${e.message}`); }
-    if (r && r.ok === false) throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${r.error}`);
-  });
+  (actions || []).forEach((a, i) => replayStep(st, a, i));
   return st;
+}
+/** Apply one logged action (replay, k0 scan). Throws replay_mismatch on an impossible action. */
+function replayStep(st, a, i) {
+  let r = null;
+  try {
+    switch (a[0]) {
+      case 'r': rollDice(st); break;
+      case 'l': landing(st); break;
+      case 'c': r = choose(st, null, a[1], a.length > 2 ? { qty: a[2] } : {}); break;
+      case 'L': r = takeLoan(st, a[1] || undefined); break;
+      case 'R': r = repayLoan(st, a[1] || undefined); break;
+      case 'C': r = payCredit(st); break;
+      case 'P': r = setPlan(st, a[1]); break;
+      case 'A': r = setAutoInvest(st, a[1]); break;
+      case 'I': r = invest(st, a[1], a[2]); break;
+      case 'S': r = moveSavings(st, a[1]); break;
+      case 'T': r = setSideReport(st, a[1]); break;
+      case 'F': r = setFocus(st, a[1], a[2] ?? 0); break;
+      case 'H': r = requestHint(st); break;
+      case 'M': r = setMentorLevel(st, a[1]); break;
+      case 'Q': r = resolveStory(st, a[1], a[2]); break;
+      case 'K': r = answerPractice(st, a[1], a[2]); break;
+      case 'W': r = continueAfterWin(st); break;
+      case 'X': r = retire(st); break;
+      default: throw new Error('unknown action');
+    }
+  } catch (e) { throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${e.message}`); }
+  if (r && r.ok === false) throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${r.error}`);
 }
 /** Config needed by replay() for this game. */
 export function replayConfig(st) {
@@ -4256,6 +4716,10 @@ export function replayConfig(st) {
   if (st.dateKey) cfg.dateKey = st.dateKey;
   if (st.gender) cfg.gender = st.gender;
   if (st._dev) cfg._dev = { ...st._dev };
+  if (st.learn) cfg.learn = true;                         // T4 E-9 (outcome-neutral; free games only)
+  if (st.dream) cfg.dream = st.dream.id;
+  if (st.tutorialFree) cfg.tutorialFree = true;
+  if (st.self) cfg.self = st.self;                        // T6 §10.2 (ghost games)
   return cfg;
 }
 /** The mentor level the game STARTED with (mid-game changes are replayed through 'M'). */
@@ -4278,15 +4742,19 @@ export function starsFor(world, months, maxMonths, charId) {
   return 1 + (months <= t.t2 ? 1 : 0) + (months <= t.t3 ? 1 : 0);
 }
 /** ★★ / ★★★ month thresholds — per character when the world defines them (characters differ in difficulty). */
-export function starThresholds(world, charId) {
+export function starThresholds(world, charId, rules = 4) {
   const w = typeof world === 'string' ? getWorld(world) : world;
   const ch = w.characters.find((c) => c.id === charId);
-  return { maxMonths: (ch && ch.maxMonths) || w.maxMonths, happy: LIFE_CFG.happyStar, fundMonths: 3, ...w.stars, ...((ch && ch.stars) || {}) };
+  return { maxMonths: charMaxMonths(w, ch, rules), happy: LIFE_CFG.happyStar, fundMonths: 3, ...w.stars, ...((ch && ch.stars) || {}) };
 }
 
 /** null while playing; otherwise the final result (pure — choose()/rollDice also store it in state.result). */
 export function checkEnd(st) {
   if (st.result) return st.result;
+  if (st.afterWin) { // T6 §9: after the win the goal no longer ends the game — bankruptcy, retire ('X') or the 10-year cap do
+    const aw = st.flags.bankrupt ? 'afterWinBroke' : st.month >= st.afterWin.m + 120 ? 'cap' : null;
+    return aw ? buildEnd(st, { aw }) : null;
+  }
   const w = W(st); const m = metrics(st); const g = w.goal;
   const timeUp = st.mode !== 'free' && st.month > st.maxMonths;
   let won = false;
@@ -4294,6 +4762,13 @@ export function checkEnd(st) {
   else won = goalMet(st) && (st.life.goalStreak || 0) >= GOAL_HOLD; // the goal must hold on 3 consecutive paydays
   const bankrupt = !!st.flags.bankrupt && !won;
   if (!won && !timeUp && !bankrupt) return null;
+  return buildEnd(st, { won, bankrupt, timeUp, m });
+}
+/** The end result (checkEnd / retire). o = {won, bankrupt, timeUp, m} or {aw: 'retired'|'cap'|'afterWinBroke'} after a win. */
+function buildEnd(st, o) {
+  const w = W(st); const m = o.m || metrics(st); const g = w.goal;
+  const A = st.afterWin; const aw = A ? o.aw : null;
+  const won = !!o.won; const bankrupt = !!o.bankrupt;
   const months = st.month;
   const happy = Math.round(st.life.happiness);
   let stars = 0, starsBlockedByHappiness = false, starsBlockedByFund = false;
@@ -4306,8 +4781,17 @@ export function checkEnd(st) {
     if (stars >= 3 && m.emergency.months < starThresholds(w, st.charId).fundMonths) { stars = 2; starsBlockedByFund = true; } // freedom that survives a crisis
   }
   const res = { status: won ? 'won' : 'lost', reason: won ? (g.type === 'benchmark' ? 'benchmark' : 'goal') : bankrupt ? 'bankrupt' : 'time', months, turns: st.turn, stars, starsBlockedByHappiness, starsBlockedByFund, netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, cashflow: m.cashflow, impact: Math.floor(st.world.impact || 0), progress: m.goalProgress, stats: { ...st.stats }, lesson: w.lesson, worldId: w.id, charId: st.charId, nearMiss: null, tip: null };
+  if (aw) { // the continuation's result: never more stars than at the win
+    res.status = aw === 'afterWinBroke' ? 'lost' : 'retired'; res.reason = aw; res.stars = A.stars; res.starsBlockedByHappiness = false; res.starsBlockedByFund = false;
+    const n = st.month - A.m; const still = m.passive >= m.expenses;
+    const lines = [`${n} חודשים אחרי היציאה`, `שווי נקי ${sgn(m.netWorth - A.nw0)} מאז היציאה`, `הכנסה פסיבית ${sgn(m.passive - A.pas0)} מאז היציאה`, `אושר ${A.hap0} → ${Math.round(st.life.happiness)}`,
+      still ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'];
+    if (aw === 'cap') lines.push('עברו 10 שנים מאז שיצאת מהמירוץ — כאן עוצרים.');
+    if (aw === 'afterWinBroke') lines.push(`החופש לא החזיק: בחודש ${st.month} נגמר הכסף.`);
+    res.afterWin = { winMonths: A.months, winStars: A.stars, months: n, nwDelta: m.netWorth - A.nw0, passiveDelta: m.passive - A.pas0, happinessDelta: Math.round(st.life.happiness) - A.hap0, stillFree: still, reason: aw, title: 'מה החופש נתן לך', lines };
+  }
   if (g.type === 'benchmark') res.benchmark = benchmarkResult(st, m);
-  res.nearMiss = nearMiss(st, w, m, res);
+  res.nearMiss = aw ? null : nearMiss(st, w, m, res);
   res.leaks = leaksOf(st);
   res.tip = tipFor(st, res);
   res.log = st.log.slice(-80);
@@ -4320,7 +4804,33 @@ export function checkEnd(st) {
     res.ddPassed = st.stats.ddPassed || 0;
     res.econPath = st.econ ? { truth: st.econ.truth.map((x) => ({ m: x.m, phase: x.phase, label: CY.PHASE_LABEL[x.phase] })), signal: st.econ.hist.map((x) => ({ m: x.m, s: x.s })), text: 'עכשיו אפשר לראות מה באמת היה' } : null;
   }
+  if (st.dream) res.dream = dreamMetrics(st);                       // T4 CR-E5 (presentation only)
+  if (st.learn) res.learn = true;
+  if (st.history && !res.lessons.includes('benchmark')) res.lessons.push('benchmark'); // T4 E-8: every history game ends with the benchmark lesson
+  try { res.recap = recapFor(st, res, m); } catch (e) { res.recap = null; } // T6 §6.2 (never blocks the end of a game)
   return res;
+}
+/** T6 §5.1 / §6.2: the input of the end summary (engine data only) → result.recap. */
+function recapFor(st, res, m) {
+  const tl = JSON.parse(JSON.stringify(st.tl || { v: 1, step: 1, from: st.month, m: [], nw: [], liq: [], debt: [], pas: [], exp: [], pg: [], hap: [], en: [] }));
+  tlPush(st, true, tl); // the final state as the last row (finalize() appends the same row to st.tl)
+  const D = dqOf(st); const L = st.life; const w = W(st);
+  const T = st.worldId !== 'h' ? starThresholds(w, st.charId, st.rules) : null;
+  const A = st.afterWin;
+  const bizNow = managedOf(st).map((a) => { const t = a.biz.totals || {}; let stage = ''; try { stage = BIZ.summary(a.biz).stageName || ''; } catch (e) { stage = ''; } return { months: t.months || 0, profitMonths: t.profitMonths || 0, lossMonths: t.lossMonths || 0, worstNp: t.worst ? t.worst.np : null, worstM: t.worst ? t.worst.m : null, stage }; });
+  const all = [...(st.bizPast || []), ...bizNow];
+  let biz = null;
+  if (all.length) { biz = { had: true, months: 0, profitMonths: 0, lossMonths: 0, worstNp: null, worstM: null, stage: '' }; for (const b of all) { biz.months += b.months; biz.profitMonths += b.profitMonths; biz.lossMonths += b.lossMonths; if (b.worstNp != null && (biz.worstNp == null || b.worstNp < biz.worstNp)) { biz.worstNp = b.worstNp; biz.worstM = b.worstM; } if (b.stage) biz.stage = b.stage; } }
+  const leak = (res.leaks || []).find((l) => l.key !== 'forced' && l.amount >= Math.max(1, m.expenses * 0.5));
+  const TIPS = { interest: 'בפעם הבאה: פחות חובות. כל שקל ריבית הוא שקל שלא קנה נכס — ואשראי מתגלגל הוא מהחובות היקרים שיש.', toys: 'בפעם הבאה: לוותר על יותר פיתויים. כל צעצוע מהמשכורת דוחה את היציאה.', badAssets: 'בפעם הבאה: תבדוק את השורה התחתונה. נכס שמוציא כסף כל חודש הוא התחייבות.', subs: 'בפעם הבאה: פחות מנויים. מנוי קטן מזיז את קו הסיום — לתמיד.', business: 'בפעם הבאה: עסק שמפסיד חודש אחרי חודש — לבדוק את המספרים לפני שמזרימים עוד.' };
+  const deals = (st.rivalDeals || []).map((d) => ({ ...d, text: RV.revealText(d, fmtM) }));
+  const won = A ? true : res.status === 'won';
+  return recapOf({ tl, marks: st.marks || [], decisions: D.decisions || [], luckLog: D.luckLog || [], verdicts: (res.learning || learningOf(st)).verdicts, nDecisions: D.n, hints: D.hints || 0,
+    stats: st.stats, mastery: D.mastery || {}, won, months: A ? A.months : res.months, stars: res.stars, thresholds: T ? [T.t3, T.t2, st.maxMonths] : [null, null, st.maxMonths], progress: won ? 1 : res.progress, maxMonths: st.maxMonths,
+    E: Math.max(1, m.expenses), hapAvg: L.hapN ? Math.round(L.hapSum / L.hapN) : null, burnouts: L.burnouts || 0, bailout: !!st.flags.bailoutUsed,
+    econTruth: st.econ ? st.econ.truth.map((x) => ({ m: x.m, phase: x.phase })) : [], endMonth: st.month, biz, rivalDeals: deals,
+    top: (res.lifeSummary && res.lifeSummary.topDecisions) || [], memory: st.story ? st.story.memory.slice() : [], leakTip: leak ? (TIPS[leak.key] || null) : null, tip: res.tip,
+    planLabels: Object.fromEntries(PLAN_IDS.map((id) => [id, PLANS[id].label])), focusLabels: Object.fromEntries(FC.FOCUS_IDS.map((id) => [id, FC.FOCUS[id].label])), fmt: fmtM, persona: RV.persona });
 }
 /** History mode: you vs. the buy-and-hold investor vs. cash under the mattress. */
 function benchmarkResult(st, m) {

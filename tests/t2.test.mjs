@@ -186,7 +186,7 @@ test('T7 legacy equivalence: rules 3 reproduces the v3 golden fixture (200 games
 });
 
 /* ------------------------------------------------------------------ T8 info leaks */
-const SEALED_KEYS = ['negR', 'raiseR', 'sideSeed', 'rng', 'decks', 'bizRng', 'hidden', 'path', 'truth', 'phase', 'jitter', 'inflationYear'];
+const SEALED_KEYS = ['negR', 'raiseR', 'sideSeed', 'rng', 'decks', 'bizRng', 'hidden', 'path', 'truth', 'phase', 'jitter', 'inflationYear', 'close', 'taker']; // + T6 competition seals
 const PUBLIC_PATHS = new Set(['$.phase', '$.metrics.index.projection.path', '$.event.data.projection.path']); // game phase / the index fund's projected range (public)
 function scanKeys(o, path, hits) { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { const p = path + '.' + k; if (SEALED_KEYS.includes(k) && !PUBLIC_PATHS.has(p)) hits.push(p); scanKeys(v, Array.isArray(o) ? path + '[]' : p, hits); } }
 function scramble(st, r) {
@@ -199,7 +199,9 @@ function scramble(st, r) {
     if (p.negR != null) p.negR = r(); if (p.r != null) p.r = r(); if (p.raiseR != null) p.raiseR = r(); if (p.seed != null) p.seed = Math.floor(r() * 1e9);
     if (p.hidden) p.hidden = { mult: Math.round(r() * 40), revealIn: 5 + Math.floor(r() * 8), signalIn: 3, signalMult: r() * 2 };
     if (p.dd) { p.dd.risk = Math.floor(r() * 4); if (p.dd.level === 0) { p.dd.f = 0.1 + r(); p.dd.vf = 0.6 + r() * 0.5; p.dd.repair = Math.floor(r() * 50) * 100; p.dd.jitter = r(); } }
+    if (p.rv && p.rv.n) { p.rv.close = Math.floor(r() * 4); p.rv.taker = p.rv.close ? p.rv.who[Math.floor(r() * p.rv.n)] : null; } // T6 sealed competition outcome
   }
+  for (const d of st.rivalDeals || []) if (!d.revealed) d.truth = { cf: Math.round(r() * 9000) - 3000, value: Math.round(r() * 1e6), repair: Math.floor(r() * 50) * 100 }; // T6: unrevealed truth
   if (st.world.coin) st.world.coin.path = st.world.coin.path.map(() => r() * 9);
   for (const x of st.angels) if (x.status === 'active') x.mult = Math.round(r() * 30);
   if (st.econ) { const sharp = st.econ.sharpUntil >= st.month; if (!sharp) st.econ.m = Math.floor(r() * 9); for (const x of st.econ.truth) if (x.m > st.month - (sharp ? 1 : 3)) x.phase = ['exp', 'slow', 'rec', 'recov'][Math.floor(r() * 4)]; } // research (review M1) legitimately shows the phase age and a 1-month official lag
@@ -249,8 +251,9 @@ test(`T9 impactFor matches the engine (${N(300)} states): certain = a real choos
         assert.ok(Number.isFinite(exp.cf) && Number.isFinite(exp.value) && Number.isFinite(exp.repair));
         assert.ok(imp.assumptions.some((a) => /המוכר|טווח הבדיקה/.test(a)));
       } else if (imp.basis === 'branches') {
-        branches++; assert.equal(imp.branches.length, 2); assert.ok(Math.abs(imp.branches[0].p + imp.branches[1].p - 1) < 1e-9);
-        if (/^offer:/.test(o.id)) { c.pending.negR = 0; E.choose(c, null, o.id); assert.equal(imp.branches[0].cashAfter, c.cash); assert.equal(imp.branches[0].cfAfter, E.metrics(c).cashflow); }
+        // T6 §3.6: a delay step on a card others want adds the rival branch (inspect: 2 branches, offer: 3)
+        branches++; assert.ok(imp.branches.length === 2 || imp.branches.length === 3); assert.ok(Math.abs(imp.branches.reduce((a, b) => a + b.p, 0) - 1) < 1e-9);
+        if (/^offer:/.test(o.id)) { const acc = imp.branches.find((b) => !b.lost); c.pending.negR = 0; if (c.pending.rv) c.pending.rv.close = 0; E.choose(c, null, o.id); assert.equal(acc.cashAfter, c.cash); assert.equal(acc.cfAfter, E.metrics(c).cashflow); }
       }
     }
   }
@@ -412,7 +415,7 @@ test('T13 due diligence: inspect costs, ranges contain the truth, exact numbers,
   const ht = dealState('w1', card, { mentor: 'hint', cash: 60000 }); assert.notEqual(E.currentEvent(ht).mentor, 'שאלה מכשילה?');
   assert.match(E.choose(ht, null, 'pass').mentor, /^שאלה מכשילה\?/);
   // golden / starter: risk 0, no inspections on those
-  const tut = E.createGame({ worldId: 'w1', seed: 3, mode: 'free', tutorial: true }); E.rollDice(tut); const te = E.landing(tut);
+  const tut = E.createGame({ worldId: 'w1', charId: 'doctor', seed: 3, mode: 'free', tutorial: true }); E.choose(tut, null, 'skip'); E.rollDice(tut); const te = E.landing(tut); // T4: intro first; the sized tutorial deal
   assert.equal(te.type, 'deal'); assert.equal(tut.pending.dd.risk, 0); assert.ok(!te.options.some((o) => /^inspect/.test(o.id)));
   const DDm = E.DD; const gd2 = DDm.drawDD([0.99, 0.99, 0.5, 0.01, 0.5, 0.5], { down: 1000 }, 'w4', { golden: true }); assert.equal(gd2.risk, 0); assert.deepEqual(gd2.flags, ['rush']);
   // 6 draws → flags from the right pool, distinct
