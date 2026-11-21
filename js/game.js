@@ -1,13 +1,26 @@
 // מירוץ העכברים 2.0 — the game controller: engine ⇄ scene ⇄ ui. Turn flow, saves, end of game.
 // Public API (contract with the lobby):
-//   initGame(), startGame(cfg), savedGame(keyOrCfg), hasActiveGame(), activeConfig(), clearSave(keyOrCfg), saveKeyFor(cfg)
+//   initGame(), startGame(cfg) → Promise<boolean>, savedGame(keyOrCfg), hasActiveGame(), activeConfig(), clearSave(keyOrCfg), saveKeyFor(cfg)
+//   T1: isStuck(), recover({lite}), setLite(on), reloadInto3D()
 // Emits on the bus: 'game:end' {…}, 'achievement' {ids}, 'lobby:open' {}.
+// T1: the renderer is chosen at run time (js/render/select.js): 3D scene.js, the flat 2D board (מצב קל) or none.
+// Every renderer implements the same scene API (js/render/null.js SCENE_API); the engine and this flow are identical.
 import * as E from './engine.js';
 import { bus } from './bus.js';
-import * as scene from './scene.js';
 import * as ui from './ui.js';
 import { sfx, setMuted, isMuted, unlock } from './audio.js';
 import { net } from './net.js';
+import * as nullScene from './render/null.js';
+import { loadRenderer, preferredChoice, prefetch3D } from './render/select.js';
+import * as OV from './render/overlay.js';
+import { flag } from './flags.js';
+import * as saves from './saves.js';
+
+const STR = OV.STR, SS = saves.STR;
+/** the active renderer: starts as the no-op scene so nothing can crash before init */
+let scene = nullScene;
+// keep three.js downloading in parallel with game.js when 3D is the likely renderer
+try { if (preferredChoice().kind === '3d') prefetch3D(); } catch (e) { /* ignore */ }
 
 const SETTINGS = 'rr2-settings';
 const readSettings = () => { try { return JSON.parse(localStorage.getItem(SETTINGS) || '{}') || {}; } catch (e) { return {}; } };
@@ -26,20 +39,80 @@ const $ = (s) => document.querySelector(s);
 const speed = () => (settings.turbo ? 0.5 : 1);
 const pause = (ms) => new Promise((r) => setTimeout(r, ms * speed()));
 
-/* ============================================================ saves */
+/* ============================================================ error boundary (T1) */
+let stuck = false; const stuckLog = [];           // timestamps of stuck moments
+let flows = 0, flowTick = 0;                      // running turn/landing flows; bumps on every step of a flow
+window.__rrErrors = window.__rrErrors || [];      // capped at 20 {msg, where, at}; read by tests; never stored
+function logErr(err, where) {
+  const msg = String((err && err.message) || err).slice(0, 300);
+  window.__rrErrors.push({ msg, where, at: Date.now() }); if (window.__rrErrors.length > 20) window.__rrErrors.shift();
+  console.warn('[rr] error in', where, err);
+}
+/** keep a locally caught error visible to devtools / monitoring as an uncaught error (the global handler skips it) */
+function resurface(err) { if (err instanceof Error) { err.__rrHandled = true; setTimeout(() => { throw err; }, 0); } }
+/** A flow broke mid-turn: save, freeze the roll, offer to continue from the save. variant 'R3' = WebGL context lost. */
+function enterStuck(err, where, variant = null) {
+  logErr(err, where);
+  if (err && typeof err === 'object') err.__rrHandled = true;
+  if (!flag('recover')) { // rollback path: the old silent behaviour + a toast
+    busy = false; ui.setRollEnabled(!!(S && !S.over && S.phase === 'roll' && !ui.isEventOpen()));
+    ui.toast(STR.R4); resurface(err); return;
+  }
+  try { if (S && CFG) persist(); } catch (e) { /* ignore */ } // engine mutators throw before mutating → S is consistent
+  stuck = true; busy = true; ui.setRollEnabled(false);
+  if (variant === 'R3') showRecoverBar('R3');
+  else { stuckLog.push(Date.now()); showRecoverBar(stuckLog.filter((t) => Date.now() - t < OV.RECOVER_WINDOW_MS).length >= 3 ? 'R2' : 'R1'); }
+  if (where !== 'global' && where !== 'context') resurface(err);
+}
+function barLobby() { try { persist(); } catch (e) { /* ignore */ } OV.hideRecover(); bus.emit('lobby:open', {}); } // stuck stays true: resume-active recovers
+function showRecoverBar(v) {
+  const lobby = { label: STR.Rlobby, fn: barLobby };
+  if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
+  else if (v === 'R2') OV.showRecover({ title: STR.R1t, body: STR.R2b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.Rsave, fn: () => recover() }, lobby] });
+  else OV.showRecover({ title: STR.R1t, body: STR.R1b, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, lobby] });
+}
+export function isStuck() { return stuck; }
+/** Continue from the save (the save was written when the flow broke). lite → continue in מצב קל. */
+export async function recover({ lite = false } = {}) {
+  OV.hideRecover(); stuck = false; busy = false; closeCard();
+  if (lite && flag('board2d') !== 'off') return setLite(true);
+  if (!CFG) return false;
+  return startGame({ ...CFG, resume: true });
+}
+// global listeners: count only while a game is on screen and the error comes from the game's own modules
+const OWN = /\/js\/(game|ui|scene|engine)\.js|\/js\/render\//;
+function onGlobalError(err, src) {
+  if (err && err.__rrHandled) return;
+  if (!(S && !S.over && $('#start') && $('#start').hidden) || stuck) return;
+  if (!OWN.test(String(src || ''))) return;
+  logErr(err, 'global');
+  const t0 = flowTick;
+  const looksStuck = () => {
+    if (stuck || !S || S.over || !$('#start').hidden) return false;
+    if (ui.isEventOpen() || !$('#gm').hidden || !$('#story').hidden || !$('#coach').hidden) return false;
+    if (busy) return flows === 0 || flowTick === t0;
+    return $('#roll').disabled && S.phase === 'roll';
+  };
+  setTimeout(() => { if (looksStuck()) setTimeout(() => { if (looksStuck()) enterStuck(err, 'global'); }, OV.STUCK_CHECK_MS); }, OV.STUCK_CHECK_MS);
+}
+addEventListener('error', (ev) => onGlobalError(ev.error || ev.message, [ev.filename, ev.error && ev.error.stack].join(' ')));
+addEventListener('unhandledrejection', (ev) => onGlobalError(ev.reason, (ev.reason && ev.reason.stack) || ''));
+
+/* ============================================================ saves (T1: js/saves.js — backup, quarantine, quota) */
 /** localStorage key for a config: free → rr2-save-free-<world>; ranked → rr2-save-<resultId>. */
 export function saveKeyFor(cfg) {
   if (!cfg) return null;
   if (cfg.mode === 'free' || !cfg.mode) return `rr2-save-free-${cfg.worldId || 'w1'}`;
-  if (cfg.mode === 'history') return `rr2-save-history-${cfg.scenarioId || 'x'}`;
+  if (cfg.mode === 'history') return cfg.scenarioId ? `rr2-save-history-${cfg.scenarioId}` : `rr2-save-history-seed-${cfg.seed >>> 0}`;
   if (cfg.resultId) return `rr2-save-${cfg.resultId}`;
   return `rr2-save-${cfg.mode}-${cfg.worldId || 'w1'}-${cfg.seed >>> 0}`;
 }
 const keyOf = (k) => (typeof k === 'string' ? k : saveKeyFor(k));
-function readSave(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
+let quotaWarned = false;
 function persist() {
   if (!S || !CFG) return;
-  try { localStorage.setItem(saveKeyFor(CFG), JSON.stringify({ v: 2, cfg: CFG, state: S, savedAt: Date.now() })); } catch (e) { /* quota / private mode */ }
+  const r = saves.write(saveKeyFor(CFG), CFG, S);
+  if (!r.ok && r.quota && !quotaWarned) { quotaWarned = true; ui.toast(SS.S7, { kind: 'bad', ms: 8000 }); }
 }
 
 /* ============================================================ ranked server checkpoint (anti-replay) */
@@ -71,57 +144,155 @@ async function pumpCheckpoint() {
   if (ckNext) pumpCheckpoint();
 }
 addEventListener('online', () => pumpCheckpoint());
-const newUi = (o = {}) => ({ seq: 0, coach: {}, firstPayday: false, ...o, coach: { ...((o && o.coach) || {}) } });
-/** Saved unfinished game for a key (or cfg) → {cfg, month, worldId, charName} | null. */
+/** Saved unfinished game for a key (or cfg) → {cfg, month, worldId, charName, future?} | null. */
 export function savedGame(k) {
-  const s = readSave(keyOf(k));
-  if (!s || !s.state || s.state.over) return null;
-  return { cfg: s.cfg, month: s.state.month, worldId: s.state.worldId, charName: s.state.charName };
+  const c = saves.peek(keyOf(k));
+  if (c.status !== 'current' && c.status !== 'old' && c.status !== 'future') return null;
+  const out = { cfg: c.wrapper.cfg, month: c.state.month, worldId: c.state.worldId, charName: c.state.charName };
+  if (c.status === 'future') out.future = true; // the lobby still offers "להמשיך"; startGame explains (S-S1)
+  return out;
 }
-export function clearSave(k) { try { localStorage.removeItem(keyOf(k)); } catch (e) { /* ignore */ } }
+export function clearSave(k) { saves.clear(keyOf(k)); }
 export function hasActiveGame() { return !!(S && !S.over); }
 export function activeConfig() { return CFG ? { ...CFG } : null; }
 
 /* ============================================================ init */
-/** Renderer, scene, lights, world-1 models + board (shown behind the lobby). Safe to call twice; runs in the
- * background while the lobby is already up — startGame() waits for it with a loading bar. */
+/** Renderer + world-1 board (shown behind the lobby). Safe to call twice; runs in the background while the lobby is up —
+ * startGame() waits for it with honest loading stages. Practically never rejects (the renderer falls back 3D → 2D → none). */
 export function initGame() {
   if (!initP) initP = doInit().then(() => { initDone = true; }, (e) => { initP = null; throw e; });
   return initP;
 }
-let initDone = false, initPct = 0;
+let initDone = false;
+let rendererInfo = null;                        // {kind, reason} for the notices
+let initPhase = 'idle';                         // 'renderer' | 'models' | 'done'
+const initModels = { done: 0, total: 0 };       // GLBs of the init set (world 1 + pawn + dice), settled / total
 const initWatchers = new Set();
-const initProgress = (p) => { initPct = p; for (const f of initWatchers) f(p); };
+const emitInit = (ev) => { for (const f of initWatchers) { try { f(ev); } catch (e) { console.error(e); } } };
 export const gameReady = () => initDone;
-let lifeP = null;
+let lifeP = null, lifeSettled = false; const lifeProg = { done: 0, total: 0 }; const lifeWatchers = new Set();
+let curPawn = '';                               // pawn id|colour currently on the board
+let forced2d = null;                            // reason when the next init must use 2D (context lost)
+let ctxDead = false, ctxT = 0;
 async function doInit() {
-  initProgress(0.05);
+  initShell();
+  await initRenderer();
+}
+let shellDone = false;
+/** once per page: wiring, settings, the #start observer, the lite button */
+function initShell() {
+  if (shellDone) return; shellDone = true;
   wireUI();
   applySettings();
-  await scene.init($('#c'));
-  await Promise.race([Promise.all([document.fonts.load('800 40px Rubik'), document.fonts.load('40px "Secular One"')]), new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
+  // the lobby covers the board: stop rendering while it is up (game flows simply wait underneath).
+  // Lobby → "חזרה למשחק" only hides #start: when the game is stuck, that is the moment to recover.
+  const start = $('#start');
+  const sync = () => { scene.setPaused(!start.hidden); if (start.hidden && stuck && S && CFG) recover(); };
+  new MutationObserver(sync).observe(start, { attributes: true, attributeFilter: ['hidden'] });
+  sync();
+}
+/** re-runnable: choose and start a renderer, then the world-1 board */
+async function initRenderer() {
+  initPhase = 'renderer'; initModels.done = initModels.total = 0;
+  const ch = forced2d ? { kind: '2d', reason: forced2d } : preferredChoice();
+  forced2d = null;
+  const r = await loadRenderer({ want: ch.kind, reason: ch.reason, canvas: $('#c'), root: $('#board2d'), onSlow: () => emitInit({ type: 'slow' }) });
+  scene = r.scene;
+  rendererInfo = { kind: r.kind, reason: r.reason };
+  initPhase = 'models';
+  emitInit({ type: 'renderer', kind: r.kind });
+  try { scene.setSpeed(speed()); } catch (e) { console.error(e); }
+  await Promise.race([Promise.all([document.fonts.load('800 40px Rubik'), document.fonts.load('40px "Secular One"')]), new Promise((res) => setTimeout(res, 2500))]).catch(() => {});
   const w1 = E.getWorld('w1');
-  await Promise.all([
-    scene.preloadWorld(w1, (p) => initProgress(0.1 + p * 0.85)),
-    scene.setPawn('classic', '#e2483d'),
-    scene.preloadDice(),
-  ]);
+  if (scene.kind === '3d') {
+    let wT = 0, wD = 0, dT = 0, dD = 0, pD = 0;
+    const upd = () => { initModels.total = wT + dT + 1; initModels.done = wD + dD + pD; emitInit({ type: 'model' }); };
+    upd();
+    await Promise.all([
+      scene.preloadWorld(w1, (p, d) => { if (d) { wT = d.total; wD = d.done; } upd(); }),
+      Promise.resolve(scene.setPawn('classic', '#e2483d')).catch((e) => console.warn(e)).finally(() => { pD = 1; upd(); }),
+      scene.preloadDice((p, d) => { if (d) { dT = d.total; dD = d.done; } upd(); }),
+    ]);
+  } else await scene.setPawn('classic', '#e2483d');
+  curPawn = 'classic|#e2483d';
   W = w1;
   scene.buildWorld(w1); scene.placePawn(0);
   ui.applyTheme(w1);
   frame();
-  $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
-  initProgress(1);
+  if (!S) $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
+  initPhase = 'done';
   // life / history models (~2.5 MB) are not needed for the lobby: fetch them after boot, off the critical path
-  // (startGame awaits the same cached promise, so they are always ready before a game begins)
-  lifeP = scene.preloadLife().catch(() => null);
-  // the lobby covers the board: stop rendering while it is up (game flows simply wait underneath)
-  const start = $('#start');
-  const sync = () => scene.setPaused(!start.hidden);
-  new MutationObserver(sync).observe(start, { attributes: true, attributeFilter: ['hidden'] });
-  sync();
+  // (startGame awaits the same promise, with its own loading stage)
+  if (scene.kind === '3d') {
+    lifeSettled = false; lifeProg.done = lifeProg.total = 0;
+    lifeP = scene.preloadLife((p, d) => { if (d) { lifeProg.done = d.done; lifeProg.total = d.total; } for (const f of lifeWatchers) f(); })
+      .catch(() => null).finally(() => { lifeSettled = true; });
+    scene.onContextLost(onContext);
+  } else { lifeP = Promise.resolve(); lifeSettled = true; }
+  const cam = $('#camBtn'); if (cam) cam.hidden = scene.kind !== '3d';
+  syncLiteBtn();
+  scene.setPaused(!$('#start').hidden);
+}
+/** WebGL context lost: keep the save; no restore within CONTEXT_RESTORE_WAIT_MS → offer מצב קל (S-R3). */
+function onContext(ev) {
+  if (ev === 'lost') {
+    try { persist(); } catch (e) { /* ignore */ }
+    clearTimeout(ctxT);
+    ctxT = setTimeout(() => { ctxDead = true; if (S && !S.over && $('#start').hidden) enterStuck(new Error('webgl_context_lost'), 'context', 'R3'); }, OV.CONTEXT_RESTORE_WAIT_MS);
+  } else { clearTimeout(ctxT); ctxDead = false; }
 }
 
+/* ============================================================ מצב קל (lite) switch + notices */
+let liteJustOn = false, noticeDone = false;
+function syncLiteBtn() {
+  const b = $('#liteBtn'); if (!b) return;
+  const on = scene.kind !== '3d';
+  b.hidden = flag('board2d') === 'off';
+  b.setAttribute('aria-pressed', String(on));
+  const t = on ? STR.liteOn : STR.liteOff; b.setAttribute('aria-label', t); b.title = t;
+}
+/** Turn מצב קל on (3D → 2D live, same page) or off (2D → 3D through a page reload). */
+export async function setLite(on) {
+  settings.lite = !!on; writeSettings({ lite: !!on });
+  if (!on) { if (scene.kind !== '3d') reloadInto3D(); return; }
+  if (scene.kind !== '3d') { if (stuck) return recover(); syncLiteBtn(); return; }
+  liteJustOn = true;
+  try { persist(); } catch (e) { /* ignore */ }
+  gen++; closeCard(); OV.hideRecover(); stuck = false; busy = false;
+  try { scene.dispose(); } catch (e) { console.warn(e); }
+  scene = nullScene; initDone = false; initP = null;
+  if (S && CFG && !S.over) return startGame({ ...CFG, resume: true });
+  initGame().catch((e) => console.warn(e));
+}
+/** 2D → 3D: re-initialising three in the same page is not supported, so save and reload; main.js resumes the game. */
+export function reloadInto3D() {
+  try { persist(); } catch (e) { /* ignore */ }
+  settings.lite = false; writeSettings({ lite: false });
+  try { if (CFG && S && !S.over) sessionStorage.setItem('rr2-resume-once', JSON.stringify(CFG)); } catch (e) { /* ignore */ }
+  location.reload();
+}
+/** renderer notices: once per page load, after the board is shown */
+function rendererNotice() {
+  if (!rendererInfo) return;
+  if (liteJustOn && scene.kind === '2d') { liteJustOn = false; ui.toast(STR.N4, { ms: 6000 }); return; }
+  if (noticeDone) return;
+  const { kind, reason } = rendererInfo;
+  if (kind === 'none') { noticeDone = true; ui.toast(STR.N5, { ms: 6000 }); return; }
+  if (kind === '2d') {
+    noticeDone = true;
+    if (reason === 'no-webgl') ui.toast(STR.N1, { ms: 6000 });
+    else if (reason === 'three-failed' || reason === 'three-timeout') ui.toast(STR.N2, { ms: 6000, action: { label: STR.N2a, fn: () => reloadInto3D() } });
+    else if (reason === 'webgl-init-failed') ui.toast(STR.N3, { ms: 6000 });
+    return;
+  }
+  let failed = [];
+  try { failed = scene.failedModels(); } catch (e) { failed = []; }
+  if (failed.length) { noticeDone = true; ui.toast(STR.N6, { ms: 6000 }); return; }
+  if (scene.lowPower && !settings.liteOffered && flag('board2d') !== 'off') {
+    noticeDone = true; settings.liteOffered = true; writeSettings({ liteOffered: true });
+    ui.toast(STR.N7, { ms: 6000, action: { label: STR.N7a, fn: () => setLite(true) } });
+  }
+}
 function applySettings() {
   scene.setSpeed(speed()); ui.setSpeed(speed());
   const tb = $('#turboBtn'); tb.setAttribute('aria-pressed', String(!!settings.turbo)); tb.title = settings.turbo ? 'טורבו: פועל' : 'טורבו: כבוי';
@@ -144,6 +315,7 @@ function wireUI() {
   bus.on('energy:change', () => updateRollEnergy());
   setInterval(() => { if (!document.hidden && S && usesEnergy() && $('#start').hidden) updateRollEnergy(); }, 1000);
   $('#camBtn').innerHTML = ui.ICON.overview;
+  const lb = $('#liteBtn'); if (lb) lb.onclick = () => { sfx('click'); setLite(scene.kind === '3d'); }; // T1: מצב קל
   $('#camBtn').onclick = () => { const o = scene.getCameraMode() !== 'overview'; scene.setCameraMode(o ? 'overview' : 'follow'); $('#camBtn').setAttribute('aria-pressed', String(o)); $('#camBtn').title = o ? 'חזרה למצלמה שעוקבת אחרי החייל' : 'מבט על כל הלוח'; sfx('click'); };
   $('#homeBtn').onclick = () => { sfx('click'); goLobby(); };
   $('#turboBtn').onclick = () => { settings.turbo = !settings.turbo; writeSettings({ turbo: settings.turbo }); applySettings(); sfx('click'); ui.toast(settings.turbo ? 'טורבו פועל: הכל זז פי 2' : 'מהירות רגילה'); };
@@ -184,103 +356,222 @@ function frame() { scene.frame(ui.freeRect()); }
  */
 export async function startGame(cfg = {}) {
   const my = ++gen;
-  if (!initDone) {
-    $('#start').hidden = true;
-    ui.showLoading('טוען את העולם…', initPct);
-    const f = (p) => ui.showLoading(null, p);
-    initWatchers.add(f);
-    try { await initGame(); } catch (e) { ui.hideLoading(); throw e; } finally { initWatchers.delete(f); }
-    if (my !== gen) return;
+  stuck = false; OV.hideRecover();
+  const orig = { ...cfg };
+  try { return await startInner(cfg, my); }
+  catch (e) {
+    logErr(e, 'start');
+    if (my !== gen) return false;
+    busy = false;
+    OV.showFatal({
+      title: STR.E1, body: STR.E2, details: e && e.message ? e.message : String(e),
+      actions: [
+        { label: STR.E3, primary: true, fn: () => startGame(orig) },
+        ...(flag('board2d') !== 'off' ? [{ label: STR.E4, fn: () => {
+          settings.lite = true; writeSettings({ lite: true }); liteJustOn = true;
+          if (scene.kind === '3d') { try { scene.dispose(); } catch (x) { /* ignore */ } }
+          scene = nullScene; initDone = false; initP = null; startGame(orig);
+        } }] : []),
+        { label: STR.E5, fn: () => bus.emit('lobby:open', {}) },
+      ],
+    });
+    return false;
   }
-  busy = true; closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
+}
+/** ranked game whose saved progress can't be loaded: never restart it from turn 0 (S-S5) */
+function rankedFail() { OV.hideLoading(); busy = false; ui.toast(SS.S5, { kind: 'bad' }); bus.emit('lobby:open', {}); return false; }
+function futureModal() {
+  OV.hideLoading(); busy = false;
+  ui.modal({ tag: SS.S1tag, color: '#2f6fdb', title: SS.S1t, html: `<p class="d">${ui.esc(SS.S1b)}</p>`,
+    actions: [{ label: SS.reload, cls: 'primary', v: 'reload' }, { label: SS.lobby, v: 'lobby' }] })
+    .then((v) => { if (v === 'reload') location.reload(); else bus.emit('lobby:open', {}); });
+  return false;
+}
+async function noBackupModal(allowGo = true) {
+  OV.hideLoading();
+  const v = await ui.modal({ title: SS.S6t, html: `<p class="d">${ui.esc(SS.S6b)}</p>`,
+    actions: [...(allowGo ? [{ label: SS.S6go, v: 'go' }] : []), { label: SS.lobby, cls: 'primary', v: 'lobby' }] });
+  return v === 'go';
+}
+async function startInner(cfg, my) {
+  initShell();
+  busy = true; quotaWarned = false;
+  closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
+  // WebGL died while the lobby was up: this start uses the 2D board
+  if (ctxDead && scene.kind === '3d') { ctxDead = false; try { scene.dispose(); } catch (e) { /* ignore */ } scene = nullScene; initDone = false; initP = null; forced2d = 'webgl-init-failed'; }
   cfg = {
     worldId: 'w1', mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false,
     ...cfg,
   };
   if (cfg.seed == null) cfg.seed = (Math.floor(Math.random() * 2147483646) + 1) >>> 0;
+  let Wt = null; try { Wt = E.getWorld(cfg.worldId); } catch (e) { Wt = null; }
+  const pawnKey = (cfg.pawn || 'classic') + '|' + (cfg.pawnColor || '#e2483d');
+
+  /* ---------- loading stages: only what is still pending (renderer → models → life → board) */
+  const initPending = !initDone;
+  const want3d = initPending ? !forced2d && preferredChoice().kind === '3d' : scene.kind === '3d';
+  const plan = [];
+  if (initPending) plan.push({ id: 'renderer', label: STR.L1 });
+  if (want3d && (initPending || (Wt && !scene.worldLoaded(Wt)) || pawnKey !== curPawn)) plan.push({ id: 'models', label: STR.L2(Wt ? Wt.name : ''), countable: true });
+  if (want3d && !lifeSettled) plan.push({ id: 'life', label: STR.L3, countable: true });
+  if (plan.length) { plan.push({ id: 'board', label: STR.L4 }); OV.showStages(plan); }
   $('#start').hidden = true;
+  // models stage = init set (if init is still running) + the target world's files + a new pawn; counts settled files
+  const M = { initD: 0, initT: 0, extraT: 0, wD: 0, wT: null, pD: 0, pT: 0 };
+  const pushM = () => OV.stageProgress('models', M.initD + M.wD + M.pD, M.initT + (M.wT ?? M.extraT) + M.pT);
+  if (initPending) {
+    const watch = (ev) => {
+      if (ev.type === 'slow') OV.stageNote('renderer', STR.L6);
+      if (initPhase === 'renderer') return;
+      OV.stageDone('renderer');
+      if (scene.kind !== '3d') { OV.stageDone('models'); OV.stageDone('life'); return; }
+      if (ev.type === 'renderer' || ev.type === 'sync') {
+        const far = Wt && Wt.id !== 'w1' && Wt.mechanic !== 'history' && typeof scene.worldModelNames === 'function';
+        try { M.extraT = far ? scene.worldModelNames.call(scene, Wt).length : 0; } catch (e) { M.extraT = 0; } // 3D-only helper, outside SCENE_API
+        M.pT = pawnKey !== 'classic|#e2483d' ? 1 : 0;
+      }
+      M.initD = initModels.done; M.initT = initModels.total; pushM();
+    };
+    initWatchers.add(watch);
+    watch({ type: 'sync' });
+    try { await initGame(); } finally { initWatchers.delete(watch); }
+    if (my !== gen) return false;
+    OV.stageDone('renderer');
+    if (scene.kind !== '3d') { OV.stageDone('models'); OV.stageDone('life'); }
+    else { M.initD = initModels.done; M.initT = initModels.total; }
+  }
   // history mode needs the real market series (lazy-loaded real.js) before createGame / save migration
   if (cfg.mode === 'history' && typeof E.loadRealData === 'function') {
     let ok = false;
     try { ok = await E.loadRealData(); } catch (e) { ok = false; }
-    if (my !== gen) return;
-    if (ok === false) { busy = false; ui.toast('לא הצלחנו לטעון את נתוני השוק. בדוק את האינטרנט ונסה שוב.'); $('#start').hidden = false; return; }
+    if (my !== gen) return false;
+    if (ok === false) { busy = false; OV.hideLoading(); ui.toast('לא הצלחנו לטעון את נתוני השוק. בדוק את האינטרנט ונסה שוב.'); $('#start').hidden = false; return false; }
   }
-  // load or create the state
-  let st = null;
-  const local = readSave(saveKeyFor(cfg));
-  const localSt = local && local.state && !local.state.over ? local.state : null;
-  let src = null;
-  if (cfg.state) {
-    // server checkpoint: the source of truth for ranked games — unless this device already got further
-    src = cfg.state;
-    if (localSt && localSt.seed === src.seed && ((localSt.ui && localSt.ui.seq) || 0) > ((src.ui && src.ui.seq) || 0)) src = localSt;
-  } else if (cfg.resume) src = localSt;
-  if (src) {
-    try {
-      st = E.deserialize(src);
-      st.ui = newUi({ ...((local && local.ui) || {}), ...(st.ui || {}) }); // (older saves kept ui beside the state)
-      cfg = { ...((local && local.cfg) || {}), ...cfg, worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode };
-    } catch (e) {
-      console.warn('bad save, starting fresh', e); st = null;
-      if (String(e && e.message).includes('save_incompatible')) { clearSave(cfg); ui.toast('המשחק השמור מגרסה ישנה — מתחילים מחדש'); }
+
+  /* ---------- load or create the state (js/saves.js: backup before migrating, never touch a future save) */
+  const key = saveKeyFor(cfg);
+  const isRanked = !!cfg.resultId;
+  let st = null, srcCfg = null, srcUi = null, note = null;
+  if (cfg.state || cfg.resume) {
+    let lr = saves.load(key);
+    if (lr.status === 'backup_failed') {
+      const go = await noBackupModal(true);
+      if (my !== gen) return false;
+      if (!go) { busy = false; bus.emit('lobby:open', {}); return false; }
+      lr = saves.load(key, { allowNoBackup: true });
     }
+    if (lr.status === 'future' || (cfg.state && saves.classifyState(cfg.state).status === 'future')) return futureModal();
+    const local = lr.status === 'ok' || lr.status === 'migrated' ? lr.state : null;
+    if (local) { srcCfg = lr.cfg; srcUi = lr.ui; }
+    if (cfg.state) {
+      // server checkpoint: the source of truth for ranked games — unless this device already got further
+      let srv = null;
+      try { srv = E.deserialize(cfg.state); } catch (e) { console.warn('bad server checkpoint', e); }
+      if (!srv || !srv.worldId) return rankedFail();
+      st = local && local.seed === srv.seed && ((local.ui && local.ui.seq) || 0) > ((srv.ui && srv.ui.seq) || 0) ? local : srv;
+      if (st === local && lr.status === 'migrated') note = 'migrated';
+    } else {
+      st = local;
+      if (lr.status === 'migrated') note = 'migrated';
+      if (lr.status === 'corrupt' || lr.status === 'incompatible') { if (isRanked) return rankedFail(); note = lr.status; }
+    }
+  }
+  if (st) {
+    st.ui = saves.normalizeUi({ ...(srcUi || {}), ...(st.ui || {}) }); // (older saves kept ui beside the state)
+    cfg = { ...(srcCfg || {}), ...cfg, worldId: st.worldId, charId: st.charId, seed: st.seed, mode: st.mode };
   }
   // never send a checkpoint number the server already has (it would be rejected as stale)
   const ckFloor = Math.max(0, Number(cfg.checkpointTurn) || 0);
   delete cfg.state; delete cfg.checkpointTurn;
   const resumed = !!st;
   if (!st) {
+    // a new game: whatever unfinished game this slot holds is backed up first (future saves are never overwritten)
+    const cl = saves.claimSlot(saveKeyFor(cfg), cfg.seed);
+    if (!cl.ok) {
+      const go = await noBackupModal(!cl.future);
+      if (my !== gen) return false;
+      if (!go) { busy = false; bus.emit('lobby:open', {}); return false; }
+    }
     st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout, scenarioId: cfg.scenarioId });
-    st.ui = newUi();
+    st.ui = saves.normalizeUi({});
     cfg.charId = st.charId;
   }
   cfg.resume = false;
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
   ui.applyTheme(W);
-  // world models (lazy) + board
-  if (!scene.worldLoaded(W)) {
-    ui.showLoading(`טוען את ${W.name}…`, 0.02);
-    await scene.preloadWorld(W, (p) => ui.showLoading(`טוען את ${W.name}…`, 0.05 + p * 0.9));
+
+  /* ---------- world models (lazy) + pawn + life models */
+  if (scene.kind === '3d') {
+    const loads = [];
+    // the init of THIS start already tried world 1's files (also used by history mode): don't wait for a failed one twice
+    const sameAsInit = initPending && (W.id === 'w1' || W.mechanic === 'history');
+    const needW = !scene.worldLoaded(W) && !sameAsInit, needP = pawnKey !== curPawn;
+    if ((needW || needP) && !OV.hasStage('models')) OV.showStages([{ id: 'models', label: STR.L2(W.name), countable: true }, ...(lifeSettled ? [] : [{ id: 'life', label: STR.L3, countable: true }]), { id: 'board', label: STR.L4 }]);
+    if (needP) M.pT = 1;
+    if (needW) loads.push(scene.preloadWorld(W, (p, d) => { if (d) { M.wT = d.total; M.wD = d.done; } pushM(); }));
+    else M.wT = 0;
+    if (needP) loads.push(Promise.resolve(scene.setPawn(cfg.pawn || 'classic', cfg.pawnColor || '#e2483d')).catch((e) => console.warn(e)).finally(() => { M.pD = 1; pushM(); }));
+    pushM();
+    await Promise.all(loads);
+  } else await scene.setPawn(cfg.pawn || 'classic', cfg.pawnColor || '#e2483d');
+  curPawn = pawnKey;
+  OV.stageDone('models');
+  if (!lifeP) lifeP = Promise.resolve();
+  if (!lifeSettled) {
+    const lw = () => OV.stageProgress('life', lifeProg.done, lifeProg.total);
+    lifeWatchers.add(lw); lw();
+    try { await lifeP; } finally { lifeWatchers.delete(lw); }
   }
-  await scene.setPawn(cfg.pawn || 'classic', cfg.pawnColor || '#e2483d');
-  if (!lifeP) lifeP = scene.preloadLife().catch(() => null);
-  await lifeP; // usually already resolved (started right after boot)
-  if (my !== gen) return;
-  scene.buildWorld(W);
-  scene.placePawn(S.pos);
-  scene.syncCity(E.cityModels(S), { silent: true });
-  ui.hideLoading();
-  ui.resetHud();
-  frame(); scene.resetCamera();
-  render(false);
-  ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
-  const intro = E.intro(S, resumed);
-  ui.mentor(intro.mentor);
-  ui.worldBanner(W, resumed ? `חזרת לחודש ${S.month}` : ui.goalWords(W.goalLabel));
-  if (!resumed) sfx('card');
-  persist();
-  if (S.over) { busy = false; return; }
-  // resume mid-event
-  if (S.phase === 'land' || S.phase === 'event' || S.pending) {
-    await handleLanding(my);
-    if (my !== gen) return;
-  }
-  busy = false;
-  if (S.over) return;
-  ui.setRollEnabled(true); ui.focusRoll();
-  updateRollEnergy();
-  offerTurbo();
-  const tutorialHere = CFG.tutorial && W.id === 'w1';
-  if (tutorialHere) markWorldCoached(W.id); // the tutorial explains w1
-  if (wantCoach('roll')) {
-    await new Promise((r) => setTimeout(r, 700));
-    if (my !== gen || busy || ui.isEventOpen()) return;
-    await showCoach('roll', { target: '#roll', title: 'מטילים קובייה', text: 'לחץ כאן (או על רווח) כדי להטיל. החייל מתקדם, ועל כל משבצת מחכה הזדמנות, הוצאה או הפתעה.' });
-  } else if (!worldCoached(W.id)) {
-    await new Promise((r) => setTimeout(r, 900));
-    await worldCoach(my);
+  OV.stageDone('life');
+  if (my !== gen) return false;
+
+  /* ---------- board + the game on screen (errors from here on → recover bar, the save is safe) */
+  try {
+    scene.buildWorld(W);
+    scene.placePawn(S.pos);
+    scene.syncCity(E.cityModels(S), { silent: true });
+    OV.hideLoading();
+    ui.resetHud();
+    frame(); scene.resetCamera();
+    render(false);
+    ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
+    const intro = E.intro(S, resumed);
+    ui.mentor(intro.mentor);
+    ui.worldBanner(W, resumed ? `חזרת לחודש ${S.month}` : ui.goalWords(W.goalLabel));
+    if (!resumed) sfx('card');
+    syncLiteBtn();
+    rendererNotice();
+    if (note === 'migrated') ui.toast(SS.S2);
+    else if (note === 'corrupt') ui.toast(SS.S4);
+    else if (note === 'incompatible') ui.toast(SS.S3, { kind: 'bad' });
+    persist();
+    if (S.over) { busy = false; return true; }
+    // resume mid-event
+    if (S.phase === 'land' || S.phase === 'event' || S.pending) {
+      await handleLanding(my);
+      if (my !== gen || stuck) return true;
+    }
+    busy = false;
+    if (S.over) return true;
+    ui.setRollEnabled(true); ui.focusRoll();
+    updateRollEnergy();
+    offerTurbo();
+    const tutorialHere = CFG.tutorial && W.id === 'w1';
+    if (tutorialHere) markWorldCoached(W.id); // the tutorial explains w1
+    if (wantCoach('roll')) {
+      await new Promise((r) => setTimeout(r, 700));
+      if (my !== gen || busy || ui.isEventOpen()) return true;
+      await showCoach('roll', { target: '#roll', title: 'מטילים קובייה', text: 'לחץ כאן (או על רווח) כדי להטיל. החייל מתקדם, ועל כל משבצת מחכה הזדמנות, הוצאה או הפתעה.' });
+    } else if (!worldCoached(W.id)) {
+      await new Promise((r) => setTimeout(r, 900));
+      await worldCoach(my);
+    }
+    return true;
+  } catch (e) {
+    OV.hideLoading();
+    if (my === gen && !stuck) enterStuck(e, 'start');
+    return true;
   }
 }
 
@@ -489,8 +780,14 @@ function wireHold() {
 
 /* ============================================================ turn */
 async function turn() {
-  if (busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
+  if (stuck || busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
   const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false);
+  flows++; flowTick++;
+  try { await turnBody(my); }
+  catch (e) { if (my === gen && !stuck) enterStuck(e, 'turn'); }
+  finally { flows--; flowTick++; }
+}
+async function turnBody(my) {
   const m0 = E.metrics(S);
   let out;
   // ⚡ the real-time limit (free/story play only — ranked modes never pay energy)
@@ -504,11 +801,14 @@ async function turn() {
     }
   }
   try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); return; }
+  persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
+  flowTick++;
   const faces = Array.isArray(out.dice) && out.dice.length ? out.dice : [out.die];
   ui.shakeDomDice(false);
   sfx('roll'); ui.vibrate(10);
   let bounces = 0;
   await scene.throwDice(faces, { held: holdState.held, onBounce: () => { sfx('clack'); if (!bounces++) ui.vibrate(8); } });
+  flowTick++;
   holdState.held = false;
   ui.landDice(faces);
   if (faces.length === 2 && faces[0] === faces[1]) { sfx('golden'); ui.vibrate([12, 30, 12]); }
@@ -518,6 +818,7 @@ async function turn() {
   for (let i = 0; i < out.steps.length; i++) {
     const from = i ? out.steps[i - 1] : out.from;
     await scene.hop(from, out.steps[i], i === out.steps.length - 1);
+    flowTick++;
     if (my !== gen) return;
     sfx('hop');
     const pd = (out.paydays || []).find((p) => p.step === i);
@@ -528,11 +829,12 @@ async function turn() {
   await applyOut(out, { skipSounds: ['roll', ...skip], skipPawnCash: true });
   render();
   persist();
-  if (out.bailout) { await bailoutCard(out.bailout); if (my !== gen) return; render(); }
+  flowTick++;
+  if (out.bailout) { await bailoutCard(out.bailout); flowTick++; if (my !== gen) return; render(); }
   const burn = out.burnout || (out.news || []).find((n) => n.kind === 'burnout');
-  if (burn) { await burnoutCard(burn); if (my !== gen) return; render(); }
+  if (burn) { await burnoutCard(burn); flowTick++; if (my !== gen) return; render(); }
   await handleLanding(my);
-  if (my !== gen) return;
+  if (my !== gen || stuck) return;
   busy = false;
   if (S.over) return;
   ui.setRollEnabled(true); ui.focusRoll();
@@ -550,8 +852,14 @@ function paydayFx(pd, runningCash) {
   ui.setMonth(pd.month, S.mode === 'free' ? 0 : S.maxMonths);
 }
 
-/** Resolve the landing event(s) of this turn (or of a resumed save). */
+/** Resolve the landing event(s) of this turn (or of a resumed save). A broken flow → recover bar (callers check `stuck`). */
 async function handleLanding(my) {
+  flows++; flowTick++;
+  try { await landingBody(my); }
+  catch (e) { if (my === gen && !stuck) enterStuck(e, 'landing'); }
+  finally { flows--; flowTick++; }
+}
+async function landingBody(my) {
   let ev = E.landing(S) || E.currentEvent(S);
   render(); // drawing a card can move the world (rate / dollar / prices) before any decision
   persist();
@@ -566,7 +874,7 @@ async function handleLanding(my) {
       const res = E.choose(S, ev, opt);
       if (ev.mentor && !ev.auto) ui.mentor(ev.mentor);
       await applyOut(res, { noVerdict: true });
-      render(); persist(); checkpoint();
+      render(); persist(); checkpoint(); flowTick++;
       if (ev.auto) await pause(900);
       if (res.end) { await endGame(res.end, my); return; }
       ev = res.event;
@@ -574,7 +882,8 @@ async function handleLanding(my) {
     }
     if (ev.type === 'payday') { UIS.firstPayday = true; persist(); }
     const res = await resolveCard(ev, my);
-    if (!res || my !== gen) return;
+    flowTick++;
+    if (!res || my !== gen || stuck) return;
     render(); persist();
     if (res.end) { await endGame(res.end, my); return; }
     ev = null;
@@ -590,9 +899,14 @@ function resolveCard(ev, my) {
     if (ev.golden || jackpot) { scene.sparkle('pawn'); ui.vibrate([15, 40, 15]); }
     else if (ev.sound === 'loss' && ['market', 'bank', 'fx', 'shipping'].includes(ev.type)) scene.shake(0.18, 380);
     let cur = ev, working = false;
-    const ctl = ui.openEvent(cur, ctx(), async (optId, params) => {
+    const ctl = ui.openEvent(cur, ctx(), (optId, params) => onChoose(optId, params).catch((e) => {
+      if (my !== gen || stuck) return;
+      try { close(); } catch (x) { /* ignore */ }
+      enterStuck(e, 'card'); resolve(null);
+    }));
+    async function onChoose(optId, params) {
       if (working || my !== gen) return;
-      working = true; ctl.busy(true);
+      working = true; ctl.busy(true); flowTick++;
       let res;
       try { res = E.choose(S, cur, optId, params || {}); }
       catch (e) {
@@ -610,7 +924,7 @@ function resolveCard(ev, my) {
       if (res.done) resolve(res);
       else { cur = res.event; ctl.update(cur); }
       working = false; ctl.busy(false);
-    });
+    }
     card = { ctl, resolve };
     function close() { if (card && card.ctl === ctl) card = null; ctl.close(); setTimeout(() => ui.focusRoll(), 30); }
     // coach mark 3: the ROI button on the first deal
@@ -714,6 +1028,9 @@ async function bailoutCard(b) {
 
 /* ============================================================ sheet actions (loans / credit) */
 function sheetAction(act) {
+  try { sheetBody(act); } catch (e) { if (!stuck) enterStuck(e, 'sheet'); }
+}
+function sheetBody(act) {
   if (!S || S.over || busy || ui.isEventOpen()) { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
   if (act === 'invest') { indexModal(); return; }
   if (act === 'save' || act === 'unsave') { savingsModal(act === 'save'); return; }
@@ -731,7 +1048,7 @@ function sheetAction(act) {
   if (out.ok === false) { ui.toast(out.error); sfx('loss'); return; }
   applyOut(out);
   render(); persist(); checkpoint();
-  if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my); }
+  if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
 }
 
 /* ============================================================ index fund any time (E.invest / E.setAutoInvest) */

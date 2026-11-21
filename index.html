@@ -14,11 +14,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/game.css">
 <link rel="stylesheet" href="css/lobby.css">
+<link rel="stylesheet" href="css/stability.css">
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
 <link rel="modulepreload" href="js/engine.js">
 </head>
 <body data-world="w1">
 <canvas id="c" aria-label="לוח המשחק התלת־ממדי"></canvas>
+<div id="board2d" hidden></div>
 
 <header class="hud" id="hud">
   <button id="homeBtn" class="hbtn" aria-label="חזרה ללובי (המשחק נשמר)"></button>
@@ -35,6 +37,7 @@
     <button id="turboBtn" class="ibtn" aria-label="טורבו (מהירות כפולה)" aria-pressed="false"></button>
     <button id="muteBtn" class="ibtn" aria-label="השתקה" aria-pressed="false"></button>
     <button id="camBtn" class="ibtn" aria-label="מבט על כל הלוח" aria-pressed="false"></button>
+    <button id="liteBtn" class="ibtn" aria-pressed="false" aria-label="מצב קל (בלי תלת־ממד)" title="מצב קל (בלי תלת־ממד)">🪶</button>
   </div>
 </header>
 
@@ -55,6 +58,7 @@
   </div>
 </section>
 
+<div id="recover" class="recover" hidden role="alertdialog" aria-labelledby="recoverT" aria-describedby="recoverD"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="achv" aria-live="polite"></div>
 <div id="verdict" role="status" aria-live="polite" title="ציון ההחלטה — לחיצה מסתירה"></div>
@@ -69,8 +73,20 @@
 <div id="gm" class="modal top" hidden><div class="card" id="gmCard" role="dialog" aria-modal="true"></div></div>
 
 <div id="loading" class="overlay loading" role="status" aria-live="polite">
-  <div class="ld"><b class="logo">מירוץ העכברים</b><span id="loadText">טוען את העיר…</span><div class="lbar"><i id="loadBar"></i></div></div>
+  <div class="ld"><b class="logo">מירוץ העכברים</b><span id="loadText">פותחים את המשחק…</span><div class="lbar indet" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="טעינה"><i id="loadBar"></i></div>
+    <ol id="loadSteps" class="lsteps" hidden></ol>
+    <div id="loadErr" class="lerr" hidden role="alertdialog" aria-labelledby="loadErrT"></div></div>
 </div>
+<script>/* boot watchdog: if the game has not opened after BOOT_SLOW_MS (20 s), offer a reload (the overlay stays; a late boot still completes) */
+setTimeout(function () {
+  var l = document.getElementById('loading'), d = l && l.querySelector('.ld');
+  if (window.__rrBooted || !d || l.hidden || document.getElementById('bootSlow')) return;
+  var p = document.createElement('p'); p.id = 'bootSlow'; p.className = 'lslow'; p.setAttribute('role', 'alert');
+  p.appendChild(document.createTextNode('הטעינה לוקחת יותר מהרגיל. אם זה נתקע, נסה לרענן את הדף.'));
+  var b = document.createElement('button'); b.type = 'button'; b.className = 'primary'; b.textContent = 'רענון הדף';
+  b.onclick = function () { location.reload(); };
+  p.appendChild(document.createElement('br')); p.appendChild(b); d.appendChild(p);
+}, 20000);</script>
 
 <script type="module" src="js/main.js"></script>
 </body>

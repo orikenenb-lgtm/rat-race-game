@@ -229,11 +229,11 @@ function boot() {
 function launchCfg(extra) { const p = P.getProgress(); return { pawn: p.pawn, pawnColor: p.pawnColor, ...extra }; }
 async function launch(cfg) {
   const g = await game();
-  if (!g || !g.startGame) { toast('המשחק עוד נטען… נסה שוב בעוד רגע'); return false; }
+  if (!g || !g.startGame) { toast('לא הצלחנו לטעון את המשחק. בדוק את החיבור ורענן את הדף.'); return false; }
   lastEndSig = null;
   P.beginSession(); sessLessons = [];
   closeLobby();
-  try { await g.startGame(cfg); return true; }
+  try { const r = await g.startGame(cfg); return r !== false; } // false = handled by game.js (message shown / lobby reopened)
   catch (e) { console.error(e); openLobby(view); toast('משהו השתבש בפתיחת המשחק'); return false; }
 }
 async function confirmAsk(text, yes, no = 'ביטול') {
@@ -629,7 +629,7 @@ async function renderHistory() {
   const body = !list ? '<div class="wv-locked"><div class="wv-lock-ic" aria-hidden="true">⏳</div><h2>מכונת הזמן מתכיילת…</h2><p>הנתונים ההיסטוריים עוד נטענים. נסה שוב עוד רגע.</p><button class="primary" data-act="history">לנסות שוב</button></div>'
     : `<div class="hs-grid">${list.map((sc, i) => {
       const h = p.history[sc.id] || {}; const best = h.best;
-      const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed })) : null;
+      const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sc.id, seed: h.lastSeed })) : null;
       return `<article class="hs-card ${open ? '' : 'is-locked'}" style="--i:${i}">
         <div class="hs-top"><span class="hs-years">${esc(ymText(sc.start))} · ${int(sc.months)} חודשים</span>${best ? starsHtml(best.stars) : ''}</div>
         <h3>${esc(sc.name)}</h3><p>${esc(sc.blurb || '')}</p>
@@ -650,12 +650,12 @@ async function startHistory(sid, cont = false) {
   const p = P.getProgress(); const h = p.history[sid] || {};
   const g = await game();
   if (cont && h.lastSeed != null) {
-    const sv = g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+    const sv = g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }));
     if (sv) return launch(launchCfg({ ...sv.cfg, resume: true, bailout: P.bailoutAvailable() }));
   }
-  if (!cont && h.lastSeed != null && g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }))) {
+  if (!cont && h.lastSeed != null && g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }))) {
     const ok = await confirmAsk('יש לך משחק שמור בתקופה הזאת. להתחיל מההתחלה?', 'מההתחלה'); if (!ok) return;
-    safe(() => g.clearSave({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+    safe(() => g.clearSave({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }));
   }
   const seed = randSeed(); P.setHistorySeed(sid, seed);
   sfx('click');
@@ -1182,7 +1182,7 @@ function onGameEnd(e, delay) {
   const hist = e.mode === 'history' || e.worldId === 'h';
   const seed = e.seed ?? (e.summary && e.summary.seed) ?? (same ? cfg.seed : null);
   if (hist) e = { ...e, mode: 'history', worldId: 'h', seed, scenarioId: e.scenarioId || (e.end && e.end.scenarioId) || (e.summary && e.summary.scenarioId) || (same && cfg.scenarioId) || null };
-  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', seed }))) || '') : freeKey(e.worldId);
+  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed }))) || '') : freeKey(e.worldId);
   // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags
   const saved = saveKey ? localSaveState(saveKey) : null;
   if (saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
@@ -1205,7 +1205,7 @@ function onGameEnd(e, delay) {
     const actions = [sumActions, saved && saved.actions].filter(Array.isArray).sort((a, b) => b.length - a.length)[0] || null;
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
-  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', seed } : freeKey(e.worldId))));
+  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : freeKey(e.worldId))));
   setTimeout(() => {
     ensureCss(); install();
     const o = overlay(); if (!o) return;

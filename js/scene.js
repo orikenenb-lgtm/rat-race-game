@@ -21,6 +21,11 @@ export let lowPower = false;
 const loader = new GLTFLoader();
 const cache = new Map();   // url -> Promise<Group>
 const ready = new Map();   // url -> Group (loaded)
+const failed = new Set();  // model names whose GLB failed or timed out (T1: S-N6 notice)
+/** T1: renderer kind for game.js ('3d' | '2d' board2d.js | 'none' null.js) */
+export const kind = '3d';
+const GLB_TIMEOUT_MS = 15000;
+let onResize = null, ctxCbs = [];
 
 /** Animation speed factor: 1 normal, 0.5 = turbo (durations are multiplied by it). */
 export function setSpeed(f) { speed = f; }
@@ -68,7 +73,11 @@ export async function init(canvas) {
   worldGroup = new THREE.Group(); cityGroup = new THREE.Group(); fxGroup = new THREE.Group();
   scene.add(worldGroup, cityGroup, fxGroup);
 
-  addEventListener('resize', () => { resize(); invalidate(); });
+  onResize = () => { resize(); invalidate(); };
+  addEventListener('resize', onResize);
+  // T1: WebGL context loss → game.js decides (keep the save, wait for restore, else offer מצב קל)
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); for (const f of ctxCbs) { try { f('lost'); } catch (x) { console.error(x); } } });
+  canvas.addEventListener('webglcontextrestored', () => { invalidate(); for (const f of ctxCbs) { try { f('restored'); } catch (x) { console.error(x); } } });
   resize();
   controls.addEventListener('start', () => { interacting = true; wake(); });
   controls.addEventListener('end', () => { interacting = false; wake(1500); });
@@ -232,9 +241,14 @@ export function resetCamera() { celebrating = false; controls.enabled = true; re
 export const modelUrl = (dir, name) => `assets/${dir}/${name}.glb`;
 /** the asset folder of a world: history mode ('h') re-uses world 1's city models */
 const assetDir = (w) => (w && (w.assetDir || (w.id === 'h' || w.mechanic === 'history' ? 'w1' : w.id)));
+const nameOf = (url) => String(url).replace(/^assets\//, '').replace(/\.glb$/, '');
 function loadGLB(url) {
   if (!cache.has(url)) {
-    cache.set(url, loader.loadAsync(url).then((g) => {
+    // T1: every GLB has its own timeout; a rejection is dropped from the cache (deferred one tick, so callers that retry
+    // in the same chain reuse it) and the next start requests it again. A late success still fills `ready`.
+    let timer = 0;
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('glb_timeout ' + url)), GLB_TIMEOUT_MS); });
+    const p = Promise.race([loader.loadAsync(url).then((g) => {
       const s = g.scene;
       s.traverse((o) => {
         if (o.isMesh) {
@@ -243,10 +257,37 @@ function loadGLB(url) {
         }
       });
       ready.set(url, s);
+      failed.delete(nameOf(url));
       return s;
-    }));
+    }), timeout]).finally(() => clearTimeout(timer));
+    p.catch(() => { failed.add(nameOf(url)); setTimeout(() => { if (cache.get(url) === p) cache.delete(url); }, 0); });
+    cache.set(url, p);
   }
   return cache.get(url);
+}
+/** T1: names (dir/name) of models whose GLB failed or timed out on this page and have not loaded since. */
+export function failedModels() { return [...failed]; }
+/** T1: stop rendering and release WebGL (switch to מצב קל). Re-initialising three in the same page is not supported. */
+export function dispose() {
+  try { if (renderer) renderer.setAnimationLoop(null); } catch (e) { /* ignore */ }
+  try { if (onResize) removeEventListener('resize', onResize); onResize = null; } catch (e) { /* ignore */ }
+  try { if (controls) controls.dispose(); } catch (e) { /* ignore */ }
+  try { if (renderer) renderer.dispose(); } catch (e) { /* ignore */ }
+  ctxCbs = [];
+}
+/** T1: cb('lost' | 'restored') on WebGL context loss / restore. */
+export function onContextLost(cb) { if (typeof cb === 'function') ctxCbs.push(cb); }
+/** settle-counting helper: onProgress(done/total, {done,total,failed}) for the files not ready yet */
+function track(urls, onProgress) {
+  const todo = urls.filter((u) => !ready.has(u));
+  let done = 0, bad = 0;
+  const report = () => { if (onProgress) { try { onProgress(todo.length ? done / todo.length : 1, { done, total: todo.length, failed: bad }); } catch (e) { console.error(e); } } };
+  report();
+  return Promise.all(urls.map((u) => {
+    const counted = todo.includes(u);
+    return loadGLB(u).then((g) => g, (e) => { if (counted) bad++; console.warn('model failed', nameOf(u), e && e.message ? e.message : e); return null; })
+      .finally(() => { if (counted) { done++; report(); } });
+  }));
 }
 /** Names of every model a world needs (landmarks, city kinds, holdings, decor). */
 export function worldModelNames(w) {
@@ -267,7 +308,7 @@ function landmarkNames(w) {
 // Others use the procedural stand-ins below.
 export const LIFE_MODELS = ['home_family', 'university', 'pension', 'index_fund', 'side_hustle', 'wedding', 'hospital'];
 export const HISTORY_MODELS = ['time_machine', 'ticker_board'];
-export function preloadLife() { return Promise.all([...LIFE_MODELS.map((n) => loadGLB(modelUrl('life', n)).catch(() => null)), ...HISTORY_MODELS.map((n) => loadGLB(modelUrl('history', n)).catch(() => null))]); }
+export function preloadLife(onProgress) { return track([...LIFE_MODELS.map((n) => modelUrl('life', n)), ...HISTORY_MODELS.map((n) => modelUrl('history', n))], onProgress); }
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, ...o });
 const shadowAll = (g) => { g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); return g; };
 const LIFE_FALLBACK = {
@@ -310,11 +351,10 @@ const LIFE_FALLBACK = {
 };
 export function worldLoaded(w) { return worldModelNames(w).every((n) => ready.has(modelUrl(assetDir(w), n))); }
 export async function preloadWorld(w, onProgress) {
-  const names = worldModelNames(w);
-  let done = 0;
-  await Promise.all(names.map((n) => loadGLB(modelUrl(assetDir(w), n))
-    .catch((e) => { console.warn('model failed', n, e); return null; })
-    .finally(() => { done++; if (onProgress) onProgress(done / names.length); })));
+  const dir = assetDir(w);
+  const urls = worldModelNames(w).map((n) => modelUrl(dir, n));
+  await track(urls, onProgress);
+  return { failed: urls.map(nameOf).filter((n) => failed.has(n)) };
 }
 function inst(name, dir = assetDir(world)) {
   if (name && name.includes('/')) [dir, name] = name.split('/');
@@ -1120,8 +1160,8 @@ function curl(k) {
   if (handGLB) { handGLB.fist.visible = k > 0.5; handGLB.open.visible = k <= 0.5; return; }
   handFingers.forEach((f, i) => { f.rotation.x = (i === 4 ? 0.6 : 1.25) * k; });
 }
-export async function preloadDice() {
-  await Promise.all(['hand', 'hand_closed', 'die'].map((n) => loadGLB(modelUrl('life', n)).catch(() => null)));
+export async function preloadDice(onProgress) {
+  await track(['hand', 'hand_closed', 'die'].map((n) => modelUrl('life', n)), onProgress);
 }
 
 function throwFrame() {

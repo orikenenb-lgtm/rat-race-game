@@ -2,9 +2,16 @@
 // If the lobby module is missing or fails, a minimal built-in picker (world + character + free play) keeps the game playable.
 import { bus } from './bus.js';
 import { unlock, sfx } from './audio.js';
-import { esc, achievementToast, showLoading, hideLoading, goalWords } from './ui.js';
+import { esc, achievementToast, goalWords, toast } from './ui.js';
 import * as EN from './engine.js';
+import * as saves from './saves.js';
+import { hideLoading } from './render/overlay.js';
 const { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } = EN;
+
+// T1: boot sweep — quarantine unparsable saved data BEFORE game.js / lobby.js (or anything they import) read it.
+// Nothing is dropped: corrupt slots go to rr2-bak:, other keys to rr2-quarantine:. The toasts come after the lobby opens.
+let SWEEP = null;
+try { SWEEP = saves.sweep(); } catch (e) { console.warn('save sweep failed', e); }
 
 // mobile audio needs a gesture
 addEventListener('pointerdown', unlock, { passive: true });
@@ -17,7 +24,9 @@ let openLobby = null;
 // three.js + the 3D world load in the background while the lobby is already on screen; startGame() waits for them.
 const gameMod = import('./game.js');
 let G = null;
-const gameP = gameMod.then((g) => { G = g; g.initGame().catch((e) => { console.error(e); showLoading('משהו נכשל בטעינת התלת־ממד: ' + (e && e.message ? e.message : e)); }); return g; });
+// T1: no error text on screen at boot — startGame() reports problems itself (loading stages / error panel)
+const gameP = gameMod.then((g) => { G = g; g.initGame().catch((e) => console.warn('init failed (startGame will report it)', e)); return g; });
+gameP.catch((e) => console.warn('game.js failed to load', e));
 
 async function boot() {
   await Promise.race([Promise.all([document.fonts.load('800 20px Rubik'), document.fonts.load('20px "Secular One"')]), new Promise((r) => setTimeout(r, 1500))]).catch(() => {});
@@ -33,6 +42,23 @@ async function boot() {
   bus.on('lobby:open', (p) => safeOpen(p || {}));
   safeOpen({});
   hideLoading();
+  window.__rrBooted = 1;
+  afterBoot();
+}
+/** sweep messages, auto-restored future saves, and the one-shot resume after a 2D → 3D reload */
+function afterBoot() {
+  const r = SWEEP || { quarantined: [], corruptSlots: 0, pendingItems: 0 };
+  if (r.corruptSlots) toast(saves.STR.S4);
+  if (r.quarantined.includes('rr2-progress')) toast(saves.STR.S8);
+  if (r.quarantined.includes('rr-player')) toast(saves.STR.S9);
+  if (r.quarantined.includes('rr2-pending-finish')) toast(saves.STR.S10);
+  try { if (saves.autoRestoreFuture() > 0) toast(saves.STR.S11); } catch (e) { console.warn(e); }
+  let cfg = null;
+  try { const raw = sessionStorage.getItem('rr2-resume-once'); if (raw != null) { sessionStorage.removeItem('rr2-resume-once'); cfg = JSON.parse(raw); } } catch (e) { cfg = null; }
+  // ranked games are not auto-resumed: the lobby re-runs rr_begin (anti-replay path unchanged)
+  if (cfg && typeof cfg === 'object' && !cfg.resultId && cfg.worldId) {
+    gameP.then((g) => g && g.startGame({ ...cfg, resume: true })).catch((e) => console.warn(e));
+  }
 }
 function safeOpen(p) {
   try { const r = openLobby(p); if (r && r.catch) r.catch((e) => { console.error(e); useFallback(); fallbackLobby(p); }); }
