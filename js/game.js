@@ -600,6 +600,8 @@ async function startInner(cfg, my) {
 
 /* ============================================================ T4 onboarding hooks (js/onboard.js owns the coaches, WORLD_COACH and rr2-coach) */
 /** IR-T4-3: built per start; IR-T4-8: the practice answer path (free/learn only — no checkpoint, practice never runs in ranked). */
+// F4: the in-game ❓ button (injected by ui.js, in-game UI lane) only emits this; onboard.js owns the modal
+bus.on('onboard:help', () => { if (S && CFG && !S.over) onboard.help(hooks(gen)).catch((e) => console.warn(e)); });
 function hooks(my) {
   return { S, CFG, W, my, gen: () => gen, persist, render, isBusy: () => busy,
     answerPractice: (qid, idx) => { if (typeof E.answerPractice !== 'function') return null; const r = E.answerPractice(S, qid, idx); render(); persist(); return r; } };

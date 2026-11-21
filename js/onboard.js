@@ -195,3 +195,21 @@ const practice = {
 function doneTopics() { try { const s = JSON.parse(localStorage.getItem('rr2-library') || '{}'); return Object.keys((s && s.practiced) || {}); } catch (e) { return []; } }
 /** IR-T4-9: game.js calls this when it goes to the lobby or ends the game. */
 export function hidePractice() { practice.hide(); }
+
+/* ------------------------------------------------------------ F4 help modal (ui.js injects #helpBtn → bus 'onboard:help') */
+/** S-H0…S-H6: "איך משחקים" → tour / legend / full tutorial in the next w1 game. */
+export async function help(h) {
+  const v = await ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: 'מה תרצה לראות?', dismissable: true,
+    html: '<div class="t4-help"><button data-h="tour">🎬 סיור קצר במסך (5 צעדים)</button><button data-h="legend">📖 מה כל סימן אומר</button><button data-h="replay">🔄 הדרכה מלאה במשחק הבא בשכונה</button></div>',
+    onExtra: (e) => { const b = e.target.closest('[data-h]'); if (!b) return; pick = b.dataset.h; document.querySelector('#gm .acts button')?.click(); },
+    actions: [{ label: 'סגירה', cls: 'primary', v: null }] });
+  void v;
+  const p = pick; pick = null;
+  if (p === 'tour') await tour(h);
+  else if (p === 'legend') await legend(h);
+  else if (p === 'replay') {
+    try { const P = await import('./progress.js'); P.requestTutorialReplay(); } catch (e) { /* game-only copy without progress.js */ }
+    ui.toast('נפתח את ההדרכה במשחק הבא בשכונה.');
+  }
+}
+let pick = null;
