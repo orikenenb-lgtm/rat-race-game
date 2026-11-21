@@ -13,7 +13,8 @@
 //   oddsS: {hit, miss} × S — the money of each branch (e.g. the announced follow-up repair), for the card totals and the evaluator.
 //   default: exactly one per inbox step (applied when the item expires); guide: the director's guide-level pick on car/transport steps.
 
-export const NAMES = { friend: ['יוסי', 'מיכל'], manager: 'רונית', garage: 'אבי' };
+/** The friend chain's texts are written in the masculine (לו, מבקש, הוא): both runs' friends are men (T3 review M2). */
+export const NAMES = { friend: ['יוסי', 'דני'], friendGender: 'm', manager: 'רונית', garage: 'אבי' };
 
 export const CHAINS = {
   /* ------------------------------------------------------------------ 5.1 car, repairs and transport */

@@ -536,5 +536,16 @@ test('review M1: stacked pay cuts multiply (half time × crisis cut), the chip e
   assert.equal(chip, ps.net - net0, 'the salary chip = the applied net change');
   assert.equal(st.story.flags.payCut.length, 2);
 });
+test('review M2: the friend chain renders with a masculine friend in both runs (texts are masculine: לו / מבקש / הוא)', () => {
+  const FEM = ['מיכל', 'נועה', 'רונית', 'שירה', 'דנה'];
+  assert.equal(CH.NAMES.friendGender, 'm');
+  for (const run of [1, 2]) for (const step of ['f1', 'f2', 'f3a', 'f3b']) {
+    const st = forced('w1', 'friend', step, { run, path: step === 'f3b' ? 'guarantee' : 'lend', data: { amount: 9000, risk: 13500, extra: 4500, name: CH.NAMES.friend[run - 1] }, item: step === 'f1' });
+    const card = step === 'f1' ? E.currentEvent(st) || E.inbox(st)[0] : E.inbox(st)[0];
+    const txt = JSON.stringify([card.title, card.text, card.remember, card.hint, card.options.map((o) => [o.label, o.odds && o.odds.text])]);
+    assert.ok(!FEM.some((n) => txt.includes(n)), `run ${run} ${step}: a feminine name in masculine texts: ${txt.slice(0, 120)}`);
+    assert.ok(txt.includes(CH.NAMES.friend[run - 1]) || step === 'f3b', `run ${run} ${step}: the friend's name is shown`);
+  }
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
