@@ -128,7 +128,7 @@ function fallbackEnd(p) {
   root().innerHTML = `<div class="intro fb end">
     <span class="tag" style="--c:${p.status === 'won' ? '#c98a12' : '#3b3f4e'}">${p.status === 'won' ? 'ניצחון' : e.reason === 'bankrupt' ? 'פשיטת רגל' : 'נגמר הזמן'}</span>
     <h1>${p.status === 'won' ? 'יצאת מהמירוץ!' : 'נשארת במירוץ'}</h1>
-    <div class="stars" aria-label="${p.stars} כוכבים">${stars}</div>
+    <div class="stars" role="img" aria-label="${p.stars | 0} כוכבים מתוך 3">${stars}</div>
     <p class="lead">${esc(e.nearMiss ? e.nearMiss.text : '')}</p>
     ${e.starsBlockedByFund ? `<p class="warn">🛟 ★★★ נעצר בגלל קרן החירום: צריך לפחות ${starThresholds(p.worldId, p.charId).fundMonths || 3} חודשי הוצאות בצד. חופש בלי כרית נשבר במשבר הראשון.</p>` : ''}
     ${e.starsBlockedByHappiness ? `<p class="warn">😐 ★★★ נעצר בגלל האושר: צריך לפחות ${starThresholds(p.worldId, p.charId).happy || 60}. כסף זה לא הכל.</p>` : ''}

@@ -22,7 +22,7 @@ const ERR = {
   challenge_not_found: 'האתגר לא נמצא',
   already_finished: 'כבר סיימת את המשחק הזה',
   result_not_found: 'המשחק לא נמצא בשרת',
-  already_sent_today: 'כבר שלחת לו ⚡ היום',
+  already_sent_today: 'כבר שלחת לו זריקות היום',
   player_not_found: 'השחקן לא נמצא בקבוצה',
   rate_limited: 'יותר מדי עדכונים היום',
   no_actions: 'אין יומן מהלכים למשחק הזה',
