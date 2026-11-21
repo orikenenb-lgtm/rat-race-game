@@ -7,11 +7,16 @@
 import { net } from './net.js';
 import { bus } from './bus.js';
 import { WORLDS, getWorld } from './worlds/index.js';
-import { characterCard, starThresholds, starsFor, fmt, fmtM } from './engine.js';
+import { characterCard, starThresholds, starsFor, fmt, fmtM, createGame, metrics } from './engine.js';
+import * as ENG from './engine.js';                       // T4 feature detection only (DREAMS, MENTOR_LEVELS, TUTORIAL_FREE_ROLLS…)
 import { ACHIEVEMENTS, titleFor, TITLES } from './achievements.js';
 import * as P from './progress.js';
 import * as EN from './energy.js';
 import * as LIB from './library.js';
+import { reducedMotion, motionPref, setMotionPref, initMotion } from './motion.js';
+import { catName } from './data/lessons-meta.js';
+import { charMeta } from './data/characters-meta.js';
+import { PRACTICE } from './practice.js';
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -27,6 +32,8 @@ const int = (v, d = 0) => { const n = Math.floor(+v); return Number.isFinite(n) 
 const HEX_RE = /^#[0-9a-f]{3,8}$/i;
 const cardArt = (wid) => asset(`assets/${wid}/card.png`);
 const freeKey = (wid) => 'rr2-save-free-' + wid;
+/** T4 IR-T4-1: learning games have their own slot (rr2-save-learn-<w>); game.js saveKeyFor owns the rule, this is the fallback. */
+const slotKey = (wid, learn = false) => (learn ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'free', worldId: wid, learn: true }))) || 'rr2-save-learn-' + wid) : freeKey(wid));
 const rankedKey = (rid) => 'rr2-save-' + rid;
 const randSeed = () => Math.floor(Math.random() * 2147483646) + 1;
 const worldOf = (id) => { try { return getWorld(id || 'w1'); } catch (e) { return WORLDS[0]; } };
@@ -173,7 +180,8 @@ let lastEndSig = null;
 function normalize(v) {
   if (!v) return { k: 'home' };
   if (typeof v === 'string') { const [k, id] = v.split(':'); return { k, id }; }
-  if (v.view) return normalize(v.view);
+  // T4 IR-T4-6: {view:'world', id, learn:true} from the in-game "out of ⚡" card
+  if (v.view) { const n = normalize(v.view); if (v.id && !n.id) n.id = v.id; if (v.learn) n.learn = true; return n; }
   return v.k ? v : { k: 'home' };
 }
 
@@ -181,9 +189,10 @@ function normalize(v) {
 export function openLobby(v) {
   ensureCss(); install();
   const o = overlay(); if (!o) { console.error('lobby: #start not found'); return; }
-  o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open');
+  o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open'); syncInert();
   if (!booted) { booted = true; boot(); }
   const nv = normalize(v);
+  if (nv.k !== 'world') worldMode = nv.learn ? 'learn' : null;
   if (nv.k === 'end' && !endCtx) nv.k = 'home';
   if (pendingDuel && nv.k === 'home' && !duelShown) { duelShown = true; nv.k = 'duel'; }
   if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
@@ -194,13 +203,14 @@ export function openLobby(v) {
 export function closeLobby() {
   stopGroupRefresh(); stopEnergyTicker();
   const o = overlay(); if (o) { o.hidden = true; o.classList.remove('lb-open'); }
-  document.body.classList.remove('lb-lobby-open');
+  document.body.classList.remove('lb-lobby-open'); syncInert();
+  closeLesson(false); worldMode = null; dreamOpen = false;
 }
 function go(v) {
   view = v;
   if (v.k !== 'group') stopGroupRefresh();
   switch (v.k) {
-    case 'world': return renderWorld(v.id);
+    case 'world': return renderWorld(v.id, { learn: !!v.learn });
     case 'group': return renderGroup(v.id);
     case 'profile': return renderProfile();
     case 'end': return renderEnd();
@@ -216,8 +226,9 @@ function go(v) {
 const rerender = () => { if (lobbyVisible() && view.k !== 'end') go(view); };
 
 function boot() {
+  migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
   game().then((m) => { if (m && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); });
-  P.syncFromServer().then((ch) => { if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
+  P.syncFromServer().then((ch) => { if (ch) revealAfterMerge(); if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
   flushPending();
   scenarios(); LIB.lessons().then(() => { const el = $('.map-lib'); if (el) el.outerHTML = libraryCard(); });
   if (pendingJoin) {
@@ -241,30 +252,38 @@ async function confirmAsk(text, yes, no = 'ביטול') {
   if (u.confirmBox) { try { return !!(await u.confirmBox(text, { yes, no })); } catch (e) { /* fall through */ } }
   return window.confirm(text);
 }
-/** Free game. opts: {seed, title, duel, sameBoard} — sameBoard/duel reuse a known seed. Asks before replacing a save. */
+/** Free game. opts: {seed, title, duel, noAsk, learn, quick} — duel reuses a known seed. Asks before replacing a save.
+ *  T4: learn → learning mode (own slot, no ⚡/stars/achievements); dream + mentor from progress; tutorial per §4.6. */
 async function startFree(worldId, charId, opts = {}) {
   if (!P.isUnlocked(worldId) && !opts.duel) return go({ k: 'world', id: worldId });
+  const learn = !!opts.learn && !opts.duel;
   const g = await game();
-  const sv = g && safe(() => g.savedGame(freeKey(worldId)));
+  const key = slotKey(worldId, learn);
+  const sv = g && safe(() => g.savedGame(key));
   if (sv && !opts.noAsk) {
-    const ok = await confirmAsk(`יש לך משחק שמור ${P.inW(worldOf(worldId).name)} (${sv.charName || ''}, חודש ${sv.month}). משחק חדש ימחק אותו.`, 'משחק חדש');
+    const ok = await confirmAsk(`יש לך ${learn ? 'תרגול שמור' : 'משחק שמור'} ${P.inW(worldOf(worldId).name)} (${sv.charName || ''}, חודש ${sv.month}). משחק חדש ימחק אותו.`, 'משחק חדש');
     if (!ok) return false;
   }
-  if (sv) safe(() => g.clearSave(freeKey(worldId)));
+  if (sv) safe(() => g.clearSave(key));
   P.markWorldSeen(worldId); if (!opts.duel) P.setLastChar(worldId, charId);
+  if (!opts.duel && !opts.quick) P.setLastMode(learn ? 'learn' : 'normal');
   sfx('click');
-  const tutorial = !opts.duel && !opts.seed && !P.getProgress().tutorialDone && worldId === 'w1';
-  const cfg = { worldId, charId, seed: opts.seed || randSeed(), mode: 'free', tutorial, resume: false, bailout: P.bailoutAvailable() };
+  const prog = P.getProgress();
+  // §4.6: the tutorial runs in the first w1 game (or once after "הדרכה מלאה במשחק הבא"), never in a duel / replayed board
+  const tutorial = worldId === 'w1' && !opts.duel && !opts.seed && (!prog.tutorialDone || P.consumeTutorialReplay());
+  const cfg = { worldId, charId, seed: opts.seed || randSeed(), mode: 'free', tutorial, resume: false, bailout: learn ? true : P.bailoutAvailable() };
+  if (learn) cfg.learn = true;
+  if (prog.dream && !opts.duel) cfg.dream = prog.dream;                       // engine ignores it until E-7 lands
+  if (mentorLevels()) cfg.mentor = tutorial ? 'guide' : (mentorAllowed(prog.mentorPref, prog) && prog.mentorPref) || undefined;
+  if (cfg.mentor === undefined) delete cfg.mentor;
   if (opts.title) cfg.title = opts.title;
   if (opts.duel) cfg.duel = opts.duel;
-  const ok = await launch(launchCfg(cfg));
-  if (ok && tutorial) P.setTutorialDone();
-  return ok;
+  return launch(launchCfg(cfg));   // T4: P.setTutorialDone() is no longer called on launch (bus 'onboard:done' / recordGame)
 }
-async function continueFree(worldId) {
-  const g = await game(); const sv = g && safe(() => g.savedGame(freeKey(worldId)));
+async function continueFree(worldId, { learn = false } = {}) {
+  const g = await game(); const sv = g && safe(() => g.savedGame(slotKey(worldId, learn)));
   if (!sv) { toast('לא מצאנו משחק שמור'); return rerender(); }
-  return launch(launchCfg({ ...sv.cfg, resume: true, bailout: P.bailoutAvailable() }));
+  return launch(launchCfg({ ...sv.cfg, resume: true, bailout: sv.cfg && sv.cfg.learn ? true : P.bailoutAvailable() }));
 }
 /* -------- server checkpoints (anti-replay): never restart a ranked game from turn 0 when the server has progress */
 function parseState(x) { if (!x) return null; if (typeof x === 'string') { try { return JSON.parse(x); } catch (e) { return null; } } return typeof x === 'object' ? x : null; }
@@ -378,7 +397,7 @@ function topBar() {
     <button class="lb-player" data-act="profile" aria-label="הפרופיל שלי">
       ${pawnHtml(p.pawn, p.pawnColor, 'md')}
       <span class="lb-pl-txt"><b class="lb-pl-name">${me ? esc(me.nickname) : 'אורח'}</b>${titleBadge(total)}</span>
-      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים">★ ${total}</span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'warn'}" title="ימים ברצף באתגר היומי">🔥 ${streak}</span>` : ''}</span>
+      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים">★ ${total}</span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'wait'}" title="ימים ברצף באתגר היומי">🔥 ${streak}</span>` : ''}</span>
     </button>
     ${energyHtml()}
     ${muteBtn()}
@@ -443,9 +462,109 @@ function activeBanner() {
   const cfg = safe(() => G.activeConfig()) || {};
   if (lastEndSig && lastEndSig === sigOf(cfg)) return '';
   const w = worldOf(cfg.worldId); const c = charOf(w, cfg.charId);
-  return `<button class="lb-resume" data-act="resume-active"><span class="lb-resume-ic">▶</span><span><b>חזרה למשחק</b><small>${esc(w.name)}${c ? ' · ' + esc(c.name) : ''}${cfg.mode && cfg.mode !== 'free' ? ' · ' + esc(cfg.title || MODE_NAME[cfg.mode]) : ''}</small></span></button>`;
+  return `<button class="lb-resume" data-act="resume-active"><span class="lb-resume-ic">▶</span><span><b>חזרה למשחק</b><small>${esc(w.name)}${c ? ' · ' + esc(c.name) : ''}${cfg.learn ? ' · 🎓 תרגול' : ''}${cfg.mode && cfg.mode !== 'free' ? ' · ' + esc(cfg.title || MODE_NAME[cfg.mode]) : ''}</small></span></button>`;
 }
 const sigOf = (o) => [o.worldId, o.charId, o.mode, o.resultId || ''].join('|');
+
+/* ============================================================ T4: strings, feature detection, a11y helpers */
+// Exact strings of docs/next-level/specs/T4-opening-modes-library.md (ids S-…). ⚡ = "זריקות", 🔋 = "כוח".
+const T4 = {
+  W1: 'החיים שלך. הכסף שלך. הזמן שלך.',
+  W2: 'משכורת נכנסת, הוצאות יוצאות. המטרה: נכסים שמשלמים את החשבונות — ולהישאר מאושר בדרך.',
+  W3: 'יאללה, משחק ראשון ←', W4: 'אני רוצה לבחור דמות', W5: 'כבר שיחקתי במכשיר אחר',
+  M0: 'איך משחקים?', M1: '⭐ משחק רגיל', M2: 'כוכבים, הישגים ובונוסים. כל הטלה עולה ⚡ זריקה אחת.',
+  M3: '🎓 תרגול חופשי', M4: 'בלי הגבלת זריקות. בלי כוכבים, הישגים ובונוסי ⚡. לנסות, לטעות וללמוד.',
+  M5: (c, m) => `▶ להמשיך · ${c} · חודש ${m}`, M6: (c, m) => `▶ להמשיך בתרגול 🎓 · ${c} · חודש ${m}`, M8: '🎓 לתרגל בלי הגבלה',
+  K1: (t1, t2, t3) => `★ עד ${t1} חודשים · ★★ עד ${t2} · ★★★ עד ${t3}, וגם 😊 60 ו־🛟 קרן של 3 חודשים`,
+  K2: 'בסוף כל חודש חסר', K3f: ' (חיה מהמזומן)', K3m: ' (חי מהמזומן)', K4: 'בסוף כל חודש נשאר',
+  Kgoal: (n) => `🎯 לצאת תוך ${n} חודשים`, Kmore: 'עוד פרטים ▾', Kless: 'פחות פרטים ▴', Kplay: 'לשחק ←',
+  Knet: 'נטו בחודש', Kcash: 'מזומן בהתחלה', Kexp: 'הוצאות קבועות',
+  D5: 'החלום שלי', D6: 'מה בשבילך לצאת מהמירוץ?', D7: 'זה לא משנה את הכוכבים — רק את המשימות שתראה בדרך.', D8: 'בלי חלום כרגע',
+  D9: (ic, n) => `החלום שלי: ${ic} ${n} · שינוי`, D10: 'לפני המשחק הבא: מה החלום שלך?', D11: (n) => `נשמר. במשחק הבא תראה את המשימות של ${n}.`,
+  D12: '🎯 החלומות שלי', D18: (ic, n, d) => `${ic} החלום שלך, ${n}: ${d} מתוך 3 משימות`,
+  G1: 'רוצה פחות עזרה? במשחק הבא אבא עשיר רק ירמוז.', G2: 'רמת עזרה:', G3: 'מדריך', G4: 'רמזים', G5: 'מקצוען', G6: '🔒 אחרי ★★', G7: '🔒 אחרי משחק אחד',
+  L1: 'יצאת מהמירוץ — בתרגול 🎓', L2: 'נשארת במירוץ — בתרגול 🎓',
+  L3: (s) => `במשחק רגיל התוצאה הזאת הייתה שווה ${s}.`, L4: 'במשחק רגיל זה עוד לא היה כוכב.',
+  L5: 'במצב תרגול לא נאספים כוכבים, הישגים ו־⚡. השיעורים נכנסים לספרייה.', L6: 'לנסות במשחק רגיל ⭐', L7: 'עוד תרגול 🎓',
+  H3: '🎬 סיור קצר במסך (5 צעדים)', H4: '📖 מה כל סימן אומר', H5: '🔄 הדרכה מלאה במשחק הבא בשכונה', H6: 'נפתח את ההדרכה במשחק הבא בשכונה.',
+  H7: '🎬 סיור קצר — בפעם הבאה שתיכנס למשחק', H8: '👋 להציג שוב את מסך הפתיחה', Hhelp: 'איך משחקים', T2: 'מה כל סימן אומר',
+  B1: (t, h) => `שיעור נעול: ${t}. איך פותחים: ${h}`, B2: 'עוד ▾', B3: (x) => `🔢 דוגמה: ${x}`, B5: (x) => `🎲 פישוט של המשחק: ${x}`, B6: (r, n) => `💡 תרגלת: ${r} מתוך ${n} נכונות`,
+  P9: (r, n) => `תרגול: ${r} מתוך ${n}`,
+  S1: (n) => `🔥 ${n} ${n === 1 ? 'יום' : 'ימים'} ברצף. האתגר של היום מחכה לך.`,
+  // T5 §12 T5-S0…S1 (settings section, lobby lane) + T1 מצב קל
+  S0: 'תצוגה ותנועה', S1leg: 'תנועה במשחק', S1opt: [['auto', 'לפי המכשיר'], ['reduce', 'מופחתת'], ['full', 'מלאה']],
+  S1hint: 'מופחתת: בלי רעידות, קונפטי וקפיצות. הקוביות והחייל זזים מיד.', lite: 'מצב קל (בלי תלת־ממד)', liteHint: 'לוח דו־ממדי שטוח: מהיר יותר בטלפונים ישנים. החזרה לתלת־ממד טוענת את הדף מחדש.',
+};
+/** Lobby-side dream display names (the missions and their logic belong to the engine, E-7). */
+const DREAM_META = {
+  biz: { icon: '🚀', name: 'עסק משלי', line: 'לבנות משהו שעובד גם בלעדיך' },
+  family: { icon: '👨‍👩‍👧', name: 'זמן למשפחה', line: 'פחות שעות בשביל כסף, יותר בשביל אנשים' },
+  stable: { icon: '🛟', name: 'יציבות', line: 'שקט: כרית בצד ובלי חובות מפתיעים' },
+  free: { icon: '🗽', name: 'חופש כלכלי', line: 'נכסים שמשלמים את כל ההוצאות' },
+};
+/** §14.1 feature detection: dreams exist only when the engine exports DREAMS (tests may provide window.__t4dreams). */
+function dreamsList() {
+  const d = Array.isArray(ENG.DREAMS) && ENG.DREAMS.length ? ENG.DREAMS : Array.isArray(globalThis.__t4dreams) ? globalThis.__t4dreams : null;
+  return d ? d.filter((x) => x && DREAM_META[x.id]).map((x) => ({ ...DREAM_META[x.id], ...x })) : null;
+}
+const dreamById = (id) => { const l = dreamsList(); return (l && l.find((x) => x.id === id)) || (DREAM_META[id] ? { id, ...DREAM_META[id], missions: [] } : null); };
+/** T2 mentor levels (feature-detected): ['guide','hint','pro'] or null. */
+const mentorLevels = () => { const l = ENG.MENTOR_LEVELS || (ENG.MN && ENG.MN.LEVELS); return Array.isArray(l) && l.includes('guide') ? l : null; };
+const completedAny = (p = P.getProgress()) => (p.gamesPlayed || 0) + (p.learnGames || 0) > 0;
+const hasTwoStars = (p = P.getProgress()) => Object.values(p.stars || {}).some((x) => x >= 2);
+function mentorAllowed(level, p = P.getProgress()) { return level === 'guide' || (level === 'hint' && completedAny(p)) || (level === 'pro' && hasTwoStars(p)); }
+/** Test-only trace of screens (welcome, world, game…), harmless in production (§14.2). Consecutive repeats are folded. */
+function trace(screen) {
+  try { const t = (window.__t4trace ||= []); if (!t.length || t[t.length - 1].screen !== screen) t.push({ t: Math.round(performance.now()), screen }); } catch (e) { /* no window */ }
+}
+/** §7.3: is this end payload a learning-mode game? */
+function isLearnEnd(e) {
+  if (!e) return false;
+  if (e.learn === true || (e.summary && e.summary.config && e.summary.config.learn === true)) return true;
+  const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null;
+  return !!(cfg && cfg.learn === true && cfg.worldId === e.worldId && (cfg.mode || 'free') === (e.mode || 'free'));
+}
+/** A11Y-1: Tab/Shift+Tab cycle inside `root`. Returns release(). (ui.js will own trapFocus; the lobby keeps its own copy.) */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+function trapFocus(el) {
+  const onKey = (ev) => {
+    if (ev.key !== 'Tab') return;
+    const f = [...el.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+    if (!f.length) { ev.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (ev.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) { ev.preventDefault(); first.focus(); }
+  };
+  el.addEventListener('keydown', onKey);
+  return () => el.removeEventListener('keydown', onKey);
+}
+/** A11Y-1: the in-game DOM is inert while the lobby overlay covers it (kept in sync with #start[hidden]). */
+const GAME_DOM = ['c', 'board2d', 'hud', 'sheet', 'sheetBack', 'bar', 'evm', 'coach', 'hist'];
+function syncInert() {
+  const on = lobbyVisible();
+  for (const id of GAME_DOM) { const el = document.getElementById(id); if (el) { if (on) el.setAttribute('inert', ''); else el.removeAttribute('inert'); } }
+}
+/** Initial focus after a render (A11Y-3); preventScroll keeps the page at the top. */
+function focusSoon(sel) { setTimeout(() => { const el = typeof sel === 'string' ? $(sel) : sel; if (el && lobbyVisible()) safe(() => el.focus({ preventScroll: true })); }, 30); }
+/* -------- §4.6 one-time reveal migration: existing players never see the tutorial, the gradual HUD or the hints */
+const REVEALK = 'rr2-reveal';
+const HINT_IDS = ['C-roll', 'C-roi', 'C-meter', 'C-plan', 'C-sheet', 'C-power', 'C-fund', 'C-happy', 'C-credit', 'C-cpi', 'C-zr', 'C-focus', 'C-impact'];
+const readReveal = () => safe(() => { const r = JSON.parse(localStorage.getItem(REVEALK) || 'null'); return r && typeof r === 'object' && !Array.isArray(r) ? r : null; }, null);
+const writeReveal = (patch) => safe(() => localStorage.setItem(REVEALK, JSON.stringify({ v: 1, all: false, coached: [], tourNext: false, ...(readReveal() || {}), ...patch })));
+let newAtBoot = false;
+function migrateReveal() {
+  const p = P.getProgress();
+  if (readReveal()) return;
+  if (completedAny(p)) writeReveal({ all: true, coached: HINT_IDS.slice() });
+  else { newAtBoot = true; writeReveal({}); }
+}
+/** A server profile / restore code can turn a "new" device into an existing player: mark everything revealed (once). */
+function revealAfterMerge() {
+  if (!newAtBoot || P.getProgress().gamesPlayed + P.getProgress().learnGames <= gamesThisSession) return;
+  newAtBoot = false; writeReveal({ all: true, coached: HINT_IDS.slice() });
+}
+let gamesThisSession = 0;
+let pointerAt = 0;
 
 /* ============================================================ ⚡ ENERGY · gifts · welcome · library */
 const ONBK = 'rr2-onboarded';
@@ -453,7 +572,7 @@ let sessLessons = [];
 LIB.onUnlock((ids) => { sessLessons.push(...ids); });
 /** Free-play milestones for friends' group feeds (ranked results come from the server itself). */
 function logMilestones(e, res) {
-  if (!net.hasMe() || !net.logEvent || (e.mode && e.mode !== 'free' && e.mode !== 'history')) return;
+  if (!net.hasMe() || !net.logEvent || (e.mode && e.mode !== 'free' && e.mode !== 'history') || isLearnEnd(e)) return; // T4: never for learning games
   const ls = (e.end && e.end.lifeSummary) || {};
   const ev = [];
   if (e.mode === 'history') ev.push(['history_done', { scenario: e.scenarioId, stars: e.stars | 0, beat: e.status === 'won' }]);
@@ -469,7 +588,7 @@ const DAILY_ENERGY = 10;         // ⚡ for playing the daily
 const STREAK_ENERGY = { 3: 5, 7: 10, 30: 25 };
 function energyHtml(cls = '') {
   const e = EN.get(); const ms = EN.msUntilNext();
-  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy" aria-label="אנרגיה ${e} מתוך ${EN.MAX}">
+  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy" aria-label="${EN.NAME}: ${e} מתוך ${EN.MAX}">
     <span class="lb-en-ic" aria-hidden="true">⚡</span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
 }
 let enTimer = null;
@@ -489,9 +608,9 @@ function emptyEnergyHtml() {
   if (EN.get() > 0) return '';
   const d = cache.daily; const dailyOpen = net.hasMe() && d && !d.error && !d.my_status;
   return `<section class="lb-empty-en" id="lbEmpty"><div class="lb-en-big" aria-hidden="true">🪫</div>
-    <div><h2>נגמרה האנרגיה ⚡</h2><p>עוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל ⚡ חדש. בינתיים:</p>
-    <div class="lb-acts start">${dailyOpen ? '<button class="primary" data-act="daily">🎲 האתגר היומי (לא עולה ⚡)</button>' : ''}
-      <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח ⚡ לחברים</button>' : ''}</div></div></section>`;
+    <div><h2>נגמרו הזריקות ⚡</h2><p>בעוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל זריקה חדשה. בינתיים:</p>
+    <div class="lb-acts start"><button class="primary" data-act="learn-now">${T4.M8}</button>${dailyOpen ? '<button data-act="daily">🎲 האתגר היומי (בלי זריקות)</button>' : ''}
+      <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח זריקות לחברים</button>' : ''}</div></div></section>`;
 }
 let claimAt = 0;
 async function claimGifts() {
@@ -503,7 +622,7 @@ async function claimGifts() {
     if (total > 0) {
       EN.add(total, 'gift');
       const from = (r && r.from) || [];
-      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${f.amount}⚡` : `${f.nickname} שלח לך ${f.amount}⚡`) : [`קיבלת ${total}⚡`];
+      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
       lines.slice(0, 3).forEach((t, i) => setTimeout(() => toast('🎁 ' + t), i * 2700));
       sfx('coin'); refreshEnergyChips();
     }
@@ -522,10 +641,12 @@ function onQuizReward(p) {
   const r = p && (p.reward || p);
   if (!r || r.kind !== 'lesson' || r.right !== true) return;
   const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null; if (!cfg) return;
+  if (cfg.learn) return;                                   // T4 §7.1: no ⚡ bonuses in learning mode
   const sig = quizSig(cfg); setQuizCredited(sig, quizCredited(sig) + 1);
-  if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${QUIZ_ENERGY}⚡`);
+  if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${EN.label(QUIZ_ENERGY)} ⚡`);
 }
 function creditQuizAtEnd(e) {
+  if (isLearnEnd(e)) return 0;                              // T4 §7.1
   const st = e.stats || (e.summary && e.summary.stats) || (e.end && e.end.stats) || {};
   const right = int(st.quizRight); const sig = quizSig(e); const had = quizCredited(sig);
   const owe = Math.max(0, right - had);
@@ -541,52 +662,103 @@ function grantDaily(streak) {
 }
 
 function renderWelcome() {
-  view = { k: 'welcome' }; ++token;
+  view = { k: 'welcome' }; ++token; trace('welcome');
+  // T4 F1: ≤ 35 words, no ⚡ / ★★★ / plan text (they come back as just-in-time coaches in the game)
   html(`<div class="lb-shell lb-welcome">
-    <article class="wl-card">
+    <article class="wl-card" aria-labelledby="wlH">
       <div class="wl-hero"><img src="${cardArt('w1')}" alt=""><div class="lb-logo wl-logo">מירוץ<br>העכברים</div></div>
-      <h1>החיים שלך. הכסף שלך. הזמן שלך.</h1>
-      <p class="wl-lead">כל חודש במשחק הוא חודש בחיים. המטרה: נכסים שמשלמים את ההוצאות — ולהישאר מאושר בדרך.</p>
-      <ul class="wl-points">
-        <li><span>📅</span><div><b>תוכנית חודשית</b><small>בכל משכורת בוחרים: עבודה רגילה, שעות נוספות, לימודים, עסק צדדי או מנוחה ומשפחה. הזמן הוא הנכס הכי יקר.</small></div></li>
-        <li><span>⚡</span><div><b>אנרגיה: ${EN.MAX} הטלות</b><small>כל הטלה עולה ⚡ אחד, ומתמלא ⚡ כל 6 דקות. האתגר היומי והשבועי — בחינם. חברים יכולים לשלוח לך ⚡.</small></div></li>
-        <li><span>😊</span><div><b>כסף זה לא הכל</b><small>★★★ רק למי שיוצא מהר, נשאר מאושר <em>וגם</em> שומר קרן חירום של 3 חודשים.</small></div></li>
-        <li><span>📚</span><div><b>אוספים שיעורים</b><small>כל שיעור של אבא עשיר נכנס לספרייה שלך.</small></div></li>
-      </ul>
-      <button class="primary lb-big" data-act="welcome-go">יאללה, מתחילים ←</button>
+      <h1 id="wlH">${T4.W1}</h1>
+      <p class="wl-lead">${T4.W2}</p>
+      <button class="primary lb-big" data-act="welcome-go">${T4.W3}</button>
+      <button class="wl-pick" data-act="welcome-pick">${T4.W4}</button>
+      <button class="wl-restore" data-act="welcome-restore">${T4.W5}</button>
     </article></div>`);
+  focusSoon('[data-act="welcome-go"]');
 }
 
-const CAT_HE = { tax: '🧾 משכורת ומסים', invest: '📈 השקעות', money: '💸 כסף ומחירים', debt: '💳 חובות ואשראי', time: '⏳ זמן ואנרגיה', life: '🌱 החיים', world: '🗺️ מהעולמות', history: '📜 מההיסטוריה' };
 async function renderLibrary() {
-  view = { k: 'library' }; const t = ++token;
+  view = { k: 'library' }; const t = ++token; trace('library');
   html(`<div class="lb-shell lb-library"><div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div><p class="lb-note">טוען את הספרייה…</p></div>`);
   const L = await LIB.lessons();
   if (t !== token) return;
   const c = LIB.counts();
   const cats = [];
-  for (const l of L) { const k = CAT_HE[l.cat] || l.cat || 'שיעורים'; let g = cats.find((x) => x.k === k); if (!g) cats.push(g = { k, items: [] }); g.items.push(l); }
+  // T4 §9.1: Hebrew category names only — an unknown category falls back to '📚 שיעורים', never to the raw key
+  for (const l of L) { const k = catName(l.cat); let g = cats.find((x) => x.k === k); if (!g) cats.push(g = { k, items: [] }); g.items.push(l); }
   const pct = c.total ? Math.round((c.have / c.total) * 100) : 0;
+  const pt = LIB.practiceTotals();
   html(`<div class="lb-shell lb-library">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
     <header class="lib-head"><span class="lib-ic" aria-hidden="true">📚</span><div><h1>ספריית השיעורים</h1>
       <p>כל שיעור שאבא עשיר מלמד אותך במשחק נכנס לכאן. <b>${num(c.have + '/' + c.total)}</b></p>
-      <div class="lb-bar-track"><i style="width:${pct}%"></i></div></div></header>
+      <div class="lb-bar-track"><i style="width:${pct}%"></i></div>${pt.n ? `<p class="lb-note">${esc(T4.P9(pt.right, pt.n))}</p>` : ''}</div></header>
     ${L.length ? cats.map((g) => `<section class="lib-sec"><h2>${esc(g.k)} <small>${num(g.items.filter((l) => LIB.isUnlocked(l.id)).length + '/' + g.items.length)}</small></h2>
-      <div class="lib-grid">${g.items.map((l) => { const un = LIB.isUnlocked(l.id); return un
-        ? `<button class="lib-card ${LIB.isNew(l.id) ? 'is-new' : ''}" data-act="lesson" data-id="${esc(l.id)}">${LIB.isNew(l.id) ? '<span class="gp-newtag">חדש</span>' : ''}<b>${esc(l.title)}</b><small>${iso(String(l.text).length > 150 ? String(l.text).slice(0, 147) + '…' : l.text)}</small></button>`
-        : `<div class="lib-card is-locked"><span class="lib-q">?</span><b>שיעור נעול</b><small>${esc(l.hint || (l.world ? 'מחכה לך ' + P.inW(worldOf(l.world).name) : 'שחק כדי לגלות'))}</small></div>`; }).join('')}</div></section>`).join('')
+      <div class="lib-grid">${g.items.map((l) => libCard(l)).join('')}</div></section>`).join('')
       : '<p class="lb-empty">הספרייה תתמלא כשתתחיל לשחק.</p>'}
   </div>`);
 }
+/** Unlocked: title + text. Locked (§9.3): 🔒 + a curious teaser (the real title stays hidden) + 🔓 how to unlock. */
+function libCard(l) {
+  if (LIB.isUnlocked(l.id)) {
+    return `<button class="lib-card ${LIB.isNew(l.id) ? 'is-new' : ''}" data-act="lesson" data-id="${esc(l.id)}">${LIB.isNew(l.id) ? '<span class="gp-newtag">חדש</span>' : ''}<b>${esc(l.title)}</b><small>${iso(String(l.text).length > 150 ? String(l.text).slice(0, 147) + '…' : l.text)}</small></button>`;
+  }
+  const m = LIB.meta(l.id) || {};
+  const teaser = m.teaser || 'שיעור שמחכה לך';
+  const hint = m.hint || l.hint || (l.world ? 'מחכה לך ' + P.inW(worldOf(l.world).name) : 'שחק כדי לגלות');
+  return `<div class="lib-card is-locked" role="group" aria-label="${esc(T4.B1(teaser, hint))}"><span class="lib-lock" aria-hidden="true">🔒</span><b>${esc(teaser)}</b><small><span aria-hidden="true">🔓 </span>${iso(hint)}</small></div>`;
+}
+/** Lesson sheet (§9.4): title · text (≤160, then עוד ▾) · example · where you learned it · simplification · practice. */
+const lessonTopics = (id) => [...new Set(PRACTICE.filter((x) => x.after.includes(id)).map((x) => x.topic))];
+function lessonLines(l) {
+  const m = LIB.meta(l.id) || {}; const ctx = LIB.contextOf(l.id); const out = [];
+  if (m.example) out.push(`<p class="ls-line ls-ex">${iso(T4.B3(m.example))}</p>`);
+  if (ctx) {
+    const wn = ctx.w === 'h' ? 'מכונת הזמן' : ctx.w ? safe(() => getWorld(ctx.w).name, '') : '';
+    const where = wn ? (ctx.w === 'h' ? 'ב' + wn : P.inW(wn)) : '';
+    const numTxt = ctx.num && ctx.num.label ? ` · ${ctx.num.label} ${ctxValue(l.id, ctx.num.value)}` : '';
+    out.push(`<p class="ls-line ls-ctx">${iso(`📍 למדת את זה בחודש ${ctx.m}${where ? ' ' + where : ''}${ctx.ev ? ` — "${ctx.ev}"` : ''}${numTxt}`)}</p>`);
+  }
+  if (m.sim) out.push(`<p class="ls-line ls-sim">${iso(T4.B5(m.sim))}</p>`);
+  const st = LIB.practiceStats(); let n = 0, r = 0;
+  for (const t of lessonTopics(l.id)) if (st[t]) { n += st[t].n || 0; r += st[t].right || 0; }
+  if (n) out.push(`<p class="ls-line ls-pr">${esc(T4.B6(r, n))}</p>`);
+  return out.join('');
+}
+/** E-6 num values: a string is shown as is; a number is a % (rates), a count, or ₪ (everything else). */
+const CTX_PCT = new Set(['tax_brackets', 'marginal_overtime', 'inflation']);
+const CTX_COUNT = new Set(['diversification', 'index_fund']);
+function ctxValue(id, v) {
+  if (v == null) return '';
+  if (typeof v !== 'number') return String(v);
+  if (CTX_PCT.has(id)) return `${Math.round(v * (Math.abs(v) <= 1 ? 1000 : 10)) / 10}%`;
+  if (CTX_COUNT.has(id)) return String(Math.round(v));
+  return fmtM(v);
+}
+let lessonRelease = null; let lessonOpener = null;
 async function openLesson(id) {
   const L = await LIB.lessons(); const l = L.find((x) => x.id === id); if (!l) return;
   LIB.markRead(id);
-  const old = $('#lbLesson'); if (old) old.remove();
+  closeLesson(false);
+  lessonOpener = document.activeElement;
+  const text = String(l.text || '');
+  const body = text.length > 160
+    ? `<p>${iso(text.slice(0, 157).replace(/\s+\S*$/, ''))}…</p><details class="ls-more"><summary>${T4.B2}</summary><p>${iso(text)}</p></details>`
+    : `<p>${iso(text)}</p>`;
   const el = document.createElement('div'); el.id = 'lbLesson'; el.className = 'lb-sheet';
-  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true"><span class="lib-ic sm" aria-hidden="true">📚</span><h2>${esc(l.title)}</h2><p>${iso(l.text)}</p><button class="primary lb-wide" data-act="lesson-close">הבנתי</button></div>`;
+  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true" aria-labelledby="lbLessonT"><span class="lib-ic sm" aria-hidden="true">📚</span><h2 id="lbLessonT">${esc(l.title)}</h2>${body}${lessonLines(l)}<button class="primary lb-wide" data-act="lesson-close">הבנתי</button></div>`;
   root().appendChild(el);
+  lessonRelease = trapFocus(el);
+  focusSoon(el.querySelector('[data-act="lesson-close"]'));
   const card = $(`.lib-card[data-id="${CSS.escape(id)}"]`); if (card) { card.classList.remove('is-new'); card.querySelector('.gp-newtag')?.remove(); }
+}
+function closeLesson(restore = true) {
+  const el = $('#lbLesson'); if (!el) return false;
+  if (lessonRelease) { lessonRelease(); lessonRelease = null; }
+  el.remove();
+  const c = $('.map-lib'); if (c) c.outerHTML = libraryCard();
+  if (restore && lessonOpener && lessonOpener.isConnected) safe(() => lessonOpener.focus({ preventScroll: true }));
+  lessonOpener = null;
+  return true;
 }
 
 /* ============================================================ ⏳ מכונת הזמן (history mode) */
@@ -664,7 +836,7 @@ async function startHistory(sid, cont = false) {
 
 /* ============================================================ HOME (world map) */
 function renderHome() {
-  view = { k: 'home' }; const t = ++token;
+  view = { k: 'home' }; const t = ++token; trace('home');
   const p = P.getProgress(); const me = net.me(); const goal = P.nextGoal();
   html(`<div class="lb-shell lb-home">
     ${activeBanner()}
@@ -697,13 +869,14 @@ function worldCard(w, i, p) {
   const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0; const best = p.best[w.id];
   const prev = i ? WORLDS[i - 1] : null;
   const sv = un && G && G.savedGame ? safe(() => G.savedGame(freeKey(w.id))) : null;
+  const svL = un && !sv && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
   const d = cache.daily; const isDaily = !!(d && d.world === w.id);
   const isNew = un && i > 0 && !p.seenWorlds.includes(w.id);
   const next = un && !s;
   const tags = [
     isNew ? '<span class="map-tag-new">חדש!</span>' : '',
     isDaily ? '<span class="map-tag-daily">🎲 היומי של היום</span>' : '',
-    sv ? `<span class="map-tag-save">▶ שמור · חודש ${esc(sv.month)}</span>` : '',
+    sv ? `<span class="map-tag-save">▶ שמור · חודש ${esc(sv.month)}</span>` : svL ? `<span class="map-tag-save">🎓 תרגול · חודש ${esc(svL.month)}</span>` : '',
   ].join('');
   return `<button class="map-card ${un ? '' : 'is-locked'} ${next ? 'is-next' : ''} ${s >= 3 ? 'is-max' : ''}" data-act="world" data-id="${w.id}" style="--i:${i}">
     <span class="map-art"><img src="${cardArt(w.id)}" alt="" loading="lazy" decoding="async"><span class="map-num">${i + 1}</span>${un ? '' : '<span class="map-lock" aria-hidden="true">🔒</span>'}<span class="map-tags">${tags}</span></span>
@@ -736,14 +909,14 @@ function dailyHtml(d) {
   const streakLine = played
     ? `<div class="lb-streak"><span class="fire">🔥</span><b>${streak || 1}</b><span>${(streak || 1) === 1 ? 'יום ברצף' : 'ימים ברצף'}</span></div>`
     : streak > 0
-      ? `<div class="lb-streak warn"><span class="fire">🔥</span><b>${streak}</b><span>${streak === 1 ? 'יום ברצף' : 'ימים ברצף'} — אל תשבור את הרצף!</span></div>`
+      ? `<div class="lb-streak wait"><span>${esc(T4.S1(streak))}</span></div>`
       : '<div class="lb-streak cold"><span class="fire">🔥</span><span>שחק היום ותתחיל רצף</span></div>';
   return `<div class="lb-dh" style="background-image:url('${cardArt(w.id)}')">
       <span class="lb-pill">🎲 האתגר היומי</span>${un ? '' : '<span class="lb-pill lock">🔒 עולם נעול — טעימה!</span>'}<span class="lb-timer">⏳ ${timeLeft(d.ends_at)}</span>
-      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים</span></div>
+      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⏱️ ספרינט ${int(d.max_months, 24) || 24} חודשים</span></div>
     </div>
     <div class="lb-db">
-      ${played ? '' : `<p class="lb-sprint">⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
+      ${played ? '' : `<p class="lb-sprint">⏱️ ספרינט ${int(d.max_months, 24) || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
       ${streakLine}
       ${cta}
       <h3 class="lb-sub">הטבלה של היום · הכי קרוב לחופש</h3>
@@ -816,19 +989,33 @@ async function joinCode(code) {
 }
 
 /* ============================================================ WORLD (character picker / locked preview) */
-function renderWorld(id) {
-  const w = worldOf(id); view = { k: 'world', id: w.id }; ++token;
+// T4 §5: mode group (normal / learning) → dream row → mentor row → character cards (articles, not buttons).
+let worldMode = null;            // 'normal' | 'learn' while the world view is open (null = from progress)
+let dreamOpen = false;           // the dream row is expanded
+function modeNow(p = P.getProgress()) {
+  if (worldMode) return worldMode;
+  return completedAny(p) ? p.lastMode : 'normal';   // a brand-new player always gets a normal first game
+}
+function renderWorld(id, opts = {}) {
+  const w = worldOf(id); view = { k: 'world', id: w.id }; ++token; trace('world');
+  if (opts.learn) worldMode = 'learn';
   const i = WORLDS.indexOf(w); const p = P.getProgress(); const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0;
   if (un) P.markWorldSeen(w.id);
-  const sv = un && G && G.savedGame ? safe(() => G.savedGame(freeKey(w.id))) : null;
+  const sv = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id))) : null;
+  const svL = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
   const prev = i ? WORLDS[i - 1] : null;
   const d = cache.daily; const isDaily = !!(d && d.world === w.id && d.my_status !== 'won' && d.my_status !== 'lost');
   const diffs = difficulty(w);
   let body;
   if (un) {
-    body = `${sv ? `<button class="lb-continue" data-act="continue-free" data-id="${w.id}"><span class="lb-resume-ic">▶</span><span><b>להמשיך מאיפה שעצרת</b><small>${esc(sv.charName || '')} · חודש ${esc(sv.month)}</small></span></button>` : ''}
-      <h2 class="wv-h">${sv ? 'או משחק חדש — ' : ''}בחר דמות</h2>
-      <div class="wv-chars">${w.characters.map((c) => charCard(w, c, diffs[c.id])).join('')}</div>`;
+    const mode = modeNow(p);
+    const cont = (x, learn) => `<button class="lb-continue ${learn ? 'is-learn' : ''}" data-act="continue-free" data-id="${w.id}" ${learn ? 'data-learn="1"' : ''}><span><b>${esc(learn ? T4.M6(x.charName || '', x.month) : T4.M5(x.charName || '', x.month))}</b></span></button>`;
+    body = `${sv ? cont(sv, false) : ''}${svL ? cont(svL, true) : ''}
+      ${modeGroupHtml(mode)}
+      ${dreamRowHtml(p)}
+      ${mentorRowHtml(p)}
+      <h2 class="wv-h">${sv || svL ? 'או משחק חדש — ' : ''}בחר דמות</h2>
+      <div class="wv-chars">${w.characters.map((c) => charCard(w, c, diffs[c.id], s)).join('')}</div>`;
   } else {
     const frontier = WORLDS.find((x) => P.isUnlocked(x.id) && !(p.stars[x.id] > 0)) || prev;
     body = `<div class="wv-locked">
@@ -841,7 +1028,7 @@ function renderWorld(id) {
       ${isDaily ? '' : '<p class="lb-note">טיפ: כל יום האתגר היומי בעולם אחר — גם בעולמות נעולים.</p>'}
     </div>`;
   }
-  html(`<div class="lb-shell lb-world">
+  html(`<div class="lb-shell lb-world ${un && modeNow(p) === 'learn' ? 'is-learn' : ''}">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
     <header class="wv-hero ${un ? '' : 'is-locked'}"><img src="${cardArt(w.id)}" alt="">
       <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}</div></header>
@@ -852,32 +1039,76 @@ function renderWorld(id) {
     </div>
     ${body}
   </div>`);
+  if (un) focusSoon('input[name="t4mode"]:checked');
+}
+function modeGroupHtml(mode) {
+  const opt = (v, t, sub) => `<label class="t4-opt ${mode === v ? 'on' : ''}"><input type="radio" name="t4mode" value="${v}" ${mode === v ? 'checked' : ''}><span><b>${t}</b><small>${sub}</small></span></label>`;
+  return `<fieldset class="t4-modes" role="radiogroup" aria-label="${T4.M0}"><legend class="sr">${T4.M0}</legend>${opt('normal', T4.M1, T4.M2)}${opt('learn', T4.M3, T4.M4)}</fieldset>`;
+}
+function dreamRowHtml(p) {
+  const list = dreamsList(); if (!list) return '';
+  const cur = p.dream ? dreamById(p.dream) : null;
+  if (cur && !dreamOpen) {
+    return `<div class="t4-dream-line"><button class="t4-dream-sum" data-act="dream-open" aria-expanded="false">${esc(T4.D9(cur.icon, cur.name))}</button></div>`;
+  }
+  const opt = (id, ic, name, line) => `<label class="t4-dopt ${(p.dream || '') === id ? 'on' : ''}"><input type="radio" name="t4dream" value="${id}" ${(p.dream || '') === id ? 'checked' : ''}><span class="t4-dic" aria-hidden="true">${ic}</span><span><b>${esc(name)}</b>${line ? `<small>${esc(line)}</small>` : ''}</span></label>`;
+  return `<fieldset class="t4-dreams" role="radiogroup" aria-label="${T4.D5}"><legend><b>${T4.D6}</b><small>${T4.D7}</small></legend>
+    <div class="t4-dgrid">${list.map((x) => opt(x.id, x.icon, x.name, x.line)).join('')}${opt('', '·', T4.D8, '')}</div></fieldset>`;
+}
+function mentorRowHtml(p) {
+  const L = mentorLevels(); if (!L) return '';
+  const cur = mentorAllowed(p.mentorPref, p) ? p.mentorPref || 'guide' : 'guide';
+  const name = { guide: T4.G3, hint: T4.G4, pro: T4.G5 };
+  const lock = { hint: T4.G7, pro: T4.G6 };
+  return `<fieldset class="t4-mentor" role="radiogroup" aria-label="${T4.G2}"><legend>${T4.G2}</legend>${['guide', 'hint', 'pro'].filter((x) => L.includes(x)).map((lv) => {
+    const ok = mentorAllowed(lv, p);
+    return `<label class="t4-mopt ${cur === lv ? 'on' : ''} ${ok ? '' : 'is-locked'}" ${ok ? '' : `title="${esc(lock[lv])}"`}><input type="radio" name="t4mentor" value="${lv}" ${cur === lv ? 'checked' : ''} ${ok ? '' : `disabled aria-label="${esc(name[lv] + ' ' + lock[lv])}"`}><span>${esc(name[lv])}${ok ? '' : ` <span aria-hidden="true">🔒</span><small>${esc(lock[lv].replace('🔒 ', ''))}</small>`}</span></label>`;
+  }).join('')}</fieldset>`;
 }
 function topMini() {
   const p = P.getProgress(); const me = net.me();
   return `<button class="lb-mini-player" data-act="profile">${pawnHtml(p.pawn, p.pawnColor, 'sm')}<span>${me ? esc(me.nickname) : 'אורח'}</span>${titleBadge(P.totalStars(p))}</button>`;
 }
+/** §5.4 the first number of the HUD: metrics(createGame()).cashflow (pure, cached per character). */
+const surplusCache = {};
+function surplusOf(w, c) {
+  const k = w.id + ':' + c.id;
+  if (!(k in surplusCache)) surplusCache[k] = safe(() => metrics(createGame({ worldId: w.id, charId: c.id, seed: 1 })).cashflow, characterCard(w, c).surplus);
+  return surplusCache[k];
+}
+/** §5.3 identity line, computed, no slash forms: "בן 31 · נשוי + ילד". */
+function identityLine(c) {
+  const f = c.gender === 'f'; const fam = c.family || {};
+  const partner = fam.partner === 'married' ? (f ? 'נשואה' : 'נשוי') : fam.partner === 'together' ? 'בזוגיות' : (f ? 'רווקה' : 'רווק');
+  const k = +fam.kids || 0;
+  return c.age ? `${f ? 'בת ' : 'בן '}${c.age} · ${partner}${k === 1 ? ' + ילד' : k > 1 ? ` + ${k} ילדים` : ''}` : '';
+}
 function charCard(w, c, d) {
-  const cc = characterCard(w, c); const T = starThresholds(w, c.id);
+  const cc = characterCard(w, c); const T = starThresholds(w, c.id); const meta = charMeta(w.id, c.id);
+  const cf = surplusOf(w, c); const neg = cf < 0;
   const salary = cc.salaryUsd ? `$${cc.salaryUsd.toLocaleString('en-US')}` : fmtM(cc.salary);
   const extras = [];
   for (const a of c.assets || []) extras.push(`🏷️ כבר יש לך: ${esc(a.n)}`);
   for (const [tk, q] of Object.entries(c.holdings || {})) extras.push(`📈 ${q.toLocaleString('en-US')} מניות ${esc(tk)}`);
   if (c.impact) extras.push(`💗 ${c.impact} נקודות השפעה מההתחלה`);
   if (cc.perk) extras.push(`✨ ${esc(cc.perk)}`);
-  return `<button class="wv-char" data-act="char" data-w="${w.id}" data-c="${c.id}">
-    <span class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b>${esc(c.name)}</b>${diffHtml(d || 2)}</span></span>
-    <span class="wv-desc">${esc(c.desc || '')}</span>
-    <span class="wv-nums">
-      <span><small>משכורת</small><b>${iso(salary)}</b></span>
-      <span><small>הוצאות</small><b>${iso(fmtM(cc.expenses))}</b></span>
-      <span><small>נשאר בחודש</small><b class="${cc.surplus > 0 ? 'pos' : cc.surplus < 0 ? 'neg' : ''}">${iso((cc.surplus > 0 ? '+' : '') + fmtM(cc.surplus))}</b></span>
-      <span><small>מזומן</small><b>${iso(fmtM(cc.cash))}</b></span>
-    </span>
-    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small>${T.happy != null || HAPPY_RULE ? `<i class="wv-happy">+ 😊 ${int(T.happy, 60)}</i>` : ''}<i class="wv-fund" title="★★★ דורש קרן חירום">🐷 קרן חירום ${int(T.fundMonths, 3)} חודשים</i></span>
-    ${extras.length ? `<span class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</span>` : ''}
-    <span class="wv-go">לשחק ←</span>
-  </button>`;
+  const exp = [...(c.expenses || [])].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const did = `wvd-${w.id}-${c.id}`;
+  const idl = identityLine(c);
+  return `<article class="wv-char" aria-labelledby="${did}-n">
+    <div class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b id="${did}-n">${esc(c.name)}</b>${idl ? `<small class="wv-id">${esc(idl)}</small>` : ''}</span>${diffHtml(d || 2)}</div>
+    <p class="wv-desc">${esc(c.desc || '')}</p>
+    ${meta ? `<p class="wv-sw wv-str">💪 ${iso(meta.strength)}</p><p class="wv-sw wv-weak">⚠️ ${iso(meta.weakness)}</p>` : ''}
+    <p class="wv-cf ${neg ? 'neg' : 'pos'}"><span>${neg ? T4.K2 : T4.K4}${neg ? (c.gender === 'f' ? T4.K3f : T4.K3m) : ''}</span><b>${iso((cf > 0 ? '+' : '') + fmt(cf))}</b></p>
+    <p class="wv-goalline">${esc(T4.Kgoal(T.maxMonths))}</p>
+    <div class="wv-details" id="${did}" hidden>
+      <div class="wv-nums"><span><small>${T4.Knet}</small><b>${iso(salary)}</b></span><span><small>${T4.Kcash}</small><b>${iso(fmtM(cc.cash))}</b></span></div>
+      ${exp.length ? `<p class="wv-exph">${T4.Kexp}</p><ul class="wv-exp">${exp.map(([l, a]) => `<li><span>${esc(l)}</span><b>${iso(fmtM(a))}</b></li>`).join('')}</ul>` : ''}
+      ${extras.length ? `<div class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</div>` : ''}
+      <p class="wv-th">${esc(T4.K1(T.maxMonths, T.t2, T.t3))}</p>
+    </div>
+    <div class="wv-acts"><button class="wv-more" data-act="char-more" aria-expanded="false" aria-controls="${did}">${T4.Kmore}</button><button class="primary wv-go" data-act="char" data-w="${w.id}" data-c="${c.id}" aria-label="${esc(T4.Kplay + ' ' + c.name)}">${T4.Kplay}</button></div>
+  </article>`;
 }
 
 /* ============================================================ GROUP */
@@ -929,8 +1160,8 @@ function membersHtml(g) {
   const members = [...g.members].sort((a, b) => int(b.stars) - int(a.stars));
   const gifted = new Set((feedCache[g.id] && feedCache[g.id].gifted_today) || []);
   return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(int(m.stars))}<span class="gp-st">★ ${int(m.stars)}</span>${m.me ? '' : gifted.has(m.nickname)
-    ? '<button class="gp-send sent" disabled title="שלחת לו ⚡ היום">✓ נשלח</button>'
-    : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3⚡ (פעם ביום)">שלח ⚡</button>`}</li>`).join('');
+    ? '<button class="gp-send sent" disabled title="שלחת לו זריקות היום">✓ נשלח</button>'
+    : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3 זריקות (פעם ביום)">שלח ⚡ 3</button>`}</li>`).join('');
 }
 /* -------- group feed: friends' milestones + ranked results (net.groupFeed) */
 const feedCache = {};
@@ -946,7 +1177,7 @@ function feedLine(f) {
     case 'history_done': return ['⏳', `${who} חזר מ${esc((scenById(d.scenario) || {}).name || 'מכונת הזמן')}${d.beat ? ' — וניצח את המדד 🏆' : ''}${st}`];
     case 'ranked_won': return ['🏁', `${who} יצא מהמירוץ ${d.title ? `ב״${esc(d.title)}״` : d.mode ? 'ב' + esc(MODE_NAME[d.mode] || '') : 'באתגר'}${int(d.months) > 0 ? ` בחודש ${int(d.months)}` : ''}${st}`];
     case 'ranked_lost': { const pr = d.progress ?? (d.stats && d.stats.progress); return ['💪', `${who} סיים ${d.title ? `את ״${esc(d.title)}״` : d.mode ? 'את ' + esc(MODE_NAME[d.mode] || 'האתגר') : 'אתגר'}${pr != null && Number.isFinite(+pr) ? ` עם ${num(Math.round(Math.max(0, Math.min(1, +pr)) * 100) + '%')} מהדרך` : ''}`]; }
-    case 'gift': case 'energy': return ['⚡', `${who} שלח ⚡`];
+    case 'gift': case 'energy': return ['⚡', `${who} שלח זריקות ⚡`];
     case 'joined': return ['👋', `${who} הצטרף לקבוצה`];
     default: return ['•', `${who} ${esc(f.kind)}`];
   }
@@ -1029,7 +1260,8 @@ function chalHtml(g, c) {
 
 /* ============================================================ PROFILE */
 function renderProfile() {
-  view = { k: 'profile' }; ++token;
+  view = { k: 'profile' }; ++token; trace('profile');
+  loadQuality();
   const p = P.getProgress(); const me = net.me(); const total = P.totalStars(p); const nt = P.nextTitle(p); const si = P.streakInfo();
   const curMin = TITLES[titleIdx(total)].min;
   const pct = nt ? Math.round(((total - curMin) / (nt.min - curMin)) * 100) : 100;
@@ -1061,7 +1293,8 @@ function renderProfile() {
     <section class="lb-card pf-ach"><h2>הישגים <small>${num(p.achievements.filter((id) => achs.some((a) => a.id === id)).length + '/' + achs.length)}</small></h2>
       <div class="pf-agrid">${achs.map((a) => { const got = have.has(a.id); const hid = !got && a.hidden; const wn = a.world ? worldOf(a.world).name : a.meta ? 'מסע' : ''; return `<div class="pf-a ${got ? 'got' : ''} ${hid ? 'hid' : ''}" title="${hid ? 'הישג סודי' : esc(a.desc)}"><span class="pf-aic">${hid ? '?' : ACH_ICON[a.icon] || '🏅'}</span><b>${hid ? 'הישג סודי' : esc(a.name)}</b><small>${hid ? 'תגלה כשתשיג' : esc(a.desc)}</small>${wn && !hid ? `<em>${esc(wn)}</em>` : ''}</div>`; }).join('')}</div>
     </section>
-    <section class="lb-card pf-set"><h2>הגדרות</h2>${muteToggle()}</section>
+    ${dreamsProfileHtml(p)}
+    ${settingsHtml()}
     <section class="lb-card pf-recover"><h2>להעביר את השחקן למכשיר אחר</h2>
       ${me ? `<p class="lb-note">קוד השחזור מעביר את השחקן, הכוכבים והקבוצות למכשיר אחר. <b>אל תשלח אותו לאף אחד</b> — מי שמחזיק בו שולט בשחקן שלך.</p>
         <div class="pf-code"><button class="chip" data-act="code-show">👁️ להציג את הקוד</button><button class="chip" data-act="code-copy">📋 להעתיק</button></div><div id="pfCode" class="pf-codebox" hidden></div>` : '<p class="lb-note">יש לך שחקן במכשיר אחר? הדבק כאן את קוד השחזור שלו.</p>'}
@@ -1069,6 +1302,65 @@ function renderProfile() {
     </section>
   </div>`);
   refreshMuted();
+}
+
+/* -------- T4 F4 + T5 §7.3 settings: sound, "תצוגה ותנועה" (motion, graphics quality when the rendering lane ships it, מצב קל), help */
+let QM = null; let qmP = null;
+/** js/render/quality.js (T5, rendering lane) — optional: the quality group appears only when the module loads. */
+function loadQuality() {
+  if (QM || qmP) return;
+  qmP = import('./render/quality.js').then((m) => { if (m && typeof m.setQualityPref === 'function' && m.TIER_LABEL) { QM = m; if (view.k === 'profile' && lobbyVisible()) { const el = $('#pfSettings'); if (el) el.outerHTML = settingsHtml(); } } }).catch(() => { /* not shipped yet */ });
+}
+const readSettings = () => safe(() => JSON.parse(localStorage.getItem('rr2-settings') || '{}') || {}, {});
+function radios(name, legend, opts, cur, hint, extra = '') {
+  return `<fieldset class="lb-radios"><legend>${legend}</legend>${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}>${l}</label>`).join('')}${hint ? `<p class="lb-note">${hint}</p>` : ''}${extra}</fieldset>`;
+}
+function settingsHtml() {
+  const liteOk = safe(() => !G || !G.setLite ? false : true, false);
+  const lite = !!readSettings().lite;
+  const q = QM ? radios('quality', 'איכות גרפיקה', QM.PREFS.map((x) => [x, QM.TIER_LABEL[x]]), safe(() => QM.qualityPref(), 'auto'),
+    'חסכונית: בלי צללים ועם פחות קישוטים. מתאים לטלפונים ישנים. החלקת קצוות משתנה אחרי רענון.', `<p class="lb-note" data-q="now">עכשיו: ${esc(QM.TIER_LABEL[safe(() => QM.resolveTier(), 'high')] || '')}</p>`) : '';
+  return `<section class="lb-card pf-set" id="pfSettings"><h2>הגדרות</h2>${muteToggle()}
+    <h3 class="lb-sub">${T4.S0}</h3>
+    ${radios('motion', T4.S1leg, T4.S1opt, motionPref(), T4.S1hint)}
+    ${q}
+    ${liteOk ? `<button class="lb-toggle ${lite ? 'on' : ''}" data-act="lite" role="switch" aria-checked="${lite}"><span>${T4.lite}</span><i></i></button><p class="lb-note">${T4.liteHint}</p>` : ''}
+    <h3 class="lb-sub">${T4.Hhelp}</h3>
+    <div class="pf-help">
+      <button class="chip" data-act="help-tour">${T4.H7}</button>
+      <button class="chip" data-act="help-legend">${T4.H4}</button>
+      <button class="chip" data-act="help-tutorial">${T4.H5}</button>
+      <button class="chip" data-act="help-welcome">${T4.H8}</button>
+    </div></section>`;
+}
+/** F4 legend in the lobby: no game is running, so it lists what each sign means (the in-game legend adds your values). */
+const LEGEND = [
+  ['💰', 'מזומן', 'הכסף שבקופה עכשיו.'], ['💧', 'תזרים חודשי', 'מה נשאר בסוף כל חודש: הכנסות פחות הוצאות.'], ['📊', 'מד החופש', 'כמה מההוצאות ההכנסה הפסיבית כבר מכסה. מלא = יצאת מהמירוץ.'],
+  ['🎂', 'גיל', 'כל חודש במשחק הוא חודש בחיים.'], ['🔋', 'כוח', 'הכוח של הדמות בסיפור — לא ⚡ זריקות. מתחת ל־25 יש סכנת שחיקה.'], ['😊', 'אושר', 'ל־★★★ צריך לפחות 60.'],
+  ['🏦', 'דירוג אשראי', 'קובע כמה יעלו הלוואות. הלוואה כפויה מורידה אותו.'], ['🛒', 'אינפלציה', 'כמה המחירים עולים השנה.'], ['🛟', 'קרן חירום', 'כמה חודשי הוצאות שמורים בצד. ל־★★★ צריך 3.'],
+  ['📅', 'התוכנית', 'איך אתה מעביר את החודש: עבודה, שעות נוספות, לימודים, עסק צדדי או מנוחה.'], ['⚡', 'זריקות', 'כל הטלת קוביות במשחק רגיל עולה זריקה אחת. בתרגול חופשי — בלי הגבלה.'], ['🎯', 'המטרה והחלום', 'הצעד הבא בדרך, והמשימות של החלום שבחרת.'],
+];
+function openSheet(title, inner) {
+  closeLesson(false);
+  const opener = document.activeElement;
+  const el = document.createElement('div'); el.id = 'lbLesson'; el.className = 'lb-sheet';
+  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true" aria-labelledby="lbLessonT"><h2 id="lbLessonT">${title}</h2>${inner}<button class="primary lb-wide" data-act="lesson-close">סגירה</button></div>`;
+  root().appendChild(el);
+  lessonRelease = trapFocus(el); lessonOpener = opener;
+  focusSoon(el.querySelector('[data-act="lesson-close"]'));
+}
+function legendHtml() {
+  return `<table class="t4-legend"><tbody>${LEGEND.map(([ic, n, t]) => `<tr><td aria-hidden="true">${ic}</td><th scope="row">${esc(n)}</th><td>${iso(t)}</td></tr>`).join('')}</tbody></table>`;
+}
+/** §6.3 S-D12 (P1): the current dream (changeable) and the badges per dream. */
+function dreamsProfileHtml(p) {
+  const list = dreamsList(); if (!list) return '';
+  const badges = list.map((d) => {
+    const got = (p.dreams[d.id] && p.dreams[d.id].done) || []; if (!got.length) return '';
+    const titles = got.map((id) => ((d.missions || []).find((m) => m.id === id) || {}).title || '').filter(Boolean);
+    return titles.map((t) => `<li>${d.icon} ${esc(t)} ✓</li>`).join('');
+  }).join('');
+  return `<section class="lb-card pf-dreams"><h2>${T4.D12}</h2>${dreamRowHtml({ ...p, dream: p.dream })}${badges ? `<ul class="pf-badges">${badges}</ul>` : '<p class="lb-empty">משימה שתשלים במשחק רגיל תופיע כאן.</p>'}</section>`;
 }
 
 /** "מה למדתי": principle mastery across games (progress.js, local) + the decision-quality trend. */
@@ -1182,36 +1474,41 @@ function onGameEnd(e, delay) {
   const hist = e.mode === 'history' || e.worldId === 'h';
   const seed = e.seed ?? (e.summary && e.summary.seed) ?? (same ? cfg.seed : null);
   if (hist) e = { ...e, mode: 'history', worldId: 'h', seed, scenarioId: e.scenarioId || (e.end && e.end.scenarioId) || (e.summary && e.summary.scenarioId) || (same && cfg.scenarioId) || null };
-  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed }))) || '') : freeKey(e.worldId);
-  // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags
+  const learnMode = !hist && !e.resultId && isLearnEnd(e);                     // T4 §7.3
+  if (learnMode) e = { ...e, learn: true };
+  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed }))) || '') : slotKey(e.worldId, learnMode);
+  // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags (never for learning games)
   const saved = saveKey ? localSaveState(saveKey) : null;
-  if (saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
-  // lessons learned this game → library
+  if (!learnMode && saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
+  // lessons learned this game → library (also in learning mode: learning is the point), with the engine's context (E-6)
   const lessonIds = [e.lessons, e.end && e.end.lessons, e.summary && e.summary.lessons, saved && saved.lessons].filter(Array.isArray).flat();
-  LIB.unlock(lessonIds);
-  const res = P.recordGame(e);
+  LIB.unlock(lessonIds, (e.end && Array.isArray(e.end.lessonList) && e.end.lessonList) || null);
+  // §7.1 learning: no stars, best, unlocks, titles, pawns, achievements, worldsPlayed, gamesPlayed, wins, ⚡, boards
+  const res = learnMode ? P.recordLearnGame(e) : P.recordGame(e);
+  gamesThisSession++;
   res.newLessons = [...sessLessons]; sessLessons = [];
   const learning = (e.end && e.end.learning) || (e.summary && e.summary.learning) || null;
-  res.learn = safe(() => P.recordLearning(learning, [e.resultId || '', e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
+  res.learn = safe(() => P.recordLearning(learning, [e.resultId || '', learnMode ? 'learn' : e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
   res.quizEnergy = creditQuizAtEnd(e);
   if (e.mode === 'daily') { res.energy = grantDaily(P.streakInfo().streak); res.energyWhy = 'על האתגר היומי — אפשר להמשיך לשחק'; }
+  if (!learnMode && (e.mode || 'free') === 'free' && !hist) res.dream = safe(() => P.recordDream(e), null);   // §6.3 badges: free normal games only
   logMilestones(e, res);
   lastEndSig = sigOf(e);
   const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
-  endCtx = { e, res, ranked, hist, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null };
+  endCtx = { e, res, ranked, hist, learn: learnMode, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null, dreamSaved: null };
   if (ranked) {
     // the replay log goes to verify, never into rr_finish's stats (16 KB cap); prefer the longer of summary / saved state
     const { actions: sumActions = null, ...summary } = e.summary || {};
     const actions = [sumActions, saved && saved.actions].filter(Array.isArray).sort((a, b) => b.length - a.length)[0] || null;
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
-  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : freeKey(e.worldId))));
+  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode))));
   setTimeout(() => {
     ensureCss(); install();
     const o = overlay(); if (!o) return;
     o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open');
     if (!booted) { booted = true; boot(); }
-    view = { k: 'end' };
+    view = { k: 'end' }; trace('end');
     renderEnd(true);
     if (ranked) submitResult();
   }, delay);
@@ -1219,19 +1516,19 @@ function onGameEnd(e, delay) {
 function renderEnd(animate = false) {
   if (!endCtx) return renderHome();
   view = { k: 'end' }; ++token;
-  const { e, res, ranked, duel, hist } = endCtx;
+  const { e, res, ranked, duel, hist, learn } = endCtx;
   const sc = hist ? scenById(e.scenarioId) : null;
   const w = hist ? { id: 'h', name: sc ? sc.name : 'מכונת הזמן', lesson: (sc && sc.lesson) || '', goal: { type: 'netWorth', target: (e.end && e.end.benchmark && e.end.benchmark.netWorth) || 0 } } : worldOf(e.worldId);
   const c = hist ? null : charOf(w, e.charId); const end = e.end || {};
   const won = e.status === 'won'; const bankrupt = end.reason === 'bankrupt';
   const sprint = e.mode === 'daily';
   const stars = hist ? Math.max(0, Math.min(3, e.stars | 0)) : won ? Math.max(0, Math.min(3, e.stars | 0)) : 0;
-  const title = hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
+  const title = learn ? (won ? T4.L1 : T4.L2) : hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
   const prog = Math.max(0, Math.min(1, e.progress ?? end.progress ?? 0));
   const near = end.nearMiss && end.nearMiss.text;
   const nextIdx = hist ? -1 : WORLDS.indexOf(w) + 1; const nextW = hist ? null : WORLDS[nextIdx] || null;
   const nextOpen = nextW && P.isUnlocked(nextW.id);
-  const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
+  const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : learn ? '🎓 תרגול' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
   const kicker = [w.name, c ? c.name : '', modeName].filter(Boolean).map(esc).join(' · ');
   const g = w.goal || {};
   const cell = (label, value, cls = '') => `<span><small>${label}</small><b class="${cls}">${iso(value)}</b></span>`;
@@ -1260,7 +1557,7 @@ function renderEnd(animate = false) {
       <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
       <p class="end-kicker">${kicker}</p>
       <h1 class="end-title">${title}</h1>
-      <div class="end-stars" aria-label="${stars} כוכבים">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}">★</span>`).join('')}</div>
+      ${learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
       ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
       ${duelHtml}
       ${near ? `<p class="end-near">${iso(near)}</p>` : ''}
@@ -1270,13 +1567,16 @@ function renderEnd(animate = false) {
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
       ${learnHtml(e, res)}
+      ${practiceEndHtml(e)}
+      ${dreamEndHtml(e)}
+      ${mentorEndHtml(e)}
       ${lifeHtml(e, won)}
       <div class="end-new">${newsHtml(e, res, won ? resisted : '')}</div>
       <div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>
       ${endButtons(e, res, nextW, nextOpen)}
     </article>
   </div>`);
-  if (animate) animateEnd(stars, won, res);
+  if (animate) animateEnd(learn ? 0 : stars, won, res);
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
 }
 /* -------- v3 end-screen blocks */
@@ -1290,7 +1590,7 @@ const PRINCIPLES = {
   risk_size: ['🎯', 'גודל הסיכון', 'לא לשים על הימור אחד יותר ממה שמותר להפסיד.'],
   rate_risk: ['📉', 'סיכון ריבית', 'ריבית משתנה יכולה לעלות — ותזרים שנראה טוב נעלם.'],
   diversification: ['🧺', 'פיזור', 'לא כל הביצים בסל אחד.'],
-  time: ['⏳', 'זמן ואנרגיה', 'הזמן הוא הנכס הכי יקר, ושחיקה עולה כסף.'],
+  time: ['⏳', 'זמן וכוח', 'הזמן הוא הנכס הכי יקר, ושחיקה עולה כסף.'],
   time_in_market: ['📈', 'זמן בשוק', 'מי שנשאר מושקע לאורך זמן מנצח את מי שמנסה לתזמן.'],
   fees_tax: ['🧾', 'מסים ועמלות', 'מה שקובע זה מה שנשאר אחרי מס.'],
   knowledge: ['📚', 'ידע פיננסי', 'להבין את המושג לפני שהכסף על השולחן.'],
@@ -1431,8 +1731,8 @@ function newsHtml(e, res, resisted = '') {
   if (res.newBest) out.push(`<div class="end-news"><span class="end-news-ic">🏁</span><span><small>שיא אישי חדש</small><b>${res.best} חודשים</b><em>היה ${res.prevBest}</em></span></div>`);
   if (res.titleAfter !== res.titleBefore) out.push(`<div class="end-news end-title-up"><span class="end-news-ic">🎖️</span><span><small>עלית דרגה!</small><b>${titleBadge(res.totalAfter)}</b><em>מ${esc(res.titleBefore)} ל${esc(res.titleAfter)}</em></span></div>`);
   if (res.newLessons && res.newLessons.length) out.push(`<button class="end-news end-lessons" data-act="library"><span class="end-news-ic">📚</span><span><small>הספרייה גדלה</small><b>+${res.newLessons.length} ${res.newLessons.length === 1 ? 'שיעור חדש' : 'שיעורים חדשים'}</b><em>${num(LIB.counts().have + '/' + (LIB.counts().total || '?'))} בספרייה · לחץ לקרוא</em></span></button>`);
-  if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס אנרגיה</small><b>+${res.energy}⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
-  if (res.quizEnergy) out.push(`<div class="end-news"><span class="end-news-ic">🧠</span><span><small>הבנה שווה אנרגיה</small><b>+${int(res.quizEnergy)}⚡</b><em>על תשובות נכונות לשאלות של אבא עשיר</em></span></div>`);
+  if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס זריקות</small><b>+${EN.label(res.energy)} ⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
+  if (res.quizEnergy) out.push(`<div class="end-news"><span class="end-news-ic">🧠</span><span><small>הבנה שווה זריקות</small><b>+${EN.label(int(res.quizEnergy))} ⚡</b><em>על תשובות נכונות לשאלות של אבא עשיר</em></span></div>`);
   if (resisted) out.push(`<div class="end-news"><span class="end-news-ic">💪</span><span><small>שליטה עצמית</small><b>${iso(resisted)}</b><em>כל פיתוי שוויתרת עליו קירב אותך לחופש</em></span></div>`);
   for (const id of res.newPawns) {
     const pw = P.PAWNS.find((x) => x.id === id);
@@ -1446,7 +1746,41 @@ function newsHtml(e, res, resisted = '') {
   }
   return out.join('');
 }
+/** §7.4: instead of the stars row in learning mode. */
+function learnStarsHtml(would) {
+  return `<div class="end-learnmode"><p class="end-would">${esc(would > 0 ? T4.L3(starStr(would).replace(/☆/g, '')) : T4.L4)}</p><p class="lb-note">${esc(T4.L5)}</p></div>`;
+}
+/** §10.1 S-P9: practice answered this game (engine end.learning.transfer, E-10; hidden until the engine sends it). */
+function practiceEndHtml(e) {
+  const T = (e.end && e.end.learning && e.end.learning.transfer) || null; if (!T || typeof T !== 'object') return '';
+  let n = 0, r = 0; for (const v of Object.values(T)) { n += int(v && v.n); r += int(v && v.right); }
+  return n ? `<p class="end-practice">💡 ${esc(T4.P9(r, n))}</p>` : '';
+}
+/** §6.3/§6.4: the dream line (S-D18) in free/learn games, or the invitation (S-D10) when no dream is set yet. */
+function dreamEndHtml(e) {
+  if ((e.mode || 'free') !== 'free' || endCtx.hist || endCtx.duel || !dreamsList()) return '';
+  const d = e.dream || (e.end && e.end.dream) || null;
+  if (d && d.id && dreamById(d.id)) {
+    const meta = dreamById(d.id); const ms = Array.isArray(d.missions) ? d.missions : [];
+    const done = ms.filter((m) => m && m.done);
+    return `<section class="end-dream"><p><b>${esc(T4.D18(meta.icon, meta.name, done.length))}</b></p>${done.length ? `<ul>${done.map((m) => `<li>✓ ${esc(m.title || '')}</li>`).join('')}</ul>` : ''}</section>`;
+  }
+  const p = P.getProgress();
+  if (endCtx.dreamSaved && dreamById(endCtx.dreamSaved)) return `<section class="end-dream saved" role="status"><p>${esc(T4.D11(dreamById(endCtx.dreamSaved).name))}</p></section>`;
+  if (p.dream) return '';
+  return `<section class="end-dream ask"><h3>${T4.D10}</h3><div class="t4-dgrid">${dreamsList().map((x) => `<button class="t4-dbtn" data-act="end-dream" data-id="${x.id}"><span class="t4-dic" aria-hidden="true">${x.icon}</span><span><b>${esc(x.name)}</b><small>${esc(x.line || '')}</small></span></button>`).join('')}</div></section>`;
+}
+/** §6.5 S-G1: after the first completed game, offer less help (only when T2's mentor levels exist). */
+function mentorEndHtml(e) {
+  const p = P.getProgress();
+  if (!mentorLevels() || endCtx.hist || (e.mode || 'free') !== 'free' || (p.gamesPlayed + p.learnGames) !== 1 || p.mentorPref) return '';
+  return `<div class="end-mentor"><span>${esc(T4.G1)}</span><button class="lb-toggle" data-act="mentor-hint" role="switch" aria-checked="false"><span>${T4.G4}</span><i></i></button></div>`;
+}
 function endButtons(e, res, nextW, nextOpen) {
+  if (endCtx.learn) {   // §7.4: no duel / share; normal game or more practice, same world and character
+    return `<div class="end-acts"><button class="primary lb-big" data-act="end-normal">${T4.L6}</button><button data-act="end-learn">${T4.L7}</button></div>
+      <div class="end-more"><button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
+  }
   const btns = [];
   const free = e.mode === 'free' || e.mode === 'history'; const won = e.status === 'won';
   const sameOk = free && !!endCtx.seed;
@@ -1501,7 +1835,8 @@ function shareText() {
   return `${pre}${body} 🐭💰\nאותן קוביות לכולם — נראה אותך 👇\n${link}`;
 }
 function animateEnd(stars, won, res) {
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduce = reducedMotion();   // T5 CR-L1: the in-app motion setting wins over the OS
+
   sfx(won ? 'win' : 'lose');
   const els = [...document.querySelectorAll('.end-star')];
   let t = reduce ? 0 : 450;
@@ -1591,12 +1926,22 @@ function install() {
   r.addEventListener('submit', onSubmit);
   r.addEventListener('change', onChange);
   r.addEventListener('error', (ev) => { if (ev.target && ev.target.tagName === 'IMG') imgFallback(ev.target); }, true);
+  r.addEventListener('pointerdown', () => { pointerAt = Date.now(); }, true);
+  safe(() => initMotion());   // <html data-motion> also when the lobby runs without game.js (T5 CR-S1 note)
+  // A11Y-1: keep the in-game DOM inert whenever #start covers it, whoever shows / hides it (lobby, game.js, main.js)
+  const o = overlay(); if (o && typeof MutationObserver === 'function') new MutationObserver(syncInert).observe(o, { attributes: true, attributeFilter: ['hidden'] });
   const wake = () => { if (view.k === 'group' && !document.hidden) refreshGroup(view.id); };
   document.addEventListener('visibilitychange', wake);
   addEventListener('focus', wake);
   addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !lobbyVisible()) return;
-    if (view.k === 'world' || view.k === 'group' || view.k === 'profile') { ev.preventDefault(); go({ k: 'home' }); }
+    if (!document.getElementById('gm')?.hidden && document.getElementById('gm')) return;   // a ui.modal on top owns Escape
+    // A11Y-2: topmost first — the lesson / legend sheet, then an open "עוד פרטים", then the view itself
+    if ($('#lbLesson')) { ev.preventDefault(); closeLesson(); return; }
+    const more = document.activeElement && document.activeElement.closest && document.activeElement.closest('.wv-char');
+    const openMore = more && more.querySelector('.wv-more[aria-expanded="true"]');
+    if (openMore) { ev.preventDefault(); openMore.click(); openMore.focus({ preventScroll: true }); return; }
+    if (view.k === 'world' || view.k === 'group' || view.k === 'profile' || view.k === 'library') { ev.preventDefault(); go({ k: 'home' }); }
   });
 }
 async function onClick(ev) {
@@ -1609,8 +1954,31 @@ async function onClick(ev) {
     case 'reload-home': cache.daily = null; return renderHome();
     case 'profile': sfx('click'); return go({ k: 'profile' });
     case 'world': sfx('click'); return go({ k: 'world', id });
-    case 'char': return startFree(b.dataset.w, b.dataset.c);
-    case 'continue-free': return continueFree(id);
+    case 'char': return startFree(b.dataset.w, b.dataset.c, { learn: modeNow() === 'learn' });
+    case 'continue-free': return continueFree(id, { learn: b.dataset.learn === '1' });
+    case 'char-more': {   // §5.1 disclosure inside the card (aria-expanded / aria-controls)
+      const el = document.getElementById(b.getAttribute('aria-controls')); if (!el) return;
+      const open = b.getAttribute('aria-expanded') !== 'true';
+      el.hidden = !open; b.setAttribute('aria-expanded', String(open)); b.textContent = open ? T4.Kless : T4.Kmore; return;
+    }
+    case 'dream-open': dreamOpen = true; return view.k === 'profile' ? renderProfile() : rerender();
+    case 'learn-now': { sfx('click'); const p = P.getProgress(); const wid = P.isUnlocked(p.lastSeenWorld) ? p.lastSeenWorld : 'w1'; worldMode = 'learn'; return go({ k: 'world', id: wid, learn: true }); }
+    case 'end-normal': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, {});
+    case 'end-learn': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, { learn: true, noAsk: true });
+    case 'end-dream': { P.setDream(id); endCtx.dreamSaved = id; sfx('click'); const box = $('.end-dream'); if (box) { box.outerHTML = dreamEndHtml(endCtx.e); focusSoon('.end-dream'); } return; }
+    case 'mentor-hint': { const on = b.getAttribute('aria-checked') !== 'true'; P.setMentorPref(on ? 'hint' : null); b.setAttribute('aria-checked', String(on)); b.classList.toggle('on', on); return; }
+    case 'lite': {
+      const on = b.getAttribute('aria-checked') !== 'true';
+      b.setAttribute('aria-checked', String(on)); b.classList.toggle('on', on);
+      const g = await game(); if (g && g.setLite) safe(() => g.setLite(on));   // T1: off → page reload into 3D
+      return;
+    }
+    case 'help-tour': writeReveal({ tourNext: true }); toast('🎬 הסיור יתחיל בפעם הבאה שתיכנס למשחק'); return;
+    case 'help-legend': return openSheet(esc(T4.T2), legendHtml());
+    case 'help-tutorial': P.requestTutorialReplay(); toast(T4.H6); return;
+    case 'help-welcome': sfx('click'); return go({ k: 'welcome' });
+    case 'welcome-pick': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); return go({ k: 'world', id: 'w1' });
+    case 'welcome-restore': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); go({ k: 'profile' }); return focusSoon('#pfRestore');
     case 'resume-active': sfx('click'); return closeLobby();
     case 'daily': return playRanked('daily');
     case 'weekly': return playRanked('weekly');
@@ -1636,11 +2004,16 @@ async function onClick(ev) {
     case 'end-again': sfx('click'); return endAgain(false);
     case 'end-same': sfx('click'); return endAgain(true);
     case 'life-image': return lifeImage();
-    case 'energy': return toast(EN.get() >= EN.MAX ? `⚡ מלא: ${EN.get()} הטלות. כל הטלה עולה ⚡ אחד.` : `⚡ ${EN.get()}/${EN.MAX} · עוד ⚡ בעוד ${EN.fmtWait(EN.msUntilNext())} · מלא בעוד ${EN.fmtWait(EN.msUntilFull())}`);
+    case 'energy': return toast(`⚡ ${EN.get()}/${EN.MAX} זריקות. כל הטלת קוביות עולה זריקה אחת.${EN.get() >= EN.MAX ? '' : ` עוד זריקה בעוד ${EN.fmtWait(EN.msUntilNext())}.`}`);
     case 'library': sfx('click'); return go({ k: 'library' });
     case 'lesson': sfx('click'); return openLesson(id);
-    case 'lesson-close': { const el = $('#lbLesson'); if (el) el.remove(); const c = $('.map-lib'); if (c) c.outerHTML = libraryCard(); return; }
-    case 'welcome-go': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); return go(P.getProgress().gamesPlayed ? { k: 'home' } : { k: 'world', id: 'w1' });
+    case 'lesson-close': closeLesson(); return;
+    case 'welcome-go': {   // F1: straight into the first game (teacher, w1, tutorial). A returning player goes home instead.
+      sfx('click'); safe(() => localStorage.setItem(ONBK, '1'));
+      if (completedAny()) return go({ k: 'home' });
+      worldMode = 'normal';
+      return startFree('w1', 'teacher', { quick: true, noAsk: true });
+    }
     case 'groups-view': return go({ k: 'groups' });
     case 'history': sfx('click'); return go({ k: 'history' });
     case 'history-go': return startHistory(id, false);
@@ -1648,7 +2021,7 @@ async function onClick(ev) {
     case 'send-energy': {
       if (b.disabled) return;
       b.disabled = true;
-      try { await net.sendEnergy(b.dataset.g, b.dataset.n); sfx('coin'); toast(`⚡ שלחת 3⚡ ל${b.dataset.n}`); b.textContent = '✓ נשלח'; b.classList.add('sent'); }
+      try { await net.sendEnergy(b.dataset.g, b.dataset.n); sfx('coin'); toast(`⚡ שלחת 3 זריקות ל${b.dataset.n}`); b.textContent = '✓ נשלח'; b.classList.add('sent'); }
       catch (e) { toast(e.message); b.disabled = false; if (/כבר שלחת/.test(e.message)) { b.textContent = '✓ נשלח היום'; b.disabled = true; } }
       return;
     }
@@ -1696,7 +2069,7 @@ async function onSubmit(ev) {
     if (kind === 'restore') {
       const code = f.code.value.trim(); if (!code) throw new Error('הדבק קוד שחזור');
       const prof = await net.restore(code);
-      P.mergeProfile(prof); await P.pushNow();
+      P.mergeProfile(prof); await P.pushNow(); revealAfterMerge();
       cache.daily = cache.weekly = cache.groups = null; cache.group = {};
       sfx('unlock'); toast(`השחקן שוחזר. ברוך שובך, ${prof.nickname}!`); return renderProfile();
     }
@@ -1706,6 +2079,17 @@ async function onSubmit(ev) {
 }
 function onChange(ev) {
   const s = ev.target;
+  if (s.name === 't4mode') { worldMode = s.value === 'learn' ? 'learn' : 'normal'; P.setLastMode(worldMode); document.querySelectorAll('.t4-opt').forEach((l) => l.classList.toggle('on', l.contains(s))); $('.lb-world')?.classList.toggle('is-learn', worldMode === 'learn'); return; }
+  if (s.name === 't4dream') {
+    P.setDream(s.value || null); sfx('click');
+    s.closest('fieldset')?.querySelectorAll('.t4-dopt').forEach((l) => l.classList.toggle('on', l.contains(s)));
+    // collapse to one line only after a pointer choice: arrow keys fire 'change' on every step (A11Y-4)
+    if (Date.now() - pointerAt < 800 && s.value) { dreamOpen = false; const f = s.closest('fieldset'); if (f) { f.outerHTML = dreamRowHtml(P.getProgress()); focusSoon('[data-act="dream-open"]'); } }
+    return;
+  }
+  if (s.name === 't4mentor') { P.setMentorPref(s.value); document.querySelectorAll('.t4-mopt').forEach((l) => l.classList.toggle('on', l.contains(s))); return; }
+  if (s.name === 'motion') { setMotionPref(s.value); return; }
+  if (s.name === 'quality' && QM) { const t = safe(() => QM.setQualityPref(s.value), null); const n = $('[data-q="now"]'); if (n && t) n.textContent = 'עכשיו: ' + (QM.TIER_LABEL[t] || ''); return; }
   if (s.name === 'world' && s.closest('[data-form="newchal"]')) {
     const cs = s.form.char; cs.innerHTML = charOptions(worldOf(s.value));
   }
@@ -1715,5 +2099,11 @@ function onChange(ev) {
 // game.js already plays its celebration before emitting, so the end screen follows almost immediately
 bus.on('game:end', (e) => onGameEnd(e, 250));
 bus.on('reward', onQuizReward);
-bus.on('achievement', (p) => { const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); }); });
+bus.on('achievement', (p) => {
+  const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null;
+  if (cfg && cfg.learn) return;                            // T4 §7.1: learning games record no achievements and grant no ⚡
+  const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); });
+});
+// T4 §4.6: the tutorial counts as done when the intro card closes (onboard.js), not when the game is launched
+bus.on('onboard:done', () => P.setTutorialDone());
 LIB.onUnlock((ids) => { if (!lobbyVisible()) LIB.lessons().then((L) => { const l = L.find((x) => x.id === ids[0]); if (l) ui().then((u) => u.toast && u.toast(`📚 שיעור חדש בספרייה: ${l.title}`)); }); });

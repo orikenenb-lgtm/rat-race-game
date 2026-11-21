@@ -798,3 +798,131 @@ body.lb-lobby-open { overflow: hidden; }
 .end-gate .na { color: var(--mut); font-weight: 700; }
 .end-gate.fund { background: light-dark(#e0f2f1, #15302e); }
 .end-gate small { flex-basis: 100%; font-size: 13px; color: var(--mut); }
+
+/* ============================================================ T4 — opening, modes, character cards, dream, library (lobby lane)
+   Contrast tokens of T4 A11Y-6 (the spec puts them in css/game.css :root, which is the in-game UI lane: until that lands they are
+   defined here, scoped to the lobby; identical values, so the later :root copy changes nothing). */
+.lb-shell, #lbLesson { --t4-pos: light-dark(#116a43, #3ccf8a); --t4-neg: light-dark(#a82d26, #ff7a6e); --t4-gold-ink: light-dark(#7a5000, #f2c14e); --t4-mut: light-dark(#5f5870, #aaa3b6); }
+/* welcome (F1): one primary, two quiet links — every control ≥ 44px */
+.wl-pick, .wl-restore { display: block; margin: 10px auto 0; min-height: var(--tap, 44px); padding: 0 16px; background: none !important; border: 0 !important; box-shadow: none !important; color: var(--t4-gold-ink); font-weight: 700; font-size: 16px; text-decoration: underline; text-underline-offset: 3px; }
+.wl-restore { font-size: 14px; color: var(--t4-mut); margin-top: 2px; }
+/* mode group (F5) */
+.t4-modes, .t4-dreams, .t4-mentor { border: 0; margin: 0; padding: 0; min-width: 0; }
+.t4-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.t4-opt { display: flex; gap: 10px; align-items: flex-start; min-height: var(--tap, 44px); padding: 12px 14px; border-radius: 18px; background: var(--paper); border: 2px solid var(--line); box-shadow: var(--shadow-s); cursor: pointer; }
+.t4-opt span { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
+.t4-opt b { font-size: 17px; }
+.t4-opt small { font-size: 14px; color: var(--t4-mut); }
+.t4-opt input, .t4-dopt input, .t4-mopt input { width: 22px; height: 22px; min-height: 0; margin: 2px 0 0; padding: 0; flex: none; accent-color: var(--gold-text); }
+.t4-opt:has(input:checked) { border-color: var(--gold-text); background: light-dark(#fff3d2, #33291a); }
+.t4-opt:has(input:focus-visible), .t4-dopt:has(input:focus-visible), .t4-mopt:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.t4-opt input:focus-visible, .t4-dopt input:focus-visible, .t4-mopt input:focus-visible { outline: none; }
+.lb-world.is-learn .wv-go::after { content: ' 🎓'; }
+.lb-continue.is-learn { background: linear-gradient(90deg, light-dark(#d9ecff, #1d3352), light-dark(#bcdcff, #24426b)); color: var(--ink); box-shadow: 0 4px 0 light-dark(#7aa7e0, #102544), var(--shadow); }
+/* dream row (§6.3) */
+.t4-dreams { background: var(--paper); border-radius: 18px; padding: 12px 14px; box-shadow: var(--shadow-s); }
+.t4-dreams legend { display: flex; flex-direction: column; float: inline-start; width: 100%; margin-bottom: 8px; }
+.t4-dreams legend b { font-size: 17px; }
+.t4-dreams legend small { font-size: 14px; color: var(--t4-mut); }
+.t4-dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; clear: both; }
+.t4-dopt, .t4-dbtn { display: flex; gap: 10px; align-items: flex-start; min-height: var(--tap, 44px); padding: 10px 12px; border-radius: 14px; background: var(--paper2) !important; border: 2px solid var(--line) !important; cursor: pointer; text-align: start; }
+.t4-dopt span:last-child, .t4-dbtn span:last-child { display: flex; flex-direction: column; line-height: 1.3; }
+.t4-dopt small, .t4-dbtn small { font-size: 13px; color: var(--t4-mut); }
+.t4-dopt:has(input:checked) { border-color: var(--gold-text) !important; background: light-dark(#fff3d2, #33291a) !important; }
+.t4-dic { font-size: 22px; line-height: 1.1; }
+.t4-dream-line { display: flex; }
+.t4-dream-sum { min-height: var(--tap, 44px); padding: 0 16px; border-radius: 999px; background: var(--paper) !important; border: 2px solid var(--line) !important; font-weight: 700; box-shadow: var(--shadow-s); }
+/* mentor row (§6.5) */
+.t4-mentor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.t4-mentor legend { float: inline-start; font-weight: 700; margin-inline-end: 4px; }
+.t4-mopt { display: inline-flex; align-items: center; gap: 8px; min-height: var(--tap, 44px); padding: 0 14px; border-radius: 999px; background: var(--paper2); border: 1.5px solid var(--line); font-weight: 700; cursor: pointer; }
+.t4-mopt:has(input:checked) { border-color: var(--gold-text); background: light-dark(#fff3d2, #33291a); }
+.t4-mopt.is-locked { cursor: not-allowed; color: var(--t4-mut); }
+.t4-mopt small { font-size: 12px; font-weight: 400; }
+/* character card (§5.1): an <article>; two sibling buttons */
+.wv-char { cursor: default; }
+.wv-char:hover { transform: none; }
+.wv-top { align-items: flex-start; }
+.wv-top .wv-diff { margin-inline-start: auto; }
+.wv-diff em { color: var(--t4-mut); font-size: 13px; }
+.wv-id { font-size: 14px; color: var(--t4-mut); font-weight: 400; }
+.wv-desc { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wv-sw { margin: 0; font-size: 14px; line-height: 1.35; }
+.wv-cf { margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; background: var(--paper2); border-radius: 14px; padding: 8px 12px; font-size: 14px; }
+.wv-cf b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.wv-cf.pos b { color: var(--t4-pos); } .wv-cf.neg b, .wv-cf.neg span { color: var(--t4-neg); }
+.wv-goalline { margin: 0; font-size: 14px; font-weight: 700; color: var(--t4-gold-ink); }
+.wv-details { display: flex; flex-direction: column; gap: 8px; }
+.wv-details[hidden] { display: none; }
+.wv-exph { margin: 0; font-size: 13px; font-weight: 700; color: var(--t4-mut); }
+.wv-exp { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 14px; }
+.wv-exp li { display: flex; justify-content: space-between; gap: 8px; }
+.wv-th { color: var(--t4-gold-ink); font-size: 13px; margin: 0; display: block; }
+.wv-acts { display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: auto; }
+.wv-more { min-height: var(--tap, 44px); padding: 0 14px; border-radius: 999px; background: var(--paper2) !important; border: 1.5px solid var(--line) !important; font-weight: 700; font-size: 14px; }
+.wv-go { min-height: var(--tap, 44px); padding: 0 18px; font-size: 17px; }
+/* library (§9.3): locked = teaser + how to unlock */
+.lib-card.is-locked { background: var(--paper2) !important; border: 2px dashed var(--line) !important; box-shadow: none; }
+.lib-card.is-locked b { font-size: 15px; }
+.lib-card.is-locked small { color: var(--t4-mut); font-size: 13px; }
+.lib-lock { font-size: 20px; line-height: 1; }
+.ls-line { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
+.ls-ex { background: var(--paper2); border-radius: 12px; padding: 8px 10px; }
+.ls-ctx, .ls-pr { color: var(--t4-gold-ink); font-weight: 700; }
+.ls-sim { color: var(--t4-mut); }
+.ls-more summary { min-height: var(--tap, 44px); display: inline-flex; align-items: center; cursor: pointer; font-weight: 700; color: var(--t4-gold-ink); }
+.t4-legend { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+.t4-legend td, .t4-legend th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.t4-legend td:first-child { font-size: 18px; width: 30px; }
+.t4-legend th { white-space: nowrap; }
+/* settings + profile */
+.pf-help { display: flex; flex-wrap: wrap; gap: 8px; }
+.pf-badges { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 14px; }
+.pf-dreams .t4-dreams { box-shadow: none; padding: 0; }
+/* streak (§11): neutral, never alarming */
+.lb-pl-fire.wait { background: var(--paper2); color: var(--ink); }
+.lb-streak.wait { background: var(--paper2); color: var(--ink); }
+/* end screen: learning mode (§7.4), dream, practice, mentor */
+.end-learnmode { text-align: center; margin: 6px 0; }
+.end-would { font-size: 18px; font-weight: 800; color: var(--t4-gold-ink); margin: 0; }
+.end-dream { background: var(--paper2); border-radius: 16px; padding: 10px 14px; margin: 10px 0; }
+.end-dream h3 { margin: 0 0 8px; font-size: 16px; }
+.end-dream ul { margin: 4px 0 0; padding-inline-start: 18px; font-size: 14px; }
+.end-practice { font-weight: 700; color: var(--t4-gold-ink); }
+.end-mentor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; margin: 10px 0; font-size: 14px; }
+@media (max-width: 420px) {
+  .t4-dgrid { grid-template-columns: 1fr 1fr; }
+  .t4-dopt small { display: none; }
+  .wv-char { padding: 14px !important; gap: 8px; }
+}
+.lb-sheet-card { max-height: calc(100dvh - 32px); overflow: auto; }
+/* T4 AC-C3: on phones the first character's "לשחק" fits the first viewport (dream row collapsed) */
+@media (max-width: 600px) {
+  .lb-world .wv-hero img { max-height: 112px; aspect-ratio: auto; height: 112px; }
+  .lb-world .wv-hero-txt { padding: 18px 14px 8px; }
+  .lb-world .wv-hero-txt h1 { font-size: 28px; }
+  .lb-world .wv-hero-txt p, .lb-world .wv-hero-txt .map-num { display: none; }
+  .lb-world .wv-goal { grid-template-columns: 1fr; gap: 6px; }
+  .lb-world .wv-goal > div:not(:first-child) { display: none; }
+  .lb-world .wv-goal > div { flex-direction: row; align-items: baseline; gap: 8px; padding: 6px 12px; }
+  .t4-modes { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .t4-opt { padding: 8px 10px; gap: 6px; }
+  .t4-opt b { font-size: 15px; }
+  .t4-opt small { font-size: 12px; line-height: 1.3; }
+  .t4-mentor { gap: 6px; }
+  .t4-mopt { padding: 0 10px; }
+  .t4-mopt small { display: none; }            /* the 🔒 stays visible; the full lock text is in the label's aria/title */
+  .lb-world .wv-h { font-size: 18px; margin-top: 0 !important; }
+  .wv-char .wv-desc { -webkit-line-clamp: 1; }
+  .lb-world .lb-shell, .lb-world { gap: 10px; }
+}
+.lb-shell .sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 600px) {
+  .t4-mentor { flex-wrap: nowrap; gap: 4px; }
+  .t4-mentor legend { font-size: 13px; margin-inline-end: 0; white-space: nowrap; }
+  .t4-mopt { padding: 0 8px; gap: 4px; font-size: 14px; white-space: nowrap; }
+  .t4-mopt input { width: 18px; height: 18px; }
+  .t4-modes .t4-opt small { font-size: 12px; }
+  .t4-opt input { width: 18px; height: 18px; }
+  .lb-world .wv-hero-txt .lb-stars i { font-size: 16px; }
+}
