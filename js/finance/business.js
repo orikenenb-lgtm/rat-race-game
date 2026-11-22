@@ -759,7 +759,21 @@ export function decisionOptions(b) {
   };
 }
 
-/** Compact card data for the UI ("דוח עסקי"). `report` = the last simulate() report (optional). */
+/**
+ * The part of a simulate() report that summary() reads, as a small JSON-safe record (rules-4 engine: kept on the asset as
+ * `a.bizRep` after every simulated month, so the manage / inbox cards show last month's L1 / L2 without the session news).
+ * Realized numbers only — the month is over, nothing sealed in it.
+ */
+export function reportCard(r) {
+  if (!r) return null;
+  return { m: r.month ?? null, revenue: r.revenue, revenueGross: r.revenueGross, netProfit: r.netProfit, corpTax: r.corpTax,
+    cash: { change: r.cash.change }, toOwner: { net: r.toOwner.net, drawNet: r.toOwner.drawNet },
+    cogs: { total: r.cogs.total }, opex: { total: r.opex.total },
+    why: r.why ? { sentence: r.why.sentence, cash: r.why.cash.map((x) => ({ ...x })), profit: r.why.profit.map((x) => ({ ...x })) } : null,
+    lines: r.lines.map((x) => ({ ...x })), notes: r.notes.map((x) => ({ ...x })), allNotes: (r.allNotes || r.notes).slice(0, 8).map((x) => ({ ...x })), headline: r.headline };
+}
+
+/** Compact card data for the UI ("דוח עסקי"). `report` = the last simulate() report, or its reportCard() (optional). */
 export function summary(b, report = null) {
   return {
     name: b.name, type: b.type, icon: b.p.icon, model: b.p.model, month: b.month, closed: b.closed,

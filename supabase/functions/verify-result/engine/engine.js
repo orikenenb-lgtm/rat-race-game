@@ -682,7 +682,7 @@ function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, ac
     life, payslip: ps, taxes: { ...st.taxes, total: Object.values(st.taxes).reduce((a, b) => a + b, 0) }, index, sideIncome, netWorthTotal: netWorth + Math.round(L.pension), pension: Math.round(L.pension),
     savings: st.savings, emergency: emergencyOf(st, expenses), realWorldRates: realWorldRates(st),
     goalHold: { streak: L.goalStreak || 0, need: GOAL_HOLD, met: goalMet(st) },
-    activeBizIncome: activeBiz, businesses: managedOf(st).map((a) => ({ assetId: 'a' + a.id, ...BIZ.summary(a.biz) })),
+    activeBizIncome: activeBiz, businesses: managedOf(st).map((a) => ({ assetId: 'a' + a.id, ...BIZ.summary(a.biz, a.bizRep || null) })),
     totalAssets: totalAssetsOf(st), totalLiabilities: st.loans + st.credit + st.assets.reduce((x, a) => x + a.debt, 0),
     cash: st.cash, salary, passive, expenses, cashflow, netWorth, loans: st.loans, credit: st.credit,
     goalProgress, goalText, goalParts, goalType: g.type,
@@ -1111,7 +1111,7 @@ function monthlyBusiness(st, out) {
     const res = opts ? BIZ.simulate(a.biz, null, () => next(st.bizRng, key), opts) : BIZ.simulate(a.biz, null, () => next(st.bizRng, key));
     const r = res.report; a.biz = res.business;
     if (opts && STORIES_OFF && a.biz.decide) { const d0 = BIZ.resolveEvent(a.biz, a.biz.decide.key, BIZ.defaultChoice(a.biz.decide.id, a.biz)); if (d0.ok) a.biz = d0.business; }
-    if (opts) reps.push({ a, r });
+    if (opts) { reps.push({ a, r }); a.bizRep = BIZ.reportCard(r); } // last month's report (manage / inbox cards: L1 + L2 without the session news)
     a.bizNet = r.toOwner.net; a.bizDraw = r.toOwner.drawNet; a.bizHeadline = r.headline;
     const v = BIZ.valuation(a.biz); a.value = v.price + v.cash + v.receivables;
     total += r.toOwner.net;
@@ -1848,7 +1848,7 @@ const DESCRIBE = {
     if (!a || !a.biz) { ev.title = 'העסק נמכר'; ev.text = 'העסק כבר לא שלך.'; ev.mentor = 'הכסף מהמכירה כבר אצלך.'; ev.options = [opt('ok', 'המשך', true)]; ev.auto = true; ev.toastText = 'העסק כבר נמכר.'; ev.data = { mode: 'manage', assetId: 'a' + p.assetId, sold: true }; return; } // T3: sold through a buyer's offer while this card was open
     const b = a.biz;
     const bKey = JSON.stringify(b);
-    const o = bizMemo(bKey + '|opts', () => BIZ.decisionOptions(b)); const sm = bizMemo(bKey + '|sum', () => BIZ.summary(b));
+    const o = bizMemo(bKey + '|opts', () => BIZ.decisionOptions(b)); const sm = bizMemo(bKey + '|sum', () => BIZ.summary(b, a.bizRep || null));
     ev.title = `העסק שלך: ${a.n}`; ev.text = a.bizHeadline || 'זמן להחליט: מחיר, עובדים, שיווק, משיכה — או למכור.'; ev.mentor = st.mentor === 'guide' ? o.suggest.why[0] : (mentorLine(st, 'bizAsk', {}) || o.suggest.why[0]);
     if (!ev.tag) ev.tag = 'העסק שלך';
     const base3 = bizMemo(bKey + '|base', () => BIZ.forecast(b, null, 3).netProfit);
@@ -1873,7 +1873,7 @@ const DESCRIBE = {
       ev.data.inbox = items;
       const qs = []; for (const it of items) for (const c of it.options) qs.push(opt(`q:${it.itemId}:${c.id}`, `${it.title}: ${c.label}`, c.enabled, { kind: 'story', story: true, reason: c.reason, effects: c.effects, preview: c.preview, odds: c.odds, default: c.default }));
       ev.options = [...qs, ...ev.options];
-      const s1 = BIZ.summary(b); Object.assign(ev.data, { l1: s1.l1, stage: s1.stage, stageName: s1.stageName, signature: s1.signature, calendar: calendarOf(st) });
+      const s1 = sm; Object.assign(ev.data, { l1: clone(s1.l1), l2: clone(s1.l2), stage: s1.stage, stageName: s1.stageName, signature: s1.signature, calendar: calendarOf(st) });
     }
   },
 
@@ -4013,10 +4013,10 @@ function bizCard(st, item) {
       impact: { now: 0, monthly: Math.round(c.preview.delta3 / 3), months: 3, horizon: 6, total: money6, risk: c.risk ? { p: c.risk.p, amount: c.risk.amount, label: c.risk.label } : null, wellbeing: { energy: 0, happiness: 0 } } };
   });
   void E;
-  const s = BIZ.summary(a.biz);
+  const s = BIZ.summary(a.biz, a.bizRep || null);
   const ev = { id: 'q' + item.id, itemId: item.id, type: 'story', kind: 'biz', assetId: item.assetId, tag: `העסק שלך · ${a.n}`, color: CHAIN_COLORS.biz, ink: '#ffffff', title: ch.title, text: ch.text,
     remember: null, hint: null, mentor: mentorLine(st, 'bizAsk', {}) || '', personal: false, progress: null, options,
-    data: { cushion: cushionLine(st), due: item.due, dueText: 'עד המשכורת הבאה', defaultId: (options.find((o) => o.default) || {}).id || null, biz: { l1: s.l1, stage: s.stage, signature: s.signature, lessons: ch.lessons, data: ch.data } } };
+    data: { cushion: cushionLine(st), due: item.due, dueText: 'עד המשכורת הבאה', defaultId: (options.find((o) => o.default) || {}).id || null, biz: { l1: s.l1, l2: s.l2 || null, stage: s.stage, signature: s.signature, lessons: ch.lessons, data: ch.data } } };
   storyPrimary(st, ev);
   return ev;
 }
