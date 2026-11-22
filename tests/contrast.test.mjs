@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const VERBOSE = process.argv.includes('-v');
-const GAME = read('css/game.css'), LOBBY = read('css/lobby.css');
+// T7 CR-33: the in-game half of game.css moved to css/game-play.css (same cascade spot) — both are "game.css" for these checks
+const GAME = read('css/game.css') + '\n' + read('css/game-play.css'), LOBBY = read('css/lobby.css');
 const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
 let n = 0, fails = 0;
 const ok = (c, msg) => { n++; if (!c) { fails++; console.log('FAIL', msg); } else if (VERBOSE) console.log('ok  ', msg); };

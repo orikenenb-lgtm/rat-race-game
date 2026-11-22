@@ -2,13 +2,18 @@
 // If the lobby module is missing or fails, a minimal built-in picker (world + character + free play) keeps the game playable.
 import { bus } from './bus.js';
 import { unlock, sfx } from './audio.js';
-import { esc, achievementToast, goalWords, toast, endAnalysisHtml, nearMissText } from './ui.js';
 import { flag } from './flags.js';
-import * as T6S from './summary.js';   // T6: graph + five dimensions in the built-in end screen too (flag recap2)
 import * as EN from './engine.js';
 import * as saves from './saves.js';
-import { hideLoading } from './render/overlay.js';
 const { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } = EN;
+
+// T7 CR-33: the lobby home must not wait for in-game modules. ui.js (+ summary.js) and game.js (+ its whole graph: ghosts,
+// rewind, onboard, scene…) are loaded on demand — cached promises, never re-fetched; a failed load degrades, never throws here.
+let UI = null, uiP = null;
+const loadUI = () => (uiP ||= import('./ui.js').then((m) => (UI = m)).catch((e) => { console.warn('ui.js failed to load', e); uiP = null; return null; }));
+const toast = (text) => { loadUI().then((u) => u && u.toast(text)); };
+let T6S = null, t6P = null;   // T6: graph + five dimensions in the built-in end screen too (flag recap2)
+const loadT6 = () => (t6P ||= import('./summary.js').then((m) => (T6S = m)).catch((e) => { console.warn('summary.js failed to load', e); t6P = null; return null; }));
 
 // T1: boot sweep — quarantine unparsable saved data BEFORE game.js / lobby.js (or anything they import) read it.
 // Nothing is dropped: corrupt slots go to rr2-bak:, other keys to rr2-quarantine:. The toasts come after the lobby opens.
@@ -22,13 +27,35 @@ addEventListener('keydown', unlock);
 // theme: <html data-theme> wins, else prefers-color-scheme (handled by CSS light-dark())
 try { const t = JSON.parse(localStorage.getItem('rr2-settings') || '{}').theme; if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) { /* ignore */ }
 
+// CR-33: render/overlay.js arrives with game.js. When the lobby opens it has not been loaded, so its stage state is still empty and
+// hiding the overlay's DOM is all its hideLoading() would do (same steps as there). Once it is loaded (the built-in picker path
+// awaits game.js first), its own hideLoading() runs.
+let OVm = null;
+function hideLoading() {
+  if (OVm) return OVm.hideLoading();
+  const $ = (q) => document.querySelector(q);
+  const l = $('#loading'); if (l) l.hidden = true;
+  const bs = $('#bootSlow'); if (bs) bs.remove();
+  const list = $('#loadSteps'); if (list) { list.hidden = true; list.innerHTML = ''; }
+  const bar = $('#loadBar'); if (bar) bar.style.width = '0';
+  const lbar = bar && bar.parentElement; if (lbar) { lbar.classList.remove('indet'); lbar.setAttribute('aria-valuenow', '0'); lbar.removeAttribute('aria-valuetext'); }
+}
+const loadOV = () => import('./render/overlay.js').then((m) => (OVm = m)).catch(() => null);
+
 let openLobby = null, lobbyResume = null;
 // three.js + the 3D world load in the background while the lobby is already on screen; startGame() waits for them.
-const gameMod = import('./game.js');
-let G = null;
+// T7 CR-33: requested once the lobby is open (the lobby asks for game.js itself as it boots), not before it — on a slow network
+// the in-game graph no longer competes with the lobby's own modules.
+let G = null, gameP = null;
 // T1: no error text on screen at boot — startGame() reports problems itself (loading stages / error panel)
-const gameP = gameMod.then((g) => { G = g; g.initGame().catch((e) => console.warn('init failed (startGame will report it)', e)); return g; });
-gameP.catch((e) => console.warn('game.js failed to load', e));
+function loadGame() {
+  if (!gameP) {
+    if (window.__rrPlayCss) window.__rrPlayCss();   // CR-33: the in-game styles (css/game-play.css) come with the game
+    gameP = import('./game.js').then((g) => { G = g; g.initGame().catch((e) => console.warn('init failed (startGame will report it)', e)); return g; });
+    gameP.catch((e) => console.warn('game.js failed to load', e));
+  }
+  return gameP;
+}
 
 async function boot() {
   await Promise.race([Promise.all([document.fonts.load('800 20px Rubik'), document.fonts.load('20px "Secular One"')]), new Promise((r) => setTimeout(r, 1500))]).catch(() => {});
@@ -39,13 +66,14 @@ async function boot() {
     if (typeof mod.resumeGame === 'function') lobbyResume = mod.resumeGame;
   } catch (e) {
     console.warn('lobby.js not available — using the built-in picker.', e);
-    await gameP.catch(() => null);
+    await Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), window.__rrPlayCss && window.__rrPlayCss()]);
     useFallback();
   }
   bus.on('lobby:open', (p) => safeOpen(p || {}));
   safeOpen({});
   hideLoading();
   window.__rrBooted = 1;
+  setTimeout(loadGame, 0);   // CR-33: after the lobby's first render (the lobby itself asks for game.js the same way)
   afterBoot();
 }
 /** sweep messages, auto-restored future saves, and the one-shot resume after a 2D → 3D reload */
@@ -63,12 +91,13 @@ function afterBoot() {
     // T1 review m-5: through the lobby's own launch (closes the lobby: body.lb-lobby-open, group polling, ⚡ ticker, session
     // bookkeeping); the built-in picker (no lobby.js) starts the game directly
     if (lobbyResume) Promise.resolve(lobbyResume({ ...cfg, resume: true })).catch((e) => console.warn(e));
-    else gameP.then((g) => g && g.startGame({ ...cfg, resume: true })).catch((e) => console.warn(e));
+    else loadGame().then((g) => g && g.startGame({ ...cfg, resume: true })).catch((e) => console.warn(e));
   }
 }
 function safeOpen(p) {
-  try { const r = openLobby(p); if (r && r.catch) r.catch((e) => { console.error(e); useFallback(); fallbackLobby(p); }); }
-  catch (e) { console.error(e); useFallback(); fallbackLobby(p); }
+  const fail = (e) => { console.error(e); Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), window.__rrPlayCss && window.__rrPlayCss()]).then(() => { useFallback(); fallbackLobby(p); }); };
+  try { const r = openLobby(p); if (r && r.catch) r.catch(fail); }
+  catch (e) { fail(e); }
 }
 
 /* ============================================================ built-in picker (no lobby.js) */
@@ -76,9 +105,13 @@ let fbOn = false;
 function useFallback() {
   if (fbOn) return; fbOn = true;
   openLobby = fallbackLobby; lobbyResume = null;
-  bus.on('game:end', fallbackEnd);
-  bus.on('achievement', ({ ids = [] } = {}) => ids.forEach((id) => { const a = achievementById(id); if (a) achievementToast({ name: a.name, desc: a.desc }); }));
+  bus.on('game:end', (p) => fallbackEnd(p));
+  bus.on('achievement', ({ ids = [] } = {}) => ids.forEach((id) => { const a = achievementById(id); if (a) loadUI().then((u) => u && u.achievementToast({ name: a.name, desc: a.desc })); }));
 }
+// the built-in picker / end screen only run after loadUI() resolved (useFallback callers await it); plain fallbacks keep them safe
+const esc = (t) => (UI ? UI.esc(t) : String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+const goalWords = (t) => (UI ? UI.goalWords(t) : String(t ?? ''));
+const nearMissText = (e) => (UI ? UI.nearMissText(e) : '');
 const root = () => document.getElementById('lobby-root');
 const show = () => { document.getElementById('start').hidden = false; };
 let pick = { worldId: 'w1', charId: null, tutorial: false };
@@ -127,7 +160,8 @@ function fallbackLobby() {
 }
 function save() { try { localStorage.setItem('rr2-fallback', JSON.stringify(pick)); } catch (e) { /* ignore */ } }
 
-function fallbackEnd(p) {
+function fallbackEnd(p, waited = false) {
+  if ((!UI || !T6S) && !waited) { Promise.all([loadUI(), loadT6()]).then(() => fallbackEnd(p, true)); return; }
   const w = getWorld(p.worldId); const e = p.end || {};
   show();
   const stars = [1, 2, 3].map((i) => `<span class="${i <= p.stars ? 'on' : ''}">★</span>`).join('');
@@ -138,15 +172,15 @@ function fallbackEnd(p) {
     <p class="lead">${esc(nearMissText(e))}</p>
     ${e.starsBlockedByFund ? `<p class="warn">🛟 ★★★ נעצר בגלל קרן החירום: צריך לפחות ${starThresholds(p.worldId, p.charId).fundMonths || 3} חודשי הוצאות בצד. חופש בלי כרית נשבר במשבר הראשון.</p>` : ''}
     ${e.starsBlockedByHappiness ? `<p class="warn">😐 ★★★ נעצר בגלל האושר: צריך לפחות ${starThresholds(p.worldId, p.charId).happy || 60}. כסף זה לא הכל.</p>` : ''}
-    ${flag('recap2') && p.t6 ? T6S.renderTop(p, { rivals: 'off', graphId: 'fb' }) : ''}
+    ${flag('recap2') && p.t6 && T6S ? T6S.renderTop(p, { rivals: 'off', graphId: 'fb' }) : ''}
     ${learnHtml(e.learning)}
-    ${endAnalysisHtml ? endAnalysisHtml(e) : ''}
+    ${UI && UI.endAnalysisHtml ? UI.endAnalysisHtml(e) : ''}
     <div class="grid"><div class="row"><span>חודשים</span><b class="num">${p.months}</b></div><div class="row"><span>שווי נקי</span><span class="num">${fmtM(p.netWorth)}</span></div>
     <div class="row"><span>הכנסה פסיבית</span><span class="num">${fmtM(p.passive)}</span></div><div class="row"><span>הוצאות</span><span class="num">${fmtM(p.expenses)}</span></div></div>
     ${(e.leaks || []).filter((l) => l.amount > 0).length ? `<h3 class="fbh">לאן הכסף דלף</h3><div class="grid">${e.leaks.filter((l) => l.amount > 0).slice(0, 4).map((l) => `<div class="row"><span>${esc(l.label)}</span><span class="num neg">${fmtM(l.amount)}</span></div>`).join('')}</div>` : ''}
     <p class="note"><b>הלקח של ${esc(w.name)}:</b> ${esc(w.lesson)}</p><p class="note">${esc(e.tip || '')}</p>
     <div class="acts"><button class="primary" id="fbAgain">עוד פעם</button><button id="fbBack">בחירת עולם</button></div></div>`;
-  if (p.t6 && p.t6.tl) T6S.wireSummary(root(), (id) => (id === 'fb' ? { tl: p.t6.tl, opts: { alt: T6S.altOf(p.t6.tl, e), recessions: T6S.recessionsOf(e) } } : null));
+  if (p.t6 && p.t6.tl && T6S) T6S.wireSummary(root(), (id) => (id === 'fb' ? { tl: p.t6.tl, opts: { alt: T6S.altOf(p.t6.tl, e), recessions: T6S.recessionsOf(e) } } : null));
   root().querySelector('#fbAgain').onclick = () => G.startGame({ worldId: p.worldId, charId: p.charId, mode: 'free', seed: (Math.random() * 2 ** 31) >>> 0, pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false });
   root().querySelector('#fbBack').onclick = () => fallbackLobby();
   setTimeout(() => root().querySelector('#fbAgain').focus(), 50);

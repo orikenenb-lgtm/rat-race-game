@@ -502,6 +502,8 @@ async function noBackupModal(allowGo = true) {
   return v === 'go';
 }
 async function startInner(cfg, my) {
+  // T7 CR-33: css/game-play.css is enabled once the lobby is open; a game never starts before it has loaded (normally long done)
+  if (window.__rrPlayCss && !window.__rrPlayCssDone) { await window.__rrPlayCss(); if (my !== gen) return false; }
   initShell();
   if (endObs) { endObs.disconnect(); endObs = null; }
   prevLevels.clear();

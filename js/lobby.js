@@ -15,12 +15,8 @@ import * as EN from './energy.js';
 import * as LIB from './library.js';
 import { reducedMotion, motionPref, setMotionPref, initMotion } from './motion.js';
 import { catName } from './data/lessons-meta.js';
-import { charMeta } from './data/characters-meta.js';
 import { PRACTICE } from './practice.js';
 import { flag } from './flags.js';
-import * as T6S from './summary.js';      // T6 §6: the personal end summary (graph, dimensions, more sections)
-import * as GH from './ghosts.js';        // T6 §2: finished ghost results (only after the game) — never sent to the server
-import * as RW from './rewind.js';        // T6 §7: practice branches (free / learn only)
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -112,8 +108,28 @@ function game() {
   if (!gameP) gameP = import('./game.js').then((m) => { G = m; return m; }).catch((e) => { console.error('lobby: game.js failed', e); gameP = null; return null; });
   return gameP;
 }
+// T7 CR-33: the T6 modules are not needed by the lobby home — loaded together with game.js (which imports them too, so the
+// module map shares one copy), never before the home is usable. Every user checks for null: a world view drawn before they
+// arrive simply has no branch chips (redrawn when they land, like the resume card that waits for game.js); the end screen
+// (only reachable after a game, i.e. after game.js) waits for them.
+//   T6S = summary.js — T6 §6 the personal end summary (graph, dimensions, more sections)
+//   GH  = ghosts.js  — T6 §2 finished ghost results (only after the game) — never sent to the server
+//   RW  = rewind.js  — T6 §7 practice branches (free / learn only)
+let T6S = null, GH = null, RW = null, t6P = null, t6Failed = false;
+// T4 §5.2 strength / weakness rows of the character cards (world view only): same post-render batch; missing → rows omitted
+let CM = null;
+const charMeta = (wid, cid) => (CM ? CM.charMeta(wid, cid) : null);
+const cmP = () => import('./data/characters-meta.js').then((m) => { CM = m; }).catch(() => {});   // failed → the end screen falls back to the classic one
+function t6Mods() {
+  if (T6S && GH && RW) return Promise.resolve(true);
+  return (t6P ||= Promise.all([import('./summary.js'), import('./ghosts.js'), import('./rewind.js')])
+    .then(([s, g, r]) => { T6S = s; GH = g; RW = r; return true; })
+    .catch((e) => { console.error('lobby: T6 modules failed', e); t6P = null; t6Failed = true; return false; }));
+}
 let UIp = null;
-const ui = () => (UIp ||= import('./ui.js').catch(() => ({})));
+// CR-33: ui.js draws its modals / toasts with css/game-play.css — enabled (and waited for) together with the module
+const playCss = () => (window.__rrPlayCss ? window.__rrPlayCss() : Promise.resolve());
+const ui = () => (UIp ||= Promise.all([import('./ui.js'), playCss()]).then(([m]) => m).catch(() => ({})));
 let AUp = null;
 const audio = () => (AUp ||= import('./audio.js').catch(() => ({})));
 function sfx(name) { audio().then((a) => { try { a.sfx && a.sfx(name); } catch (e) { /* ignore */ } }); }
@@ -249,7 +265,8 @@ const rerender = () => { if (lobbyVisible() && view.k !== 'end') go(view); };
 
 function boot() {
   migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
-  game().then((m) => { if (m && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); });
+  // CR-33: the in-game graph starts loading right AFTER this first render (a task later), so it never delays the home itself
+  setTimeout(() => Promise.all([game(), t6Mods(), cmP(), playCss()]).then(([m]) => { if ((m || CM) && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); }), 0);
   P.syncFromServer().then((ch) => { if (ch) revealAfterMerge(); if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
   flushPending();
   scenarios(); LIB.lessons().then(() => { const el = $('.map-lib'); if (el) el.outerHTML = libraryCard(); });
@@ -1075,6 +1092,7 @@ function modeNow(p = P.getProgress()) {
 /** T6 §7.4 items 3–4: the practice branch of this world (continue / delete) and "back to a moment of the last game" (flag rewind) */
 function t6WorldHtml(w) {
   if (!flag('rewind')) return '';
+  if (!RW) return '';   // CR-33: not loaded yet — boot() redraws the world view once it is
   const out = [];
   const bs = safe(() => RW.branchSave(w.id), null);
   if (bs) out.push(`<div class="t6-wbr"><button class="lb-continue is-learn" data-act="t6-branch" data-id="${w.id}"><span><b>${esc(RW.STR.lobbyCont.replace('{m}', bs.month))}</b></span></button><button class="chip" data-act="t6-branch-del" data-id="${w.id}">${esc(RW.STR.lobbyDel)}</button></div>`);
@@ -1560,6 +1578,7 @@ function clearDuelParam() { safe(() => { const q = new URLSearchParams(location.
 
 function onGameEnd(e, delay) {
   if (!e || !e.worldId) return;
+  if (!RW && !t6Failed) { t6Mods().then(() => onGameEnd(e, delay)); return; }   // CR-33: normally already in (game.js imports them)
   const cfg = (G && G.activeConfig && safe(() => G.activeConfig())) || null;
   const same = !!(cfg && cfg.worldId === e.worldId && (cfg.mode || 'free') === (e.mode || 'free') && (e.worldId === 'h' || cfg.charId === e.charId));
   const hist = e.mode === 'history' || e.worldId === 'h';
@@ -1598,10 +1617,10 @@ function onGameEnd(e, delay) {
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
   } else if (!(e.t6 && e.t6.afterwinAllowed)) {   // T6 §9.3: a win that may continue keeps its (finished) save until the player decides
     // T6: a practice branch clears its OWN slot (rr2-save-branch-<w>), never the original's learn / free slot
-    const key = e.branch && e.saveKey && RW.isBranchKey(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
+    const key = e.branch && e.saveKey && RW && RW.isBranchKey(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
     game().then((g) => g && g.clearSave && safe(() => g.clearSave(key)));
     // T6 review nit: the rr2-branches entry goes with its slot; the end screen keeps it (endCtx.t6meta) for "↩ חזרה למשחק המקורי"
-    if (e.branch && RW.isBranchKey(key)) endCtx.t6meta = safe(() => RW.forgetBranch(e.worldId), null);
+    if (e.branch && RW && RW.isBranchKey(key)) endCtx.t6meta = safe(() => RW.forgetBranch(e.worldId), null);
   }
   setTimeout(() => {
     ensureCss(); install();
@@ -1615,6 +1634,7 @@ function onGameEnd(e, delay) {
 }
 function renderEnd(animate = false) {
   if (!endCtx) return renderHome();
+  if (flag('recap2') && endCtx.e && endCtx.e.t6 && !T6S && !t6Failed) { const c = endCtx; t6Mods().then(() => { if (endCtx === c && view.k === 'end') renderEnd(animate); }); return; }   // CR-33
   view = { k: 'end' }; ++token;
   const { e, res, ranked, duel, hist, learn } = endCtx;
   const sc = hist ? scenById(e.scenarioId) : null;
@@ -1653,7 +1673,7 @@ function renderEnd(animate = false) {
       ${duel.r ? `<p class="dl-verdict ${v > 0 ? 'win' : v < 0 ? 'lose' : ''}">${v > 0 ? 'ניצחת בדו־קרב! 🏆' : v < 0 ? 'הפעם הוא ניצח. החזר לו אתגר!' : 'תיקו מושלם 🤝'}</p>` : ''}</div>`;
   }
   const analysis = safe(() => (UIm && UIm.endAnalysisHtml ? UIm.endAnalysisHtml(end) : ''), '') || '';   // T2 §15.9 (was a MutationObserver in game.js)
-  if (flag('recap2') && e.t6) return renderEndT6({ e, res, w, c, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate, prog, sprint, g });
+  if (flag('recap2') && e.t6 && T6S && GH && RW) return renderEndT6({ e, res, w, c, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate, prog, sprint, g });
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
       <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
@@ -1683,7 +1703,7 @@ function renderEnd(animate = false) {
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
 }
 /* -------- T6 §6: the personal end summary (flag recap2). The old layout above stays the fallback. */
-let UIm = null; ui().then((m) => { UIm = m; }).catch(() => {});
+let UIm = null; setTimeout(() => ui().then((m) => { UIm = m; }).catch(() => {}), 0);   // CR-33: after the first lobby render, not during it
 const T6END = { awLines: (A) => [`${A.months} חודשים אחרי היציאה`, `שווי נקי ${fmtSgn(A.nwDelta)} מאז היציאה`, `הכנסה פסיבית ${fmtSgn(A.passiveDelta)} מאז היציאה`,
   A.hap0 != null && A.hap1 != null ? `אושר ${A.hap0} → ${A.hap1}` : A.happinessDelta != null ? `אושר ${A.happinessDelta > 0 ? '+' : ''}${Math.round(A.happinessDelta)} מאז היציאה` : '',
   A.reason === 'afterWinBroke' && A.brokeM ? `החופש לא החזיק: בחודש ${A.brokeM} נגמר הכסף.` : A.stillFree ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'].filter(Boolean) };
@@ -1754,7 +1774,7 @@ function t6Graph() {
 }
 /** ghosts finished (bus 'ghosts:done'): fill the comparison lines and the "מול היריבים" section in place */
 function onGhostsDone({ ends } = {}) {
-  if (!endCtx || !endCtx.e || !endCtx.e.t6 || endCtx.rivals === 'off') return;
+  if (!T6S || !endCtx || !endCtx.e || !endCtx.e.t6 || endCtx.rivals === 'off') return;
   endCtx.ghosts = ends || null;
   if (view.k !== 'end' || !flag('recap2')) return;
   const ctx = t6Ctx(); const end = endCtx.e.end || {};
@@ -2201,8 +2221,8 @@ async function onClick(ev) {
     case 't6-rewind': sfx('click'); return bus.emit('t6:rewind', { k0: +b.dataset.k0, origin: 'last' });       // T6 §7.4 (rewind.js refuses ranked)
     case 't6-moments': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
     case 't6-afterwin': sfx('click'); return bus.emit('game:afterwin', {});                                       // T6 §9.3
-    case 't6-branch': sfx('click'); { const bs = RW.branchSave(id); if (bs) return launch({ ...bs.cfg, resume: true }); return; }
-    case 't6-branch-del': { const ok = await ui().then((u) => (u.confirmBox ? u.confirmBox(RW.STR.deleteQ, { yes: RW.STR.del, no: RW.STR.cancel }) : true)); if (ok) { RW.deleteBranch(id); rerender(); } return; }
+    case 't6-branch': sfx('click'); { if (!(await t6Mods())) return; const bs = RW.branchSave(id); if (bs) return launch({ ...bs.cfg, resume: true }); return; }
+    case 't6-branch-del': { if (!(await t6Mods())) return; const ok = await ui().then((u) => (u.confirmBox ? u.confirmBox(RW.STR.deleteQ, { yes: RW.STR.del, no: RW.STR.cancel }) : true)); if (ok) { RW.deleteBranch(id); rerender(); } return; }
     case 't6-last': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
     case 't6-origin': { sfx('click'); const o = endCtx && endCtx.e ? t6Origin(endCtx.e) : null; if (o) return launch({ ...o.cfg, resume: true }); toast('המשחק המקורי כבר לא זמין'); return; }
     case 'end-again': sfx('click'); return endAgain(false);
