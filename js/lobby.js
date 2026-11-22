@@ -1693,6 +1693,23 @@ function t6Ctx() {
     // M4: from the end of a finished free / learn game (rr2-last-game), never from a branch end (its log is not the last game)
     rewindAllowed: !e.branch && !endCtx.ranked && RW.endAllowed({ mode: e.mode || 'free', worldId: e.worldId, learn: !!endCtx.learn, resultId: e.resultId || null }), lastGame: !!lg && !e.branch, afterwinAllowed: !!t6.afterwinAllowed, branchTl: t6.branchTl || null, graphId: 'end' };
 }
+/** director decision 5: a finished practice branch, side by side with its original (only while the original is still the same game —
+ *  T6 M2; game.js builds e.t6.branchCmp). Months, net worth, decision quality, luck; the luck row says that it was not held constant. */
+function branchCmpHtml(C) {
+  if (!C || !C.orig || !C.branch) return '';
+  const O = C.orig, B = C.branch;
+  const mo = (x) => (x.done ? (x.status === 'won' ? `יצאת בחודש ${x.months}` : `${x.months} חודשים`) : `עדיין משחק · חודש ${x.months}`);
+  const money = (v) => (v == null ? '—' : num(fmtM(v)));
+  const q = (v) => (v == null ? '—' : num(`${v}/100`));
+  const lk = (v) => (v == null ? '—' : num(v >= 0 ? `+${fmtM(v)}` : `−${fmtM(-v)}`));
+  const better = (a, b) => (a == null || b == null || a === b ? '' : b > a ? ' class="pos"' : ' class="neg"');
+  const rows = [['⏱️ זמן', mo(O), mo(B), ''], ['💰 שווי נקי', money(O.nw), money(B.nw), better(O.nw, B.nw)],
+    O.q != null || B.q != null ? ['🧠 איכות ההחלטות', q(O.q), q(B.q), better(O.q, B.q)] : null,
+    O.luck != null || B.luck != null ? ['🍀 מזל', lk(O.luck), lk(B.luck), ''] : null].filter(Boolean);
+  return `<section class="t6-bcmp" aria-label="הענף מול המשחק המקורי"><h3>🧪 הענף מול המשחק המקורי</h3>
+    <table><thead><tr><th scope="col"></th><th scope="col">המקורי</th><th scope="col">הענף</th></tr></thead><tbody>${rows.map(([l, a, b, c]) => `<tr><th scope="row">${l}</th><td>${a}</td><td${c}>${b}</td></tr>`).join('')}</tbody></table>
+    ${O.luck != null && B.luck != null && Math.abs(O.luck - B.luck) > 0 ? '<p class="t6-note">המזל לא נשאר זהה אחרי נקודת הפיצול — חלק מההבדל הוא מזל, לא רק ההחלטה.</p>' : ''}</section>`;
+}
 function renderEndT6(o) {
   const { e, res, w, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate } = o;
   const ctx = t6Ctx();
@@ -1710,7 +1727,7 @@ function renderEndT6(o) {
     achOpen: !!(res.unlockedWorld || res.gained > 0) });
   html(`<div class="lb-shell lb-end t6-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
-      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${e.branch && !ctx.branchTl ? '<p class="t6-note">המשחק המקורי כבר לא זמין להשוואה.</p>' : ''}${T6S.renderTop(e, ctx)}</div>
+      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${e.branch && !ctx.branchTl && !(e.t6 && e.t6.branchCmp) ? '<p class="t6-note">המשחק המקורי כבר לא זמין להשוואה.</p>' : ''}${e.branch ? branchCmpHtml(e.t6 && e.t6.branchCmp) : ''}${T6S.renderTop(e, ctx)}</div>
       <div class="t6-btns">${endButtons(e, res, nextW, nextOpen)}</div>
       ${more}
       ${learn || A ? '' : ''}

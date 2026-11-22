@@ -242,6 +242,9 @@ async def t_rewind(b, F):
     check(bend, 'M1: the practice branch was played to its own end')
     if bend:
         await pg.wait_for_selector('#endTop', timeout=20000); await shot(pg, 'branch_end_phone')
+        cmp = await pg.evaluate("() => { const c = document.querySelector('#endTop .t6-bcmp'); return c ? { rows: [...c.querySelectorAll('tbody tr')].map((r) => [...r.children].map((x) => x.textContent.trim())), head: c.querySelector('h3').textContent } : null; }")
+        check(cmp and len(cmp['rows']) >= 2 and any('שווי נקי' in r[0] and '₪' in r[1] and '₪' in r[2] for r in cmp['rows']) and any('זמן' in r[0] for r in cmp['rows']),
+              f'director decision 5: the branch end compares with the original (M2 identity matches): {cmp}')
         btn = await pg.evaluate("() => [...document.querySelectorAll('.end-acts button, .end-more button')].map((x) => x.dataset.act)")
         check(await hashes(pg, [F['midLearn']['key']]) == hl, f'M1: the branch end did not touch the learning slot (buttons {btn})')
         await pg.evaluate("() => { window.__t6confirm = 0; }")

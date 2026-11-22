@@ -983,3 +983,10 @@ body.lb-lobby-open { overflow: hidden; }
   .t6-dh { font-size: 13px; }
 }
 .t6-tabs button[aria-pressed=true] { background: var(--ink); color: var(--paper); border-color: var(--ink); }   /* T6 review m11: toggle buttons (aria-pressed), not tabs */
+
+/* director decision 5: practice branch vs its original on the branch end screen */
+.t6-bcmp{margin:12px 0;padding:10px 12px;border-radius:14px;background:rgba(124,58,237,.07);border:1px solid rgba(124,58,237,.25)}
+.t6-bcmp h3{margin:0 0 6px;font-size:16px}
+.t6-bcmp table{width:100%;border-collapse:collapse;font-size:14px}
+.t6-bcmp th,.t6-bcmp td{padding:5px 4px;text-align:start;border-bottom:1px solid rgba(0,0,0,.08)}
+.t6-bcmp td.pos{color:var(--green,#15803d);font-weight:700}.t6-bcmp td.neg{color:var(--red,#b91c1c);font-weight:700}

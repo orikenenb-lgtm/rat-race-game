@@ -1458,6 +1458,20 @@ async function retireFlow() {
   persist(); const my = gen; busy = true; ui.setRollEnabled(false);
   endGame(r.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); });
 }
+/** director decision 5: the branch end compares with its original — {orig, branch} each {months, status, stars, nw, q, luck, done}.
+ *  The original comes from rewind.compareData (null when its M2 identity no longer matches): a finished original (rr2-last-game)
+ *  brings its own end numbers (stored by cmpSide); a live one (learning slot, still playing) is shown at the branch's month. */
+const luckOf = (L) => { const x = L && L.luck; const v = x && typeof x === 'object' ? x.total : x; return Number.isFinite(+v) ? Math.round(+v) : null; };
+function cmpSide(end) { const L = end && end.learning; return { nw: end && Number.isFinite(+end.netWorth) ? Math.round(+end.netWorth) : null, q: L && Number.isFinite(+L.decisionQuality) ? Math.round(+L.decisionQuality) : null, luck: luckOf(L) }; }
+function branchCmp(d, end) {
+  if (!d || !end) return null;
+  const branch = { months: end.months, status: end.status, stars: end.stars || 0, ...cmpSide(end), done: true };
+  const tl = d.originTl; const nwAt = (m) => { if (!tl || !Array.isArray(tl.m) || !Array.isArray(tl.nw)) return null; let v = null; for (let i = 0; i < tl.m.length; i++) if (tl.m[i] <= m) v = tl.nw[i]; return v == null ? null : Math.round(v); };
+  const L = d.endLite;
+  const orig = L && L.months != null ? { months: L.months, status: L.status, stars: L.stars || 0, nw: L.nw ?? nwAt(L.months), q: L.q ?? null, luck: L.luck ?? null, done: true }
+    : { months: d.upTo, status: null, stars: null, nw: nwAt(d.upTo), q: null, luck: null, done: false };
+  return { orig, branch };
+}
 /** end-of-game T6 data for the lobby: timeline, the five dimensions, ghost state, rewind / after-win gates; rr2-last-game */
 function t6End(end) {
   const out = { tl: null, dims: null, rivals: 'off', rewindAllowed: false, afterwinAllowed: false, branchTl: null };
@@ -1472,8 +1486,8 @@ function t6End(end) {
     out.rewindAllowed = !branch && rewind.endAllowed(CFG);
     out.afterwinAllowed = end.status === 'won' && !S.afterWin && !end.afterWin && typeof E.continueAfterWin === 'function' && flagFor('afterwin', CFG) && CFG.mode === 'free';
     if (ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
-    if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; }
-    else if (out.rewindAllowed) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: endLite(end, out), ghostsKey: out.ghostsKey || null });
+    if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; out.branchCmp = branchCmp(d, end); }
+    else if (out.rewindAllowed) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: { ...endLite(end, out), ...cmpSide(end) }, ghostsKey: out.ghostsKey || null });
     persist();
   } catch (e) { console.warn('t6 end', e); }
   return out;
