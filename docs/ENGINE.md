@@ -729,3 +729,11 @@ Spec: `docs/next-level/specs/T6-rivals-summary.md` (implementation notes at its 
   rules = 4)`; rules 3 keeps the old limits (ranked games before `RULES4_FROM`). ★★ / ★★★ thresholds unchanged.
 * (b) `CH.TRIGGER` sealed trigger odds of the crisis and career chains lowered (crisis: recession signal 0.4, crisis tile 0.15,
   index drop 0.4; career: warn 0.35, degree 0.4, promo 0.25); other chains unchanged.
+
+### T6 client CRs (2026-11-22)
+* `E.endNow(st)` — `checkEnd(st)` when the game ended, else a `status:'capped', reason:'cap'` result with `recap` (pure; for a ghost
+  stopped at its cap). Decision records carry `l` (the chosen option's label) and `decisionPoints()` returns `label`.
+* `out.rival.dd` — the inspection result line of a lost inspection (null for a lost offer). `metrics().rivals.deals[]` has `revealAt`
+  always and `text` / `cf` / `repair` once revealed.
+* After-win result: `afterWin.m0, hap0, hap1, brokeM` (+ `happinessDelta`).
+* Stable for the ghost driver: archetype `quizSkill`, `publicView(st, {freeze:false, event})`.

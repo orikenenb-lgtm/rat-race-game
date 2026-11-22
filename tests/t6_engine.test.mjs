@@ -404,6 +404,19 @@ test(`AC-30 rule cards are true (${N(25)} games per archetype per world)`, () =>
   console.log('   ' + JSON.stringify(tot));
 });
 
+test('client CRs: endNow (a capped game has recap dims), decisionPoints labels, out.rival.dd after a lost inspection, after-win hap0 / hap1 / brokeM, learn in replayConfig', () => {
+  const g = E.createGame({ worldId: 'w3', seed: 41 }); for (let i = 0; i < 30; i++) { if (g.pending) { resolve(g); continue; } E.rollDice(g); E.landing(g); resolve(g); }
+  assert.equal(E.checkEnd(g), null); const e = E.endNow(g); assert.equal(e.status, 'capped'); assert.deepEqual(Object.keys(e.recap.dims), ['speed', 'resilience', 'decisions', 'happiness', 'business']);
+  assert.equal(E.checkEnd(g), null, 'endNow does not end the game');
+  assert.ok(E.decisionPoints(g).every((p) => typeof p.label === 'string' && p.label.length > 0));
+  const st = E.deserialize(rivalStates(3, 4400)[0]); const ev = E.currentEvent(st); const o = ev.options.find((x) => x.kind === 'inspect' && x.enabled);
+  if (o) { st.pending.rv.close = st.pending.rv.steps + 1; const r = E.choose(st, ev, o.id); assert.ok(r.rival.lost && typeof r.rival.dd === 'string' && r.rival.dd.length > 5); }
+  assert.ok(E.metrics(st).rivals.deals.every((d) => Number.isInteger(d.revealAt)));
+  assert.equal(E.replayConfig(E.createGame({ worldId: 'w1', seed: 1, learn: true })).learn, true);
+  let won = null; for (let s = 0; s < 40 && !won; s++) { const x = randomGame({ worldId: 'w1', charId: 'teacher', seed: 50 + s }, prng(s), { afterWin: false }); if (x.over === 'won') won = x; }
+  E.continueAfterWin(won); E.retire(won); const A = won.result.afterWin;
+  assert.ok(Number.isInteger(A.hap0) && Number.isInteger(A.hap1) && A.happinessDelta === A.hap1 - A.hap0 && A.brokeM === null && A.m0 > 0);
+});
 const GW = await import('../js/ghost-worker.js');
 test('the ghost worker runs the archetype module (API 2): rows never ahead of upTo, done with the engine timeline and recap dims', () => {
   GW.setPolicies(AR);

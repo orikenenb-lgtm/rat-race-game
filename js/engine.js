@@ -2725,7 +2725,7 @@ function decisionRecord(st, ev, o, params) {
   if (mine.flags.includes('panicSell') || (ev.type === 'trade' && ev.data.ticker === 'IDX')) pr.push('time_in_market');
   if (ev.type === 'bank' || o.id === 'buyVar' || o.id === 'buyFix') pr.push('rate_risk');
   if (/^inspect:/.test(o.id) || (ev.data.dd && ev.data.dd.level === 0 && o.kind === 'buy')) pr.push('knowledge');
-  const rec = { t: st.turn, m: st.month, k: (st.actions || []).length, k0, type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) };
+  const rec = { t: st.turn, m: st.month, k: (st.actions || []).length, k0, l: String(o.label || o.id).replace(/\s*\(.*\)$/, '').slice(0, 24), type: ev.type, c: String(ev.title).slice(0, 24), o: o.id, s: score, v: verdict, f: mine.flags.filter((f) => f !== 'debt'), p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) };
   if (st.pending && st.pending.hinted) rec.h = 1;
   return rec;
 }
@@ -4066,7 +4066,7 @@ function storyDecision(st, ev, o) {
   const bestOpt = ev.options.find((x) => x.id === best.id) || {};
   const why = mine.flags.length ? DQ_WHY[mine.flags[0]] || 'סיכון גבוה' : o.dq === 'personal' ? 'החלטה אישית — אין כאן תשובה נכונה אחת' : best.U - worst.U < 0.5 ? DQ_WHY.near : s >= 85 ? DQ_WHY.best : `היה עדיף: ${bestOpt.label || ''}`.slice(0, 60);
   const pr = [...(STORY_PRINC[ev.kind === 'biz' ? 'biz' : ev.chain] || [])]; if (mine.flags.includes('noCushion')) pr.push('cushion');
-  return { t: st.turn, m: st.month, k: (st.actions || []).length, type: 'story', c: String(ev.title).slice(0, 24), o: o.id, s, v: verdict, f: mine.flags, p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).slice(0, 24) };
+  return { t: st.turn, m: st.month, k: (st.actions || []).length, l: String(o.label || o.id).slice(0, 24), type: 'story', c: String(ev.title).slice(0, 24), o: o.id, s, v: verdict, f: mine.flags, p: [...new Set(pr)], why, gap: round2(best.U - mine.U), b: String(bestOpt.label || best.id).slice(0, 24) };
 }
 
 /* ---------------------------------------------------------------- resolveStory ('Q') */
@@ -4651,8 +4651,8 @@ function loseToRival(st, p, out, how) {
     truth: { cf: cfAt(t.base), value: t.value, repair: t.repair || 0 }, revealAt: st.month + RV.RIVAL_REVEAL, revealed: false };
   st.rivalDeals.push(d); if (st.rivalDeals.length > 12) st.rivalDeals.shift();
   mark(st, 'rivalLost', d.claimedValue, CUR_K, c.n);
-  const tx = RV.lostTexts(p.rv.taker, how);
-  out.rival = { lost: true, by: personaPub(p.rv.taker), how, text: gz(st, tx.text), sub: gz(st, tx.sub), button: RV.TEXT.lostButton };
+  const tx = RV.lostTexts(p.rv.taker, how); const ddLine = how === 'inspect' && out.mentor ? out.mentor : null; // the inspection result the player paid for
+  out.rival = { lost: true, by: personaPub(p.rv.taker), how, text: gz(st, tx.text), sub: gz(st, tx.sub), button: RV.TEXT.lostButton, dd: ddLine };
   out.news.push({ kind: 'rival', text: out.rival.text });
   out.mentor = RV.TEXT.mentorLost; sound(out, 'loss');
 }
@@ -4675,7 +4675,7 @@ export function decisionPoints(st) {
   const D = (st.dq && st.dq.decisions) || [];
   let scan = null;
   if (D.some((r) => r.k0 == null || r.k0 < 0)) scan = k0Scan(st);
-  return D.map((r) => ({ k0: r.k0 != null && r.k0 >= 0 ? r.k0 : scan && scan.get(r.k) != null ? scan.get(r.k) : r.k, k: r.k, m: r.m, t: r.t, type: r.type, c: r.c, o: r.o, v: r.v }))
+  return D.map((r) => ({ k0: r.k0 != null && r.k0 >= 0 ? r.k0 : scan && scan.get(r.k) != null ? scan.get(r.k) : r.k, k: r.k, m: r.m, t: r.t, type: r.type, c: r.c, o: r.o, label: r.l || r.o, v: r.v }))
     .filter((x) => x.k0 != null && x.k0 >= 0).slice(-120);
 }
 /** k → k0 for every action of the log, by one replay (the card a 'c' answers started right after the action that opened it). */
@@ -4808,6 +4808,15 @@ export function checkEnd(st) {
   if (!won && !timeUp && !bankrupt) return null;
   return buildEnd(st, { won, bankrupt, timeUp, m });
 }
+/**
+ * T6 client CR: the result of a game stopped from outside (a ghost at its cap) — checkEnd() when the game ended, else a 'capped'
+ * result built the same way (recap dims, graph, learning) without touching the state. Pure.
+ */
+export function endNow(st) {
+  const end = checkEnd(st); if (end) return end;
+  const r = buildEnd(st, { won: false, bankrupt: false, timeUp: false });
+  return { ...r, status: 'capped', reason: 'cap', stars: 0, nearMiss: null };
+}
 /** The end result (checkEnd / retire). o = {won, bankrupt, timeUp, m} or {aw: 'retired'|'cap'|'afterWinBroke'} after a win. */
 function buildEnd(st, o) {
   const w = W(st); const m = o.m || metrics(st); const g = w.goal;
@@ -4832,7 +4841,7 @@ function buildEnd(st, o) {
       still ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'];
     if (aw === 'cap') lines.push('עברו 10 שנים מאז שיצאת מהמירוץ — כאן עוצרים.');
     if (aw === 'afterWinBroke') lines.push(`החופש לא החזיק: בחודש ${st.month} נגמר הכסף.`);
-    res.afterWin = { winMonths: A.months, winStars: A.stars, months: n, nwDelta: m.netWorth - A.nw0, passiveDelta: m.passive - A.pas0, happinessDelta: Math.round(st.life.happiness) - A.hap0, stillFree: still, reason: aw, title: 'מה החופש נתן לך', lines };
+    res.afterWin = { winMonths: A.months, winStars: A.stars, m0: A.m, months: n, nwDelta: m.netWorth - A.nw0, passiveDelta: m.passive - A.pas0, hap0: A.hap0, hap1: Math.round(st.life.happiness), happinessDelta: Math.round(st.life.happiness) - A.hap0, brokeM: aw === 'afterWinBroke' ? st.month : null, stillFree: still, reason: aw, title: 'מה החופש נתן לך', lines };
   }
   if (g.type === 'benchmark') res.benchmark = benchmarkResult(st, m);
   res.nearMiss = aw ? null : nearMiss(st, w, m, res);
