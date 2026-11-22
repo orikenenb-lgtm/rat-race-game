@@ -378,6 +378,47 @@ async def t_skip(b):
         check(not seen, f'AC-T1 run {run}: 3 rolls + a reload of the skipped game show no coach ({seen})')
         await ctx.close()
 
+TOAST_OBS = "window.__toasts=[]; new MutationObserver(()=>{const e=document.querySelector('#toast'); if(e&&/\\bon\\b/.test(e.className)&&e.innerText) window.__toasts.push(e.innerText.replace(/\\n/g,' '))}).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})"
+async def t_dreamtut(b):
+    """AC-D3 (T4 verify D3): in the tutorial game (F2 + dream 🗽 + developer) buying the tutorial coffee cart completes the dream's
+    first mission — its "משימה הושלמה" toast is shown even though the buy emits a burst of other feedback (it is never dropped)."""
+    ctx, pg = await page(b, vp=PHONE, onboarded=False)
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-welcome', timeout=90000)
+    await pg.click('[data-act=welcome-pick]'); await pg.wait_for_selector('.wv-char'); await pg.wait_for_timeout(500)
+    await pg.click('label.t4-dopt:has(input[value=free])', timeout=10000); await pg.wait_for_timeout(300)
+    await pg.click('.wv-char[data-c=dev] .wv-go')
+    for sel in ('[data-intro-opt="next"]', '[data-intro-opt="fix:pay"]', '[data-intro-opt="go"]'):
+        await pg.wait_for_selector(sel + ':not([disabled])', timeout=90000); await pg.click(sel)
+    await pg.wait_for_function("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()", timeout=30000)
+    await pg.evaluate(TOAST_OBS)
+    await pg.click('#roll')
+    for _ in range(80):
+        if await pg.locator('#evm:not([hidden]) #evCard button[data-o=buy]:not([disabled])').count(): break
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
+        await pg.wait_for_timeout(400)
+    for _ in range(6):
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); await pg.wait_for_timeout(300)
+    bought = await pg.evaluate("(()=>{const b=document.querySelector('#evCard button[data-o=buy]'); if(!b) return false; b.click(); return true})()")
+    got = False
+    for _ in range(100):   # ≤ 30 s: cards that follow the buy are answered; the toast queue drains on its own
+        if any('משימה הושלמה' in t for t in await pg.evaluate('window.__toasts')): got = True; break
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
+        if await pg.locator('#evm:not([hidden])').count():
+            await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()")
+        await pg.wait_for_timeout(300)
+    sv = await ls(pg, 'rr2-save-free-w1') or {}; dr = ((sv.get('state') or {}).get('dream') or {})
+    ts = [t for t in await pg.evaluate('[...new Set(window.__toasts)]')]
+    check(bought and (dr.get('done') or {}).get('fr_first') and got, f'AC-D3 tutorial game: bought={bought}, engine fr_first={(dr.get("done") or {}).get("fr_first")}, mission toast shown={got} (toasts {ts[:6]})')
+    # the cap itself: a dream mission queued FIRST, then 8 ordinary toasts — the mission is still shown
+    await pg.evaluate("window.__toasts=[]")
+    await pg.evaluate("import('./js/ui.js').then(u=>{u.dreamToast([{id:'x',title:'בדיקת תור'}],{icon:'🗽',name:'חופש'}); for(let i=0;i<8;i++) u.toast('הודעה רגילה '+i);})")
+    got2 = False
+    for _ in range(120):
+        if any('בדיקת תור' in t for t in await pg.evaluate('window.__toasts')): got2 = True; break
+        await pg.wait_for_timeout(250)
+    check(got2, f'T4 §4.7: a dream mission toast queued before 8 info toasts is never dropped by the cap of 6 ({(await pg.evaluate("window.__toasts"))[:4]})')
+    await ctx.close()
+
 async def drive(pg, rolls):
     """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button)."""
     n = 0; deadline = time.time() + 60 * 18
@@ -495,7 +536,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('dreamtut', t_dreamtut), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

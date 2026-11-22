@@ -72,7 +72,7 @@ const tq = []; let tBusy = false, tWait = 0;
 export function toast(text, opts = {}) {
   if (!text) return;
   // T5 §4.2 rules 5–6 (T5 verify D1): identical consecutive texts are dropped; the queue keeps 6 and drops the OLDEST ordinary item
-  // first — important feedback (opts.keep: level-down, milestones; every 'bad' toast) is never dropped
+  // first — important feedback (opts.keep: level-down, milestones, dream missions, lessons; every 'bad' toast) is never dropped
   const it = { text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null, sub: opts.sub ? String(opts.sub) : '', keep: !!opts.keep || opts.kind === 'bad' };
   const last = tq[tq.length - 1]; if (last && last.text === it.text && last.sub === it.sub && !it.action) return;
   tq.push(it);
@@ -107,6 +107,7 @@ function nextToast() {
    On phones (≤ 600 px) at most ONE of coach / achievement / lesson / rumour (newspaper) / verdict floats above the board.
    A coach bubble holds everything; the rest is released one by one by priority. Desktop shows them as before. */
 const OVP = { levelUp: 1, worldEntry: 1, achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };   // T5 §4.2 rule 3
+const OV_KEEP = new Set(['coach', 'levelUp', 'worldEntry', 'achievement', 'dream', 'lesson']);   // T4 §4.7: never dropped by the cap
 let fbHold = false;   // T5 §4.2 holdFeedback(true): B / C / D wait (e.g. while the T4 coach or the T1 recover bar is up)
 const ovq = []; let ovBusy = null, ovT = 0;
 const phoneQ = () => innerWidth <= 600;
@@ -117,7 +118,9 @@ function overlay(kind, show) {
   if (kind === 'verdict') { const i = ovq.findIndex((x) => x.kind === 'verdict'); if (i >= 0) ovq.splice(i, 1); }
   ovq.push({ kind, show, p: OVP[kind] || 9, t: performance.now(), behindRival: ovBusy === 'rival' });
   ovq.sort((a, b) => a.p - b.p || a.t - b.t);
-  if (ovq.length > 6) { const i = ovq.map((x) => x.kind).lastIndexOf('verdict'); ovq.splice(i >= 0 ? i : ovq.length - 1, 1); }
+  // §4.7 cap 6: the newest verdict goes first, then the lowest-priority info line; a coach, achievement / level-up / world entry,
+  // dream mission or lesson is never dropped (T4 verify D3) — the queue may then hold more than 6
+  if (ovq.length > 6) { const ks = ovq.map((x) => x.kind); let i = ks.lastIndexOf('verdict'); if (i < 0) { for (let j = ovq.length - 1; j >= 0; j--) if (!OV_KEEP.has(ovq[j].kind)) { i = j; break; } } if (i >= 0) { const [x] = ovq.splice(i, 1); x.cancel?.(); } }
   pumpOv();
 }
 function pumpOv() {
@@ -1730,10 +1733,10 @@ export function renderRollEnergy(g, msNext) {
 export function lessonToast(list, onOpen) {
   (list || []).forEach((l, i) => {
     const text = `📚 שיעור חדש בספרייה: ${l.title}`; const action = onOpen ? { label: 'לקרוא', fn: () => onOpen(l) } : null;
-    if (!phoneQ()) { setTimeout(() => toast(text, { kind: 'gold', action }), i * 1400); return; }
+    if (!phoneQ()) { setTimeout(() => toast(text, { kind: 'gold', action, keep: true }), i * 1400); return; }   // §4.7: lessons are never dropped
     // phones: one floating thing at a time (the lesson waits for a coach / achievement / verdict to clear)
     const ms = Math.round(Math.max(1300, Math.min(3200, 900 + text.length * 38)) * (action ? 2.4 : 1));
-    overlay('lesson', (done) => { toast(text, { kind: 'gold', action, ms }); setTimeout(done, ms + 300); });
+    overlay('lesson', (done) => { toast(text, { kind: 'gold', action, ms, keep: true }); setTimeout(done, ms + 300); });
   });
 }
 /** One lesson as a reading card (in-game). */
@@ -1916,7 +1919,7 @@ export function hidePractice() { if (practiceEl) { practiceEl.remove(); practice
 export function dreamToast(list, dream = null) {
   const icon = (dream && dream.icon) || '🎯';
   for (const d of list || []) overlay('dream', (done) => {
-    toast(`${d.icon || icon} משימה הושלמה: ${d.title || ''}`, { kind: 'gold' });
+    toast(`${d.icon || icon} משימה הושלמה: ${d.title || ''}`, { kind: 'gold', keep: true });   // T4 verify D3: important feedback, never dropped by the cap
     if (dream && dream.name) mentor(`${d.title || ''} — צעד אמיתי לכיוון ${dream.name}.`);
     announce(`משימה הושלמה: ${d.title || ''}`);
     setTimeout(done, 2600);
