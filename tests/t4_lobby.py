@@ -428,12 +428,23 @@ async def t_replayreal(b):
     """M-2 in the real game: a replayed tutorial's rolls cost ⚡."""
     ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:3,tutorialDone:true,tutorialReplay:true,stars:{w1:3}}))", "localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))", "if(!sessionStorage.getItem('t4e')){sessionStorage.setItem('t4e','1');localStorage.setItem('rr2-energy', JSON.stringify({e:9, at:Date.now(), granted:{}}))}", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
     await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    # deterministic ⚡ accounting (the old "9 → 6" read raced with a random seed's achievement / quiz bonus, the 6-minute refill on a
+    # slow run, and the last roll's spend): every change is an energy:change event, the refill is the stored clock's whole steps
+    await pg.evaluate("import('./js/bus.js').then(m => { window.__en = []; m.bus.on('energy:change', (p) => window.__en.push({ d: p.delta, r: p.reason })); })")
+    e0 = await ls(pg, 'rr2-energy')
     await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
     await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
     cfg = await pg.evaluate("import('./js/game.js').then(g=>g.activeConfig())")
     n = await drive(pg, 3)
-    e = await ls(pg, 'rr2-energy')
-    check(cfg.get('tutorial') is True and not cfg.get('tutorialFree') and n == 3 and e and e['e'] == 9 - 3, f'review M-2 replayed tutorial in the real game: 3 rolls cost 3 ⚡ (9 → {e and e["e"]}, rolls {n})')
+    try: await pg.wait_for_function("(window.__en || []).filter(x => x.r === 'roll').length >= 3", timeout=30000)
+    except Exception: pass  # noqa: BLE001 — reported by the check below
+    await pg.wait_for_timeout(500)
+    ev = await pg.evaluate('window.__en || []'); e = await ls(pg, 'rr2-energy')
+    rolls = [x['d'] for x in ev if x['r'] == 'roll']; bonus = sum(x['d'] for x in ev if x['r'] != 'roll' and x['d'] > 0)
+    REFILL_MS = 6 * 60 * 1000; refill = (e['at'] - e0['at']) / REFILL_MS if e and e0 else -1
+    ok = e0 and e0['e'] == 9 and rolls == [-1, -1, -1] and refill >= 0 and refill == int(refill) and e['e'] == 9 - 3 + bonus + int(refill)
+    check(cfg.get('tutorial') is True and not cfg.get('tutorialFree') and n == 3 and bool(ok),
+          f'review M-2 replayed tutorial in the real game: 3 rolls cost 3 ⚡ (9 → {e and e["e"]} = 9 − {-sum(rolls)} rolls + {bonus} bonus {[x for x in ev if x["r"] != "roll"]} + {refill} refill; rolls {n})')
     await ctx.close()
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
