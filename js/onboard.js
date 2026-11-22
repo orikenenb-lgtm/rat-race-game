@@ -105,7 +105,7 @@ const narrow = () => innerWidth <= 820;
 export const WORLD_COACH = {
   w1: [
     { target: '#hGoal', title: 'מד החופש', text: 'המטרה בשכונה: הכנסה פסיבית — כסף שנכסים מכניסים בלי שתעבוד — שמכסה את כל ההוצאות. כשהפס מתמלא, יצאת מהמירוץ.' },
-    { target: () => (narrow() ? '#sheetBtn' : '#sheet .total'), title: 'הדוח הכספי', text: 'כאן רואים מה נכנס, מה יוצא, מה יש לך ומה אתה חייב. לפני כל החלטה — תציץ בשורה התחתונה: התזרים החודשי.' },
+    { target: () => (narrow() ? '#sheetBtn' : '#sheet .total'), title: 'הדוח הכספי', text: 'כאן רואים מה נכנס, מה יוצא, מה יש לך ומה החובות שלך. לפני כל החלטה — כדאי להציץ בשורה התחתונה: התזרים החודשי.' },
   ],
   w2: [
     { target: '#hWorld', title: 'הריבית', text: 'בעיר הגדולה הריבית זזה. משכנתא משתנה עולה ויורדת איתה; קבועה ננעלת ולא מפתיעה. משבצות הבנק (תכלת) מזיזות אותה.' },
@@ -113,7 +113,7 @@ export const WORLD_COACH = {
   ],
   w3: [
     { target: '#hWorld', title: 'שער הדולר', text: 'בנמל הכל תלוי בדולר: דולר חזק טוב ליצואנים ולספינות, ורע ליבואנים. גידור נועל את השער לשנה — קונים אותו כשהשער נוח, לא באמצע סערה.' },
-    { target: '#hGoal', title: 'היעד: שווי נקי', text: 'כאן לא סופרים תזרים אלא שווי: כל מה שיש לך פחות כל מה שאתה חייב. וזהב? הוא קופץ במשברים — ביטוח טוב לתיק.' },
+    { target: '#hGoal', title: 'היעד: שווי נקי', text: 'כאן לא סופרים תזרים אלא שווי: כל מה שיש לך פחות החובות שלך. וזהב? הוא קופץ במשברים — ביטוח טוב לתיק.' },
   ],
   w4: [
     { target: '#hGoal', title: 'שני יעדים', text: 'בעמק העתיד צריך גם שווי נקי וגם נקודות השפעה. שני הפסים חייבים להתמלא.' },
@@ -133,7 +133,7 @@ async function worldCoach(h) {
 
 /* ------------------------------------------------------------ hooks */
 const coarse = () => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } };
-const ROLL_TEXT = () => 'לחץ על "הטל קוביות". החייל זז, ובכל משבצת מחכה הזדמנות, הוצאה או הפתעה.' + (coarse() ? '' : ' (אפשר גם רווח)');   // S-C2
+const ROLL_TEXT = () => ui.gw('לחץ', 'לחצי') + ' על "הטל קוביות". החייל זז, ובכל משבצת מחכה הזדמנות, הוצאה או הפתעה.' + (coarse() ? '' : ' (אפשר גם רווח)');   // S-C2
 /** Called once the board is shown and any pending card (e.g. the engine's intro card) was handled. */
 export async function afterStart(h) {
   curS = h.S; practice.reset(h);
@@ -179,7 +179,7 @@ export function onCard(ev, ctl, h) {
   if (wantCoach(h, 'roi') && ev.type === 'deal' && ev.data && ev.data.down) {
     setTimeout(async () => {
       if (h.my !== h.gen() || !ui.isEventOpen()) return;
-      await showCoach(h, 'roi', { target: '#evCard [data-roi]', title: 'הסוד של המשקיעים', text: 'לפני שקונים: כמה אחוז בשנה הכסף שלך מרוויח? לחץ כאן ותראה את החישוב. אם התשואה גבוהה ממה שעולה ההלוואה — העסקה עובדת בשבילך. אם נמוכה — היא עובדת נגדך.' });
+      await showCoach(h, 'roi', { target: '#evCard [data-roi]', title: 'הסוד של המשקיעים', text: 'לפני שקונים: כמה אחוז בשנה הכסף שלך מרוויח? ' + ui.gw('לחץ כאן ותראה', 'לחצי כאן ותראי') + ' את החישוב. אם התשואה גבוהה ממה שעולה ההלוואה — העסקה עובדת בשבילך. אם נמוכה — היא עובדת נגדך.' });
     }, 450);
   }
 }
@@ -213,11 +213,11 @@ async function tourInner(h) {
   const m = E.metrics(h.S); const pay = m.payslip || {};
   const net = pay.net ?? m.salary ?? 0; const exp = m.expenses || 0; const pct = exp ? Math.round(((m.passive || 0) / exp) * 100) : 0;
   const steps = [
-    { target: '#hCash', title: '💰 מזומן ותזרים', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — תציץ.` },
+    { target: '#hCash', title: '💰 מזומן ותזרים', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — כדאי להציץ.` },
     { target: '#hGoal', title: 'מד החופש', text: `הכנסה פסיבית ${fmt(m.passive || 0)} מתוך ${fmt(exp)} הוצאות: ${pct}%. כשהפס מלא — יצאת מהמירוץ.` },
     { target: '#hLife', title: 'החיים שלך', text: 'החיים שלך: גיל, 🔋 כוח, אושר, אשראי ועוד. לחיצה על כל סימן מסבירה אותו.' },
     { target: '#roll', title: 'מטילים קובייה', text: ROLL_TEXT() },
-    { target: '#sheetBtn', title: 'הדוח שלי', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — תציץ.` },
+    { target: '#sheetBtn', title: 'הדוח שלי', text: `כאן כל השורות: נטו ${fmt(net)}, הוצאות ${fmt(exp)}, נשאר ${fmt(m.cashflow || 0)}. לפני החלטה גדולה — כדאי להציץ.` },
   ];
   for (let i = 0; i < steps.length; i++) {
     const v = await ui.coach({ ...steps[i], step: i + 1, total: steps.length, label: 'סיור', skipLabel: 'סיום' });
@@ -238,7 +238,7 @@ export function legend(h) {
     m.focus ? ['🎯', 'מוקד החודש', String(m.focus.current.label || ''), 'על מה שמים את הראש החודש. עולה קצת 🔋.'] : null,
     m.econ ? ['📊', 'מד הכלכלה', String(m.econ.label || ''), 'מתעדכן באיחור ועם רעש.'] : null,
     ['🛟', 'קרן חירום', e.months != null ? `${e.months} חודשים` : fmt(m.savings || 0), 'חודשי הוצאות שמורים בצד.'],
-    L.plan ? ['📅', 'התוכנית', String((L.plans || []).find((p) => p.id === L.plan)?.label || L.plan), 'איך אתה מעביר את החודש.'] : null,
+    L.plan ? ['📅', 'התוכנית', String((L.plans || []).find((p) => p.id === L.plan)?.label || L.plan), ui.gw('איך אתה מעביר את החודש.', 'איך את מעבירה את החודש.')] : null,
     h.CFG && !h.CFG.learn && !h.CFG.resultId && (h.CFG.mode || 'free') !== 'daily' ? ['⚡', 'זריקות', (() => { try { return `${EN.get()}/${EN.MAX}`; } catch (e) { return ''; } })(), 'כל הטלה במשחק רגיל עולה זריקה אחת.'] : null,
     m.nextGoal ? ['🎯', 'המטרה הבאה', String(m.nextGoal.title || ''), ''] : m.dream ? ['🎯', 'החלום', `${m.dream.icon || ''} ${m.dream.name || ''}`, ''] : null,
   ].filter(Boolean);
@@ -275,7 +275,7 @@ export async function help(h) {
   // T2 (in-game UI lane): the mentor level lives in this menu — game.js passes h.mentorMenu / h.mentorLabel
   const ml = h && typeof h.mentorMenu === 'function' && typeof h.mentorLabel === 'function' ? h.mentorLabel() : null;
   const mBtn = ml ? `<button data-h="mentor">🧭 רמת המנטור: ${ui.esc(ml)}</button>` : '';
-  const v = await ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: 'מה תרצה לראות?', dismissable: true,
+  const v = await ui.modal({ tag: 'איך משחקים', color: '#0e7490', title: ui.gz('מה תרצה לראות?'), dismissable: true,
     html: `<div class="t4-help"><button data-h="tour">🎬 סיור קצר במסך (5 צעדים)</button><button data-h="legend">📖 מה כל סימן אומר</button>${mBtn}<button data-h="replay">🔄 הדרכה מלאה במשחק הבא בשכונה</button></div>`,
     onExtra: (e) => { const b = e.target.closest('[data-h]'); if (!b) return; pick = b.dataset.h; document.querySelector('#gm .acts button')?.click(); },
     actions: [{ label: 'סגירה', cls: 'primary', v: null }] });

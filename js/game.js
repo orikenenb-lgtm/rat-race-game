@@ -610,6 +610,7 @@ async function startInner(cfg, my) {
   cfg.resume = false;
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
+  ui.setGender(S.gender);   // T3 verify D4: the UI's own strings in the player's gender
   ui.applyTheme(W);
   t6Start();
 
@@ -844,7 +845,7 @@ async function lifeChip(kind) {
     const L = m.life || {}; const plans = L.plans || [];
     const ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
     const v = await ui.modal({ tag: 'התוכנית החודשית', color: '#0e7490', title: 'איך תעביר את החודשים הבאים?',
-      html: `<p class="d">התוכנית חלה מיום המשכורת הבא. זמן וכוח (🔋) הם משאב — בחר על מה לבזבז אותם.</p><div class="plans">${plans.map((p) => `<button class="plan ${p.id === L.plan ? 'cur' : ''}" data-plan="${p.id}"><span class="pi">${ICON[p.id] || '📅'}</span><b>${ui.esc(p.label)}</b>${p.id === L.plan ? '<small class="tagc">עכשיו</small>' : ''}<small class="pn">${ui.esc(p.desc || '')}</small></button>`).join('')}</div>`,
+      html: `<p class="d">התוכנית חלה מיום המשכורת הבא. זמן וכוח (🔋) הם משאב — ${ui.gw('בחר', 'בחרי')} על מה לבזבז אותם.</p><div class="plans">${plans.map((p) => `<button class="plan ${p.id === L.plan ? 'cur' : ''}" data-plan="${p.id}"><span class="pi">${ICON[p.id] || '📅'}</span><b>${ui.esc(p.label)}</b>${p.id === L.plan ? '<small class="tagc">עכשיו</small>' : ''}<small class="pn">${ui.esc(p.desc || '')}</small></button>`).join('')}</div>`,
       actions: [{ label: 'ביטול', v: null }], dismissable: true,
       onExtra: (e) => { const b = e.target.closest('[data-plan]'); if (!b) return; chosenPlan = b.dataset.plan; document.querySelector('#gm .acts button').click(); } });
     void v;
@@ -1256,7 +1257,7 @@ async function bailoutCard(b) {
     ${b.creditFolded ? `<div class="row"><span>חוב האשראי הועבר להלוואה זולה יותר</span><span class="num">${E2.fmtM(b.creditFolded)}</span></div>` : ''}
     ${b.writtenOff ? `<div class="row"><span>הבנק מחק לך חוב</span><b class="num pos">${E2.fmtM(b.writtenOff)}</b></div>` : ''}</div>
     ${leaks.length ? `<h3 class="lk">לאן הכסף דלף</h3><div class="grid">${leaks.map((l) => `<div class="row"><span>${ui.esc(l.label)}</span><span class="num neg">${E2.fmtM(l.amount)}</span></div>`).join('')}</div>` : ''}
-    <p class="note">זה קורה רק פעם אחת במשחק. מעכשיו התזרים שלך לא שלילי — תשמור עליו ככה.</p>`;
+    <p class="note">זה קורה רק פעם אחת במשחק. מעכשיו התזרים שלך לא שלילי — ${ui.gw('תשמור', 'תשמרי')} עליו ככה.</p>`;
   await ui.modal({ tag: 'הבנק נכנס לתמונה', color: '#3b3f4e', title: b.title || 'הבנק עשה לך ארגון מחדש', html, actions: [{ label: 'הבנתי, ממשיכים', cls: 'primary' }] });
 }
 

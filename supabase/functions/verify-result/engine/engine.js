@@ -627,7 +627,7 @@ function goalOf(st, netWorth, passive, expenses) {
 }
 function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, activeBiz, cashflow, netWorth, goalProgress, goalText, goalParts, incomeLines) {
   if (sideIncome) incomeLines.push({ label: 'עסק צדדי (משוער)', amount: sideIncome, id: 'side' });
-  for (const a of managedOf(st)) if (!a.biz.manager) incomeLines.push({ label: `${a.n} (אתה עובד בו — לא פסיבי)`, amount: a.bizDraw || 0, id: 'biz:a' + a.id, active: true });
+  for (const a of managedOf(st)) if (!a.biz.manager) incomeLines.push({ label: `${a.n} (${st.gender === 'f' ? 'את עובדת' : 'אתה עובד'} בו — לא פסיבי)`, amount: a.bizDraw || 0, id: 'biz:a' + a.id, active: true });
   for (const a of st.assets) if (!a.biz || a.biz.manager) incomeLines.push({ label: a.biz ? `${a.n} (עם מנהל — פסיבי)` : a.n, amount: assetCf(st, a), assetId: 'a' + a.id });
   for (const x of st.incomeExtra || []) if ((!x.until || x.until >= st.month) && (!x.from || x.from <= st.month)) incomeLines.push({ label: x.label + (x.until ? ` (עד חודש ${x.until})` : ''), amount: x.amount, id: x.id, extra: true });
   const rtax = rentTaxOf(st); if (rtax) incomeLines.push({ label: `מס על שכר דירה: 10% מכל שכר הדירה (עברת את תקרת הפטור של ${fmtM(TAX.rentExempt)} בחודש)`, amount: -rtax, id: 'rentTax' });
@@ -806,7 +806,8 @@ function mentorLine(st, key, vars) {
 const GZ = [['אתה', 'את'], ['שים לב', 'שימי לב'], ['תחשוב', 'תחשבי'], ['תבדוק', 'תבדקי'], ['תמשיך', 'תמשיכי'], ['תזכור', 'תזכרי'], ['תחפש', 'תחפשי'],
   ['תסתכל', 'תסתכלי'], ['תתחיל', 'תתחילי'], ['תנסה', 'תנסי'], ['תמכור', 'תמכרי'], ['תקנה', 'תקני'], ['תבקש', 'תבקשי'], ['תוודא', 'תוודאי'], ['תשאל', 'תשאלי'],
   ['תשאיר', 'תשאירי'], ['תסגור', 'תסגרי'], ['תוכל', 'תוכלי'], ['תגדר', 'תגדרי'], ['תלמד', 'תלמדי'], ['תרגיש', 'תרגישי'], ['מוכן', 'מוכנה'], ['תצא', 'תצאי'], ['נסה', 'נסי'], ['קח', 'קחי'],
-  ['זוכר', 'זוכרת'], ['תחליט', 'תחליטי'], ['תעבור', 'תעברי'], ['תשקיע', 'תשקיעי'], ['תעזוב', 'תעזבי']];
+  ['זוכר', 'זוכרת'], ['תחליט', 'תחליטי'], ['תעבור', 'תעברי'], ['תשקיע', 'תשקיעי'], ['תעזוב', 'תעזבי'],
+  ['תחתום', 'תחתמי'], ['תשלם', 'תשלמי'], ['תשים', 'תשימי'], ['תרצה', 'תרצי'], ['תציץ', 'תציצי']]; // T3 verify D4: f1 'שתחתום', 'תשלם ריבית', the focus 'תשים'
 const GZ_RE = GZ.map(([m, f]) => [new RegExp('(^|[^\u05D0-\u05EA])([ושכבלה]?)' + m + '(?![\u05D0-\u05EA])', 'g'), '$1$2' + f]);
 /** Address the player in her/his grammatical gender (st.gender 'f' | 'm'). Data is written in the masculine form. */
 function gz(st, text) { if (!text || !st || st.gender !== 'f') return text; let t = String(text); for (const [re, f] of GZ_RE) t = t.replace(re, f); return t; }
@@ -3599,7 +3600,7 @@ function storyVars(st, chainId, item) {
   };
   const mv = chainOf(st, 'move');
   v.rememberMove = mv && mv.path === 'stay' ? 'בפעם הקודמת נשארת וקיבלת העלאה קטנה.' : mv && mv.path === 'periphery' ? 'עברת לפריפריה כדי לחסוך בשכירות.' : mv && mv.path ? `לפני ${heMonths(Math.max(1, st.month - mv.startM))} עברת דירה.` : '';
-  v.rememberFriend = chainId === 'friend' && (c.run || 1) >= 2 ? `זוכר מה קרה עם ${CH.NAMES.friend[0]}? הפעם זו ${CH.NAMES.friend[1]}.` : '';
+  v.rememberFriend = chainId === 'friend' && (c.run || 1) >= 2 ? `זוכר מה קרה עם ${CH.NAMES.friend[0]}? הפעם ${CH.NAMES.friendGender === 'f' ? 'זו' : 'זה'} ${CH.NAMES.friend[1]}.` : '';
   v.rememberF2 = d.path === 'guarantee' || c.path === 'guarantee' ? `חתמת לו ערבות של ${fmtM(d.risk || 0)}.` : `כבר נתת לו ${fmtM(d.amount || 0)}.`;
   v.f2line = c.path === 'guarantee' ? 'הבנק רוצה ממנו עוד ערבות.' : '';
   v.pathLine = !d.choice ? '' : d.choice === 'keep' ? 'המשכת — והיחידות שקנית בירידה שוות היום יותר.' : d.choice === 'pause' ? 'עצרת — ובצדק אם לא הייתה כרית; היחידות שלא נקנו עלו בינתיים.'

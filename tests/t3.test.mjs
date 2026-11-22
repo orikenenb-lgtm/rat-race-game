@@ -776,5 +776,32 @@ test('T3 verify D3: the monthly business sentence is true — ≥ 5,000 simulate
   for (const [k, v] of Object.entries(seen)) assert.ok(v > 0, `every sentence form occurs (${k}: ${v}) ${JSON.stringify(seen)}`);
   console.log(`   D3: ${months} business months, ${JSON.stringify(seen)}`);
 });
+test('T3 verify D4 / D5: the player\'s gender reaches the texts (f1 "שתחתמי", "את עובדת בו", no "שאת קיים"); friend run 2 says "הפעם זה דני"; the UI wraps its own masculine strings', () => {
+  // f1 for a female player (feminine verb) and a male one (unchanged)
+  for (const [g, want, not] of [['f', 'שתחתמי', 'שתחתום'], ['m', 'שתחתום', 'שתחתמי']]) {
+    const st = forced('w1', 'friend', 'f1', { item: true, data: { amount: 9000, name: CH.NAMES.friend[0] } }); st.gender = g;
+    const card = E.inbox(st)[0]; assert.ok(card.text.includes(want) && !card.text.includes(not), `${g}: ${card.text}`);
+  }
+  // run 2: "זוכר מה קרה עם יוסי? הפעם זה דני." (masculine friend), genderized for her ("זוכרת")
+  for (const g of ['m', 'f']) {
+    const st = forced('w1', 'friend', 'f1', { run: 2, item: true, data: { amount: 9000, name: CH.NAMES.friend[1] } }); st.gender = g;
+    const rem = E.inbox(st)[0].remember; assert.ok(rem.includes(`הפעם זה ${CH.NAMES.friend[1]}`) && !rem.includes('הפעם זו'), rem);
+    assert.ok(rem.startsWith(g === 'f' ? 'זוכרת' : 'זוכר '), rem);
+  }
+  // the active-business income line and the toyshop offer
+  const females = E.getWorld('w1').characters.filter((c) => c.gender === 'f'); assert.ok(females.length >= 1);
+  const st = E.createGame({ worldId: 'w1', charId: females[0].id, seed: 9, mode: 'free' }); st.cash = 1e6;
+  st.pending = { id: 5, type: 'business', tile: 'K', pos: 3, mode: 'offer', typeId: 'toyshop', seed: 3 }; st.phase = 'event';
+  const offer = E.currentEvent(st); assert.ok(!JSON.stringify(offer).includes('שאת קיים') && !JSON.stringify(offer).includes('שאתה קיים'), 'toyshop desc is neutral');
+  E.choose(st, offer, offer.options.find((o) => /^start/.test(o.id) && o.enabled).id);
+  const lines = JSON.stringify(E.metrics(st)); assert.ok(lines.includes('את עובדת בו') && !lines.includes('אתה עובד בו'), 'income line for her');
+  // GZ covers the verbs the UI routes through gz()
+  for (const [m, f] of [['אם לא תחליט', 'אם לא תחליטי'], ['כמה עזרה תרצה?', 'כמה עזרה תרצי?'], ['על מה תשים את הראש', 'על מה תשימי את הראש'], ['אם תשלם', 'אם תשלמי'], ['שווי אם תמכור', 'שווי אם תמכרי']]) assert.equal(E.genderize(m, 'f'), f);
+  // static scan: every in-game UI line with a masculine second-person word goes through gz() / gw()
+  const W = /(?<![א-ת])[ושכבלהמ]?(תחליט|אתה|תמכור|תשלם|שים לב|תראה|תשים|תרצה|חייב|עובד בו|לחץ|תציץ|תשמור|תחתום)(?![א-ת])/;
+  const bad = [];
+  for (const f of ['js/ui.js', 'js/onboard.js', 'js/game.js']) readFileSync(new URL('../' + f, import.meta.url), 'utf8').split('\n').forEach((l, i) => { const code = l.replace(/\/\/ .*$/, '').replace(/\/\*.*?\*\//g, ''); if (W.test(code) && !/\bg[zw]\(/.test(l)) bad.push(`${f}:${i + 1}`); });
+  assert.deepEqual(bad, [], 'masculine UI strings outside gz() / gw()');
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
