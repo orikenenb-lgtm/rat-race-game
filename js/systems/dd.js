@@ -109,6 +109,8 @@ export function expectFactors(worldId, k) { const e = EXP[(CFG[worldId] ? worldI
 export function p10Factor(worldId, k, noi) { const e = P10[(CFG[worldId] ? worldId : 'w1') + ':' + kOf(k)]; return noi ? e.fNoi : e.f; }
 /** Expected repair share of the down payment once the level-1 bucket is known (small < 15% of down: u < 0.4). */
 export const BUCKET_REP = Object.freeze({ none: 0, small: REP_MIN + REP_SPAN * 0.2, big: REP_MIN + REP_SPAN * 0.7 });
+/** The span [min, max] of the repair share of the down payment for a level-1 bucket (public: the bucket rule + the repair formula). */
+export const BUCKET_SPAN = Object.freeze({ none: Object.freeze([0, 0]), small: Object.freeze([REP_MIN, 0.15]), big: Object.freeze([0.15, REP_MIN + REP_SPAN]) });
 
 /**
  * Level-1 range around the TRUE value (its position inside the range comes from the sealed jitter draw, so the range
@@ -119,12 +121,15 @@ export const BUCKET_REP = Object.freeze({ none: 0, small: REP_MIN + REP_SPAN * 0
  */
 export function rangeOf(dd, truth) {
   const r10 = (x) => Math.round(x / 10) * 10; const j = dd.jitter;
+  // T2 verify D6: the value range sits at its own position, a scrambled function of the same sealed draw (no extra draw), so the
+  // value range says nothing about where the cashflow range sits around its truth (j ↦ frac(7919·j) is ~independent of j).
+  const jx = j * 7919; const jv = jx - Math.floor(jx);
   const w = truth.width ?? Math.max(50, Math.abs(truth.claimedBase ?? truth.base) * 0.3);
   const wv = truth.valueWidth ?? Math.abs(truth.claimedValue ?? truth.value) * 0.06;
   const down = Math.max(1, truth.down || 1);
   return {
     base: [r10(truth.base - w * j), r10(truth.base + w * (1 - j))],
-    value: [Math.round(truth.value - 2 * wv * j), Math.round(truth.value + 2 * wv * (1 - j))],
+    value: [Math.round(truth.value - 2 * wv * jv), Math.round(truth.value + 2 * wv * (1 - jv))],
     repair: !truth.repair ? 'none' : truth.repair < 0.15 * down ? 'small' : 'big',
   };
 }

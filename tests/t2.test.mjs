@@ -508,6 +508,24 @@ test('review M2: the level-1 inspection range widths come from the CLAIMED numbe
   }
 });
 
+test('T2 verify D5 + D6: the level-1 buy range spans the loan a repair in its bucket adds; the value range sits at its own position (not the cashflow jitter)', () => {
+  const card = { k: 'biz', n: 'עסק', d: 'x', cost: 200000, down: 40000, cf: 1500 }; // not a rental: rent tax is its own row on the card
+  let inside = 0, n = 0, posDiff = 0;
+  for (let i = 0; i < 60; i++) {
+    const r = prng(i + 101); const repair = r() < 0.3 ? 0 : 100 * Math.round((0.05 + 0.25 * r()) * 40000 / 100); const j = r();
+    const st = dealState('w1', card, { cash: 30000 + Math.round(r() * 20000), dd: { f: 0.6 + 0.4 * r(), vf: 0.85 + 0.15 * r(), jitter: j, repair, level: 1, risk: 2 } });
+    st.savings = 0; const ev = E.currentEvent(st); const buy = ev.options.find((o) => o.id === 'buy'); const R = ev.data.dd.range;
+    const m = /([−-]?₪[\d,]+)\s*עד\s*([−-]?₪[\d,]+)/.exec(buy.netLabel); assert.ok(m, buy.netLabel);
+    const num = (x) => (/[−-]/.test(x) ? -1 : 1) * +x.replace(/[^\d]/g, ''); const lo = num(m[1]), hi = num(m[2]);
+    const cf0 = E.metrics(st).cashflow; E.choose(st, ev, 'buy'); const d = E.metrics(st).cashflow - cf0; n++;
+    if (d >= lo - 10 && d <= hi + 10) inside++;
+    const vPos = (st.assets[st.assets.length - 1].value - R.value[0]) / Math.max(1, R.value[1] - R.value[0]);
+    if (Math.abs(vPos - j) > 0.05) posDiff++;
+    assert.ok(st.assets[st.assets.length - 1].value >= R.value[0] - 1 && st.assets[st.assets.length - 1].value <= R.value[1] + 1, 'the value range contains the true value');
+  }
+  assert.equal(inside, n, `the real Δcf is inside the buy button's range ${inside}/${n}`);
+  assert.ok(posDiff >= n * 0.8, `the value position is not the cashflow jitter (${posDiff}/${n})`);
+});
 test('review M1: the gauge is honest (lagged, noisy, correlated with the phase); research gives a real, limited edge — the phase-age report and the official figure 2 months earlier', () => {
   const CYm = E.CY; let agree = 0, n = 0, ripeOk = 0, reps = 0;
   for (let seed = 1; seed <= 40; seed++) {

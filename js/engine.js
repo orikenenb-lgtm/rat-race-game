@@ -1653,6 +1653,13 @@ function loanFor(st, amount) {
   return { need, ok: need === 0 || st.loans + need <= loanCap(st), monthly: Math.round((need * loanPct(st)) / 100) };
 }
 
+/** The monthly cost of buying for `amount` and then paying a repair of `rep`: the buy's loan, then cash, the emergency fund and a forced loan (as ensureCash). */
+function loanWithRepair(st, amount, rep) {
+  const L = loanFor(st, amount); const left = st.cash + L.need - amount + Math.max(0, st.savings || 0);
+  const unit = autoUnit(st); const extra = rep > left ? Math.ceil((rep - left) / unit) * unit : 0;
+  return { need: L.need + extra, monthly: Math.round(((L.need + extra) * loanPct(st)) / 100) };
+}
+
 /* ---------------------------------------------------------------- v3 describe helpers */
 /** "⚠ במשחק / 🌍 במציאות" line for a deal card (the game exaggerates on purpose — label it). */
 function dealReality(st, c, d) {
@@ -1939,7 +1946,9 @@ const DESCRIBE = {
     // a buy option: label + the ONE number that matters (cashflow after the cost of any loan it needs); o.net = the EXPECTED net
     const buyOpt = (id, text, amount, pr) => {
       const L = loanFor(st, amount + (B && B.level === 2 ? B.rep || 0 : 0)); const cfC = assetCf(st, pr); const cfE = atBase(pr, B ? B.base : null); const net = cfE - L.monthly; // review m2: a verified repair is part of the money you need
-      const shown = !B ? netLabel(net) : B.level === 0 ? prefix + netLabel(cfC - L.monthly) : B.level === 1 ? `${prefix}${fmtM(atBase(pr, B.lo) - L.monthly)} עד ${fmtM(atBase(pr, B.hi) - L.monthly)} בחודש` : prefix + netLabel(net);
+      // T2 verify D5: at level 1 the repair is only a bucket, so the range also spans the loan a repair in that bucket would add
+      const span = B && B.level === 1 ? DD.BUCKET_SPAN[B.range.repair] || [0, 0] : null;
+      const shown = !B ? netLabel(net) : B.level === 0 ? prefix + netLabel(cfC - L.monthly) : B.level === 1 ? `${prefix}${fmtM(atBase(pr, B.lo) - loanWithRepair(st, amount, r100(span[1] * Math.max(0, c.down))).monthly)} עד ${fmtM(atBase(pr, B.hi) - loanWithRepair(st, amount, r100(span[0] * Math.max(0, c.down))).monthly)} בחודש` : prefix + netLabel(net);
       const label = L.need ? `הלוואה ${fmtM(L.need)} ו${text}` : (id === 'buy' && w.mechanic !== 'fx' ? `לקנות ב־${fmtM(amount)}` : `${text} ב־${fmtM(amount)}`);
       const basis = { cf: cfE, vf: B ? B.value / Math.max(1, value) : 1, rep: B ? B.rep : 0 };
       if (B && B.r) basis.r = B.r.map((x) => ({ p: x.p, cf: atBase(pr, x.base), vf: x.value / Math.max(1, value), rep: x.rep }));
