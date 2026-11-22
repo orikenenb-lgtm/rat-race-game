@@ -602,7 +602,7 @@ async def t_fund(b):
         await pg.wait_for_timeout(250)
     chip = await pg.evaluate("(()=>{const c=document.querySelector('#hLife .lc.fund');const p=document.querySelector('#hLifeMore .lc.fund');return {vis:!!c&&!c.hidden&&c.getClientRects().length>0, txt:c?c.textContent:null, more:!!p, aria:c?c.getAttribute('aria-label'):null}})()")
     check(got, f'"★★★ דורש קרן חירום" shown once near the goal without the fund ({fx}; toasts {(await pg.evaluate("[...new Set(window.__toasts)]"))[:3]})')
-    check((chip['vis'] or chip['more']) and chip['txt'] and '/3' in chip['txt'] and 'שלושה כוכבים' in (chip['aria'] or ''), f'phone: the 🛟 chip shows months / 3 (in the row or behind "⋯") ({chip})')
+    check((chip['vis'] or chip['more']) and chip['txt'] and '/3' in chip['txt'] and 'שלושה כוכבים' in chip['txt'] and not chip['aria'], f'phone: the 🛟 chip shows months / 3 (accessible name = the visible text + a hidden suffix, label-in-name) (in the row or behind "⋯") ({chip})')
     await pg.wait_for_timeout(1500)
     fw = await pg.evaluate("(()=>{try{const s=JSON.parse(localStorage.getItem('rr2-save-free-w1')).state;return [s.ui&&s.ui.fundWarn, Object.keys(s.ui||{})]}catch(e){return String(e)}})()")
     check(isinstance(fw, list) and bool(fw[0]), f'the notice is recorded in the save (once per game) ({fw})')

@@ -611,8 +611,11 @@ async def test_nextlevel(b, phone=False):
     st2 = await pg.evaluate(SAVE_JS, 'rr2-save-free-w2')
     assert st2['life']['agenda'][0] == 'network', 'agenda slot 1 not set: %s' % st2['life']['agenda']
     log(tag, '  focus:', fid, '· agenda:', st2['life']['agenda'])
-    # 3) economy gauge
-    await pg.click('#hLife [data-life="econ"]')
+    # 3) economy gauge — on a phone the chip may sit behind "⋯" when the life row is full (T7 overflow; the 🛟 fund chip is shown there now)
+    if await pg.locator('#hLife > [data-life="econ"]:not([hidden])').count(): await pg.click('#hLife > [data-life="econ"]')
+    else:
+        await pg.click('#hLife > .lc.more'); await pg.wait_for_selector('#hLifeMore:not([hidden]) [data-life="econ"]', timeout=5000)
+        await pg.click('#hLifeMore [data-life="econ"]')
     await pg.wait_for_selector('#gm:not([hidden]) .econ.big', timeout=10000)
     log(tag, '  econ:', (await pg.inner_text('#gmCard')).replace('\n', ' | ')[:200])
     await pg.wait_for_timeout(300); await pg.screenshot(path=f'{SHOTS}/{PFX}econ{sfx}.png')
