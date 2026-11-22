@@ -736,7 +736,7 @@ test('history mode (real data): every scenario plays to the end; panic selling l
     const res = {};
     for (const strat of ['hold', 'panic']) {
       const st = E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7, mentor: 'guide' });
-      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass'; if (ev.type === 'business') id = ev.options.find((o) => ['pass', 'ok'].includes(o.id)).id;
+      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass'; if (ev.type === 'business') id = ev.options.find((o) => ['pass', 'ok'].includes(o.id)).id; if ((ev.type === 'payday' || ev.type === 'edu') && ev.options.find((o) => o.id === 'plan:work' && o.enabled)) id = 'plan:work'; /* the same plan in both runs: only the index decision differs */
         if (ev.type === 'trade' && !ev.data.lastResult) { if (strat === 'hold' && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } if (strat === 'panic' && st.prices.IDX < 80 && ev.data.maxSell > 0) { id = 'sell'; p = { qty: ev.data.maxSell }; } if (strat === 'panic' && st.prices.IDX >= 95 && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } }
         ev = E.choose(st, ev, id, p).event; } }
       assert.ok(st.over && st.month === sc.months + 1, sc.id + ' ended at ' + st.month);
