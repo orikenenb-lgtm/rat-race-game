@@ -1,1 +1,1 @@
-{"engineSha":"7f5b5ef06ed50652bb88c817cdead9c255e0763af36787057a0287f0a768af45","states":421,"describe":{"p50":0.03,"p95":0.13},"impactFor":{"n":742,"p50":0.643,"p95":1.802},"sim":{"games":78,"secs":23.925,"gamesPerSec":3.26}}
+{"engineSha":"d1d75867c5b63cf27aa1d504684b3d65e2a9dfc94a0c1022ef5f87af6907af03","states":408,"describe":{"p50":0.033,"p95":0.137},"impactFor":{"n":728,"p50":0.919,"p95":2.457},"sim":{"games":78,"secs":19.384,"gamesPerSec":4.02}}
