@@ -706,8 +706,24 @@ export function applyInflation(b0, pct) { const b = clone(b0); b.cpi = Math.roun
 /** Deterministic preview (no events, neutral luck): simulate `months` months with `decisions` applied first. */
 export function forecast(b, decisions = null, months = 1, opts = {}) {
   const out = []; let cur = b;
-  for (let i = 0; i < months; i++) { const r = simulate(cur, i === 0 ? decisions : null, () => 0.5, opts.cal ? { noEvents: true, cal: calPlus(opts.cal, i) } : { noEvents: true }); out.push(r.report); cur = r.business; }
+  for (let i = 0; i < months; i++) {
+    const so = opts.cal ? { noEvents: true, cal: calPlus(opts.cal, i) } : { noEvents: true };
+    const d = i === 0 ? decisions : null;
+    let r = simulate(cur, d, () => 0.5, so);
+    if (opts.restock != null && i >= opts.restock && cur.p.stock === 'inventory') { // the usual restock (see restockQty), so a cost or demand change reaches the goods you would buy
+      const q = restockQty(d && Object.keys(d).length ? applyDecisions(cur, d).business : cur, r.report.demand);
+      if (q > 0) r = simulate(cur, { ...(d || {}), order: ((d && d.order) || 0) + q }, () => 0.5, so);
+    }
+    out.push(r.report); cur = r.business;
+  }
   return { reports: out, business: cur, netProfit: out.reduce((s, r) => s + r.netProfit, 0), cashChange: out.reduce((s, r) => s + r.cash.change, 0) };
+}
+/** Units to order so stock + on order (+ already queued) covers lead time + 3 months of `demand` (as suggest()), in steps of 50. */
+export function restockQty(b, demand) {
+  const p = b.p; if (p.stock !== 'inventory') return 0;
+  const onOrder = b.orders.reduce((s, o) => s + o.units, 0) + b.queued.reduce((s, q) => s + (q.kind === 'order' ? q.units : 0), 0);
+  const need = demand * ((p.leadTime || 0) + 3) - b.stock - onOrder;
+  return need > 0 ? Math.ceil(need / 50) * 50 : 0;
 }
 
 /** Smart default for the decision card (the engine's `primary`): marketing/hiring by a 3-month (subscription: 12-month) forecast, stock to cover lead time + 3 months, a draw that keeps a cushion. */
@@ -1039,14 +1055,29 @@ export function eventChoices(b, opts = {}) {
     : d.id === 'buyerOffer' ? `${TEXT.buyerOffer} ההצעה: ${fmt(d.data.offer || 0)}.` : TEXT[d.id] || (b.p.eventText && b.p.eventText[d.id]) || (E && E.text) || '';
   const cs = T3_CHOICES[d.id](b);
   const def = cs.find((c) => c.default) || cs[0];
-  const f3 = (x) => forecast(x, null, 3, { cal: opts.cal });
+  const f3 = (x) => forecast(x, null, 3, { cal: opts.cal, restock: PREVIEW_RESTOCK[d.id] ?? 0 });
   const baseR = resolveEvent(b, d.key, def.id, { neutral: true }); const base = baseR.ok ? f3(baseR.business) : null;
   const choices = cs.map((c) => {
     let preview = { delta3: 0, cash3: 0 };
-    if (c.enabled && base && c.id !== def.id && !(d.id === 'buyerOffer')) { const r = resolveEvent(b, d.key, c.id, { neutral: true }); if (r.ok) { const f = f3(r.business); preview = { delta3: f.netProfit - base.netProfit, cash3: f.cashChange - base.cashChange - (r.cashNeeded || 0) }; } }
+    if (c.enabled && base && c.id !== def.id && !(d.id === 'buyerOffer')) {
+      const r = resolveEvent(b, d.key, c.id, { neutral: true });
+      if (r.ok) { const f = f3(r.business); preview = { delta3: f.netProfit - base.netProfit, cash3: f.cashChange - base.cashChange - (r.cashNeeded || 0) }; if (!preview.delta3 && !preview.cash3) preview.why = noEffectWhy(b, d.id, c.id); }
+    }
     return { id: c.id, label: c.label, note: c.note || '', enabled: c.enabled, reason: c.reason, default: !!c.default, odds: c.odds || null, risk: c.risk || null, preview, sale: c.sale || false };
   });
   return { key: d.key, id: d.id, month: d.m, title, text, choices, lessons: LESSONS_OF[d.id] || [], data: { ...d.data } };
+}
+/** Previews of inventory businesses assume the usual restock from this forecast month on (seasonPrep / customsDelay ARE this month's order: from month 1). */
+export const PREVIEW_RESTOCK = { seasonPrep: 1, customsDelay: 1 };
+/** Why a choice's 3-month preview is exactly zero (shown with the ₪0, so it never reads as a bug). */
+function noEffectWhy(b, id, choiceId) {
+  const p = b.p; const k = id + ':' + choiceId;
+  if (p.stock === 'inventory' && id === 'costSpike') return 'בשלושת החודשים הקרובים לא תזמין סחורה חדשה — העלייה תפגע רק בהזמנה הבאה.';
+  if (['staffQuit:cover', 'overload:temp', 'seasonPrep:temp'].includes(k)) return `כרגע יש מספיק ידיים לכל הלקוחות — עוד עזרה לא תמכור יותר${k === 'staffQuit:cover' && !b.manager ? '. זה עולה לך רק בכוח (🔋), לא בכסף' : ''}.`;
+  if (id === 'lateClient' && p.stock === 'inventory' && b.stock <= 0) return 'אין מלאי לספק את ההזמנה בחודש הבא — בלי סחורה אין מכירה.';
+  if (p.mode === 'subscription' && !b.users) return 'עוד אין מנויים — אין על מה שזה ישפיע.';
+  if (lastRev(b) <= 0) return 'אין כרגע מכירות — אין על מה שזה ישפיע.';
+  return 'בשלושת החודשים הקרובים זה לא משנה את הרווח או את הקופה — ההבדל מגיע רק אחר כך.';
 }
 /** T3 §6.6 M: is a season-prep decision due after calendar month `cal`? → {peak, title, kind, mult, label} | null */
 function seasonPrepFor(b, cal) {

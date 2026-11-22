@@ -442,9 +442,22 @@ test('U15 / §12.23 the 7 requested events open a decision with ≥ 2 enabled ch
     const def = ch.choices.find((c) => c.default);
     for (const c of ch.choices.filter((x) => x.enabled && !x.default && !x.sale)) {
       const r0 = BIZ.resolveEvent(b, ch.key, def.id, { neutral: true }), r1 = BIZ.resolveEvent(b, ch.key, c.id, { neutral: true });
-      const f0 = BIZ.forecast(r0.business, null, 3, { cal: 6 }), f1 = BIZ.forecast(r1.business, null, 3, { cal: 6 });
+      const fo = { cal: 6, restock: BIZ.PREVIEW_RESTOCK[id] ?? 0 }; // inventory previews include the usual restock (polish: no all-zero toyshop previews)
+      const f0 = BIZ.forecast(r0.business, null, 3, fo), f1 = BIZ.forecast(r1.business, null, 3, fo);
       assert.ok(Math.abs((f1.netProfit - f0.netProfit) - c.preview.delta3) <= 1, `${id}/${t}/${c.id} preview`);
+      if (!c.preview.delta3 && !c.preview.cash3) assert.ok(typeof c.preview.why === 'string' && c.preview.why.length > 10, `${id}/${t}/${c.id}: a zero preview says why`);
     }
+  }
+});
+test('polish: "הספקים העלו מחירים" in a toyshop with no stock and nothing on order — every other choice has a real (non-zero) 3-month preview', () => {
+  for (const stock of [0, 343]) {
+    let b = BIZ.simulate(BIZ.create('toyshop', { t3: true }), null, () => 0.5, { cal: 5, story: () => 0.5 }).business; b.decide = null;
+    b.stock = stock; if (!stock) { b.stockValue = 0; b.orders = []; }
+    b.decide = { key: b.month + ':costSpike', id: 'costSpike', m: b.month, seal: { a: 0.5, b: 0.5 }, data: {} };
+    b.effects.push({ id: 'costSpike', kind: 'cost', mult: 1.15, until: b.month + 2 });
+    const ch = BIZ.eventChoices(b, { cal: 6 });
+    for (const c of ch.choices.filter((x) => x.enabled && !x.default)) assert.ok(c.preview.delta3 !== 0 || c.preview.cash3 !== 0, `stock ${stock} ${c.id}: ${JSON.stringify(c.preview)}`);
+    const sw = ch.choices.find((c) => c.id === 'switch'); assert.ok(sw.preview.cash3 > 0, 'a cheaper supplier keeps cash in the business');
   }
 });
 test('U18 / §12.24 lateClient: receivable due at +2, +3 when late, written off as חוב אבוד when bad; VAT paid stays paid; frequencies ±3 pp of 25% / 8% over 10,000 sealed draws', () => {
