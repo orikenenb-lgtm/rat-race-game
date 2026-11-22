@@ -87,7 +87,16 @@ const engineIntro = (S) => !!(S && S.intro);
 
 /* ------------------------------------------------------------ legacy tutorial coaches (roll → meter → ROI), unchanged texts */
 const COACH_TOTAL = 3;
-function wantCoach(h, k) { const U = h.S && h.S.ui; return !!(h.CFG && h.CFG.tutorial && U && U.coach && !U.coach.skip && !U.coach[k]); }
+/** §4.1 / AC-T1 (T4 verify D1): "דלג על ההדרכה" — on intro beat 1 or on a core coach — ends every tutorial coach of this game for
+ *  good. The intro skip is recorded by the engine (S.intro.step 'skipped') and by the reveal state; both are folded into
+ *  S.ui.coach.skip (saved with the game), so a resumed / re-rendered game never brings a coach back. */
+function tutorialSkipped(S) { const U = S && S.ui; return !!(U && ((U.coach && U.coach.skip) || (U.reveal && U.reveal.skipped) || (S.intro && S.intro.step === 'skipped'))); }
+function markSkipped(S) { const U = S && S.ui; if (!U) return false; if (!U.coach || typeof U.coach !== 'object') U.coach = {}; if (U.coach.skip) return false; U.coach.skip = true; return true; }
+function wantCoach(h, k) {
+  const U = h.S && h.S.ui; if (!(h.CFG && h.CFG.tutorial && U)) return false;
+  if (tutorialSkipped(h.S)) { if (markSkipped(h.S)) h.persist(); return false; }
+  return !!(U.coach && !U.coach[k]);
+}
 async function showCoach(h, k, o) {
   const U = h.S.ui; U.coach[k] = true; h.persist();
   const step = ['roll', 'meter', 'roi'].filter((x) => U.coach[x]).length;
@@ -186,6 +195,7 @@ export function onCard(ev, ctl, h) {
 /** A card closed. The engine intro card (E-3) ends the tutorial core: bus 'onboard:done' {reason:'done'|'skip'}. */
 export function onCardClosed(ev, res, h) {
   if (ev && ev.type === 'intro') emitDone(h, h.S && h.S.intro && h.S.intro.step === 'skipped' ? 'skip' : 'done');
+  if (ev && ev.type === 'intro' && h && h.S && h.S.intro && h.S.intro.step === 'skipped' && markSkipped(h.S)) h.persist();   // AC-T1: no coach after the skip
   const S = h && h.S; const R = S && S.ui && S.ui.reveal;
   if (!ev || !R || R.skipped) return;
   let ch = false;

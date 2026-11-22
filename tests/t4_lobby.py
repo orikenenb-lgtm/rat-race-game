@@ -332,6 +332,52 @@ async def t_first_minute(b, path):
             check(turn.get('tutorialFree') is True and e is not None and e.get('e') == 7, f'D-9 the first-ever game: its roll cost no ⚡ (seeded 7 → {e and e.get("e")}; tutorialFree={turn.get("tutorialFree")})')
         await ctx.close()
 
+COACH_TXT = "(()=>{const c=document.getElementById('coach');return c&&!c.hidden?(c.querySelector('.bubble small')||{}).textContent+' · '+(c.querySelector('.bubble b')||{}).textContent:''})()"
+async def t_skip(b):
+    """AC-T1 (T4 verify D1): after intro beat 1 "דלג על ההדרכה" no tutorial coach opens — not after the start, not after rolls,
+    not after a reload (3 independent runs, phone, brand-new player)."""
+    for run in (1, 2, 3):
+        ctx, pg = await page(b, vp=PHONE, onboarded=False)
+        await pg.goto(REAL); await pg.wait_for_selector('.lb-welcome', timeout=60000)
+        await pg.click('[data-act=welcome-go]')
+        await pg.wait_for_selector('[data-intro-opt="skip"]:not([disabled])', timeout=90000)
+        await pg.click('[data-intro-opt="skip"]')
+        await pg.wait_for_function("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()", timeout=30000)
+        seen = []
+        for _ in range(16):   # the roll coach used to open ~0.7–2 s after the skip: watch 4 s
+            t = await pg.evaluate(COACH_TXT)
+            if t: seen.append(t)
+            await pg.wait_for_timeout(250)
+        p = await ls(pg, 'rr2-progress'); sv = await ls(pg, 'rr2-save-free-w1') or {}
+        ui = ((sv.get('state') or {}).get('ui') or {})
+        check(not seen and p.get('tutorialDone') is True and (ui.get('coach') or {}).get('skip') is True,
+              f'AC-T1 run {run}: no coach after the skip ({seen}); tutorialDone={p.get("tutorialDone")}; saved ui.coach.skip={(ui.get("coach") or {}).get("skip")}')
+        for _ in range(3):   # rolls: no "הדרכה" coach (meter / ROI) and no tip in the skipped game
+            await pg.click('#roll')
+            for _ in range(40):
+                t = await pg.evaluate(COACH_TXT)
+                if t: seen.append(t); await pg.evaluate("document.querySelector('#coach [data-c=next]')?.click()")
+                if await pg.locator('#evm:not([hidden])').count():
+                    await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()")
+                if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()")
+                if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled && document.getElementById('evm').hidden && document.getElementById('gm').hidden})()"): break
+                await pg.wait_for_timeout(300)
+            await pg.wait_for_timeout(900)
+            t = await pg.evaluate(COACH_TXT)
+            if t: seen.append(t)
+        await pg.reload(); await pg.wait_for_selector('.lb-home', timeout=60000)
+        await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()")
+        await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
+        if await pg.locator('[data-act=continue-free]').count():
+            await pg.evaluate("document.querySelector('[data-act=continue-free]').click()")
+            await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+            for _ in range(12):
+                t = await pg.evaluate(COACH_TXT)
+                if t: seen.append(t)
+                await pg.wait_for_timeout(250)
+        check(not seen, f'AC-T1 run {run}: 3 rolls + a reload of the skipped game show no coach ({seen})')
+        await ctx.close()
+
 async def drive(pg, rolls):
     """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button)."""
     n = 0; deadline = time.time() + 60 * 18
@@ -449,7 +495,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:
