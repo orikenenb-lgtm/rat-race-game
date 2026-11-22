@@ -446,6 +446,9 @@ async def test_v32(b, phone=False):
     s = await force_card(pg, 'w1', 'K', {'cash': 90000}, 'business')
     assert s['type'] == 'business', 'K tile did not open a business card: ' + json.dumps(s, ensure_ascii=False)
     await pg.wait_for_timeout(500); await pg.screenshot(path=f'{SHOTS}/{PFX}biz_offer{sfx}.png')
+    # T3 (rules 4) layered offer: the active/passive explanation sits one tap away in "איך עובד עסק במשחק" — open it, then it must show
+    if not await pg.is_visible('#evCard .bizkind') and await pg.locator('#evCard details.bizmore > summary').count():
+        await pg.click('#evCard details.bizmore > summary'); await pg.wait_for_timeout(200)
     assert await pg.is_visible('#evCard .bizkind'), 'business offer: active/passive explanation missing'
     await pg.click('#evCard [data-o="start"]'); hit['business'] = 1
     await verdict_seen(pg, tag, f'verdict_after_biz{sfx}')
