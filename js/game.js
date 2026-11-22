@@ -645,18 +645,20 @@ async function startInner(cfg, my) {
     scene.syncCity(E.cityModels(S), { silent: true });
     syncLevels(false);
     OV.hideLoading();
+    ui.flushFeedback?.({ toasts: false });   // T5 §4.2: the last game's queued cards / verdicts / reveal lines are not this game's
     ui.resetHud();
     frame(); scene.resetCamera();
     try { scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK); } catch (e) { console.warn(e); }   // T5 CR-B5
-    if (!resumed && !S.over && !onboard.worldCoached(W.id)) { try { scene.introWorld?.(); } catch (e) { console.warn(e); } } // first game in this world
+    const firstInWorld = !resumed && !S.over && !onboard.worldCoached(W.id);
+    if (firstInWorld) { try { scene.introWorld?.(); } catch (e) { console.warn(e); } } // first game in this world
     onboard.prepare?.(S, CFG, W);   // T4 §4.3: the gradual-reveal state of a new tutorial game (before the first HUD paint)
     render(false);
     frame(false);   // T1 verify D-1: the first render added the HUD's life row — frame the board to the settled free rect
     ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
     const intro = E.intro(S, resumed);
     ui.mentor(intro.mentor);
-    ui.worldBanner(W, resumed ? `חזרת לחודש ${S.month}` : ui.goalWords(W.goalLabel));
-    if (!resumed) sfx('card');
+    if (firstInWorld && ui.feedback) { ui.feedback('worldEntry', { world: W }); sfx('unlock'); }   // T5 §4.1 world entry: T5-W1 "עולם חדש נפתח"
+    else { ui.worldBanner(W, resumed ? `חזרת לחודש ${S.month}` : ui.goalWords(W.goalLabel)); if (!resumed) sfx('card'); }
     syncLiteBtn();
     rendererNotice();
     if (note === 'migrated') ui.toast(SS.S2);

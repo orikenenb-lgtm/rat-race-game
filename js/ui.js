@@ -64,8 +64,12 @@ const tq = []; let tBusy = false, tWait = 0;
 /** Short message pill under the HUD (queued). kind: ''|'gold'|'bad' */
 export function toast(text, opts = {}) {
   if (!text) return;
-  tq.push({ text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null, sub: opts.sub ? String(opts.sub) : '' });
-  if (tq.length > 4) tq.splice(0, tq.length - 4);
+  // T5 §4.2 rules 5–6 (T5 verify D1): identical consecutive texts are dropped; the queue keeps 6 and drops the OLDEST ordinary item
+  // first — important feedback (opts.keep: level-down, milestones; every 'bad' toast) is never dropped
+  const it = { text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null, sub: opts.sub ? String(opts.sub) : '', keep: !!opts.keep || opts.kind === 'bad' };
+  const last = tq[tq.length - 1]; if (last && last.text === it.text && last.sub === it.sub && !it.action) return;
+  tq.push(it);
+  while (tq.length > 6) { const i = tq.findIndex((x) => !x.keep); if (i < 0) break; tq.splice(i, 1); }
   if (!tBusy) nextToast();
 }
 function nextToast() {
@@ -73,7 +77,7 @@ function nextToast() {
   if (!tq.length) { tBusy = false; return; }
   // T2 verify D7 / T1 D-2: on phones a toast never floats over an open card, dialog or the life story (same rule as the verdict pill):
   // it waits (no timer races, nothing dropped but the queue cap) and shows once the board is clear
-  if (phoneQ() && (evState || shown('#gm') || shown('#story'))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); return; }
+  if (fbHold || (phoneQ() && (evState || shown('#gm') || shown('#story')))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); return; }
   const t = tq.shift();
   tBusy = true;
   el.className = 'on ' + t.kind + (t.action ? ' act' : '') + (t.sub ? ' two' : '') + (t.text.length > 64 ? ' long' : '');
@@ -88,14 +92,15 @@ function nextToast() {
     b.onclick = () => { try { t.action.fn(); } catch (e) { console.error(e); } el.className = t.kind; };
     el.appendChild(b);
   }
-  const ms = t.ms || Math.max(1300, Math.min(t.sub ? 5200 : 3200, 900 + (t.text.length + t.sub.length) * 38)) * (tq.length ? 0.75 : 1) * (t.action ? 2.4 : 1);
+  const ms = t.ms || Math.max(1300, Math.min(t.sub ? 5200 : 3200, 900 + (t.text.length + t.sub.length) * 38)) * (tq.length ? 0.75 : 1) * (t.action ? 2.4 : 1) * Math.max(0.5, Math.min(1, speed));   // §4.2 rule 4: × speed in turbo
   setTimeout(() => { el.className = t.kind; setTimeout(nextToast, 260); }, ms);
 }
 
 /* ============================================================ phone overlay queue (T5 / T4 §4.7, UX§4 fix 2)
    On phones (≤ 600 px) at most ONE of coach / achievement / lesson / rumour (newspaper) / verdict floats above the board.
    A coach bubble holds everything; the rest is released one by one by priority. Desktop shows them as before. */
-const OVP = { achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };
+const OVP = { levelUp: 1, worldEntry: 1, achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };   // T5 §4.2 rule 3
+let fbHold = false;   // T5 §4.2 holdFeedback(true): B / C / D wait (e.g. while the T4 coach or the T1 recover bar is up)
 const ovq = []; let ovBusy = null, ovT = 0;
 const phoneQ = () => innerWidth <= 600;
 const coachOpen = () => { const c = $('#coach'); return !!c && !c.hidden; };
@@ -111,6 +116,7 @@ function overlay(kind, show) {
 function pumpOv() {
   clearTimeout(ovT);
   if (ovBusy || !ovq.length) return;
+  if (fbHold) { ovT = setTimeout(pumpOv, 400); return; }
   // T7: a verdict that waited behind a T6 reveal line (it holds the slot until tapped or the next roll) is about a decision long gone
   if (ovq[0].kind === 'verdict' && ovq[0].behindRival && performance.now() - ovq[0].t > 9000) { ovq.shift(); ovT = setTimeout(pumpOv, 50); return; }
   if (coachOpen() || (ovq[0].kind === 'verdict' && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
@@ -137,20 +143,21 @@ const coversContent = () => !!evState || shown('#gm') || shown('#story') || lobb
 const aq = []; let aBusy = false;
 /** Celebratory slide-in card with sound (used for achievements and unlocks). */
 export function achievementToast(a = {}) {
-  aq.push(a);
+  if (a.first) { const i = aq.findIndex((x) => !x.first); aq.splice(i < 0 ? aq.length : i, 0, a); } else aq.push(a);   // §4.2 rule 3: level-up / world entry first
   if (!aBusy) nextAch();
 }
 function nextAch() {
   const box = $('#achv'); if (!box) return;
   const a = aq.shift(); if (!a) { aBusy = false; return; }
   aBusy = true;
-  overlay('achievement', (done) => {
-    const icon = a.icon && String(a.icon).length <= 4 ? `<span class="emo" aria-hidden="true">${esc(a.icon)}</span>` : ICON.medal;
+  overlay(a.kind || 'achievement', (done) => {
+    const icon = a.pips ? `<span class="pips" aria-hidden="true">${[1, 2, 3].map((i) => `<i class="${i <= a.pips.n ? 'on' : ''}"></i>`).join('')}</span>`
+      : a.icon && String(a.icon).length <= 4 ? `<span class="emo" aria-hidden="true">${esc(a.icon)}</span>` : ICON.medal;
     box.innerHTML = `<div class="ach" role="status"><div class="medal">${icon}</div><div><small>${esc(a.label || 'הישג חדש!')}</small><b>${escI(a.name || '')}</b>${a.desc ? `<p>${escI(a.desc)}</p>` : ''}</div></div>`;
     const card = box.firstElementChild;
     sfx(a.sound || 'achievement'); vibrate([12, 40, 18]);
     requestAnimationFrame(() => card.classList.add('in'));
-    setTimeout(() => { card.classList.remove('in'); card.classList.add('out'); setTimeout(() => { box.innerHTML = ''; done(); nextAch(); }, 380); }, 3300);
+    setTimeout(() => { card.classList.remove('in'); card.classList.add('out'); setTimeout(() => { box.innerHTML = ''; done(); nextAch(); }, 380); }, 2600 * Math.max(0.5, Math.min(1, speed)));   // §4.2: B hold 2.6 s (× speed in turbo)
   });
 }
 
@@ -240,7 +247,7 @@ export function worldBanner(w, sub = '') {
   const el = $('#banner'); if (!el) return;
   el.innerHTML = `<small>עולם ${w.order}</small><b>${esc(w.name)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
   el.className = 'banner'; void el.offsetWidth; el.className = 'banner in';
-  clearTimeout(el._t); el._t = setTimeout(() => { el.className = 'banner out'; }, 2300);
+  clearTimeout(el._t); el._t = setTimeout(() => { el.className = 'banner out'; }, (450 + 1600) * Math.max(0.5, Math.min(1, speed)));   // T5 §4.1: in 450, hold 1.6 s, out 350
 }
 
 /* ============================================================ HUD */
@@ -259,7 +266,7 @@ export function setCash(v, animate = true) {
     cashRaf = requestAnimationFrame(step);
   } else el.textContent = money(v);
 }
-export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; }
+export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; }
 export function setMonth(month, max) {
   const el = $('#hMonth'); if (!el) return;
   el.innerHTML = max ? `${month}<small>/${max}</small>` : String(month);
@@ -297,6 +304,8 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   } else { box.innerHTML = ''; box.hidden = true; }
   $('#hWorld').classList.toggle('noind', !key);
   renderLife(m, ctx);
+  // T5-C1: the board's accessible name says how many assets the city holds (details are in the sheet)
+  const cv = $('#c'); if (cv) { const n = (m.assets || []).length; const t = n ? `לוח המשחק. בעיר שלך ${n === 1 ? 'נכס אחד' : n + ' נכסים'}. פרטים על כל נכס בדוח הכספי.` : 'לוח המשחק. עדיין אין נכסים בעיר.'; if (cv.getAttribute('aria-label') !== t) cv.setAttribute('aria-label', t); }
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
   const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : 'יעד העולם';
@@ -310,6 +319,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
       '<div class="gsub num"></div>';
   }
   g.querySelector('.gl b').textContent = pc + '%';
+  if (m.goalType !== 'benchmark') milestoneCheck(pc);
   const bars = g.querySelectorAll('.gbar');
   parts.forEach((p, i) => {
     const b = bars[i]; if (!b) return;
@@ -1967,7 +1977,7 @@ export function assetInfo(key, info, ctx = {}) {
     ${info.levelText ? `<div class="alevel">${pips}<b>${esc(info.levelText)}</b>${info.levelHint ? `<small>${escI(info.levelHint)}</small>` : ''}</div>` : ''}
     ${info.activity ? `<p class="chipline"><em class="b"><span aria-hidden="true">${esc(info.activity.emoji || '')}</span> ${esc(info.activity.text || '')}</em></p>` : ''}`;
   const acts = [];
-  if (info.business && ctx.opsOpen) acts.push({ label: '🏪 לוח העסק', cls: 'primary', v: 'ops' });
+  if (info.business && ctx.opsOpen) acts.push({ label: 'לנהל את העסק', cls: 'primary', v: 'ops' });
   if (info.sheetRow) acts.push({ label: 'לדוח הכספי', cls: acts.length ? '' : 'primary', v: 'sheet' });
   acts.push({ label: 'סגירה', cls: acts.length ? '' : 'primary', v: undefined });
   return modal({ tag: info.kindLabel || 'פרטי הנכס', color: '#0e7490', title: info.title || '', html, actions: acts, dismissable: true, cls: 'ainfo' }).then((v) => {
@@ -1977,10 +1987,50 @@ export function assetInfo(key, info, ctx = {}) {
   });
 }
 /** T5 CR-B1: a business changed stage (the scene already animates the building). */
-export function feedback(kind, { level, name } = {}) {
-  if (!level) return;
-  if (kind === 'levelUp') { toast(`⬆️ ${name ? name + ': ' : ''}שלב ${level.n} מתוך ${level.of || 3}`, { kind: 'gold' }); announce(`${name || 'העסק'} עלה לשלב ${level.n}`); }
-  if (kind === 'levelDown') { toast(`⬇️ ${name ? name + ': ' : ''}ירד לשלב ${level.n}`, { kind: 'bad' }); announce(`${name || 'העסק'} ירד לשלב ${level.n}`); }
+/**
+ * T5 §4.2 one feedback entry point. kind ∈ levelUp | levelDown | achievement | worldEntry | milestone | toast | lesson | verdict.
+ * B channel (#achv card, never dropped, first in line): levelUp, worldEntry, achievement. C channel (#toast): levelDown (kept),
+ * milestone (kept), toast, lesson. D: verdict. Holds and turbo / reduced motion follow the channels above.
+ */
+export function feedback(kind, p = {}) {
+  const { level, name } = p;
+  if (kind === 'levelUp') {
+    if (!level) return;
+    const label = level.label || '';
+    achievementToast({ kind: 'levelUp', first: true, label: T5S.U1, name: name || 'העסק', desc: fillT(T5S.U2, { n: level.n, label }), pips: { n: level.n }, sound: 'none' });
+    announce(`${name || 'העסק'}: ${fillT(T5S.U2, { n: level.n, label })}`);
+    return;
+  }
+  if (kind === 'levelDown') {
+    if (!level) return;
+    const t = fillT(T5S.D1, { name: name || 'העסק', label: level.n === 0 ? 'בהתחלה' : level.label || '' });
+    sfx('loss'); toast('⚠️ ' + t, { kind: 'bad', keep: true }); announce(t);
+    return;
+  }
+  if (kind === 'milestone') { const t = T5S.M[p.q]; if (t) { sfx('coin'); toast('🎯 ' + t, { kind: 'gold', keep: true }); } return; }
+  if (kind === 'worldEntry') { if (p.world) worldBanner(p.world, T5S.W1); return; }
+  if (kind === 'achievement') return achievementToast(p);
+  if (kind === 'lesson') return lessonToast(p.list || [], p.open);
+  if (kind === 'verdict') return verdict(p.decision || p, p.opts || {});
+  if (kind === 'toast') return toast(p.text, p);
+}
+const T5S = { U1: 'העסק התקדם!', U2: 'שלב {n} מתוך 3 · {label}', D1: '{name}: חזרה לשלב "{label}". כדאי להציץ בלוח העסק.', W1: 'עולם חדש נפתח',
+  M: { 1: 'רבע מהדרך לחופש!', 2: 'חצי מהדרך לחופש!', 3: 'שלושה רבעים מהדרך. כמעט שם!' } };
+/** T5 §4.2: hold B / C / D (true) or release them (false) */
+export function holdFeedback(on) { fbHold = !!on; if (!fbHold) { pumpOv(); if (tq.length && !tBusy) nextToast(); } }
+/** T5 §4.2: drop everything queued (a new game / back to the lobby); what is on screen finishes on its own.
+ *  {toasts:false} keeps the C pills (shell notices such as the T1 save / renderer messages are queued around a game start). */
+export function flushFeedback({ toasts = true } = {}) {
+  if (toasts) tq.length = 0;
+  aq.length = 0; ovq.length = 0; clearTimeout(ovT); fbHold = false;
+  const c = stickyCur; stickyCur = null; const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; } if (c) c.done();
+}
+/* T5 §4.1 progress milestones: 25 / 50 / 75 % of the freedom meter, once per game each (a resumed game starts from where it is) */
+let msBase = null;
+function milestoneCheck(pc) {
+  const q = Math.min(3, Math.floor(pc / 25));
+  if (msBase == null) { msBase = q; return; }
+  if (q > msBase) { const top = q; msBase = q; feedback('milestone', { q: top }); }
 }
 
 /* ============================================================ T6: rivals panel, deal competition outcomes, practice rewind chrome */
