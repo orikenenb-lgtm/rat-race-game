@@ -33,6 +33,9 @@ export const vatOn = (net) => rnd((net * VAT_PCT) / 100);
 export const netOf = (gross) => gross - vatOf(gross);
 const groups = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 /** Same format as engine.fmt: "₪1,234" / "−₪50". */
+/** Hebrew month counts: 1 → "חודש", 2 → "חודשיים", else "n חודשים"; moL = after the prefix ל (ל־3 חודשים / לחודש / לחודשיים). */
+const mo = (n) => (n === 1 ? 'חודש' : n === 2 ? 'חודשיים' : `${n} חודשים`);
+const moL = (n) => (n === 1 || n === 2 ? mo(n) : `־${n} חודשים`);
 export function fmt(n) { const r = rnd(n); return (r < 0 ? '−' : '') + '₪' + groups(Math.abs(r)); }
 const sgn = (n) => (rnd(n) > 0 ? '+' : '') + fmt(n);
 const pct1 = (x) => Math.round(x * 1000) / 10;              // 0.1234 → 12.3 (display only)
@@ -425,7 +428,7 @@ export function simulate(b0, decisions, rng, opts = {}) {
     if (E.delay) { if (b.orders.length) b.orders.forEach((o) => { o.arrive += E.delay; }); else ev.text = 'הנמל עמוס — טוב שלא היה לך משלוח בדרך.'; }
     if (E.extra) extra = p.mode === 'subscription' ? rnd(p.baseNew * 3) : rnd((p.baseDemand || 0) * E.extra);
     if (t3 && E.extra) extra = 0; // (bigClient is not in a T3 table; lateClient is a decision)
-    ev.effect = E.demand ? `ביקוש ×${E.demand} ל־${E.months} חודשים` : E.cost ? (lfx ? `הוצאות קבועות +${rnd((E.cost - 1) * 100)}% ל־${E.months} חודשים` : `עלות המוצר +${rnd((E.cost - 1) * 100)}% ל־${E.months} חודשים`) : E.cap ? 'קיבולת −30% החודש' : E.oneOff && oneOffs.length ? `הוצאה חד־פעמית ${fmt(oneOffs[oneOffs.length - 1].amount)}` : E.extra ? `+${extra} ${p.unit} החודש` : '';
+    ev.effect = E.demand ? `ביקוש ×${E.demand} ל${moL(E.months)}` : E.cost ? (lfx ? `הוצאות קבועות +${rnd((E.cost - 1) * 100)}% ל${moL(E.months)}` : `עלות המוצר +${rnd((E.cost - 1) * 100)}% ל${moL(E.months)}`) : E.cap ? 'קיבולת −30% החודש' : E.oneOff && oneOffs.length ? `הוצאה חד־פעמית ${fmt(oneOffs[oneOffs.length - 1].amount)}` : E.extra ? `+${extra} ${p.unit} החודש` : '';
     events.push(ev);
     if (t3 && !opts.noEvents && T3_CHOICES[id] && eventDecides(b, id)) cands.push({ id, prio: 2 });
   }
@@ -859,7 +862,7 @@ function teach(b, r, prev) {
     let best = null, bestD = 0; for (const k of keys) { const d = (r.opex[k] || 0) - ((prev.opex && prev.opex[k]) || 0); if (d > bestD) { bestD = d; best = k; } }
     note('rev_up_profit_down', 100, `ההכנסות עלו ב־${fmt(r.revenue - prev.revenue)}, אבל הרווח הנקי ירד ב־${fmt(prev.netProfit - r.netProfit)}${best ? ` — ${names[best]} עלה ב־${fmt(bestD)}` : ''}. יותר מחזור ≠ יותר רווח.`, 'biz_revenue_profit');
   }
-  if (r.sub && r.ebt < 0) note('burn', 88, `קצב שריפה: ${fmt(r.sub.burn)} בחודש. ${r.sub.runway != null ? `בקופה נשאר מספיק לעוד ${r.sub.runway} חודשים.` : ''} ${p.unit}: ${r.sub.users} (+${r.sub.newUsers}, −${r.sub.churned}).`, 'biz_burn');
+  if (r.sub && r.ebt < 0) note('burn', 88, `קצב שריפה: ${fmt(r.sub.burn)} בחודש. ${r.sub.runway != null ? `בקופה נשאר מספיק לעוד ${mo(r.sub.runway)}.` : ''} ${p.unit}: ${r.sub.users} (+${r.sub.newUsers}, −${r.sub.churned}).`, 'biz_burn');
   if (r.sub && r.sub.cac != null) note('ltv_cac', r.sub.cac > r.sub.ltv ? 80 : 30, `כל מנוי מפרסום עלה ${fmt(r.sub.cac)}, ומשאיר בממוצע ${fmt(r.sub.ltv)} עד שהוא עוזב.${r.sub.cac > r.sub.ltv ? ' כל לקוח חדש מעמיק את ההפסד!' : ''}`, 'biz_ltv_cac');
   if (r.netProfit < 0 && !r.sub) note('loss', 90, `החודש העסק הפסיד ${fmt(-r.netProfit)}, למרות מחזור של ${fmt(r.revenueGross)}. הוצאות קבועות לא מחכות שהלקוחות יגיעו.`, 'biz_revenue_profit');
   if (prev && prev.price !== r.price && prev.units > 0) {
@@ -1210,9 +1213,9 @@ export function signature(b) {
   const r = b.hist[b.hist.length - 1] || null; const p = b.p;
   switch (b.type) {
     case 'coffee': case 'laundromat': { const cap = capacity(b); const u = r ? r.units : 0; const v = cap ? Math.round(u / cap * 100) : 0; return { label: SIGNATURE[b.type], value: v, text: `${v}% מהקיבולת` }; }
-    case 'toyshop': { const exp = Math.max(1, b.lastUnits || p.baseDemand || 1); const v = Math.round(b.stock / exp * 10) / 10; return { label: SIGNATURE.toyshop, value: v, text: `${v} חודשים · ${fmt(b.stockValue)} תקועים במלאי` }; }
+    case 'toyshop': { const exp = Math.max(1, b.lastUnits || p.baseDemand || 1); const v = Math.round(b.stock / exp * 10) / 10; return { label: SIGNATURE.toyshop, value: v, text: `${mo(v)} · ${fmt(b.stockValue)} תקועים במלאי` }; }
     case 'pizza': { const v = r && r.rev ? Math.round(r.np / r.rev * 100) : 0; return { label: SIGNATURE.pizza, value: v, text: `${fmt(v)} מכל ₪100` }; }
-    case 'app': { const burn = r && r.np < 0 ? -r.np : 0; const v = burn ? Math.floor(Math.max(0, b.cash) / burn) : null; return { label: SIGNATURE.app, value: v, text: v == null ? 'העסק לא שורף כסף' : `${v} חודשים` }; }
+    case 'app': { const burn = r && r.np < 0 ? -r.np : 0; const v = burn ? Math.floor(Math.max(0, b.cash) / burn) : null; return { label: SIGNATURE.app, value: v, text: v == null ? 'העסק לא שורף כסף' : mo(v) }; }
     default: return null;
   }
 }

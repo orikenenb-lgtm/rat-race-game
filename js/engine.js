@@ -82,7 +82,13 @@ const r10 = (x) => Math.round(x / 10) * 10;
 const r100 = (x) => Math.round(x / 100) * 100;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 /** Fill {placeholders}. Numbers must be pre-formatted by the caller. */
-export function tpl(s, vars = {}) { return String(s ?? '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)); }
+export function tpl(s, vars = {}) { return heMonthFix(String(s ?? '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m))); }
+/** Hebrew month counts: 1 → "חודש", 2 → "חודשיים", n → "n חודשים" (integers; decimals stay "1.5 חודשים"). */
+export function heMonths(n) { return n === 1 ? 'חודש' : n === 2 ? 'חודשיים' : `${n} חודשים`; }
+/** Fix a filled template's "1 חודשים" / "2 חודשים" / "1 חודשי …" (a whole number, not part of 11 / 1.5 / 1,000). */
+export function heMonthFix(s) { return String(s).replace(/(^|[^\u05D0-\u05EA])([לב])־1 חודשים/g, '$1$2חודש').replace(/(^|[^\u05D0-\u05EA])([לב])־2 חודשים/g, '$1$2חודשיים').replace(/(^|[^\d.,])1 חודשים/g, '$1חודש').replace(/(^|[^\d.,])2 חודשים/g, '$1חודשיים').replace(/(^|[^\d.,])1 חודשי /g, '$1חודש '); }
+/** "סימן אזהרה אחד" / "n סימני אזהרה". */
+const warnSigns = (n) => (n === 1 ? 'סימן אזהרה אחד' : `${n} סימני אזהרה`);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 /* ============================================================ create / save */
@@ -721,7 +727,7 @@ function indexProjection(st) {
 /** קרן חירום: the savings account measured in months of expenses (target 3). */
 function emergencyOf(st, expenses) {
   const months = expenses > 0 ? Math.round((st.savings / expenses) * 10) / 10 : 0;
-  return { balance: st.savings, months, target: 3, covered: months >= 3, rate: round2(savingsRate(st) * 100), text: `קרן חירום: ${months} חודשי הוצאות` };
+  return { balance: st.savings, months, target: 3, covered: months >= 3, rate: round2(savingsRate(st) * 100), text: heMonthFix(`קרן חירום: ${months} חודשי הוצאות`) };
 }
 function totalAssetsOf(st) { return Math.round(st.cash + (st.savings || 0) + holdingsValue(st) + angelPaper(st) + st.assets.reduce((x, a) => x + assetValue(st, a), 0)); }
 /** ₪ change in monthly cashflow if the dollar moves +10% (unhedged assets + USD salary). Used by the w3 HUD. */
@@ -2540,7 +2546,7 @@ function dealBuy(ctx, ev, o, cut = 0) {
   else if (dd && dd.level === 1 && b.lo != null) evi2 = 0.5 * Math.max(0, money(b.lo, vfE, repE) / ctx.E - pen) + 0.5 * Math.max(0, money(b.hi, vfE, repE) / ctx.E - pen) - Math.max(0, U);
   const reasons = [R('net', `לפי מה שידוע: בערך ${fmtM(o.net + cfAdd)} בחודש אחרי עלות ההלוואה`, (o.net + cfAdd) * 24 / ctx.E),
     R('cushion', `אחרי זה תישאר כרית של ${round2(Math.max(0, cush.after)).toFixed(1)} חודשים`, cush.flagged ? -4 : cush.after < 2 ? -0.3 : 0.05)];
-  if (dd && dd.level === 0 && dd.flags.filter((f) => f.kind === 'warn').length) reasons.push(R('flags', `יש ${dd.flags.filter((f) => f.kind === 'warn').length} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, Math.max(0.2, evi2)));
+  if (dd && dd.level === 0 && dd.flags.filter((f) => f.kind === 'warn').length) reasons.push(R('flags', `יש ${warnSigns(dd.flags.filter((f) => f.kind === 'warn').length)} — בדיקה יכולה לשנות את ההחלטה`, Math.max(0.2, evi2)));
   if (value0 !== cost && ctx.nwWeight >= 1) reasons.push(R('price', `המחיר ${value0 > cost ? 'מתחת' : 'מעל'} השווי ב־${fmtM(Math.abs(value0 - cost))}`, ctx.nwWeight * (value0 - cost) / ctx.E));
   if (o.loanAmount) reasons.push(R('debt', `הלוואה ב־${round2(ctx.loanPct)}% בחודש`, -(o.loanMonthly || 0) * 24 / ctx.E));
   if (ctx.econ && (ctx.econ.label === 'מיתון' || ctx.econ.label === 'האטה')) reasons.push(R('signal', `מד הכלכלה מראה ${ctx.econ.label} — כרית גדולה יותר נותנת מרחב`, 0.05));
@@ -2571,7 +2577,7 @@ function optionU(ctx, ev, o, params) {
         if (flaggedInspect(ev) === o.id) U = Math.max(U, base + 0.05); // T3 review M7: with warning signs, checking first is the careful choice
         const k = d.dd ? d.dd.flags.filter((f) => f.kind === 'warn').length : 0;
         reasons.push(R('evi', evi2 > 0.3 ? 'העסקה גבולית: בדיקה שווה יותר ממה שהיא עולה' : 'הבדיקה כנראה לא תשנה את ההחלטה', evi2 - 0.1));
-        if (k) reasons.push(R('flags', `יש ${k} סימני אזהרה — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
+        if (k) reasons.push(R('flags', `יש ${warnSigns(k)} — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
         reasons.push(...rivalR(base));
         return { U, flags: [], reasons };
       }
@@ -3580,7 +3586,7 @@ function storyVars(st, chainId, item) {
     netUp: fmtM(Math.max(0, baseNet(st) - (d.net0 || baseNet(st)))), energyAvg: String(Math.round(L.energy)),
   };
   const mv = chainOf(st, 'move');
-  v.rememberMove = mv && mv.path === 'stay' ? 'בפעם הקודמת נשארת וקיבלת העלאה קטנה.' : mv && mv.path === 'periphery' ? 'עברת לפריפריה כדי לחסוך בשכירות.' : mv && mv.path ? `לפני ${Math.max(1, st.month - mv.startM)} חודשים עברת דירה.` : '';
+  v.rememberMove = mv && mv.path === 'stay' ? 'בפעם הקודמת נשארת וקיבלת העלאה קטנה.' : mv && mv.path === 'periphery' ? 'עברת לפריפריה כדי לחסוך בשכירות.' : mv && mv.path ? `לפני ${heMonths(Math.max(1, st.month - mv.startM))} עברת דירה.` : '';
   v.rememberFriend = chainId === 'friend' && (c.run || 1) >= 2 ? `זוכר מה קרה עם ${CH.NAMES.friend[0]}? הפעם זו ${CH.NAMES.friend[1]}.` : '';
   v.rememberF2 = d.path === 'guarantee' || c.path === 'guarantee' ? `חתמת לו ערבות של ${fmtM(d.risk || 0)}.` : `כבר נתת לו ${fmtM(d.amount || 0)}.`;
   v.f2line = c.path === 'guarantee' ? 'הבנק רוצה ממנו עוד ערבות.' : '';
@@ -4452,7 +4458,7 @@ export function impactFor(st, ref, params = {}) {
   const income = ma.salary + ma.sideIncome + Math.max(0, ma.passive);
   const cushFlag = imp.cushionMonthsAfter < 1 && !(imp.cfDelta >= 0.15 * E1 && imp.cushionMonthsAfter >= 0.5);
   if (cushFlag) imp.mainRisk = { key: 'noCushion', text: `אחרי זה תישאר כרית של ${Math.max(0, imp.cushionMonthsAfter).toFixed(1)} חודשים. הוצאה לא צפויה אחת — והבנק יחליט בשבילך.` };
-  else if (ddB && ddB.level === 0 && ddB.warn >= 1) imp.mainRisk = { key: 'unverified', text: `המספרים לא נבדקו, ויש ${ddB.warn} סימני אזהרה.` };
+  else if (ddB && ddB.level === 0 && ddB.warn >= 1) imp.mainRisk = { key: 'unverified', text: `המספרים לא נבדקו, ויש ${warnSigns(ddB.warn)}.` };
   else if (income > 0 && debtPay > 0.4 * income) imp.mainRisk = { key: 'dsr', text: 'החזרי החובות יעברו 40% מההכנסה.' };
   else if (ref === 'buyVar') { const d = ev.data.debt || 0; imp.mainRisk = { key: 'rate', text: `ריבית משתנה: אם הריבית תעלה ב־1%, התזרים יורד ב־${fmtM(r10(d / 1200))}.` }; }
   else if (W(st).mechanic === 'fx' && o && o.kind === 'buy' && ev.data.sens) imp.mainRisk = { key: 'fx', text: `דולר +10% → תזרים ${sgn((ma.worldIndicators.exposure || {}).cf || 0)}.` };
@@ -4837,7 +4843,7 @@ function buildEnd(st, o) {
   if (aw) { // the continuation's result: never more stars than at the win
     res.status = aw === 'afterWinBroke' ? 'lost' : 'retired'; res.reason = aw; res.stars = A.stars; res.starsBlockedByHappiness = false; res.starsBlockedByFund = false;
     const n = st.month - A.m; const still = m.passive >= m.expenses;
-    const lines = [`${n} חודשים אחרי היציאה`, `שווי נקי ${sgn(m.netWorth - A.nw0)} מאז היציאה`, `הכנסה פסיבית ${sgn(m.passive - A.pas0)} מאז היציאה`, `אושר ${A.hap0} → ${Math.round(st.life.happiness)}`,
+    const lines = [`${heMonths(n)} אחרי היציאה`, `שווי נקי ${sgn(m.netWorth - A.nw0)} מאז היציאה`, `הכנסה פסיבית ${sgn(m.passive - A.pas0)} מאז היציאה`, `אושר ${A.hap0} → ${Math.round(st.life.happiness)}`,
       still ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'];
     if (aw === 'cap') lines.push('עברו 10 שנים מאז שיצאת מהמירוץ — כאן עוצרים.');
     if (aw === 'afterWinBroke') lines.push(`החופש לא החזיק: בחודש ${st.month} נגמר הכסף.`);

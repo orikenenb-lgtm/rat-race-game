@@ -85,6 +85,8 @@ export function mult(econ, worldId, key) {
 }
 
 export const GAUGE_TEXT = 'מד הכלכלה מתעדכן באיחור ועם רעש. הנתון הרשמי מתפרסם אחרי 3 חודשים.';
+/** The gauge line with the actual official lag (3 months; 1 with research). */
+export function gaugeText(lag) { return lag === 3 ? GAUGE_TEXT : `מד הכלכלה מתעדכן באיחור ועם רעש. הנתון הרשמי מתפרסם אחרי ${lag === 1 ? 'חודש' : lag === 2 ? 'חודשיים' : lag + ' חודשים'}${lag < 3 ? ' (בזכות המחקר)' : ''}.`; }
 export const RIPE_TEXT = Object.freeze({ ripe: 'לפי הדוחות: השלב הנוכחי כבר ארוך — שינוי כיוון יכול להגיע בכל חודש.', young: 'לפי הדוחות: השלב הנוכחי עוד צעיר — שינוי כיוון לא צפוי בחודשים הקרובים.' });
 /**
  * What a player may see (§8.4). The current phase is never output (it is inferable from rates and prices — accepted, review M1).
@@ -97,7 +99,7 @@ export function econPublic(econ, month, worldId) {
   const out = { signal: econ.signal, label: econ.label, trend: econ.trend, labelChangedAt: econ.lc ?? null, sharp, sharpUntil: econ.sharpUntil,
     hist: econ.hist.slice(-24).map((x) => ({ m: x.m, s: x.s })),
     official: econ.truth.filter((x) => x.m <= month - lag).slice(-12).map((x) => ({ m: x.m, label: PHASE_LABEL[x.phase] })), officialLag: lag,
-    report: null, text: GAUGE_TEXT };
+    report: null, text: gaugeText(lag) };
   if (sharp && worldId) { const ripe = econ.m + 1 >= cycleCfg(worldId).minLen[econ.phase]; out.report = { ripe, text: ripe ? RIPE_TEXT.ripe : RIPE_TEXT.young }; }
   return out;
 }
