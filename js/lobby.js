@@ -264,7 +264,9 @@ async function startFree(worldId, charId, opts = {}) {
   const g = await game();
   const key = slotKey(worldId, learn);
   const sv = g && safe(() => g.savedGame(key));
-  if (sv && !opts.noAsk) {
+  // T6 review M1: the end of a practice branch is a learning end, but the learning slot holds the player's ORIGINAL — always ask
+  const fromBranch = !!(endCtx && endCtx.e && endCtx.e.branch && view.k === 'end');
+  if (sv && (!opts.noAsk || fromBranch)) {
     const ok = await confirmAsk(`יש לך ${learn ? 'תרגול שמור' : 'משחק שמור'} ${P.inW(worldOf(worldId).name)} (${sv.charName || ''}, חודש ${sv.month}). משחק חדש ימחק אותו.`, 'משחק חדש');
     if (!ok) return false;
   }
@@ -675,6 +677,9 @@ function onQuizReward(p) {
   if (!r || r.kind !== 'lesson' || r.right !== true) return;
   const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null; if (!cfg) return;
   if (cfg.learn) return;                                   // T4 §7.1: no ⚡ bonuses in learning mode
+  if (cfg.slot === 'branch') return;                       // T6: a practice branch is a learning game
+  const live = safe(() => localSaveState(G && G.saveKeyFor ? G.saveKeyFor(cfg) : slotKey(cfg.worldId)), null);
+  if (live && live.afterWin) return;                       // T6 review m3: no ⚡ farming in the continuation after a win
   const sig = quizSig(cfg); setQuizCredited(sig, quizCredited(sig) + 1);
   if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${EN.label(QUIZ_ENERGY)} ⚡`);
 }
@@ -1640,20 +1645,26 @@ const T6END = { awLines: (A) => [`${A.months} חודשים אחרי היציאה
   A.hap0 != null && A.hap1 != null ? `אושר ${A.hap0} → ${A.hap1}` : A.happinessDelta != null ? `אושר ${A.happinessDelta > 0 ? '+' : ''}${Math.round(A.happinessDelta)} מאז היציאה` : '',
   A.reason === 'afterWinBroke' && A.brokeM ? `החופש לא החזיק: בחודש ${A.brokeM} נגמר הכסף.` : A.stillFree ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'].filter(Boolean) };
 const fmtSgn = (n) => (Math.round(+n || 0) > 0 ? '+' : '') + fmtM(+n || 0);
+/** the original of a finished branch (live learning slot) — only while it is still the same game (T6 M2) */
+function t6Origin(e) {
+  const meta = safe(() => RW.branchFor(e.worldId), null); if (!meta || meta.origin !== 'live') return null;
+  const o = safe(() => RW.originOf(meta), null); return o && o.cfg && !(o.state && o.state.over) ? o : null;
+}
 function t6Ctx() {
   const { e } = endCtx; const t6 = e.t6 || {};
   const ghostsOn = endCtx.rivals !== 'off';
   const lg = safe(() => RW.lastGame(), null);
   return { ghosts: endCtx.ghosts, rivals: ghostsOn ? (endCtx.ghosts ? 'done' : 'pending') : 'off', personas: safe(() => GH.personas(), T6S.PERSONAS_FALLBACK),
-    rewindAllowed: !!t6.rewindAllowed && !endCtx.ranked, lastGame: !!(lg || e.branch), afterwinAllowed: !!t6.afterwinAllowed, branchTl: t6.branchTl || null, graphId: 'end' };
+    // M4: from the end of a finished free / learn game (rr2-last-game), never from a branch end (its log is not the last game)
+    rewindAllowed: !e.branch && !endCtx.ranked && RW.endAllowed({ mode: e.mode || 'free', worldId: e.worldId, learn: !!endCtx.learn, resultId: e.resultId || null }), lastGame: !!lg && !e.branch, afterwinAllowed: !!t6.afterwinAllowed, branchTl: t6.branchTl || null, graphId: 'end' };
 }
 function renderEndT6(o) {
   const { e, res, w, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate } = o;
   const ctx = t6Ctx();
   const A = end.afterWin || e.afterWin || null;
   const head = `<p class="end-kicker">${kicker}</p>
-      <h1 class="end-title">${A ? esc(T6S.T6.afterwinTitle) : title}</h1>
-      ${A ? `<ul class="t6-awl">${T6END.awLines(A).map((l) => `<li>${iso(l)}</li>`).join('')}${A.reason === 'cap' ? '<li>עברו 10 שנים מאז שיצאת מהמירוץ — כאן עוצרים.</li>' : ''}</ul>`
+      <h1 class="end-title">${A ? esc(A.title || T6S.T6.afterwinTitle) : title}</h1>
+      ${A ? `<ul class="t6-awl">${(Array.isArray(A.lines) && A.lines.length ? A.lines : T6END.awLines(A)).map((l) => `<li>${iso(l)}</li>`).join('')}</ul>`
         : learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
       ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
       ${duelHtml}
@@ -1664,7 +1675,7 @@ function renderEndT6(o) {
     achOpen: !!(res.unlockedWorld || res.gained > 0) });
   html(`<div class="lb-shell lb-end t6-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
-      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${T6S.renderTop(e, ctx)}</div>
+      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${e.branch && !ctx.branchTl ? '<p class="t6-note">המשחק המקורי כבר לא זמין להשוואה.</p>' : ''}${T6S.renderTop(e, ctx)}</div>
       <div class="t6-btns">${endButtons(e, res, nextW, nextOpen)}</div>
       ${more}
       ${learn || A ? '' : ''}
@@ -1891,6 +1902,11 @@ function mentorEndHtml(e) {
   return `<div class="end-mentor"><span>${esc(T4.G1)}</span><button class="lb-toggle" data-act="mentor-hint" role="switch" aria-checked="false"><span>${T4.G4}</span><i></i></button></div>`;
 }
 function endButtons(e, res, nextW, nextOpen) {
+  if (e.branch) {   // T6 review M1: from a branch end the way back is the original, never a silent new practice over it
+    const o = t6Origin(e);
+    return `<div class="end-acts">${o && o.cfg ? '<button class="primary lb-big" data-act="t6-origin">↩ חזרה למשחק המקורי</button>' : ''}<button class="${o && o.cfg ? '' : 'primary lb-big'}" data-act="end-learn">${T4.L7}</button></div>
+      <div class="end-more"><button class="chip" data-act="end-normal">${T4.L6}</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
+  }
   if (endCtx.learn) {   // §7.4: no duel / share; normal game or more practice, same world and character
     return `<div class="end-acts"><button class="primary lb-big" data-act="end-normal">${T4.L6}</button><button data-act="end-learn">${T4.L7}</button></div>
       <div class="end-more"><button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
@@ -2127,6 +2143,7 @@ async function onClick(ev) {
     case 't6-branch': sfx('click'); { const bs = RW.branchSave(id); if (bs) return launch({ ...bs.cfg, resume: true }); return; }
     case 't6-branch-del': { const ok = await ui().then((u) => (u.confirmBox ? u.confirmBox(RW.STR.deleteQ, { yes: RW.STR.del, no: RW.STR.cancel }) : true)); if (ok) { RW.deleteBranch(id); rerender(); } return; }
     case 't6-last': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
+    case 't6-origin': { sfx('click'); const o = endCtx && endCtx.e ? t6Origin(endCtx.e) : null; if (o) return launch({ ...o.cfg, resume: true }); toast('המשחק המקורי כבר לא זמין'); return; }
     case 'end-again': sfx('click'); return endAgain(false);
     case 'end-same': sfx('click'); return endAgain(true);
     case 'life-image': return lifeImage();

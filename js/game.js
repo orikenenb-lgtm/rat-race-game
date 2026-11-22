@@ -1330,7 +1330,7 @@ function backToOrigin() {
 }
 function openCompare() {
   const d = S ? rewind.compareData(S) : null;
-  if (!d || !d.originTl) { ui.toast('אין נתונים של המקור להשוואה'); return; }
+  if (!d || !d.originTl) { ui.toast('המשחק המקורי כבר לא זמין להשוואה'); return; }   // T6 review M2: the original changed or is gone
   ui.compareSheet({ branchTl: tlOf(S), originTl: d.originTl, month: S.month });
 }
 /** T6 §9.2: keep living after the win (engine W) — only when the engine exports it and the flag is on (free / learn) */

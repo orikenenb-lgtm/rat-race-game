@@ -982,3 +982,4 @@ body.lb-lobby-open { overflow: hidden; }
   .t6-end .end-art { display: none; }
   .t6-dh { font-size: 13px; }
 }
+.t6-tabs button[aria-pressed=true] { background: var(--ink); color: var(--paper); border-color: var(--ink); }   /* T6 review m11: toggle buttons (aria-pressed), not tabs */
