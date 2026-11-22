@@ -1,6 +1,6 @@
 // T4 lobby-lane unit tests (spec §16 T-M1…T-M6 + practice data AC-P4). Run: node tests/t4_meta.test.mjs
-// Engine-lane checks (T-E*, the 75/75 library sweep) live in tests/t4_engine.test.mjs; here they are reported as PENDING when the
-// engine part has not landed yet (feature detection, never a failure).
+// Engine-lane checks (T-E*) live in tests/t4_engine.test.mjs; here they are reported as PENDING when the engine part has not landed
+// yet (feature detection, never a failure). The library reachability sweep (AC-B3) runs here, against the engine's own lesson list.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -188,7 +188,54 @@ if (typeof E.TUTORIAL_FREE_ROLLS !== 'number') pending('E-2 TUTORIAL_FREE_ROLLS 
 if (E.rollCost({ mode: 'free', learn: true }) !== 0) pending('E-2 rollCost(st.learn) → 0 (client gate in game.js usesEnergy is active)');
 { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 1, tutorial: true }); if (!st.intro) pending('E-1/E-3 intro card (createGame({tutorial}) → st.intro)'); }
 { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 1, mode: 'free', learn: true }); if (st.learn !== true) pending('E-1 createGame({learn:true}) → st.learn'); if (!('learn' in E.replayConfig(st))) pending('E-9 replayConfig().learn'); }
-pending('library 75/75 (77/77 with T2) reachability sweep: needs E-8 (time_in_market, benchmark unlocks) — tests/t4_engine.test.mjs');
+
+/* ---------------- AC-B3 / §9.2 (T4 verify D5): every engine lesson is reachable in play — a real sweep, not a pending entry.
+   Seeded sim games (tools/sim.mjs policies, every world and character), the history scenarios, then a targeted business / story
+   pass for the lessons only a managed business or a "more" story choice opens. Stops as soon as every lesson was seen.
+   The lesson count comes from the engine (82 today), never a constant. */
+{
+  const t0 = Date.now();
+  const { play, POLICIES } = await import('../tools/sim.mjs');
+  if (typeof E.loadRealData === 'function') { try { await E.loadRealData(); } catch (e) { /* history scenarios may stay empty offline */ } }
+  const all = new Set(E.LESSONS.map((l) => l.id)); const got = new Map();
+  const note = (st, tag) => { for (const id of st.lessons || []) if (all.has(id) && !got.has(id)) got.set(id, tag); };
+  const done = () => got.size >= all.size;
+  const pols = ['random', 'smart', 'reckless', 'cautious', 'greedy', 'guideTapper', 'blindTapper', 'naive'].filter((x) => POLICIES[x]);
+  const rnd = (seed) => { let x = seed >>> 0 || 1; return () => (x = (x * 16807) % 2147483647) / 2147483647; };
+  // a game played with random choices (story "more" / partner / lend first, businesses opened and grown): the paths the sim avoids
+  const roam = (st, r, bizFirst) => {
+    const pick = (ev, k) => {
+      const en = ev.options.filter((o) => o.enabled);
+      if (k > 4) return en.find((o) => ['ok', 'done', 'pass', 'skip', 'close'].includes(o.id)) || en[0];
+      if (bizFirst && ev.type === 'business') return en.find((o) => /open|buy|start|mkt|marketing|grow/.test(o.id)) || en[Math.floor(r() * en.length)];
+      return en[Math.floor(r() * en.length)];
+    };
+    const resolve = (ev) => { let k = 0; while (ev && k++ < 10 && !st.over) { const o = pick(ev, k); if (!o) break; ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}).event; } };
+    for (let g = 0; g < 400 && !st.over; g++) {
+      if (typeof E.inbox === 'function') for (const it of E.inbox(st)) { const en = (it.options || []).filter((o) => o.enabled); const o = en.find((x) => ['more', 'partner', 'lend'].includes(x.id)) || en[Math.floor(r() * en.length)]; if (o) E.resolveStory(st, it.itemId, o.id); if (st.over) break; }
+      if (st.pending) resolve(E.currentEvent(st));
+      if (st.over) break;
+      E.rollDice(st); resolve(E.landing(st));
+    }
+    return st;
+  };
+  const stages = [
+    ['sim seed 1', function* () { for (const w of ['w1', 'w2', 'w3', 'w4']) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + pol.length, pol, 120).st; }],
+    ['history', function* () { for (const sc of E.scenarioList()) yield () => roam(E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7 }), rnd(8), false); }],
+    ['business / story', function* () { for (let s = 0; s < 120; s++) for (const ch of ['founder', 'engineer', 'social', 'teacher', 'dev']) { const w = ['founder', 'engineer', 'social'].includes(ch) ? 'w4' : 'w1'; yield () => roam(E.createGame({ worldId: w, charId: ch, seed: 300 + s, mode: 'free' }), rnd(s + 11), true); } }],
+    ['sim seeds 2–3', function* () { for (let k = 1; k <= 2; k++) for (const w of ['w1', 'w2', 'w3', 'w4']) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + k * 31 + pol.length, pol, 120).st; }],
+  ];
+  const games = {};
+  for (const [name, gen] of stages) {
+    if (done()) break;
+    games[name] = 0;
+    for (const g of gen()) { if (done()) break; let st = null; try { st = g(); } catch (e) { /* a crashing game is the engine suites' business */ } games[name]++; if (st) note(st, name); }
+  }
+  const miss = [...all].filter((x) => !got.has(x));
+  ok(all.size >= 75, `AC-B3 the engine has ≥ 75 lessons (${all.size})`);
+  ok(!miss.length, `AC-B3 every lesson is reachable in play: ${got.size}/${all.size} reached; missing ${JSON.stringify(miss)}`);
+  console.log(`AC-B3 sweep: ${got.size}/${all.size} lessons reached in ${((Date.now() - t0) / 1000).toFixed(0)} s (${Object.entries(games).map(([k, v]) => `${k}: ${v} games`).join(', ')})`);
+}
 
 console.log(fails ? `${fails}/${n} FAILED` : `all ${n} t4_meta tests passed`, pend.length ? `· ${pend.length} pending (other lanes)` : '');
 process.exit(fails ? 1 : 0);
