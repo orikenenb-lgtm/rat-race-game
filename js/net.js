@@ -22,13 +22,14 @@ const ERR = {
   challenge_not_found: 'האתגר לא נמצא',
   already_finished: 'כבר סיימת את המשחק הזה',
   result_not_found: 'המשחק לא נמצא בשרת',
-  already_sent_today: 'כבר שלחת לו ⚡ היום',
+  already_sent_today: 'כבר שלחת לו זריקות היום',
   player_not_found: 'השחקן לא נמצא בקבוצה',
   rate_limited: 'יותר מדי עדכונים היום',
   no_actions: 'אין יומן מהלכים למשחק הזה',
   not_finished: 'המשחק עוד לא נשלח לשרת',
   engine_unavailable: 'השרת מתעדכן — ננסה שוב בעוד רגע',
   stale_checkpoint: 'יש שמירה חדשה יותר בשרת',
+  diverged_checkpoint: 'המשחק הזה המשיך במכשיר אחר — טוענים את השמירה מהשרת',   // T6 §8.1 (server trigger: NOT applied, awaiting the owner)
   state_too_big: 'השמירה גדולה מדי',
 };
 

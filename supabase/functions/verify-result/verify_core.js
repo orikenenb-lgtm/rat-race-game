@@ -4,7 +4,48 @@
 export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actions; generous cap keeps replay < 1 s CPU
 export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
-const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T']); // = the cases of engine.js replay()
+export const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X']); // = the cases of engine.js replay() (Q = T3 story inbox, K = T4 practice, W/X = T6 continue after win / retire — K, W, X are refused in ranked replays)
+/** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
+ *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
+export const RULES4_FROM = '2026-12-07'; // a Monday (review B1): a weekly never straddles the cut-over
+// ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
+function daysFromCivil(y, m, d) {
+  y -= m <= 2 ? 1 : 0;
+  const era = Math.floor(y / 400); const yoe = y - era * 400;
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function civilFromDays(z) {
+  z += 719468; const era = Math.floor(z / 146097); const doe = z - era * 146097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+  const y = yoe + era * 400; const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  const mp = Math.floor((5 * doy + 2) / 153); const d = doy - Math.floor((153 * mp + 2) / 5) + 1; const m = mp + (mp < 10 ? 3 : -9);
+  return [y + (m <= 2 ? 1 : 0), m, d];
+}
+const p2 = (n) => String(n).padStart(2, '0');
+function isoWeekStart(y, w) {
+  const jan4 = daysFromCivil(y, 1, 4); const dow = ((jan4 + 3) % 7 + 7) % 7;
+  const [Y, M, D] = civilFromDays(jan4 - dow + (w - 1) * 7);
+  return `${Y}-${p2(M)}-${p2(D)}`;
+}
+/** YYYY-MM-DD from a date-ish key ('2026-11-30', '20261130', '2026-W49' → its Monday, a Date → its UTC day) or null. */
+export function isoDay(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10);
+  const s = String(v);
+  const w = /^(\d{4})-?W(\d{1,2})$/i.exec(s.trim());
+  if (w) { const wk = +w[2]; return wk >= 1 && wk <= 53 ? isoWeekStart(+w[1], wk) : null; }
+  const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(s); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+/**
+ * Legacy games (daily/weekly/challenge started before RULES4_FROM) replay with the pre-T2 rules. ONE Israel calendar date decides:
+ * daily_key · weekly_start (Monday of the ISO week) · challenge_day (index.ts: created_at AT TIME ZONE 'Asia/Jerusalem').
+ */
+export function rulesFor(row) {
+  const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
+  return day && day < RULES4_FROM ? 3 : 4;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class VerifyError extends Error { constructor(code, status = 400) { super(code); this.code = code; this.status = status; } }
@@ -53,7 +94,7 @@ export function configFor(E, row) {
   else throw new VerifyError('bad_char', 422);
   const seed = Number(row.seed);
   if (!Number.isFinite(seed)) throw new VerifyError('bad_seed', 422);
-  const cfg = { worldId: world.id, charId, seed, mode: row.mode, tutorial: false, bailout: false };
+  const cfg = { worldId: world.id, charId, seed, mode: row.mode, tutorial: false, bailout: false, mentor: 'hint', rules: rulesFor(row) };
   if (row.max_months != null) cfg.maxMonths = +row.max_months;
   return cfg;
 }
@@ -77,6 +118,22 @@ export function claimOf(row) {
  */
 export function verifyGame(E, row, actions) {
   const cfg = configFor(E, row);
+  const first = replayCompare(E, cfg, row, actions);
+  // review B1 defence in depth: a game the row dates before the cut-over may have been started by a v4 client — retry ONCE with
+  // rules 4. Never from 4 to 3. T3 review m3: rules 4 is NOT always harder (better on 12–15 % of seeds), so best-of-two is a real
+  // option — the retry is allowed only for a result FINISHED in the cut-over week (RULES4_FROM … RULES4_FROM + 6 days).
+  if (first.ok || cfg.rules !== 3 || !inCutoverWeek(row.finished_day)) return first;
+  const second = replayCompare(E, { ...cfg, rules: 4 }, row, actions);
+  return second.ok ? { ...second, rulesFallback: true } : first;
+}
+/** Is this (Israel) date inside the cut-over week [RULES4_FROM, RULES4_FROM + 6]? (missing date → false) */
+export function inCutoverWeek(day) {
+  const d = isoDay(day); if (!d) return false;
+  const [y, m, dd] = RULES4_FROM.split('-').map(Number); const from = daysFromCivil(y, m, dd);
+  const [y2, m2, d2] = d.split('-').map(Number); const x = daysFromCivil(y2, m2, d2);
+  return x >= from && x <= from + 6;
+}
+function replayCompare(E, cfg, row, actions) {
   let st;
   try { st = E.replay(cfg, actions); }
   catch (e) { return { ok: false, error: 'replay:' + String(e && e.message || e).slice(0, 300), result: null, diff: null, cfg }; }

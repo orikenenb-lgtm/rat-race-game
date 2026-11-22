@@ -13,28 +13,75 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/game.css">
+<!-- T7 CR-33: the in-game styles, off the lobby's critical path: no href (nothing is fetched) until window.__rrPlayCss() (below)
+     sets it once the lobby is open. The element stays at this spot, so the cascade order is the one from before the split. -->
+<link id="playCss" data-href="css/game-play.css">
 <link rel="stylesheet" href="css/lobby.css">
+<link rel="stylesheet" href="css/stability.css">
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<!-- T7 CR-33: the lobby's whole static module graph (main.js + lobby.js), fetched in parallel instead of a 7-level waterfall.
+     Lobby-critical modules only: the in-game graph (game.js, ui.js, scene, three…) loads after the lobby is open.
+     Kept in sync with the real import graph by tests/preload.test.mjs. -->
+<link rel="modulepreload" href="js/main.js">
+<link rel="modulepreload" href="js/playcss.js">
 <link rel="modulepreload" href="js/engine.js">
+<link rel="modulepreload" href="js/lobby.js">
+<link rel="modulepreload" href="js/bus.js">
+<link rel="modulepreload" href="js/audio.js">
+<link rel="modulepreload" href="js/flags.js">
+<link rel="modulepreload" href="js/saves.js">
+<link rel="modulepreload" href="js/net.js">
+<link rel="modulepreload" href="js/worlds/index.js">
+<link rel="modulepreload" href="js/achievements.js">
+<link rel="modulepreload" href="js/progress.js">
+<link rel="modulepreload" href="js/energy.js">
+<link rel="modulepreload" href="js/library.js">
+<link rel="modulepreload" href="js/motion.js">
+<link rel="modulepreload" href="js/data/lessons-meta.js">
+<link rel="modulepreload" href="js/practice.js">
+<link rel="modulepreload" href="js/rng.js">
+<link rel="modulepreload" href="js/finance/bank.js">
+<link rel="modulepreload" href="js/finance/invest.js">
+<link rel="modulepreload" href="js/finance/business.js">
+<link rel="modulepreload" href="js/life.js">
+<link rel="modulepreload" href="js/history.js">
+<link rel="modulepreload" href="js/systems/mentor.js">
+<link rel="modulepreload" href="js/systems/focus.js">
+<link rel="modulepreload" href="js/systems/dd.js">
+<link rel="modulepreload" href="js/systems/cycle.js">
+<link rel="modulepreload" href="js/systems/rules.js">
+<link rel="modulepreload" href="js/systems/chains.js">
+<link rel="modulepreload" href="js/systems/rivals.js">
+<link rel="modulepreload" href="js/systems/dreams.js">
+<link rel="modulepreload" href="js/systems/recap.js">
+<link rel="modulepreload" href="js/worlds/w1.js">
+<link rel="modulepreload" href="js/worlds/w2.js">
+<link rel="modulepreload" href="js/worlds/w3.js">
+<link rel="modulepreload" href="js/worlds/w4.js">
+<link rel="modulepreload" href="js/worlds/h.js">
+<link rel="modulepreload" href="js/data/tax.js">
+<link rel="modulepreload" href="js/worlds/common.js">
 </head>
 <body data-world="w1">
 <canvas id="c" aria-label="לוח המשחק התלת־ממדי"></canvas>
+<div id="board2d" hidden></div>
 
 <header class="hud" id="hud">
-  <button id="homeBtn" class="hbtn" aria-label="חזרה ללובי (המשחק נשמר)"></button>
+  <button id="homeBtn" class="hbtn" aria-label="לובי (המשחק נשמר)" title="חזרה ללובי — המשחק נשמר"></button>
   <div class="hcard hworld" id="hWorld"><b id="hWorldName">השכונה</b><span id="hInd" class="hind" aria-live="polite" hidden></span></div>
   <div class="hcard hstats">
     <div class="stat cash"><span>מזומן</span><b id="hCash" class="num">₪0</b></div>
     <div class="stat"><span>תזרים חודשי</span><b id="hCf" class="num">₪0</b></div>
     <div class="stat mon"><span>חודש</span><b id="hMonth" class="num">1</b></div>
   </div>
-  <div class="hcard hgoal" id="hGoal" role="meter" aria-label="מד החופש"></div>
+  <div class="hcard hgoal" id="hGoal" role="meter" aria-label="מד החופש" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0%"></div>
   <div class="hlife" id="hLife" hidden></div>
-  <button class="hcard hen" id="hEnergy" hidden aria-label="אנרגיה להטלות"><span>⚡</span><b class="num" id="hEnVal">25</b><small id="hEnT"></small></button>
+  <button class="hcard hen" id="hEnergy" hidden><span>⚡</span><b class="num" id="hEnVal">25</b><small id="hEnT"></small><span class="sr" id="hEnSr"> זריקות</span></button>
   <div class="htools">
     <button id="turboBtn" class="ibtn" aria-label="טורבו (מהירות כפולה)" aria-pressed="false"></button>
     <button id="muteBtn" class="ibtn" aria-label="השתקה" aria-pressed="false"></button>
     <button id="camBtn" class="ibtn" aria-label="מבט על כל הלוח" aria-pressed="false"></button>
+    <button id="liteBtn" class="ibtn" aria-pressed="false" aria-label="מצב קל (בלי תלת־ממד)" title="מצב קל (בלי תלת־ממד)">🪶</button>
   </div>
 </header>
 
@@ -55,6 +102,7 @@
   </div>
 </section>
 
+<div id="recover" class="recover" hidden role="alertdialog" aria-labelledby="recoverT" aria-describedby="recoverD"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="achv" aria-live="polite"></div>
 <div id="verdict" role="status" aria-live="polite" title="ציון ההחלטה — לחיצה מסתירה"></div>
@@ -69,8 +117,20 @@
 <div id="gm" class="modal top" hidden><div class="card" id="gmCard" role="dialog" aria-modal="true"></div></div>
 
 <div id="loading" class="overlay loading" role="status" aria-live="polite">
-  <div class="ld"><b class="logo">מירוץ העכברים</b><span id="loadText">טוען את העיר…</span><div class="lbar"><i id="loadBar"></i></div></div>
+  <div class="ld"><b class="logo">מירוץ העכברים</b><span id="loadText">פותחים את המשחק…</span><div class="lbar indet" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="טעינה"><i id="loadBar"></i></div>
+    <ol id="loadSteps" class="lsteps" hidden></ol>
+    <div id="loadErr" class="lerr" hidden role="alertdialog" aria-labelledby="loadErrT"></div></div>
 </div>
+<script>/* boot watchdog: if the game has not opened after BOOT_SLOW_MS (20 s), offer a reload (the overlay stays; a late boot still completes) */
+setTimeout(function () {
+  var l = document.getElementById('loading'), d = l && l.querySelector('.ld');
+  if (window.__rrBooted || !d || l.hidden || document.getElementById('bootSlow')) return;
+  var p = document.createElement('p'); p.id = 'bootSlow'; p.className = 'lslow'; p.setAttribute('role', 'alert');
+  p.appendChild(document.createTextNode('הטעינה לוקחת יותר מהרגיל. אם זה נתקע, נסה לרענן את הדף.'));
+  var b = document.createElement('button'); b.type = 'button'; b.className = 'primary'; b.textContent = 'רענון הדף';
+  b.onclick = function () { location.reload(); };
+  p.appendChild(document.createElement('br')); p.appendChild(b); d.appendChild(p);
+}, 20000);</script>
 
 <script type="module" src="js/main.js"></script>
 </body>

@@ -1,10 +1,13 @@
-# v3 lobby tests (stub game, LIVE server, טסט nicknames): welcome · ⚡ energy (header, empty state, daily bonus,
+# v3 lobby tests (stub game, OFFLINE fake backend by default; --live = staging only; טסט nicknames): welcome · ⚡ energy (header, empty state, daily bonus,
 # gifts, referral) · lesson library · time machine (history) · life story end screen + PNG · happiness gate ·
 # group feed + send ⚡. Screenshots desktop 1300×820 + phone 390×800 light/dark → /tmp/lbshots/v3_*.png
-import asyncio, sys, random, json
+import asyncio, os, sys, random, json
 from playwright.async_api import async_playwright
-BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8771/'
-SHOT = '/tmp/lbshots/'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
+MODE = FB.mode_from_argv()
+BASE = FB.base_url('http://localhost:8771/')
+SHOT = os.environ.get('RR_SHOTS', '/tmp/lbshots') + '/'
+fb = FB.FakeBackend(); SINKS = []    # default verify=replay (the stub game sends no action log here, so the sidecar never starts)
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 TAG = str(random.randint(100, 999))
 results = []
@@ -16,7 +19,8 @@ async def started(pg, action, timeout=20000):
     await pg.wait_for_function(f'(window.__cfgs || []).length > {n}', timeout=timeout)
     return await pg.evaluate('window.__lastCfg')
 async def page(b, vp, scheme, name, onboarded=True):
-    ctx = await b.new_context(viewport=vp, color_scheme=scheme)
+    ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, color_scheme=scheme)
+    SINKS.append(await FB.install_mode(ctx, fb, MODE))
     if onboarded: await ctx.add_init_script("localStorage.setItem('rr2-onboarded','1')")
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: log('PAGEERR', name, e))
@@ -35,11 +39,14 @@ async def solo_flow(b, name, vp, scheme, first):
     ctx, pg = await page(b, vp, scheme, name, onboarded=False)
     A = check if first else (lambda c, m: None)
     await pg.goto(BASE); await pg.wait_for_selector('.wl-card', timeout=30000); await pg.wait_for_timeout(700)
-    A('⚡' in await pg.inner_text('.wl-points') and 'תוכנית חודשית' in await pg.inner_text('.wl-points'), 'first run: one welcome screen explains ⚡ and the monthly plan')
+    # T4 F1 (intentional change): the welcome no longer explains ⚡ / ★★★ / the plan — they return as just-in-time coaches in the game;
+    # "יאללה, משחק ראשון" starts the first game directly, "אני רוצה לבחור דמות" opens the world view (the old path, used here)
+    wl = await pg.inner_text('.wl-card')
+    A('⚡' not in wl and 'תוכנית חודשית' not in wl and await pg.locator('[data-act="welcome-pick"]').count() == 1, 'first run: a short welcome (T4 F1: no ⚡ / plan text; a "choose a character" link)')
     await pg.screenshot(path=f'{SHOT}v3_{name}_welcome.png')
-    await pg.click('[data-act="welcome-go"]'); await pg.wait_for_selector('.wv-chars')
+    await pg.click('[data-act="welcome-pick"]'); await pg.wait_for_selector('.wv-chars')
     A(await pg.evaluate("localStorage.getItem('rr2-onboarded')") == '1', 'welcome shown once')
-    A('😊' in await pg.inner_text('.wv-char'), 'character cards show the happiness part of ★★★')
+    A('😊' in await pg.evaluate("document.querySelector('.wv-char .wv-th').textContent"), 'character cards show the happiness part of ★★★ (T4: inside "עוד פרטים")')
     await pg.click('[data-act="home"]'); await pg.wait_for_selector('.lb-home'); await pg.wait_for_timeout(900)
     A('25/25' in await pg.inner_text('.lb-energy'), 'header shows ⚡ 25/25')
     A(await pg.locator('.map-hist').count() == 1 and await pg.locator('.map-lib').count() == 1, 'map has the time machine + library entries')
@@ -111,7 +118,7 @@ async def social(b):
     await started(A, lambda: A.click('[data-act="daily"]'))
     await A.evaluate("window.__stubEnd('lost', 24)"); await A.wait_for_selector('.end-place, .end-rank .lb-board', timeout=20000); await A.wait_for_timeout(2500)
     en = await A.evaluate("import('./js/energy.js').then(E => E.get())")
-    check(en == 15 and '+10⚡' in await A.inner_text('.end-new'), f'daily gives +10⚡ ({en})')
+    check(en == 15 and '+10 זריקות ⚡' in await A.inner_text('.end-new'), f'daily gives +10⚡ ({en}; T4 N11 label "+10 זריקות ⚡")')
     await A.click('[data-act="end-lobby"]'); await A.wait_for_selector('.lb-home')
     await A.fill('#lbGname', 'טסט אנרגיה ' + TAG); await A.press('#lbGname', 'Enter'); await A.wait_for_selector('.gp-code', timeout=20000)
     link = await A.input_value('.gp-link input')
@@ -149,11 +156,16 @@ async def social(b):
 
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=ARGS)
+        os.makedirs(SHOT, exist_ok=True); FB.banner(MODE, 'replay')
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args(MODE, ARGS))
         for i, (name, vp, scheme) in enumerate(CONFIGS):
             await solo_flow(b, name, vp, scheme, i == 0); log('done', name)
         await social(b)
         await b.close()
+    try: [FB.assert_clean(s) for s in SINKS]; check(True, f'guard clean: no request left the fake (calls {dict(fb.calls)})')
+    except AssertionError as e: check(False, str(e))
+    fb.close()
     fails = [m for ok, m in results if not ok]
     log(f'\n{len(results) - len(fails)}/{len(results)} checks passed'); [log('  FAILED:', m) for m in fails]
+    sys.exit(1 if fails else 0)
 asyncio.run(main())

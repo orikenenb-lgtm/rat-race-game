@@ -8,6 +8,13 @@
 // Bus: 'energy:change' {energy, max, delta, reason, msUntilNext}
 import { bus } from './bus.js';
 
+/** T4 §8 naming: ⚡ is called "זריקות" (singular "זריקה") everywhere on screen; 🔋 stays "כוח" (the story's strength). */
+export const NAME = 'זריקות';
+export const ONE = 'זריקה';
+export const ICON = '⚡';
+/** 1 → 'זריקה אחת', n → '{n} זריקות' (no icon; callers add ⚡ where the line needs it). */
+export function label(n) { n = Math.floor(+n || 0); return n === 1 ? 'זריקה אחת' : `${n} ${NAME}`; }
+
 export const MAX = 25;
 export const REFILL_MS = 6 * 60 * 1000;
 export const CAP = 99;

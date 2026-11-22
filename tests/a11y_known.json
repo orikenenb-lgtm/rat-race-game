@@ -1,0 +1,6 @@
+{
+  "_doc": "Ratchet allowlist for tests/a11y_e2e.py (T7 §4.1). Only QA§4.1 findings still present at T7 start, each mapped to its CR. A critical/serious violation that matches no entry fails at once; an entry that no longer occurs prints STALE (fails with --strict-allowlist). --strict ignores this file (release gate AX-3). screen and selector_regex are regular expressions.",
+  "entries": [
+    {"rule": "region", "screen": ".*", "selector_regex": ".*", "owner_lane": "shell + lobby", "cr": "CR-13", "note": "content outside landmarks (moderate)"}
+  ]
+}

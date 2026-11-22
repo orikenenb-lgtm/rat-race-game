@@ -122,7 +122,7 @@ All return `{ok, error?, effects, mentor, event (current pending event or null),
 | function | returns |
 |---|---|
 | `intro(st, resumed?)` | `{mentor, goalText, goalLabel, world, tagline}` — opening mentor line (or "חזרת לחודש X") |
-| `cityModels(st)` | every 3D object the city should show now: `[{key, assetId, model, label, kind:'re'…/'holding'/'angel'/'foundation', golden}]` — rebuild the board from this on resume |
+| `cityModels(st)` | every 3D object the city should show now: `[{key, assetId, model, label, kind:'re'…/'holding'/'angel'/'foundation', golden, stage?, activity?}]` (`stage` 0–3 and last month's `activity` on T3 businesses) — rebuild the board from this on resume |
 | `boardInfo(worldId)` | `[{index, ch, type, name, color, ink, icon}] × 24` for building the ring |
 | `worldList()` | lobby data: `[{id, order, name, tagline, goal, goalLabel, maxMonths, stars, theme, mechanic, characters:[characterCard]}]` |
 | `characterCard(world, c)` | `{id, name, desc, salary, salaryUsd, cash, expenses, surplus, perk, icon}` |
@@ -546,3 +546,194 @@ Proof: same-seed before/after run of the formula swap (2,016 games = 4 worlds ×
 
 ### API summary (v3.1/v3.2 additions)
 `loadRealData()` · `moveSavings(st, ₪)` · `setSideReport(st, bool)` · `genderize(text, gender)` · `GOAL_HOLD` · `inflate(amount, fromYm, toYm)` · `registerRealData(mod)`. Replay actions: `r l c L R C P A I S T`.
+
+---------------------------------------------------------------------------------------------------
+
+## Changes v4 — T2 "עומק אסטרטגי" (strategic depth core) — engine contract
+Spec: `docs/next-level/specs/T2-strategic-depth.md`. Everything from v3 still holds; all new fields are additive. New pure modules in `js/systems/` (picked up by `tools/build-edge.mjs` because engine.js imports them): `mentor.js`, `focus.js`, `dd.js`, `cycle.js`; the engine re-exports them as `E.MN`, `E.FC`, `E.DD`, `E.CY`.
+
+### 1. Rules gate, saves, streams, actions
+* `st.rules` 3 | 4 (`createGame({rules})`, default **4**). Rules 3 = the exact v3 game (no dd/cycle draws, v3 option sets, identical money — proven against `tests/fixtures/v3-golden*.json`, 200 games). Rollback = change the default to 3 and re-pin.
+* `SAVE_VERSION = 4`. `deserialize`: v1 → `migrateV2` (→ v3) → `migrateV3` (→ v4); then **`v4Defaults(st)`** runs on every load. It is the ONE idempotent function that fills every missing v4 field — later lanes (T3 `story`, T4, T6 `st.tl`, `st.marks`, `dq.luckLog`, decision `k0`…) extend it. Migrated in-flight ranked games get `rules: 3`, free/history `rules: 4`; a pending deal drawn under v3 stays a legacy card (no dd).
+* **Stream registry** (`js/rng.js STREAMS`, append-only; the seed comes from the index): 0–9 v1–v3 · **10 `dd`** (exactly 6 draws on every deal or mystery landing, rules 4) · **11 `cycle`** (2 in createGame + exactly 2 per payday, rules 4, every mode incl. history) · **12 `rival`** (T6 deal competition: exactly 4 draws per deal or mystery landing; created now, never drawn in T2) · **13 `listing`** (reserved) · **next free index: 14** (`story`, T3; then T3's per-business streams). Rules 3 never touches 10–13.
+* **Action codes**: `F` `['F', id, slot]` setFocus · `H` `['H']` requestHint · `M` `['M', level]` setMentorLevel. (Q = T3, K = T4, W/X = T6, B reserved.) `replay` handles them; `replayConfig` adds `mentor` (the STARTING level), `rules`, `gender`, and `_dev` when present. `verify_core.js` accepts F/H/M and replays rows dated before `RULES4_FROM` with rules 3 (`rulesFor(row)`).
+* Decision records (`st.dq.decisions[]`) carry `k` = the index in `st.actions` of the action that created them, `b` = the best option's label, `h: 1` when hinted.
+
+### 2. Mentor levels (`st.mentor` 'guide' | 'hint' | 'pro')
+* Default: ranked = `hint` (forced), tutorial = `guide` (forced), else `createGame({mentor})`, else w1 `guide`, others `hint`. Labels: `E.MN.LEVEL_TEXT` (מתחיל / מתקדם / מומחה + desc).
+* **guide**: exactly one `primary` — for scored decisions it is the evaluator's top option (`E.scoreOptions`, ties within 0.1 → closing options, then the card's own default); none on quizzes, personal and values life events. **hint/pro**: every `primary` is false; no verdict wording (`E.MN.VERDICT_WORDS`) in labels / mentor / text / `data.roiVsLoan`; the deal trap question `c.q` moves to after the decision; `biz:suggest` label = "הגדרות אוטומטיות של העסק"; business card mentor = `bizAsk`.
+* `requestHint(st)` (guide/hint; pro → `ok:false`): `{ok, hint:{optionId|null, label, reasons:[2+ texts], note}, hintsUsed}`; counted and logged once per event. No hint on trade windows, quizzes, auto/single-option cards.
+* `setMentorLevel(st, level)` — free/history only (after the tutorial deal); pushes `{m, from, to}` to `st.dq.levelChanges`.
+* pro: `choose().decision` is withheld (still recorded). `metrics().mentor = {level, label, hintsUsed, canHint}`.
+
+### 3. Monthly focus ("מוקד החודש", rules 4)
+* `setFocus(st, id, slot=0)` — ids `scout debt ops frugal network research none`. slot 0 activates now (between rolls, or on a payday / edu card), paid at once (🔋, 😊, debt fee in ₪); one per month (`none` locks it). slot 1/2 = the agenda (free), popped at each payday (disabled entries reported in `news {kind:'focus'}`). `ops` opens the business panel as a pending card with NO draw (`source:'focus'`); from the agenda it sets `opsOpen` and a later `setFocus('ops',0)` opens it once.
+* Effects: scout → `inspect:1` free, `inspect:2` half price · debt → card debt into the bank loan (within the cap), loan rate −0.5 pp/month (w2 −0.25) for 6 months, +10 credit once per game · frugal → cancels the priciest subscription or cuts the largest eligible line 10% (w1) / 8% for good, happiness setpoint −1 per audit (max −4) · network → +0.10 negotiation and raise chances this month · research → sharp gauge for 3 paydays · none → +3 🔋 at payday.
+* `metrics().focus` (null in rules 3) and payday/edu `ev.data.focus` = `{current:{id,label,m}, locked, opsOpen, agenda:[{slot,id,label}], options:[{id, icon, label, desc, cost:{energy,happiness,cash}, benefit, notBest, enabled, reason?, suggested? (guide only)}], text}`. `setFocus` returns `focus` (the same block) and `decision` when scored (flags only: burnout / noUse).
+
+### 4. Due diligence (rules 4)
+* Asset deal pendings get a sealed `p.dd = {risk, flags, f, vf, repair, jitter, level}`. Public: `ev.data.dd = {level 0|1|2, flags:[{id,text,kind:'warn'|'good'}], claimed:{cf,value,label}, range (level ≥ 1):{cf:[lo,hi], value:[lo,hi], repair:'none'|'small'|'big'}, verified (level 2):{cf,value,repair}, basis:'claimed'|'range'|'verified', expected:{cf,value,repair}, inspect1:{energy,free}, inspect2:{fee,half}}`.
+* Options `inspect:1` (`kind:'inspect'`, `cost:{energy}`; 🔋 ≥ 10) and `inspect:2` (`cost:{cash}`; cash ≥ fee) come before the buy options and keep the card open. Buy options: `o.net` = EXPECTED net for the basis; `netLabel` prefixed `לפי המוכר:` / `לפי הבדיקה: X עד Y` / `נבדק:`; `o.basis` = the public scenarios used by the evaluator. `data.cf/cfVar/cfFix` stay claimed until level 2.
+* Buying applies the truth (a hidden problem never makes a money-losing line better), charges the repair (`news {kind:'dd'}`), stores `asset.dd = {claimedCf, claimedValue, level, repair}`, mentor line adds "מוצהר X · בפועל Y". `luck.dd` = actual − expected. No inspections on golden (risk 0, good `rush` flag) or starter cards. `checkEnd().ddRecap`, `ddPassed`. Stats: `inspections, inspectSpent, ddRepairs, ddAvoided, ddPassed`.
+
+### 5. Economic cycle (rules 4; `st.econ` null in rules 3, history and `_dev.noCycle`)
+* Phases exp/slow/rec/recov (SEALED). Public gauge `metrics().econ = E.CY.econPublic(...)` = `{signal 0..100, label, trend, labelChangedAt, sharp, sharpUntil, hist:[{m,s}], official:[{m,label}] (≥ 3 months old), text}`. `news {kind:'econ', text, label, signal}` on a label change and every 3rd payday.
+* Multipliers only (§8.5 of the spec, deviation × world amp: w1 0.5, w2/w3 1, w4 1.1): deal cost at the draw (value keeps its level), rent / other cashflow, bank-loan rate (not w2), loan cap, index drift and crash odds, job-card swaps (not w1), business demand shocks on entering rec/exp. `luck.cycle` per payday. `checkEnd().econPath = {truth, signal, text}`. `E.cyclePath(seed, worldId, months)` rebuilds the path from the seed (tested equal to the engine).
+
+### 6. Impact, public view, evaluator
+* `E.impactFor(st, ref, params?)` — ref = an option id | `act:loan` | `act:repay` | `act:payCredit` | `act:save:<₪>` | `focus:<id>`; `params.event` = the already described card (skips a describe). Returns `{ref, label, basis:'certain'|'expected'|'branches', cashBefore/After, fundBefore/After, cushionMonthsBefore/After, fundMonthsAfter, cfBefore/After/Delta, passiveDelta, expensesDelta, netWorthDelta, goalProgressDelta, newLiabilities:[{label,amount,monthly}], power:{before,after,delta,perMonth?}, happiness:{…}, time:{studyMonths?,note?}, mainRisk:{key,text}, assumptions:[…], scenarios:{base,hard}|null, branches:[{p,label,cashAfter,cfAfter,netWorthDelta,buyNet?}]|null, disclaimer}`. Options with an impact are marked `o.major = true`.
+* `E.publicView(st, {freeze=true, event?})` — everything a player may see (metrics without `inflationYear`, the event, econ, focus, hintsUsed). `metrics().life.inflationYear` is now what a player can know (last year's figure, or the long-run expectation in year one); `inflationLastYear` added.
+* `E.scoreOptions(st, ev)` → `[{id, U, flags, reasons:[{key,text,w}]}]` from the public context only (tested with a Proxy that throws on `rng/pending/decks/bizRng`, and a scramble of every sealed field).
+* Evaluator changes (both rules; dq never affects money or verification): one cushion rule, offers = chance × max(0, discounted buy), DD expected value + value of information (inspections join the pool), life events value energy/study/guarantee risk, `values` events (car, health) in a 1.5-month band with no primary, edu course uses the study formula, focus scored by flags. `checkEnd().learning` adds `mentor, hints, byHint, levelChanges, review[≤40]`, `luck.parts.dd/cycle`; `summaryForServer` adds `mentor, rules, hints`.
+* Dominated options (rules 4): doodad `inst3` only with credit score ≥ 600 and then `credit` is hidden; side-income reporting costs `world.sideReportFee` a month (w1 120, w2 200, w3/w4 250; label "עלות רו״ח").
+* `_dev: {noCycle, noDD}` (sim ablations only; refused in ranked modes).
+
+UI lines that still show the old inflation meaning (owned by the UI agent): `js/ui.js:253, :270, :294` read `metrics().life.inflationYear` — it is now last year's / the expected figure, so the copy "השנה המחירים עולים ב־…" should say "בשנה שעברה" (or use `inflationLastYear`).
+
+## Changes v4 — T3 "סיפורים ועסקים" (stories & business) — engine contract
+Spec: `docs/next-level/specs/T3-stories-business.md` (Implementation notes at its end). Everything is **rules 4 only** (a rules-3 game
+never draws `story`, never gets a chain, an inbox item or a T3 business — tested against the v3 golden fixture). Save version stays 4:
+`v4Defaults` → `ensureStoryState(st)` (idempotent, no randomness, runs at every load). Chain data: `js/systems/chains.js` (`E.CH`).
+
+### 1. Streams, actions, saves
+* **Stream 14 `story`**: exactly 2 draws every payday of a rules-4 game (history included) → `st.story.r` (the seals of chain items created
+  that payday). **Per-business sealed story stream** `st.bizStory['a<id>']` (seed `mix32(bizSeed ^ 0x51A7E5ED)`): exactly 2 draws per
+  simulated month (`BIZ.simulate(…, {cal, story})`, on top of the existing 3). No other stream gets a draw; tile L still pops one card + one `r`.
+  Substitutions, variants, the bike doodad and every outcome are pure functions of state (+ the seals).
+* **Action `Q`** `['Q', itemId, optionId]` = `resolveStory`. In `replay`, in `verify_core CODES`. A `q:<item>:<choice>` option on the
+  business manage card routes to `resolveStory` (logged `Q`, the card stays open).
+* New state: `st.story` {chains, inbox (≤ 3), nextId, seen/shown (L-card anti-repeat), memory (≤ 40), flags {noCar, commute, area, payCut,
+  planLock, busM}, r, pacing marks}, `st.bizStory`, `st.incomeExtra` [{label, amount, from?, until?}] (in cashflow, not passive),
+  `st.stats.storyDefaults`, `st.dq.luck.story`, `st.life.forcedM`. Expense **tags** are derived from labels (`tagOf`: rent / mortgage / car /
+  carLoan / transport) unless a story effect stored one — so nothing is written at load and saves round-trip byte-identically.
+  A pre-T3 rules-4 save: businesses → `BIZ.upgradeT3` (no `holiday`, T3 event table), an open `L.friend` → the friend chain (same month,
+  same outcome), a legacy bus line → `noCar`.
+
+### 2. Chains and the inbox
+* Six chains (car, move, career, side, friend, crisis — crisis w1–w4 only). Entry steps of car / moving / friend are the **tile-L card**
+  itself (`pending.chain = {id, step}`; `ev.data.chain`, `ev.data.remember`); later steps and the trigger chains (career, side, crisis)
+  arrive as **inbox items** at a payday. Pacing: ≤ 1 chain item per payday, ≥ 2 months apart, ≤ 3 open items, ≤ 2 open chains (crisis exempt);
+  chain item due = created + 2 paydays, business item due = the next payday (before the next simulated month). An item nobody resolves
+  takes its `default` (news "לא החלטת — …", no decision recorded, `stats.storyDefaults++`).
+* `E.inbox(st)` → story cards; `E.resolveStory(st, itemId, optionId)` → `{ok, error?, effects, news, lessons, decision, spawn, despawn,
+  event (the pending tile card or null), inbox, end}`; `E.scoreStory(st, card)`; `E.storyMoneyFor(st, effects, H)` (= `effects.total24` at 24).
+  `publicView().inbox` = the cards. Cards never contain a seal (tested by a scramble of every story seal).
+* Story card: `{id:'q12', itemId, type:'story', kind:'chain'|'biz', chain?, step?, assetId?, tag, color, ink, title, text, remember, hint,
+  mentor, personal, progress:{n, of}|null, options:[{id, label, enabled, reason?, primary, dq, kind:'story', default, effects:{cash, flow, months,
+  salary, salaryMonths, happiness, energy, glow, study, risk, total12, total24, note, monthly (deprecated = −flow), oddsMoney}, odds:{p, text}|null,
+  loanAmount, loanMonthly, impact:{now, monthly, months, horizon, total, risk, wellbeing}, preview? (biz)}], data:{cushion:{months, text}, due,
+  dueText, defaultId, chain?, biz?}}`. `primary` only at guide: the evaluator's top on financial steps; the director's cheap pick on car /
+  transport steps (`option.guide`, cushion-aware); never on personal options.
+* C1–C9: tags + `housingOf`; bus → `noCar`, car lines cut 60 % and relabelled תחבורה ציבורית; a `car:true` doodad becomes the bike repair;
+  homeowners get `homeRepair` (no effect ever touches a mortgage line); per-card cooldowns / caps + a deterministic rotating substitution
+  (`CH.SUBST`, `quiet` = `LIFE_QUIET`, not in the life deck); every life option carries `flow` (signed), `salary`, `salaryMonths`, `total12/24`,
+  `dq`; renewal texts use last year's published inflation; evaluator classes personal / mixed / financial (§9).
+* End screen: `result.lifeSummary.stories = [{chain, title, path, outcome, cost, steps, open}]` (≤ 6), `storyDefaults`.
+* `metrics()` (rules 4) adds `calendar {m, label, season}`, `inbox {open, urgent}`, `story {noCar, area, commute}`; income lines include
+  `incomeExtra`; payslip shows "קיצוץ זמני בשכר" / "חצי משרה" while a `payCut` runs.
+
+### 3. Business (js/finance/business.js, `create({t3:true, setup})` in rules-4 games)
+* Setups `SETUPS[type]` (offer options `start:lean` / `start` (= std, the old id) / `start:strong`; `ev.data.setups`, `seasonProfile`,
+  `eventsText`). `SEASONS` (public calendar, `calOf`: game month 1 = January; history = the real month), shock floor 0.6, general expansion
+  (coffee / toyshop / app), B2B receivables on terms (`arTerms`, written off as `badDebt` "חוב אבוד"), decision events (`T3_CHOICES`,
+  `eventChoices(b, {cal})`, `resolveEvent(b, key, choice)` atomic; previews = deterministic 3-month forecast deltas), state events (overload,
+  buyerOffer, season prep announced leadTime + 1 months ahead), `report.why` {profit, cash, sentence} (Σ profit = Δ net profit; net profit + Σ
+  cash = cash change; integers), `report.stage` / `growthStage` (hysteresis 2 up / 3 down), `report.activity`, `summary().{stage, signature,
+  l1, l2, l3, seasonProfile, decide}`. `SIDE_GRAD` for the side chain's graduation.
+* Engine glue: business news gains `{type, icon, cal, revenueGross, profit, cashDelta, toOwner, why, stage, stagePrev, activity, decide}`
+  (`note` = `why.sentence`, deprecated); effects `{type:'bizStage', at, from, to}` and `{type:'bizPulse', at, kind, amount}`.
+
+### 4. CR-29 (ranked rules from the date key)
+* `js/systems/rules.js`: `RULES4_FROM`, `dayOf`, `rulesForDay`. `createGame({mode: ranked, dateKey})` → `st.rules = rulesForDay(dateKey)`
+  (daily key, weekly key `YYYY-Www`, or the Israel date the challenge was created); `dailyConfig()` returns `dateKey` + `rules`.
+  `verify_core.js rulesFor` is a tested duplicate; `index.ts` challenge_day = `created_at AT TIME ZONE 'Asia/Jerusalem'`.
+
+### Review fixes on T2 (2026-11-21, `docs/next-level/reviews/T2-review.md`)
+* **B1** `RULES4_FROM = 2026-12-07` (a Monday) in `js/systems/rules.js` and `verify_core.js`; `verifyGame` retries a failed rules-3
+  replay once with rules 4 (`result.rulesFallback`, stored in `detail`), never 4 → 3; `createGame({dateKey})` stores `st.dateKey`
+  (in `replayConfig`; `migrateV3` gives a dated ranked save `rulesForDay(dateKey)`). The lobby / shell must pass `dateKey`.
+* **M1 (accepted)** the cycle phase is never output but IS inferable from public data (bank-loan rate, loan cap, deal price ÷ value,
+  asset cashflow) — rates and prices are public signals, as in reality. The evaluator / hints read those public numbers. The gauge stays
+  honest (one month late, ±12 noise, correlated). `research` now buys what public data cannot give, for 3 paydays: a sharper gauge,
+  the official figure with a 1-month lag instead of 3 (`econ.officialLag`), and `econ.report = {ripe, text}` — has the current phase
+  passed its minimum length (a transition may come any month; never the timing).
+* **M2** level-1 inspection range widths come from the CLAIMED cashflow / value (`DD.rangeOf({width, valueWidth})`); only the
+  position inside the range is sealed.
+
+## Changes v4 — T4 engine part (opening, learning mode, dreams, lesson context, practice) — engine contract
+Spec: `docs/next-level/specs/T4-opening-modes-library.md` §13 + CR-E1…E6 (implementation notes at its end). Same save version 4;
+`v4Defaults` fills every new field (idempotent, no randomness). Nothing here changes money except the intro's glitch choice and the
+sized tutorial deal (rules 4 tutorial games only).
+* **CR-E1** `createGame({learn, dream, tutorialFree, mentor})` — free mode only (`st.learn`, `st.dream`, `st.tutorialFree`; ranked /
+  history ignore them). `rollCost(st)`: ranked 0 · `st.learn` 0 · `st.tutorialFree && st.turn < TUTORIAL_FREE_ROLLS` (export, 10) 0 · else 1.
+  `replayConfig` adds `learn: true`, `dream: id`, `tutorialFree: true` when set (and T6 `self`).
+* **CR-E2** intro card `type:'intro'` (w1, rules 4, `tutorial`): the pending event of a new game (`k0: 0`, no draw). `ev.data.step`
+  salary → glitch → result; options `next`/`skip` · `fix:pay`/`fix:inst`/`fix:diy` (no primary, `data.note`) · `go`. Money: pay = −cost,
+  inst = a 3-month line `תשלומים: מכונת כביסה` (`until = month + 2`), diy = −diy and −10 🔋. `st.intro = {step, glitch:{cost, inst, fee, diy},
+  choice, before, goal}`; no decision record, no log entry. Goal chain `metrics().nextGoal = {id, title, value, target, unit, done:false}`
+  (cushion → asset → fund → done; checked after choose / moveSavings / takeLoan and at payday; news `{kind:'goal'}` with the spec texts).
+  Tutorial deal (rules 4): eligible iff w1 && not drawn && `floor500(cash + savings − E) ∈ [1000, 5000]`; card `עגלת הקפה של השכן`
+  (k biz, cf = round10(down × 0.09), `tutorialDeal`, starter-like: no dd, no offers, no competition, reality line "🎲 מספר של משחק…");
+  the dice remap fires on the first roll at which it is eligible (both dice still drawn); a payday that makes it eligible after turn 0 says
+  `השכן מוכר עגלת קפה — שווה לבדוק בהטלה הבאה.` Rules 3 keeps the v3 starter deal (old saves).
+* **CR-E3** `practiceDue(st, memo)` = `practice.js pickPractice(st, memo, expensesOf(st), fmtM)` (free only, no RNG); `answerPractice(st, qid, idx)`
+  guards (not free / history, unknown or answered qid, not between rolls → `{ok:false}`), logs **`['K', qid, idx]`**, returns
+  `recordAnswer(...)` (changes only `st.practice`, `st.dq.transfer`, `st.actions`). `replay` case `K`; verifier `CODES` has `K`;
+  `checkEnd().learning.transfer`.
+* **CR-E4** `lesson()` writes `st.lessonCtx[id] = {m, ev, num}` and pushes `{id, title, text, ctx:{month, worldId, event, num}}`;
+  `event` = the open card's name, `יום המשכורת` / `סוף שנה` for payday / yearly lessons; `num = {label, value}` (value a number:
+  `tax_brackets` / `marginal_overtime` a fraction ≤ 1, `inflation` %, counts for `diversification` / `index_fund`, else ₪) or null.
+* **CR-E5** `metrics().dream` / `checkEnd().dream` = `{id, icon, name, line, missions:[{id, title, progress, done, doneMonth}], done}`;
+  new completions in `out.dream = [{id, title}]` (choose, payday, moveSavings, takeLoan, payCredit). `js/systems/dreams.js` (`E.DREAMS`,
+  `E.DR`). Same seed + log with any dream ⇒ identical metrics (minus `dream`), end result and RNG (tested).
+* **CR-E6** `time_in_market`: index units held through a −8 % month and still held 3 paydays later with no index sale between;
+  `benchmark`: added at the end of every history game (`res.lessons`, `st.lessons`). N18 was already done.
+* `metrics().learn`, `checkEnd().learn` (learning games).
+
+## Changes v4 — T6 engine part (deal competition, logging data, recap, continue after win) — engine contract
+Spec: `docs/next-level/specs/T6-rivals-summary.md` (implementation notes at its end). Path A: part of rules 4, save version 4.
+* **Stream 12 `rival`**: exactly 4 draws on every deal and every mystery landing under rules 4 (history included), whatever the card
+  is and whatever the player does; rules 3 never. `listing` stays at 0. `js/systems/rivals.js` (`E.RV`, `E.RIVALS` = the four personas).
+* **Competition** on asset deals with dd (not golden-less starter / tutorial cards): `p.rv = {n, who, steps, close, taker}` — `n` / `who`
+  from the card's public data only (claimed cf as printed, down, kind / rent, golden, warn flags → tier → eligible personas), `close` /
+  `taker` sealed. `ev.data.rivals = {n, who:[{id, icon, name, label, g}], steps, hazardNext, text, note, chip}`; every delay option
+  (`inspect:*`, `offer:*`) gets `o.rivalRisk = hazardNext` when n ≥ 1. A delay step that reaches `close` → `out.rival = {lost, by, how,
+  text, sub, button}`, news `{kind:'rival'}`, the card closes; the player paid only for the step (inspection result still shown in
+  `out.mentor`; a lost offer is not evaluated). Buying is never a delay step. `st.rivalDeals` (≤ 12; truth sealed until the reveal at the
+  first payday with `month ≥ m + 6`, news `{kind:'rival', text, by, name}`), `st.stats.rivalLost`, `metrics().rivals = {lost, deals}`.
+  Evaluator: `U(inspect) = (1 − h)(base + EVI) − stepCost`, `U(offer) = (1 − h) · U_T2`, reason key `rival`; `impactFor` adds the rival
+  branch (inspect 2 branches, offer 3; p sums to 1; `lost: true` on the rival branch); hints re-count after a survived step; luck part
+  `rival` (expected 0). `_dev.noRival` (sim ablation, refused in ranked) keeps the draws.
+* **Logging data** (outcome-neutral): `st.tl` (start row + one row per payday, columns m nw liq debt pas exp pg hap en, ₪100 units for
+  money, cap 240 by halving; the final state replaces / appends the last row at the end; not in `summaryForServer`), `st.marks`
+  (`[m, kind, amount, k, label]`, cap 40), `st.dq.luckLog` (`[m, part, amount, k]`, cap 40), decision records carry `k`, `k0` (card
+  start; `p.k0` on every pending) and `a` (bought asset id). `E.decisionPoints(st)` → `[{k0, k, m, t, type, c, o, v}]` (records without
+  `k0` are completed by one replay of the log). Business totals `profitMonths / lossMonths / worst {np, m}`; sold businesses are kept in
+  `st.bizPast` for the summary.
+* **`checkEnd().recap`** (`js/systems/recap.js`, built once at the end): `{v, dims:{speed, resilience, decisions, happiness, business}
+  (each {facts, headline, short, id, icon, title, orderText}), graph:{tl, recessions, lowCushion, notes, alt}, grid, crisis, suggestion,
+  decisions, rivalDeals, happiness}`. `E.DIM_META`.
+* **Continue after win** `continueAfterWin(st)` (`['W']`, free incl. learn, not history, once) and `retire(st)` (`['X']`): after the win
+  the goal no longer ends the game; it ends on bankruptcy (`lost`, `afterWinBroke`), retire (`retired`, `retired`) or 120 months
+  (`retired`, `cap`); the result keeps the win's stars and adds `afterWin {winMonths, winStars, months, nwDelta, passiveDelta,
+  happinessDelta, stillFree, reason, title, lines}`; no achievements while `st.afterWin`; `metrics().afterWin = {m, sinceMonths}`.
+  Ranked logs with K / W / X fail replay.
+* `createGame({self})` (ghost games; outcome-neutral), `E.OUTCOME_REV` (= 1, bump with every outcome-changing release; part of the
+  ghost cache key — add to the re-pin checklist).
+* **Archetypes** (`js/systems/archetypes.js`, ARCH_API 2, ARCH_V 1): pure, no imports, decide from `publicView` only;
+  `tools/policies.mjs` re-exports them and `archPolicy(id)` adapts them for `tools/sim.mjs`. Ghost drivers answer quizzes themselves
+  (`P.quizSkill`).
+
+### Balance decisions (director, rules 4 only; tools/balance-report.md)
+* (a) per-character limits for rules 4: `maxMonths4` w1 doctor 82 (was 76), w4 engineer 69 (was 60). `starThresholds(world, charId,
+  rules = 4)`; rules 3 keeps the old limits (ranked games before `RULES4_FROM`). ★★ / ★★★ thresholds unchanged.
+* (b) `CH.TRIGGER` sealed trigger odds of the crisis and career chains lowered (crisis: recession signal 0.4, crisis tile 0.15,
+  index drop 0.4; career: warn 0.35, degree 0.4, promo 0.25); other chains unchanged.
+
+### T6 client CRs (2026-11-22)
+* `E.endNow(st)` — `checkEnd(st)` when the game ended, else a `status:'capped', reason:'cap'` result with `recap` (pure; for a ghost
+  stopped at its cap). Decision records carry `l` (the chosen option's label) and `decisionPoints()` returns `label`.
+* `out.rival.dd` — the inspection result line of a lost inspection (null for a lost offer). `metrics().rivals.deals[]` has `revealAt`
+  always and `text` / `cf` / `repair` once revealed.
+* After-win result: `afterWin.m0, hap0, hap1, brokeM` (+ `happinessDelta`).
+* Stable for the ghost driver: archetype `quizSkill`, `publicView(st, {freeze:false, event})`.

@@ -1,0 +1,35 @@
+INSERT 0 1
+1 first checkpoint (k/2 actions)
+ {"ok" : true}
+2 append (k actions)
+ {"ok" : true}
+3 identical resend
+ {"ok" : true}
+4a branch that starts AT the stored end (indistinguishable from honest play)
+ {"ok" : true}
+UPDATE 1
+DELETE 1
+4b rewind: choice already stored, then a branch from k with HIGHER turn (diverged)
+ {"ok" : true}
+audit rows
+   kind   | old_len | new_len | old_turn | new_turn 
+ diverged |      79 |      94 |       26 |       30
+UPDATE 1
+5 honest append after the log-mode branch (prefix = branch)
+ {"ok" : true}
+6 ENFORCE: back to the original line (diverges from the branch)
+psql:sql/test.sql:20: ERROR:  diverged_checkpoint
+7 ENFORCE: shorter log, higher turn
+psql:sql/test.sql:22: ERROR:  diverged_checkpoint
+8 ENFORCE: legacy state without actions
+psql:sql/test.sql:24: ERROR:  diverged_checkpoint
+9 timing: 6000-action prefix check
+UPDATE 1
+UPDATE 1
+UPDATE 1
+Timing is on.
+ {"ok" : true}
+Time: 9.831 ms
+psql:sql/test.sql:31: ERROR:  diverged_checkpoint
+Time: 7.860 ms
+Timing is off.

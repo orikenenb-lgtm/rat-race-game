@@ -1,0 +1,111 @@
+/* מירוץ העכברים — T1 "stability": renderer switch, מצב קל (flat 2D board), honest loading stages, error panel, recover bar.
+   Owned by the stability lane (js/render/*, js/game.js shell). Loaded after game.css / lobby.css. */
+
+/* ============================================================ renderer switch (body[data-renderer] = 3d | 2d | none) */
+/* game.css gives canvas#c display:block, so [hidden] alone would not hide it */
+body:not([data-renderer="3d"]) canvas#c{display:none}
+#board2d{display:none}
+body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+#liteBtn{font-size:20px;line-height:1}
+#liteBtn[hidden],#camBtn[hidden]{display:none}
+/* CR-S2: phones — the HUD's first row has no room for a 4th tool button. מצב קל stays reachable from the renderer
+   notices (S-N7 offer), the recover bar (also on S-R1 on phones) and the start error panel. */
+@media (max-width:600px){#liteBtn{display:none}}
+
+/* ============================================================ the flat board */
+.b2d-board{position:absolute;--cell:40px;--b2d-board:#f6efe2;--b2d-edge:#6b4430;--b2d-center:#efe3cb;
+  border-radius:calc(var(--cell) * .28);background:var(--b2d-board);box-shadow:0 0 0 calc(var(--cell) * .12) var(--b2d-edge),var(--shadow);transform-origin:50% 50%}
+.b2d-board.b2d-hist{filter:sepia(.42) contrast(1.04) saturate(.9)}
+.b2d-grid{position:absolute;inset:0;display:grid;direction:ltr;gap:2px;padding:2px}
+.b2d-tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border-radius:calc(var(--cell) * .14);
+  overflow:hidden;text-align:center;box-shadow:inset 0 -2px 0 rgba(0,0,0,.14);min-width:0;min-height:0}
+.b2d-corner{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),inset 0 -2px 0 rgba(0,0,0,.18)}
+.b2d-ti{font-size:calc(var(--cell) * .42);line-height:1}
+.b2d-tn{display:block;max-width:100%;padding:0 2px;font-size:max(12px,calc(var(--cell) * .16));font-weight:700;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b2d-sm .b2d-tn{display:none}
+.b2d-sm .b2d-ti{font-size:calc(var(--cell) * .5)}
+.b2d-center{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;margin:4px;padding:6px;
+  border-radius:calc(var(--cell) * .3);background:var(--b2d-center);box-shadow:inset 0 2px 8px rgba(0,0,0,.08);min-width:0;min-height:0;overflow:hidden}
+.b2d-cap{font:max(12px,calc(var(--cell) * .34))/1.1 var(--title);color:color-mix(in srgb,var(--b2d-edge) 80%,transparent);opacity:.75}
+.b2d-city{--n:4;display:grid;grid-template-columns:repeat(var(--n),1fr);gap:4px;width:100%;flex:1 1 auto;align-content:center;min-height:0}
+.b2d-card{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;border-radius:10px;
+  background:rgba(255,255,255,.82);box-shadow:var(--shadow-s);color:#1d1a2b;min-width:0;overflow:visible}
+.b2d-ce{font-size:calc(var(--cell) * 3.2 / var(--n));line-height:1}
+.b2d-cl{display:block;max-width:100%;padding:0 2px;font-size:max(12px,calc(var(--cell) * 1.1 / var(--n)));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b2d-sm .b2d-cl{display:none}
+.b2d-shield{position:absolute;inset:-6%;border-radius:14px;border:3px solid #38bdf8;box-shadow:0 0 14px #38bdf8;pointer-events:none}
+.b2d-pawn{position:absolute;left:0;top:0;width:calc(var(--cell) * .82);height:calc(var(--cell) * .82);border-radius:50%;--pawn:#e2483d;
+  display:grid;place-items:center;background:var(--pawn);background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--pawn) 55%,#fff),var(--pawn) 70%);
+  box-shadow:0 0 0 3px #fff,0 4px 10px rgba(0,0,0,.35);z-index:3;will-change:transform}
+.b2d-glyph{font-size:calc(var(--cell) * .48);line-height:1;filter:drop-shadow(0 1px 0 rgba(255,255,255,.6))}
+.b2d-fx{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:visible}
+.b2d-float{position:absolute;white-space:nowrap;padding:3px 12px;border-radius:999px;border:2.5px solid currentColor;background:rgba(255,250,240,.96);
+  font:800 max(13px,calc(var(--cell) * .36))/1.2 var(--font);box-shadow:var(--shadow-s)}
+.b2d-pt{position:absolute;font-size:max(14px,calc(var(--cell) * .4));line-height:1}
+.b2d-heart{color:#db2777}
+.b2d-conf{position:absolute;top:0;width:9px;height:5px;border-radius:2px;z-index:5}
+
+/* ============================================================ loading: steps + indeterminate stripe (never a percentage) */
+.lbar{position:relative}
+.lbar.indet::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(-45deg,rgba(255,255,255,0) 0 10px,rgba(255,255,255,.55) 10px 20px);
+  background-size:28px 28px;animation:lstripe 1s linear infinite;pointer-events:none}
+@keyframes lstripe{to{background-position:28px 0}}
+.lsteps{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;min-width:min(300px,80vw);text-align:start}
+.lsteps[hidden]{display:none}
+.lsteps li{display:flex;align-items:flex-start;gap:8px;font-weight:600;opacity:.55}
+.lsteps li.on{opacity:1}
+.lsteps li.done{opacity:.8}
+.lsteps .lmark{flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;background:rgba(255,255,255,.55);color:#3a1f00}
+.lsteps li.done .lmark{background:var(--gold);color:var(--gold-ink)}
+.lsteps .ltxt{display:flex;flex-direction:column}
+.lsteps small{font-weight:500;font-size:13px}
+.lerr{max-width:min(440px,90vw);padding:16px 18px;border-radius:var(--radius);background:var(--paper);color:var(--ink);box-shadow:var(--shadow);text-align:start}
+.lerr[hidden]{display:none}
+.lerr h2{margin:0 0 6px;font:22px/1.2 var(--title)}
+.lerr p{margin:0 0 10px}
+.lerr .lacts{display:flex;flex-wrap:wrap;gap:8px}
+.lerr details{margin-top:10px;font-size:13px;color:var(--mut)}
+.lerr details p{margin:6px 0 0;word-break:break-word}
+.loading.lfail .lbar,.loading.lfail #loadText,.loading.lfail .lsteps{display:none}
+.lslow{max-width:min(420px,90vw);margin:6px 0 0;font-weight:600}
+.lslow button{margin-top:8px}
+
+/* ============================================================ recover bar (stuck mid-turn / 3D stopped) */
+.recover{position:fixed;z-index:60;left:50%;bottom:calc(12px + var(--safe-b));transform:translateX(-50%);width:min(640px,calc(100vw - 16px));
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px 16px;border-radius:var(--radius);
+  background:var(--paper);color:var(--ink);box-shadow:var(--shadow);border:2px solid var(--gold)}
+.recover[hidden]{display:none}
+.recover .rtx{flex:1 1 260px}
+.recover .rtx b{display:block;font:18px/1.25 var(--title)}
+.recover .rtx p{margin:2px 0 0;font-size:15px}
+.recover .racts{display:flex;flex-wrap:wrap;gap:8px}
+.recover .racts button.primary{background:var(--gold);color:var(--gold-ink);font-weight:700}
+
+@media (prefers-reduced-motion:reduce){.lbar.indet::after{animation:none}}
+
+/* ============ T5 part B — 2D living city (§5.3), world motifs (§3), picking (§6.2) — rendering lane ============ */
+.b2d-card{font:inherit;padding:0;margin:0;cursor:pointer;pointer-events:auto;min-width:24px;min-height:24px;
+  border:2px solid var(--b2d-accent,#f2b632);-webkit-appearance:none;appearance:none}
+.b2d-card:focus-visible{outline:3px solid var(--focus,#2f6fdb);outline-offset:2px}
+.b2d-card.hl{box-shadow:0 0 0 3px var(--b2d-rim,#f2b632),var(--shadow-s)}
+.b2d-card[data-kind="biz"][data-level="0"]{border-style:dashed}
+.b2d-card[data-kind="biz"][data-level="3"]{border:4px double #c98a12}
+.b2d-pips{position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:max(12px,calc(var(--cell) * .9 / var(--n)));line-height:1;
+  letter-spacing:1px;color:#8a5a00;background:#fffaf0;border-radius:6px;padding:0 3px;white-space:nowrap}
+.b2d-corner-b,.b2d-act{position:absolute;top:-6px;font-size:max(12px,calc(var(--cell) * 1 / var(--n)));line-height:1;background:#fffaf0;border-radius:999px;
+  padding:1px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.b2d-corner-b{inset-inline-end:-6px}
+.b2d-act{inset-inline-start:-6px}
+.b2d-annex{position:absolute;bottom:2px;inset-inline-end:3px;font:800 max(12px,calc(var(--cell) * .8 / var(--n)))/1 var(--font,Rubik,sans-serif);color:#8a5a00}
+.b2d-flash{z-index:2}
+.b2d-passed{box-shadow:inset 0 0 0 3px #f2b632,0 0 10px #f2b632}
+.b2d-pawn{box-shadow:0 0 0 3px var(--ring,#fff),0 4px 10px rgba(0,0,0,.35)}
+/* world motifs on the centre (CSS gradients only, no images) */
+.b2d-m-dots .b2d-center{background-image:radial-gradient(rgba(107,68,48,.16) 1.2px,transparent 1.6px);background-size:14px 14px}
+.b2d-m-neon .b2d-center{background-image:linear-gradient(rgba(255,79,216,.22) 1px,transparent 1px),linear-gradient(90deg,rgba(34,211,238,.18) 1px,transparent 1px);background-size:18px 18px}
+.b2d-m-waves .b2d-center{background-image:repeating-linear-gradient(170deg,rgba(14,165,233,.14) 0 4px,transparent 4px 14px)}
+.b2d-m-stars .b2d-center{background-image:radial-gradient(rgba(109,40,217,.28) 1px,transparent 1.5px),radial-gradient(rgba(34,211,238,.28) 1px,transparent 1.5px);background-size:22px 22px,31px 31px;background-position:0 0,11px 7px}
+.b2d-m-news .b2d-center{background-image:repeating-linear-gradient(0deg,rgba(91,65,39,.16) 0 1px,transparent 1px 12px)}
+:root[data-motion=reduce] .b2d-card,:root[data-motion=reduce] .b2d-pawn{transition:none}
+/* dense city grids (6–8 per row): the short label goes; the card's accessible name keeps it (12 px floor, review m-6) */
+.b2d-dense .b2d-cl{display:none}

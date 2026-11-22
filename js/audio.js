@@ -34,6 +34,10 @@ export function unlock() {
   const c = ac();
   if (c && c.state === 'suspended') c.resume().catch(() => {});
 }
+/** T5 CR-B7: hidden tab → no sound (and no audio thread work); visible again → resume (only if it was running before). */
+let suspendedByHide = false;
+export function suspendAudio() { if (ctx && ctx.state === 'running') { suspendedByHide = true; ctx.suspend().catch(() => {}); } }
+export function resumeAudio() { if (ctx && suspendedByHide) { suspendedByHide = false; ctx.resume().catch(() => {}); } }
 export function setMuted(b) { muted = !!b; writeSettings({ muted }); }
 export function isMuted() { return muted; }
 

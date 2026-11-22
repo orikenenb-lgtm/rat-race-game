@@ -11,7 +11,7 @@
 //  • grow: monthly change of an asset's value. Growing industries rise, hyped/declining ones sink — buying the
 //    right thing (and not the shiny thing) is what builds net worth here. Shown on the deal card (data.grow).
 //  • 'S' tiles: shipping events — freight booms, lost containers (cargo insurance pays), port strikes.
-import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER, STAKE_KIND } from './common.js';
 
 const board = ring(['OFODSOLMO', 'FOXOM?OSL', 'ODFOEMOSI', 'XOFLKMTOI']); // v3: 40 tiles, paydays on the corners
 
@@ -31,6 +31,7 @@ export default {
   }),
   loan: { unit: 20000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
+  sideReportFee: 250, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'netWorth', target: 9_000_000 },
   maxMonths: 60,
   stars: { t2: 43, t3: 32 },
@@ -38,9 +39,9 @@ export default {
   start: { usd: 3.6, goldUsd: 2700, insuredUntil: 0 },
   // valueSens: how much of an FX hit to profits also hits the asset's value. hedgeCost: fee = value × |sens| × hedgeCost.
   fx: { ref: 3.6, min: 2.7, max: 4.7, drift: 0.09, revert: 0.08, valueSens: 1.0, hedgeMonths: 12, hedgeCost: 0.0025, goldDrift: 0.004 },
-  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory', side: 'warehouse', biz: 'warehouse' },
+  models: { ship: 'ship', warehouse: 'warehouse', factory: 'factory', side: 'warehouse', biz: 'warehouse', stake: 'warehouse' },
   bizOffers: ['toyshop', 'laundromat'],
-  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
+  kinds: { ship: { label: 'ספנות', debtLabel: 'הלוואת ספינה' }, warehouse: { label: 'יבוא ולוגיסטיקה', debtLabel: 'הלוואה' }, factory: { label: 'יצוא', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: 'gold' },
     GOLD: { name: 'זהב · אונקייה', kind: 'gold', start: 9720, div: 0, step: [1, 10], model: 'gold', modelLabel: 'כספת זהב', unit: 'אונקיות' },

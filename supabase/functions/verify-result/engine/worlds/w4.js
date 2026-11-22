@@ -10,7 +10,7 @@
 //    vests over giving.vest months (programs take time) — so whoever gives only at the end has to wait.
 //    Monthly pledges add impact every payday; realised impact ripples (+giving.ripple a month).
 //  • Win = net worth ≥ target AND impact ≥ goal.impact.
-import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER, STAKE_KIND } from './common.js';
 
 const board = ring(['OAOGADOLA', 'KOAXG?OAL', 'OAEGOMADO', 'AXOLGMTAI']); // v3: 40 tiles, paydays on the corners
 
@@ -30,6 +30,7 @@ export default {
   }),
   loan: { unit: 25000, autoUnit: 5000, pct: 3, bankrupt: 10, cap: 3 },
   creditPct: 5,
+  sideReportFee: 250, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'netWorthImpact', target: 9_000_000, impact: 90 },
   maxMonths: 70,
   stars: { t2: 45, t3: 37 },
@@ -55,9 +56,9 @@ export default {
   },
   // a gift gives `immediate` of its impact now and the rest spread over `vest` months; realised impact then ripples.
   giving: { unit: 20000, levels: [100000, 400000, 1500000], pledge: 15000, pledgeBoost: 1.2, ripple: 0.01, immediate: 0.3, vest: 10 },
-  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', biz: 'campus', angel: 'rocket', giving: 'foundation' },
+  models: { datacenter: 'datacenter', campus: 'campus', side: 'campus', biz: 'campus', angel: 'rocket', giving: 'foundation', stake: 'campus' },
   bizOffers: ['app', 'laundromat', 'pizza'],
-  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' } },
+  kinds: { datacenter: { label: 'תשתיות', debtLabel: 'הלוואה' }, campus: { label: 'נדל"ן חדשנות', debtLabel: 'משכנתא', rent: true }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: null },
     INDX: { name: 'INDX · מדד חדשנות עולמי', start: 100, div: 0.5, step: [100, 1000], model: null },
@@ -66,7 +67,7 @@ export default {
   characters: [
     { id: 'founder', gender: 'f', age: 34, family: { partner: 'married', kids: 1 }, name: 'יזמית אחרי אקזיט', icon: 'rocket', maxMonths: 70, stars: { t2: 44, t3: 33 }, desc: 'מכרת את החברה שלך. הרבה מזומן, כמעט בלי משכורת — הכסף צריך לעבוד.', salary: 12000, cash: 3200000,
       expenses: [['משכנתא', 12000], ['רכב', 3500], ['אוכל ובילויים', 6000], ['ילדים וחוגים', 3500]] },
-    { id: 'engineer', gender: 'm', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 60, stars: { t2: 45, t3: 37 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
+    { id: 'engineer', gender: 'm', age: 32, family: { partner: 'married', kids: 2 }, name: 'מהנדס בכיר', icon: 'gear', maxMonths: 60, maxMonths4: 69, stars: { t2: 45, t3: 37 }, desc: 'משכורת ענקית בענק טכנולוגיה. פחות חסכונות מהיזמית — אבל כל חודש נכנס הרבה.', salary: 55000, cash: 1500000,
       expenses: [['משכנתא', 12000], ['שני רכבים', 5000], ['אוכל ובילויים', 8000], ['גן ובית ספר', 7000]] },
     { id: 'social', gender: 'm', age: 28, family: { partner: 'together', kids: 0 }, name: 'יזם חברתי', icon: 'heart', maxMonths: 84, stars: { t2: 52, t3: 40 }, desc: 'פחות כסף, אבל כבר יש לך השפעה ורשת של אנשים טובים.', salary: 22000, cash: 1300000, impact: 20,
       expenses: [['שכירות', 7000], ['רכב', 2000], ['אוכל ושוטף', 4500], ['ביטוחים', 1500]] },

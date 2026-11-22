@@ -7,11 +7,16 @@
 import { net } from './net.js';
 import { bus } from './bus.js';
 import { WORLDS, getWorld } from './worlds/index.js';
-import { characterCard, starThresholds, starsFor, fmt, fmtM } from './engine.js';
+import { characterCard, starThresholds, starsFor, fmt, fmtM, createGame, metrics } from './engine.js';
+import * as ENG from './engine.js';                       // T4 feature detection only (DREAMS, MENTOR_LEVELS, TUTORIAL_FREE_ROLLS…)
 import { ACHIEVEMENTS, titleFor, TITLES } from './achievements.js';
 import * as P from './progress.js';
 import * as EN from './energy.js';
 import * as LIB from './library.js';
+import { reducedMotion, motionPref, setMotionPref, initMotion } from './motion.js';
+import { catName } from './data/lessons-meta.js';
+import { PRACTICE } from './practice.js';
+import { flag } from './flags.js';
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -25,8 +30,11 @@ const num = (t) => `<bdi dir="ltr" class="lb-num">${esc(t)}</bdi>`;
 /** Server / other-player numbers → a safe integer before they touch markup (strings like "<img …>" become the fallback). */
 const int = (v, d = 0) => { const n = Math.floor(+v); return Number.isFinite(n) ? n : d; };
 const HEX_RE = /^#[0-9a-f]{3,8}$/i;
-const cardArt = (wid) => asset(`assets/${wid}/card.png`);
+// T7 CR-33 / PF-5: WebP copies of the 800×480 card PNGs (q90, ~20 KB instead of ~280 KB each, PSNR ≥ 36 dB); the PNGs stay in assets/
+const cardArt = (wid) => asset(`assets/${wid}/card.webp`);
 const freeKey = (wid) => 'rr2-save-free-' + wid;
+/** T4 IR-T4-1: learning games have their own slot (rr2-save-learn-<w>); game.js saveKeyFor owns the rule, this is the fallback. */
+const slotKey = (wid, learn = false) => (learn ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'free', worldId: wid, learn: true }))) || 'rr2-save-learn-' + wid) : freeKey(wid));
 const rankedKey = (rid) => 'rr2-save-' + rid;
 const randSeed = () => Math.floor(Math.random() * 2147483646) + 1;
 const worldOf = (id) => { try { return getWorld(id || 'w1'); } catch (e) { return WORLDS[0]; } };
@@ -101,8 +109,28 @@ function game() {
   if (!gameP) gameP = import('./game.js').then((m) => { G = m; return m; }).catch((e) => { console.error('lobby: game.js failed', e); gameP = null; return null; });
   return gameP;
 }
+// T7 CR-33: the T6 modules are not needed by the lobby home — loaded together with game.js (which imports them too, so the
+// module map shares one copy), never before the home is usable. Every user checks for null: a world view drawn before they
+// arrive simply has no branch chips (redrawn when they land, like the resume card that waits for game.js); the end screen
+// (only reachable after a game, i.e. after game.js) waits for them.
+//   T6S = summary.js — T6 §6 the personal end summary (graph, dimensions, more sections)
+//   GH  = ghosts.js  — T6 §2 finished ghost results (only after the game) — never sent to the server
+//   RW  = rewind.js  — T6 §7 practice branches (free / learn only)
+let T6S = null, GH = null, RW = null, t6P = null, t6Failed = false;
+// T4 §5.2 strength / weakness rows of the character cards (world view only): same post-render batch; missing → rows omitted
+let CM = null;
+const charMeta = (wid, cid) => (CM ? CM.charMeta(wid, cid) : null);
+const cmP = () => import('./data/characters-meta.js').then((m) => { CM = m; }).catch(() => {});   // failed → the end screen falls back to the classic one
+function t6Mods() {
+  if (T6S && GH && RW) return Promise.resolve(true);
+  return (t6P ||= Promise.all([import('./summary.js'), import('./ghosts.js'), import('./rewind.js')])
+    .then(([s, g, r]) => { T6S = s; GH = g; RW = r; return true; })
+    .catch((e) => { console.error('lobby: T6 modules failed', e); t6P = null; t6Failed = true; return false; }));
+}
 let UIp = null;
-const ui = () => (UIp ||= import('./ui.js').catch(() => ({})));
+// CR-33: ui.js draws its modals / toasts with css/game-play.css — enabled (and waited for) together with the module
+const playCss = () => (window.__rrPlayCss ? window.__rrPlayCss() : Promise.resolve());
+const ui = () => (UIp ||= Promise.all([import('./ui.js'), playCss()]).then(([m]) => m).catch(() => ({})));
 let AUp = null;
 const audio = () => (AUp ||= import('./audio.js').catch(() => ({})));
 function sfx(name) { audio().then((a) => { try { a.sfx && a.sfx(name); } catch (e) { /* ignore */ } }); }
@@ -173,7 +201,8 @@ let lastEndSig = null;
 function normalize(v) {
   if (!v) return { k: 'home' };
   if (typeof v === 'string') { const [k, id] = v.split(':'); return { k, id }; }
-  if (v.view) return normalize(v.view);
+  // T4 IR-T4-6: {view:'world', id, learn:true} from the in-game "out of ⚡" card
+  if (v.view) { const n = normalize(v.view); if (v.id && !n.id) n.id = v.id; if (v.learn) n.learn = true; return n; }
   return v.k ? v : { k: 'home' };
 }
 
@@ -181,11 +210,14 @@ function normalize(v) {
 export function openLobby(v) {
   ensureCss(); install();
   const o = overlay(); if (!o) { console.error('lobby: #start not found'); return; }
-  o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open');
+  o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open'); syncInert();
   if (!booted) { booted = true; boot(); }
   const nv = normalize(v);
+  if (nv.k !== 'world') worldMode = nv.learn ? 'learn' : null;
   if (nv.k === 'end' && !endCtx) nv.k = 'home';
   if (pendingDuel && nv.k === 'home' && !duelShown) { duelShown = true; nv.k = 'duel'; }
+  // T4 verify D7: a player from before the welcome (progress, but no rr2-onboarded) is onboarded already — mark it, no welcome
+  if (!safe(() => localStorage.getItem(ONBK)) && (completedAny() || P.getProgress().onboarded)) safe(() => localStorage.setItem(ONBK, '1'));
   if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
   claimGifts();
   startEnergyTicker();
@@ -194,13 +226,30 @@ export function openLobby(v) {
 export function closeLobby() {
   stopGroupRefresh(); stopEnergyTicker();
   const o = overlay(); if (o) { o.hidden = true; o.classList.remove('lb-open'); }
-  document.body.classList.remove('lb-lobby-open');
+  document.body.classList.remove('lb-lobby-open'); syncInert();
+  closeLesson(false); worldMode = null; dreamOpen = false;
 }
-function go(v) {
+function go(v) { const r = goRender(v); focusView(); return r; }
+/** T7 K-2 / CR-03: after a view render focus never stays on <body> (or on a node the render replaced). A render's own initial
+ *  focus (focusSoon, 30 ms) wins; otherwise the view's heading (tabindex=-1), else its first control. */
+function focusView() {
+  setTimeout(() => {
+    if (!lobbyVisible()) return;
+    const a = document.activeElement, o = overlay(), r = root();
+    if (!r || (a && a !== document.body && a.isConnected && o && o.contains(a))) return;
+    if (a && a !== document.body && a.isConnected && a.closest('#gm:not([hidden]), #evm:not([hidden])')) return;   // a dialog over the lobby keeps it
+    const h = r.querySelector('h1') || r.querySelector('h2');
+    const t = h || r.querySelector(FOCUSABLE);
+    if (!t) return;
+    if (h && !h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
+    safe(() => t.focus({ preventScroll: true }));
+  }, 80);
+}
+function goRender(v) {
   view = v;
   if (v.k !== 'group') stopGroupRefresh();
   switch (v.k) {
-    case 'world': return renderWorld(v.id);
+    case 'world': return renderWorld(v.id, { learn: !!v.learn });
     case 'group': return renderGroup(v.id);
     case 'profile': return renderProfile();
     case 'end': return renderEnd();
@@ -216,8 +265,10 @@ function go(v) {
 const rerender = () => { if (lobbyVisible() && view.k !== 'end') go(view); };
 
 function boot() {
-  game().then((m) => { if (m && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); });
-  P.syncFromServer().then((ch) => { if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
+  migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
+  // CR-33: the in-game graph starts loading right AFTER this first render (a task later), so it never delays the home itself
+  setTimeout(() => Promise.all([game(), t6Mods(), cmP(), playCss()]).then(([m]) => { if ((m || CM) && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); }), 0);
+  P.syncFromServer().then((ch) => { if (ch) revealAfterMerge(); if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
   flushPending();
   scenarios(); LIB.lessons().then(() => { const el = $('.map-lib'); if (el) el.outerHTML = libraryCard(); });
   if (pendingJoin) {
@@ -229,11 +280,11 @@ function boot() {
 function launchCfg(extra) { const p = P.getProgress(); return { pawn: p.pawn, pawnColor: p.pawnColor, ...extra }; }
 async function launch(cfg) {
   const g = await game();
-  if (!g || !g.startGame) { toast('המשחק עוד נטען… נסה שוב בעוד רגע'); return false; }
+  if (!g || !g.startGame) { toast('לא הצלחנו לטעון את המשחק. בדוק את החיבור ורענן את הדף.'); return false; }
   lastEndSig = null;
   P.beginSession(); sessLessons = [];
   closeLobby();
-  try { await g.startGame(cfg); return true; }
+  try { const r = await g.startGame(cfg); return r !== false; } // false = handled by game.js (message shown / lobby reopened)
   catch (e) { console.error(e); openLobby(view); toast('משהו השתבש בפתיחת המשחק'); return false; }
 }
 async function confirmAsk(text, yes, no = 'ביטול') {
@@ -241,30 +292,44 @@ async function confirmAsk(text, yes, no = 'ביטול') {
   if (u.confirmBox) { try { return !!(await u.confirmBox(text, { yes, no })); } catch (e) { /* fall through */ } }
   return window.confirm(text);
 }
-/** Free game. opts: {seed, title, duel, sameBoard} — sameBoard/duel reuse a known seed. Asks before replacing a save. */
+/** Free game. opts: {seed, title, duel, noAsk, learn, quick} — duel reuses a known seed. Asks before replacing a save.
+ *  T4: learn → learning mode (own slot, no ⚡/stars/achievements); dream + mentor from progress; tutorial per §4.6. */
 async function startFree(worldId, charId, opts = {}) {
   if (!P.isUnlocked(worldId) && !opts.duel) return go({ k: 'world', id: worldId });
+  const learn = !!opts.learn && !opts.duel;
   const g = await game();
-  const sv = g && safe(() => g.savedGame(freeKey(worldId)));
-  if (sv && !opts.noAsk) {
-    const ok = await confirmAsk(`יש לך משחק שמור ${P.inW(worldOf(worldId).name)} (${sv.charName || ''}, חודש ${sv.month}). משחק חדש ימחק אותו.`, 'משחק חדש');
+  const key = slotKey(worldId, learn);
+  const sv = g && safe(() => g.savedGame(key));
+  // T6 review M1: the end of a practice branch is a learning end, but the learning slot holds the player's ORIGINAL — always ask
+  const fromBranch = !!(endCtx && endCtx.e && endCtx.e.branch && view.k === 'end');
+  if (sv && (!opts.noAsk || fromBranch)) {
+    const ok = await confirmAsk(`יש לך ${learn ? 'תרגול שמור' : 'משחק שמור'} ${P.inW(worldOf(worldId).name)} (${sv.charName || ''}, חודש ${sv.month}). משחק חדש ימחק אותו.`, 'משחק חדש');
     if (!ok) return false;
   }
-  if (sv) safe(() => g.clearSave(freeKey(worldId)));
+  if (sv) safe(() => g.clearSave(key));
   P.markWorldSeen(worldId); if (!opts.duel) P.setLastChar(worldId, charId);
+  if (!opts.duel && !opts.quick) P.setLastMode(learn ? 'learn' : 'normal');
   sfx('click');
-  const tutorial = !opts.duel && !opts.seed && !P.getProgress().tutorialDone && worldId === 'w1';
-  const cfg = { worldId, charId, seed: opts.seed || randSeed(), mode: 'free', tutorial, resume: false, bailout: P.bailoutAvailable() };
+  const prog = P.getProgress();
+  // §4.6: the tutorial runs in a brand-new player's first w1 game (or once after "הדרכה מלאה במשחק הבא"), never in a duel / replayed
+  // board, and never again for a player with finished games (review M-3: a restore / server merge can leave tutorialDone false)
+  const w1 = worldId === 'w1' && !opts.duel && !opts.seed;
+  const tutorial = w1 && (P.consumeTutorialReplay() || (!prog.tutorialDone && !completedAny(prog)));
+  const cfg = { worldId, charId, seed: opts.seed || randSeed(), mode: 'free', tutorial, resume: false, bailout: learn ? true : P.bailoutAvailable() };
+  // review M-2: the 10 free rolls (D-9) belong to the player's very first game only — a replayed tutorial keeps its coaches, not the rolls
+  if (tutorial && !learn && P.firstEverGame()) cfg.tutorialFree = true;
+  if (learn) cfg.learn = true;
+  if (prog.dream && !opts.duel) cfg.dream = prog.dream;                       // engine ignores it until E-7 lands
+  if (mentorLevels()) cfg.mentor = tutorial ? 'guide' : (mentorAllowed(prog.mentorPref, prog) && prog.mentorPref) || undefined;
+  if (cfg.mentor === undefined) delete cfg.mentor;
   if (opts.title) cfg.title = opts.title;
   if (opts.duel) cfg.duel = opts.duel;
-  const ok = await launch(launchCfg(cfg));
-  if (ok && tutorial) P.setTutorialDone();
-  return ok;
+  return launch(launchCfg(cfg));   // T4: P.setTutorialDone() is no longer called on launch (bus 'onboard:done' / recordGame)
 }
-async function continueFree(worldId) {
-  const g = await game(); const sv = g && safe(() => g.savedGame(freeKey(worldId)));
+async function continueFree(worldId, { learn = false } = {}) {
+  const g = await game(); const sv = g && safe(() => g.savedGame(slotKey(worldId, learn)));
   if (!sv) { toast('לא מצאנו משחק שמור'); return rerender(); }
-  return launch(launchCfg({ ...sv.cfg, resume: true, bailout: P.bailoutAvailable() }));
+  return launch(launchCfg({ ...sv.cfg, resume: true, bailout: sv.cfg && sv.cfg.learn ? true : P.bailoutAvailable() }));
 }
 /* -------- server checkpoints (anti-replay): never restart a ranked game from turn 0 when the server has progress */
 function parseState(x) { if (!x) return null; if (typeof x === 'string') { try { return JSON.parse(x); } catch (e) { return null; } } return typeof x === 'object' ? x : null; }
@@ -291,6 +356,7 @@ async function playRanked(mode, challengeId = null, groupId = null, title = '') 
     const cfg = { worldId: w.id, charId, seed: Number(r.seed), mode, resultId: r.result_id, challengeId: challengeId || null, groupId: r.group_id || groupId || null,
       title: r.title || title || MODE_NAME[mode], tutorial: false, resume: false };
     if (mode === 'daily' && r.max_months != null) cfg.maxMonths = +r.max_months;
+    const dk = rankedDateKey(mode, r, challengeId, r.group_id || groupId); if (dk) cfg.dateKey = dk;   // T2 review B1 (CR-29): the rule set follows the server's day key
     const cpTurn = +r.checkpoint_turn || 0;
     if (cpTurn > 0) {
       const server = parseState(r.checkpoint);
@@ -306,6 +372,28 @@ async function playRanked(mode, challengeId = null, groupId = null, title = '') 
     if (sv) return launch(launchCfg({ ...sv.cfg, resume: true }));
     return launch(launchCfg(cfg));
   } finally { rankedBusy = false; }
+}
+/** The day key the verifier uses for this ranked result (verify_core rulesFor): daily → the Israel date of the daily key,
+ *  weekly → the ISO week key, challenge → the Israel date the challenge was created. rr_begin may return it as date_key (preferred);
+ *  otherwise it comes from what the lobby already fetched (rr_daily / rr_weekly key, the group's challenge starts_at — assumed equal
+ *  to created_at) and, last, from today's Israel date at the moment rr_begin answered. */
+function rankedDateKey(mode, r, challengeId, groupId) {
+  if (r && r.date_key) return String(r.date_key);
+  const today = P.israelDate();
+  if (mode === 'daily') return cache.daily && cache.daily.key === today ? cache.daily.key : today;
+  if (mode === 'weekly') {
+    if (cache.weekly && cache.weekly.key && /^\d{4}-W\d{1,2}$/.test(cache.weekly.key)) return cache.weekly.key;
+    const [y, m, d] = today.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1, d)); const dow = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - dow + 3); const wy = t.getUTCFullYear(); const w1 = new Date(Date.UTC(wy, 0, 4));
+    const wk = 1 + Math.round(((t - w1) / 864e5 - 3 + ((w1.getUTCDay() + 6) % 7)) / 7);
+    return `${wy}-W${String(wk).padStart(2, '0')}`;
+  }
+  if (mode === 'challenge') {
+    const g = groupId && cache.group[groupId]; const c = g && (g.challenges || []).find((x) => x.id === challengeId);
+    const at = c && (c.created_at || c.starts_at);
+    return at ? P.israelDate(new Date(at)) : today;
+  }
+  return null;
 }
 function needNick() {
   toast('צריך כינוי קודם — שנייה אחת');
@@ -373,12 +461,13 @@ if (typeof addEventListener === 'function') addEventListener('online', () => { i
 function topBar() {
   const p = P.getProgress(); const me = net.me(); const total = P.totalStars(p); const si = P.streakInfo();
   const streak = si.streak;
+  // T7 AX-2 (CR-12) label-in-name: the player and ⚡ buttons are named by their visible text plus a hidden lead-in (no aria-label)
   return `<header class="lb-top">
     <div class="lb-logo" aria-label="מירוץ העכברים">מירוץ<br>העכברים</div>
-    <button class="lb-player" data-act="profile" aria-label="הפרופיל שלי">
-      ${pawnHtml(p.pawn, p.pawnColor, 'md')}
+    <button class="lb-player" data-act="profile">
+      <span class="sr">הפרופיל שלי: </span>${pawnHtml(p.pawn, p.pawnColor, 'md')}
       <span class="lb-pl-txt"><b class="lb-pl-name">${me ? esc(me.nickname) : 'אורח'}</b>${titleBadge(total)}</span>
-      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים">★ ${total}</span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'warn'}" title="ימים ברצף באתגר היומי">🔥 ${streak}</span>` : ''}</span>
+      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים"><span aria-hidden="true">★</span> ${total}<span class="sr"> כוכבים</span></span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'wait'}" title="ימים ברצף באתגר היומי"><span aria-hidden="true">🔥</span> ${streak}<span class="sr"> ימים ברצף</span></span>` : ''}</span>
     </button>
     ${energyHtml()}
     ${muteBtn()}
@@ -443,9 +532,122 @@ function activeBanner() {
   const cfg = safe(() => G.activeConfig()) || {};
   if (lastEndSig && lastEndSig === sigOf(cfg)) return '';
   const w = worldOf(cfg.worldId); const c = charOf(w, cfg.charId);
-  return `<button class="lb-resume" data-act="resume-active"><span class="lb-resume-ic">▶</span><span><b>חזרה למשחק</b><small>${esc(w.name)}${c ? ' · ' + esc(c.name) : ''}${cfg.mode && cfg.mode !== 'free' ? ' · ' + esc(cfg.title || MODE_NAME[cfg.mode]) : ''}</small></span></button>`;
+  return `<button class="lb-resume" data-act="resume-active"><span class="lb-resume-ic">▶</span><span><b>חזרה למשחק</b><small>${esc(w.name)}${c ? ' · ' + esc(c.name) : ''}${cfg.learn ? ' · 🎓 תרגול' : ''}${cfg.mode && cfg.mode !== 'free' ? ' · ' + esc(cfg.title || MODE_NAME[cfg.mode]) : ''}</small></span></button>`;
 }
 const sigOf = (o) => [o.worldId, o.charId, o.mode, o.resultId || ''].join('|');
+
+/* ============================================================ T4: strings, feature detection, a11y helpers */
+// Exact strings of docs/next-level/specs/T4-opening-modes-library.md (ids S-…). ⚡ = "זריקות", 🔋 = "כוח".
+const T4 = {
+  W1: 'החיים שלך. הכסף שלך. הזמן שלך.',
+  W2: 'משכורת נכנסת, הוצאות יוצאות. המטרה: נכסים שמשלמים את החשבונות — ולהישאר מאושר בדרך.',
+  W3: 'יאללה, משחק ראשון ←', W4: 'אני רוצה לבחור דמות', W5: 'כבר שיחקתי במכשיר אחר',
+  M0: 'איך משחקים?', M1: '⭐ משחק רגיל', M2: 'כוכבים, הישגים ובונוסים. כל הטלה עולה ⚡ זריקה אחת.',
+  M3: '🎓 תרגול חופשי', M4: 'בלי הגבלת זריקות. בלי כוכבים, הישגים ובונוסי ⚡. לנסות, לטעות וללמוד.',
+  M5: (c, m) => `▶ להמשיך · ${c} · חודש ${m}`, M6: (c, m) => `▶ להמשיך בתרגול 🎓 · ${c} · חודש ${m}`, M8: '🎓 לתרגל בלי הגבלה',
+  K1: (t1, t2, t3, h = 60, f = 3) => `★ עד ${t1} חודשים · ★★ עד ${t2} · ★★★ עד ${t3}, וגם 😊 ${h} ו־🛟 קרן של ${f} חודשים`,
+  K2: 'בסוף כל חודש חסר', K3f: ' (חיה מהמזומן)', K3m: ' (חי מהמזומן)', K4: 'בסוף כל חודש נשאר',
+  Kgoal: (n) => `🎯 לצאת תוך ${n} חודשים`, Kmore: 'עוד פרטים ▾', Kless: 'פחות פרטים ▴', Kplay: 'לשחק ←',
+  Knet: 'נטו בחודש', Kcash: 'מזומן בהתחלה', Kexp: 'הוצאות קבועות',
+  D5: 'החלום שלי', D6: 'מה בשבילך לצאת מהמירוץ?', D7: 'זה לא משנה את הכוכבים — רק את המשימות שתראה בדרך.', D8: 'בלי חלום כרגע',
+  D9: (ic, n) => `החלום שלי: ${ic} ${n} · שינוי`, D10: 'לפני המשחק הבא: מה החלום שלך?', D11: (n) => `נשמר. במשחק הבא תראה את המשימות של ${n}.`,
+  D12: '🎯 החלומות שלי', D18: (ic, n, d) => `${ic} החלום שלך, ${n}: ${d} מתוך 3 משימות`,
+  G1: 'רוצה פחות עזרה? במשחק הבא אבא עשיר רק ירמוז.', G2: 'רמת עזרה:', G3: 'מדריך', G4: 'רמזים', G5: 'מקצוען', G6: '🔒 אחרי ★★', G7: '🔒 אחרי משחק אחד',
+  L1: 'יצאת מהמירוץ — בתרגול 🎓', L2: 'נשארת במירוץ — בתרגול 🎓',
+  L3: (s) => `במשחק רגיל התוצאה הזאת הייתה שווה ${s}.`, L4: 'במשחק רגיל זה עוד לא היה כוכב.',
+  L5: 'במצב תרגול לא נאספים כוכבים, הישגים ו־⚡. השיעורים נכנסים לספרייה.', L6: 'לנסות במשחק רגיל ⭐', L7: 'עוד תרגול 🎓',
+  H3: '🎬 סיור קצר במסך (5 צעדים)', H4: '📖 מה כל סימן אומר', H5: '🔄 הדרכה מלאה במשחק הבא בשכונה', H6: 'נפתח את ההדרכה במשחק הבא בשכונה.',
+  H7: '🎬 סיור קצר — בפעם הבאה שתיכנס למשחק', H8: '👋 להציג שוב את מסך הפתיחה', Hhelp: 'איך משחקים', T2: 'מה כל סימן אומר',
+  B1: (t, h) => `שיעור נעול: ${t}. איך פותחים: ${h}`, B2: 'עוד ▾', B3: (x) => `🔢 דוגמה: ${x}`, B5: (x) => `🎲 פישוט של המשחק: ${x}`, B6: (r, n) => `💡 תרגלת: ${r} מתוך ${n} נכונות`,
+  P9: (r, n) => `תרגול: ${r} מתוך ${n}`,
+  S1: (n) => `🔥 ${n === 1 ? 'יום אחד' : n + ' ימים'} ברצף. האתגר של היום מחכה לך.`,
+  // T5 §12 T5-S0…S1 (settings section, lobby lane) + T1 מצב קל
+  S0: 'תצוגה ותנועה', S1leg: 'תנועה במשחק', S1opt: [['auto', 'לפי המכשיר'], ['reduce', 'מופחתת'], ['full', 'מלאה']],
+  S1hint: 'מופחתת: בלי רעידות, קונפטי וקפיצות. הקוביות והחייל זזים מיד.', lite: 'מצב קל (בלי תלת־ממד)', liteHint: 'לוח דו־ממדי שטוח: מהיר יותר בטלפונים ישנים. החזרה לתלת־ממד טוענת את הדף מחדש.',
+};
+/** Lobby-side dream display names (the missions and their logic belong to the engine, E-7). */
+const DREAM_META = {
+  biz: { icon: '🚀', name: 'עסק משלי', line: 'לבנות משהו שעובד גם בלעדיך' },
+  family: { icon: '👨‍👩‍👧', name: 'זמן למשפחה', line: 'פחות שעות בשביל כסף, יותר בשביל אנשים' },
+  stable: { icon: '🛟', name: 'יציבות', line: 'שקט: כרית בצד ובלי חובות מפתיעים' },
+  free: { icon: '🗽', name: 'חופש כלכלי', line: 'נכסים שמשלמים את כל ההוצאות' },
+};
+/** §14.1 feature detection: dreams exist only when the engine exports DREAMS (tests may provide window.__t4dreams). */
+function dreamsList() {
+  // the test seam (window.__t4dreams) is read only under automation (navigator.webdriver), never for real players
+  const seam = safe(() => globalThis.navigator && globalThis.navigator.webdriver === true, false) && Array.isArray(globalThis.__t4dreams) ? globalThis.__t4dreams : null;
+  const d = Array.isArray(ENG.DREAMS) && ENG.DREAMS.length ? ENG.DREAMS : seam;
+  return d ? d.filter((x) => x && DREAM_META[x.id]).map((x) => ({ ...DREAM_META[x.id], ...x })) : null;
+}
+const dreamById = (id) => { const l = dreamsList(); return (l && l.find((x) => x.id === id)) || (DREAM_META[id] ? { id, ...DREAM_META[id], missions: [] } : null); };
+/** T2 mentor levels (feature-detected): ['guide','hint','pro'] or null. */
+const mentorLevels = () => { const l = ENG.MENTOR_LEVELS || (ENG.MN && ENG.MN.LEVELS); return Array.isArray(l) && l.includes('guide') ? l : null; };
+/** (same as ui.js nearMissText — the lobby does not load ui.js) Playtest B1: the end-screen near miss never shows negative months. The engine's "עוד {d} חודשים פחות" is about TIME; when the
+ *  months already met the ★★★ (or ★★) line, what stopped the star was the fund or happiness — say that. */
+function nearMissText(end) {
+  const n = end && end.nearMiss; if (!n || !n.text) return '';
+  if (typeof n.monthsToNext !== 'number' || n.monthsToNext > 0) return n.text;
+  const f = !!end.starsBlockedByFund, h = !!end.starsBlockedByHappiness;
+  if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
+  if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
+  if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
+  return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
+}
+const completedAny = (p = P.getProgress()) => (p.gamesPlayed || 0) + (p.learnGames || 0) > 0;
+const hasTwoStars = (p = P.getProgress()) => Object.values(p.stars || {}).some((x) => x >= 2);
+function mentorAllowed(level, p = P.getProgress()) { return level === 'guide' || (level === 'hint' && completedAny(p)) || (level === 'pro' && hasTwoStars(p)); }
+/** Test-only trace of screens (welcome, world, game…), harmless in production (§14.2). Consecutive repeats are folded. */
+function trace(screen) {
+  try { const t = (window.__t4trace ||= []); if (!t.length || t[t.length - 1].screen !== screen) t.push({ t: Math.round(performance.now()), screen }); } catch (e) { /* no window */ }
+}
+/** §7.3: is this end payload a learning-mode game? */
+function isLearnEnd(e) {
+  if (!e) return false;
+  if (e.learn === true || (e.summary && e.summary.config && e.summary.config.learn === true)) return true;
+  const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null;
+  return !!(cfg && cfg.learn === true && cfg.worldId === e.worldId && (cfg.mode || 'free') === (e.mode || 'free'));
+}
+/** A11Y-1: Tab/Shift+Tab cycle inside `root`. Returns release(). (ui.js will own trapFocus; the lobby keeps its own copy.) */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+function trapFocus(el) {
+  const onKey = (ev) => {
+    if (ev.key !== 'Tab') return;
+    const f = [...el.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+    if (!f.length) { ev.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (ev.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) { ev.preventDefault(); first.focus(); }
+  };
+  el.addEventListener('keydown', onKey);
+  return () => el.removeEventListener('keydown', onKey);
+}
+/** A11Y-1: the in-game DOM is inert while the lobby overlay covers it (kept in sync with #start[hidden]). */
+const GAME_DOM = ['c', 'board2d', 'hud', 'sheet', 'sheetBack', 'bar', 'evm', 'coach', 'hist'];
+function syncInert() {
+  const on = lobbyVisible();
+  for (const id of GAME_DOM) { const el = document.getElementById(id); if (el) { if (on) el.setAttribute('inert', ''); else el.removeAttribute('inert'); } }
+}
+/** Initial focus after a render (A11Y-3); preventScroll keeps the page at the top. */
+function focusSoon(sel) { setTimeout(() => { const el = typeof sel === 'string' ? $(sel) : sel; if (el && lobbyVisible()) safe(() => el.focus({ preventScroll: true })); }, 30); }
+/* -------- §4.6 one-time reveal migration: existing players never see the tutorial, the gradual HUD or the hints */
+const REVEALK = 'rr2-reveal';
+const HINT_IDS = ['C-roll', 'C-roi', 'C-meter', 'C-plan', 'C-sheet', 'C-power', 'C-fund', 'C-happy', 'C-credit', 'C-cpi', 'C-zr', 'C-focus', 'C-impact'];
+const readReveal = () => safe(() => { const r = JSON.parse(localStorage.getItem(REVEALK) || 'null'); return r && typeof r === 'object' && !Array.isArray(r) ? r : null; }, null);
+const writeReveal = (patch) => safe(() => localStorage.setItem(REVEALK, JSON.stringify({ v: 1, all: false, coached: [], tourNext: false, ...(readReveal() || {}), ...patch })));
+let newAtBoot = false;
+function migrateReveal() {
+  const p = P.getProgress();
+  if (readReveal()) return;
+  if (completedAny(p)) writeReveal({ all: true, coached: HINT_IDS.slice() });
+  else { newAtBoot = true; writeReveal({}); }
+}
+/** A server profile / restore code can turn a "new" device into an existing player: mark everything revealed (once). */
+function revealAfterMerge() {
+  if (!newAtBoot || P.getProgress().gamesPlayed + P.getProgress().learnGames <= gamesThisSession) return;
+  newAtBoot = false; writeReveal({ all: true, coached: HINT_IDS.slice() });
+}
+let gamesThisSession = 0;
+let pointerAt = 0;
 
 /* ============================================================ ⚡ ENERGY · gifts · welcome · library */
 const ONBK = 'rr2-onboarded';
@@ -453,7 +655,7 @@ let sessLessons = [];
 LIB.onUnlock((ids) => { sessLessons.push(...ids); });
 /** Free-play milestones for friends' group feeds (ranked results come from the server itself). */
 function logMilestones(e, res) {
-  if (!net.hasMe() || !net.logEvent || (e.mode && e.mode !== 'free' && e.mode !== 'history')) return;
+  if (!net.hasMe() || !net.logEvent || (e.mode && e.mode !== 'free' && e.mode !== 'history') || isLearnEnd(e)) return; // T4: never for learning games
   const ls = (e.end && e.end.lifeSummary) || {};
   const ev = [];
   if (e.mode === 'history') ev.push(['history_done', { scenario: e.scenarioId, stars: e.stars | 0, beat: e.status === 'won' }]);
@@ -469,8 +671,8 @@ const DAILY_ENERGY = 10;         // ⚡ for playing the daily
 const STREAK_ENERGY = { 3: 5, 7: 10, 30: 25 };
 function energyHtml(cls = '') {
   const e = EN.get(); const ms = EN.msUntilNext();
-  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy" aria-label="אנרגיה ${e} מתוך ${EN.MAX}">
-    <span class="lb-en-ic" aria-hidden="true">⚡</span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
+  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy">
+    <span class="lb-en-ic" aria-hidden="true">⚡</span><span class="sr">${EN.NAME}: </span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
 }
 let enTimer = null;
 function startEnergyTicker() {
@@ -484,14 +686,22 @@ function startEnergyTicker() {
 }
 function stopEnergyTicker() { clearInterval(enTimer); enTimer = null; }
 EN.onChange((p) => { if (p.delta > 0 && p.reason && !['sync', 'roll'].includes(p.reason) && lobbyVisible()) { /* bonus toasts are shown by the caller */ } });
+/** director decision 6: with ⚡ at 0, say that the unfinished game is kept (it continues from the same turn once a roll is back) */
+function savedNote() {
+  if (!G || !G.savedGame) return '';
+  const sv = WORLDS.filter((w) => P.isUnlocked(w.id)).map((w) => [w, safe(() => G.savedGame(slotKey(w.id)), null)]).find(([, x]) => x && !x.future);
+  if (!sv) return '';
+  const [w, x] = sv;
+  return `<p class="lb-en-saved">💾 המשחק שלך שמור: ${esc(x.charName || '')} ${esc(P.inW(w.name))}, חודש ${num(String(x.month))}. ממשיכים ממנו בדיוק מאותו מקום.</p>`;
+}
 /** "Out of energy" card: what you CAN do while waiting (DESIGN-v3 §3). */
 function emptyEnergyHtml() {
   if (EN.get() > 0) return '';
   const d = cache.daily; const dailyOpen = net.hasMe() && d && !d.error && !d.my_status;
   return `<section class="lb-empty-en" id="lbEmpty"><div class="lb-en-big" aria-hidden="true">🪫</div>
-    <div><h2>נגמרה האנרגיה ⚡</h2><p>עוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל ⚡ חדש. בינתיים:</p>
-    <div class="lb-acts start">${dailyOpen ? '<button class="primary" data-act="daily">🎲 האתגר היומי (לא עולה ⚡)</button>' : ''}
-      <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח ⚡ לחברים</button>' : ''}</div></div></section>`;
+    <div><h2>נגמרו הזריקות ⚡</h2><p>בעוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל זריקה חדשה. בינתיים:</p>${savedNote()}
+    <div class="lb-acts start"><button class="primary" data-act="learn-now">${T4.M8}</button>${dailyOpen ? '<button data-act="daily">🎲 האתגר היומי (בלי זריקות)</button>' : ''}
+      <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח זריקות לחברים</button>' : ''}</div></div></section>`;
 }
 let claimAt = 0;
 async function claimGifts() {
@@ -503,7 +713,7 @@ async function claimGifts() {
     if (total > 0) {
       EN.add(total, 'gift');
       const from = (r && r.from) || [];
-      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${f.amount}⚡` : `${f.nickname} שלח לך ${f.amount}⚡`) : [`קיבלת ${total}⚡`];
+      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
       lines.slice(0, 3).forEach((t, i) => setTimeout(() => toast('🎁 ' + t), i * 2700));
       sfx('coin'); refreshEnergyChips();
     }
@@ -522,10 +732,15 @@ function onQuizReward(p) {
   const r = p && (p.reward || p);
   if (!r || r.kind !== 'lesson' || r.right !== true) return;
   const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null; if (!cfg) return;
+  if (cfg.learn) return;                                   // T4 §7.1: no ⚡ bonuses in learning mode
+  if (cfg.slot === 'branch') return;                       // T6: a practice branch is a learning game
+  const live = safe(() => localSaveState(G && G.saveKeyFor ? G.saveKeyFor(cfg) : slotKey(cfg.worldId)), null);
+  if (live && live.afterWin) return;                       // T6 review m3: no ⚡ farming in the continuation after a win
   const sig = quizSig(cfg); setQuizCredited(sig, quizCredited(sig) + 1);
-  if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${QUIZ_ENERGY}⚡`);
+  if (EN.add(QUIZ_ENERGY, 'lesson')) toast(`📚 תשובה נכונה: +${EN.label(QUIZ_ENERGY)} ⚡`);
 }
 function creditQuizAtEnd(e) {
+  if (isLearnEnd(e)) return 0;                              // T4 §7.1
   const st = e.stats || (e.summary && e.summary.stats) || (e.end && e.end.stats) || {};
   const right = int(st.quizRight); const sig = quizSig(e); const had = quizCredited(sig);
   const owe = Math.max(0, right - had);
@@ -541,56 +756,107 @@ function grantDaily(streak) {
 }
 
 function renderWelcome() {
-  view = { k: 'welcome' }; ++token;
+  view = { k: 'welcome' }; ++token; trace('welcome');
+  // T4 F1: ≤ 35 words, no ⚡ / ★★★ / plan text (they come back as just-in-time coaches in the game)
   html(`<div class="lb-shell lb-welcome">
-    <article class="wl-card">
+    <article class="wl-card" aria-labelledby="wlH">
       <div class="wl-hero"><img src="${cardArt('w1')}" alt=""><div class="lb-logo wl-logo">מירוץ<br>העכברים</div></div>
-      <h1>החיים שלך. הכסף שלך. הזמן שלך.</h1>
-      <p class="wl-lead">כל חודש במשחק הוא חודש בחיים. המטרה: נכסים שמשלמים את ההוצאות — ולהישאר מאושר בדרך.</p>
-      <ul class="wl-points">
-        <li><span>📅</span><div><b>תוכנית חודשית</b><small>בכל משכורת בוחרים: עבודה רגילה, שעות נוספות, לימודים, עסק צדדי או מנוחה ומשפחה. הזמן הוא הנכס הכי יקר.</small></div></li>
-        <li><span>⚡</span><div><b>אנרגיה: ${EN.MAX} הטלות</b><small>כל הטלה עולה ⚡ אחד, ומתמלא ⚡ כל 6 דקות. האתגר היומי והשבועי — בחינם. חברים יכולים לשלוח לך ⚡.</small></div></li>
-        <li><span>😊</span><div><b>כסף זה לא הכל</b><small>★★★ רק למי שיוצא מהר, נשאר מאושר <em>וגם</em> שומר קרן חירום של 3 חודשים.</small></div></li>
-        <li><span>📚</span><div><b>אוספים שיעורים</b><small>כל שיעור של אבא עשיר נכנס לספרייה שלך.</small></div></li>
-      </ul>
-      <button class="primary lb-big" data-act="welcome-go">יאללה, מתחילים ←</button>
+      <h1 id="wlH">${T4.W1}</h1>
+      <p class="wl-lead">${T4.W2}</p>
+      <button class="primary lb-big" data-act="welcome-go">${T4.W3}</button>
+      <button class="wl-pick" data-act="welcome-pick">${T4.W4}</button>
+      <button class="wl-restore" data-act="welcome-restore">${T4.W5}</button>
     </article></div>`);
+  focusSoon('[data-act="welcome-go"]');
 }
 
-const CAT_HE = { tax: '🧾 משכורת ומסים', invest: '📈 השקעות', money: '💸 כסף ומחירים', debt: '💳 חובות ואשראי', time: '⏳ זמן ואנרגיה', life: '🌱 החיים', world: '🗺️ מהעולמות', history: '📜 מההיסטוריה' };
 async function renderLibrary() {
-  view = { k: 'library' }; const t = ++token;
+  view = { k: 'library' }; const t = ++token; trace('library');
   html(`<div class="lb-shell lb-library"><div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div><p class="lb-note">טוען את הספרייה…</p></div>`);
   const L = await LIB.lessons();
   if (t !== token) return;
   const c = LIB.counts();
   const cats = [];
-  for (const l of L) { const k = CAT_HE[l.cat] || l.cat || 'שיעורים'; let g = cats.find((x) => x.k === k); if (!g) cats.push(g = { k, items: [] }); g.items.push(l); }
+  // T4 §9.1: Hebrew category names only — an unknown category falls back to '📚 שיעורים', never to the raw key
+  for (const l of L) { const k = catName(l.cat); let g = cats.find((x) => x.k === k); if (!g) cats.push(g = { k, items: [] }); g.items.push(l); }
   const pct = c.total ? Math.round((c.have / c.total) * 100) : 0;
+  const pt = LIB.practiceTotals();
   html(`<div class="lb-shell lb-library">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
     <header class="lib-head"><span class="lib-ic" aria-hidden="true">📚</span><div><h1>ספריית השיעורים</h1>
       <p>כל שיעור שאבא עשיר מלמד אותך במשחק נכנס לכאן. <b>${num(c.have + '/' + c.total)}</b></p>
-      <div class="lb-bar-track"><i style="width:${pct}%"></i></div></div></header>
+      <div class="lb-bar-track"><i style="width:${pct}%"></i></div>${pt.n ? `<p class="lb-note">${esc(T4.P9(pt.right, pt.n))}</p>` : ''}</div></header>
     ${L.length ? cats.map((g) => `<section class="lib-sec"><h2>${esc(g.k)} <small>${num(g.items.filter((l) => LIB.isUnlocked(l.id)).length + '/' + g.items.length)}</small></h2>
-      <div class="lib-grid">${g.items.map((l) => { const un = LIB.isUnlocked(l.id); return un
-        ? `<button class="lib-card ${LIB.isNew(l.id) ? 'is-new' : ''}" data-act="lesson" data-id="${esc(l.id)}">${LIB.isNew(l.id) ? '<span class="gp-newtag">חדש</span>' : ''}<b>${esc(l.title)}</b><small>${iso(String(l.text).length > 150 ? String(l.text).slice(0, 147) + '…' : l.text)}</small></button>`
-        : `<div class="lib-card is-locked"><span class="lib-q">?</span><b>שיעור נעול</b><small>${esc(l.hint || (l.world ? 'מחכה לך ' + P.inW(worldOf(l.world).name) : 'שחק כדי לגלות'))}</small></div>`; }).join('')}</div></section>`).join('')
+      <div class="lib-grid">${g.items.map((l) => libCard(l)).join('')}</div></section>`).join('')
       : '<p class="lb-empty">הספרייה תתמלא כשתתחיל לשחק.</p>'}
   </div>`);
 }
+/** Unlocked: title + text. Locked (§9.3): 🔒 + a curious teaser (the real title stays hidden) + 🔓 how to unlock. */
+function libCard(l) {
+  if (LIB.isUnlocked(l.id)) {
+    return `<button class="lib-card ${LIB.isNew(l.id) ? 'is-new' : ''}" data-act="lesson" data-id="${esc(l.id)}">${LIB.isNew(l.id) ? '<span class="gp-newtag">חדש</span>' : ''}<b>${esc(l.title)}</b><small>${iso(String(l.text).length > 150 ? String(l.text).slice(0, 147) + '…' : l.text)}</small></button>`;
+  }
+  const m = LIB.meta(l.id) || {};
+  const teaser = m.teaser || 'שיעור שמחכה לך';
+  const hint = m.hint || l.hint || (l.world ? 'מחכה לך ' + P.inW(worldOf(l.world).name) : 'שחק כדי לגלות');
+  return `<div class="lib-card is-locked" role="group" aria-label="${esc(T4.B1(teaser, hint))}"><span class="lib-lock" aria-hidden="true">🔒</span><b>${esc(teaser)}</b><small><span aria-hidden="true">🔓 </span>${iso(hint)}</small></div>`;
+}
+/** Lesson sheet (§9.4): title · text (≤160, then עוד ▾) · example · where you learned it · simplification · practice. */
+const lessonTopics = (id) => [...new Set(PRACTICE.filter((x) => x.after.includes(id)).map((x) => x.topic))];
+function lessonLines(l) {
+  const m = LIB.meta(l.id) || {}; const ctx = LIB.contextOf(l.id); const out = [];
+  if (m.example) out.push(`<p class="ls-line ls-ex">${iso(T4.B3(m.example))}</p>`);
+  if (ctx) {
+    const wn = ctx.w === 'h' ? 'מכונת הזמן' : ctx.w ? safe(() => getWorld(ctx.w).name, '') : '';
+    const where = wn ? (ctx.w === 'h' ? 'ב' + wn : P.inW(wn)) : '';
+    const numTxt = ctx.num && ctx.num.label ? ` · ${ctx.num.label} ${ctxValue(l.id, ctx.num.value)}` : '';
+    out.push(`<p class="ls-line ls-ctx">${iso(`📍 למדת את זה בחודש ${ctx.m}${where ? ' ' + where : ''}${ctx.ev ? ` — "${ctx.ev}"` : ''}${numTxt}`)}</p>`);
+  }
+  if (m.sim) out.push(`<p class="ls-line ls-sim">${iso(T4.B5(m.sim))}</p>`);
+  const st = LIB.practiceStats(); let n = 0, r = 0;
+  for (const t of lessonTopics(l.id)) if (st[t]) { n += st[t].n || 0; r += st[t].right || 0; }
+  if (n) out.push(`<p class="ls-line ls-pr">${esc(T4.B6(r, n))}</p>`);
+  return out.join('');
+}
+/** E-6 num values: a string is shown as is; a number is a % (rates), a count, or ₪ (everything else). */
+const CTX_PCT = new Set(['tax_brackets', 'marginal_overtime', 'inflation']);
+const CTX_COUNT = new Set(['diversification', 'index_fund']);
+function ctxValue(id, v) {
+  if (v == null) return '';
+  if (typeof v !== 'number') return String(v);
+  if (CTX_PCT.has(id)) return `${Math.round(v * (Math.abs(v) <= 1 ? 1000 : 10)) / 10}%`;
+  if (CTX_COUNT.has(id)) return String(Math.round(v));
+  return fmtM(v);
+}
+let lessonRelease = null; let lessonOpener = null;
 async function openLesson(id) {
   const L = await LIB.lessons(); const l = L.find((x) => x.id === id); if (!l) return;
   LIB.markRead(id);
-  const old = $('#lbLesson'); if (old) old.remove();
+  closeLesson(false);
+  lessonOpener = document.activeElement;
+  const text = String(l.text || '');
+  const body = text.length > 160
+    ? `<p>${iso(text.slice(0, 157).replace(/\s+\S*$/, ''))}…</p><details class="ls-more"><summary>${T4.B2}</summary><p>${iso(text)}</p></details>`
+    : `<p>${iso(text)}</p>`;
   const el = document.createElement('div'); el.id = 'lbLesson'; el.className = 'lb-sheet';
-  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true"><span class="lib-ic sm" aria-hidden="true">📚</span><h2>${esc(l.title)}</h2><p>${iso(l.text)}</p><button class="primary lb-wide" data-act="lesson-close">הבנתי</button></div>`;
+  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true" aria-labelledby="lbLessonT"><span class="lib-ic sm" aria-hidden="true">📚</span><h2 id="lbLessonT">${esc(l.title)}</h2>${body}${lessonLines(l)}<button class="primary lb-wide" data-act="lesson-close">הבנתי</button></div>`;
   root().appendChild(el);
+  lessonRelease = trapFocus(el);
+  focusSoon(el.querySelector('[data-act="lesson-close"]'));
   const card = $(`.lib-card[data-id="${CSS.escape(id)}"]`); if (card) { card.classList.remove('is-new'); card.querySelector('.gp-newtag')?.remove(); }
+}
+function closeLesson(restore = true) {
+  const el = $('#lbLesson'); if (!el) return false;
+  if (lessonRelease) { lessonRelease(); lessonRelease = null; }
+  el.remove();
+  const c = $('.map-lib'); if (c) c.outerHTML = libraryCard();
+  if (restore && lessonOpener && lessonOpener.isConnected) safe(() => lessonOpener.focus({ preventScroll: true }));
+  lessonOpener = null;
+  return true;
 }
 
 /* ============================================================ ⏳ מכונת הזמן (history mode) */
-const HIST_ART = asset('assets/history/card.png');
+const HIST_ART = asset('assets/history/card.webp');
 let SCEN = null; let scenP = null;
 /** E.scenarioList() → [{id, name, start, months, blurb, lesson}] (needs js/data/real.js; null while unavailable). */
 function scenarios() {
@@ -629,7 +895,7 @@ async function renderHistory() {
   const body = !list ? '<div class="wv-locked"><div class="wv-lock-ic" aria-hidden="true">⏳</div><h2>מכונת הזמן מתכיילת…</h2><p>הנתונים ההיסטוריים עוד נטענים. נסה שוב עוד רגע.</p><button class="primary" data-act="history">לנסות שוב</button></div>'
     : `<div class="hs-grid">${list.map((sc, i) => {
       const h = p.history[sc.id] || {}; const best = h.best;
-      const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed })) : null;
+      const sv = open && g && h.lastSeed != null ? safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sc.id, seed: h.lastSeed })) : null;
       return `<article class="hs-card ${open ? '' : 'is-locked'}" style="--i:${i}">
         <div class="hs-top"><span class="hs-years">${esc(ymText(sc.start))} · ${int(sc.months)} חודשים</span>${best ? starsHtml(best.stars) : ''}</div>
         <h3>${esc(sc.name)}</h3><p>${esc(sc.blurb || '')}</p>
@@ -650,12 +916,12 @@ async function startHistory(sid, cont = false) {
   const p = P.getProgress(); const h = p.history[sid] || {};
   const g = await game();
   if (cont && h.lastSeed != null) {
-    const sv = g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+    const sv = g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }));
     if (sv) return launch(launchCfg({ ...sv.cfg, resume: true, bailout: P.bailoutAvailable() }));
   }
-  if (!cont && h.lastSeed != null && g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', seed: h.lastSeed }))) {
+  if (!cont && h.lastSeed != null && g && safe(() => g.savedGame({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }))) {
     const ok = await confirmAsk('יש לך משחק שמור בתקופה הזאת. להתחיל מההתחלה?', 'מההתחלה'); if (!ok) return;
-    safe(() => g.clearSave({ mode: 'history', worldId: 'h', seed: h.lastSeed }));
+    safe(() => g.clearSave({ mode: 'history', worldId: 'h', scenarioId: sid, seed: h.lastSeed }));
   }
   const seed = randSeed(); P.setHistorySeed(sid, seed);
   sfx('click');
@@ -664,7 +930,7 @@ async function startHistory(sid, cont = false) {
 
 /* ============================================================ HOME (world map) */
 function renderHome() {
-  view = { k: 'home' }; const t = ++token;
+  view = { k: 'home' }; const t = ++token; trace('home');
   const p = P.getProgress(); const me = net.me(); const goal = P.nextGoal();
   html(`<div class="lb-shell lb-home">
     ${activeBanner()}
@@ -697,13 +963,14 @@ function worldCard(w, i, p) {
   const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0; const best = p.best[w.id];
   const prev = i ? WORLDS[i - 1] : null;
   const sv = un && G && G.savedGame ? safe(() => G.savedGame(freeKey(w.id))) : null;
+  const svL = un && !sv && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
   const d = cache.daily; const isDaily = !!(d && d.world === w.id);
   const isNew = un && i > 0 && !p.seenWorlds.includes(w.id);
   const next = un && !s;
   const tags = [
     isNew ? '<span class="map-tag-new">חדש!</span>' : '',
     isDaily ? '<span class="map-tag-daily">🎲 היומי של היום</span>' : '',
-    sv ? `<span class="map-tag-save">▶ שמור · חודש ${esc(sv.month)}</span>` : '',
+    sv ? `<span class="map-tag-save">▶ שמור · חודש ${esc(sv.month)}</span>` : svL ? `<span class="map-tag-save">🎓 תרגול · חודש ${esc(svL.month)}</span>` : '',
   ].join('');
   return `<button class="map-card ${un ? '' : 'is-locked'} ${next ? 'is-next' : ''} ${s >= 3 ? 'is-max' : ''}" data-act="world" data-id="${w.id}" style="--i:${i}">
     <span class="map-art"><img src="${cardArt(w.id)}" alt="" loading="lazy" decoding="async"><span class="map-num">${i + 1}</span>${un ? '' : '<span class="map-lock" aria-hidden="true">🔒</span>'}<span class="map-tags">${tags}</span></span>
@@ -736,14 +1003,14 @@ function dailyHtml(d) {
   const streakLine = played
     ? `<div class="lb-streak"><span class="fire">🔥</span><b>${streak || 1}</b><span>${(streak || 1) === 1 ? 'יום ברצף' : 'ימים ברצף'}</span></div>`
     : streak > 0
-      ? `<div class="lb-streak warn"><span class="fire">🔥</span><b>${streak}</b><span>${streak === 1 ? 'יום ברצף' : 'ימים ברצף'} — אל תשבור את הרצף!</span></div>`
+      ? `<div class="lb-streak wait"><span>${esc(T4.S1(streak))}</span></div>`
       : '<div class="lb-streak cold"><span class="fire">🔥</span><span>שחק היום ותתחיל רצף</span></div>';
   return `<div class="lb-dh" style="background-image:url('${cardArt(w.id)}')">
       <span class="lb-pill">🎲 האתגר היומי</span>${un ? '' : '<span class="lb-pill lock">🔒 עולם נעול — טעימה!</span>'}<span class="lb-timer">⏳ ${timeLeft(d.ends_at)}</span>
-      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים</span></div>
+      <div class="lb-dh-txt"><b>${esc(w.name)}</b><span>${esc(c.name)} · ⏱️ ספרינט ${int(d.max_months, 24) || 24} חודשים</span></div>
     </div>
     <div class="lb-db">
-      ${played ? '' : `<p class="lb-sprint">⚡ ספרינט ${int(d.max_months, 24) || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
+      ${played ? '' : `<p class="lb-sprint">⏱️ ספרינט ${int(d.max_months, 24) || 24} חודשים — כמה קרוב לחופש תגיע?</p>`}
       ${streakLine}
       ${cta}
       <h3 class="lb-sub">הטבלה של היום · הכי קרוב לחופש</h3>
@@ -816,19 +1083,44 @@ async function joinCode(code) {
 }
 
 /* ============================================================ WORLD (character picker / locked preview) */
-function renderWorld(id) {
-  const w = worldOf(id); view = { k: 'world', id: w.id }; ++token;
+// T4 §5: mode group (normal / learning) → dream row → mentor row → character cards (articles, not buttons).
+let worldMode = null;            // 'normal' | 'learn' while the world view is open (null = from progress)
+let dreamOpen = false;           // the dream row is expanded
+function modeNow(p = P.getProgress()) {
+  if (worldMode) return worldMode;
+  return completedAny(p) ? p.lastMode : 'normal';   // a brand-new player always gets a normal first game
+}
+/** T6 §7.4 items 3–4: the practice branch of this world (continue / delete) and "back to a moment of the last game" (flag rewind) */
+function t6WorldHtml(w) {
+  if (!flag('rewind')) return '';
+  if (!RW) return '';   // CR-33: not loaded yet — boot() redraws the world view once it is
+  const out = [];
+  const bs = safe(() => RW.branchSave(w.id), null);
+  if (bs) out.push(`<div class="t6-wbr"><button class="lb-continue is-learn" data-act="t6-branch" data-id="${w.id}"><span><b>${esc(RW.STR.lobbyCont.replace('{m}', bs.month))}</b></span></button><button class="chip" data-act="t6-branch-del" data-id="${w.id}">${esc(RW.STR.lobbyDel)}</button></div>`);
+  const L = safe(() => RW.lastGame(), null);
+  if (L && L.cfg && L.cfg.worldId === w.id) out.push(`<button class="chip t6-wlast" data-act="t6-last">${esc(RW.STR.lobbyLast)}</button>`);
+  return out.join('');
+}
+function renderWorld(id, opts = {}) {
+  const w = worldOf(id); view = { k: 'world', id: w.id }; ++token; trace('world');
+  if (opts.learn) worldMode = 'learn';
   const i = WORLDS.indexOf(w); const p = P.getProgress(); const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0;
   if (un) P.markWorldSeen(w.id);
-  const sv = un && G && G.savedGame ? safe(() => G.savedGame(freeKey(w.id))) : null;
+  const sv = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id))) : null;
+  const svL = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
   const prev = i ? WORLDS[i - 1] : null;
   const d = cache.daily; const isDaily = !!(d && d.world === w.id && d.my_status !== 'won' && d.my_status !== 'lost');
   const diffs = difficulty(w);
   let body;
   if (un) {
-    body = `${sv ? `<button class="lb-continue" data-act="continue-free" data-id="${w.id}"><span class="lb-resume-ic">▶</span><span><b>להמשיך מאיפה שעצרת</b><small>${esc(sv.charName || '')} · חודש ${esc(sv.month)}</small></span></button>` : ''}
-      <h2 class="wv-h">${sv ? 'או משחק חדש — ' : ''}בחר דמות</h2>
-      <div class="wv-chars">${w.characters.map((c) => charCard(w, c, diffs[c.id])).join('')}</div>`;
+    const mode = modeNow(p);
+    const cont = (x, learn) => `<button class="lb-continue ${learn ? 'is-learn' : ''}" data-act="continue-free" data-id="${w.id}" ${learn ? 'data-learn="1"' : ''}><span><b>${esc(learn ? T4.M6(x.charName || '', x.month) : T4.M5(x.charName || '', x.month))}</b></span></button>`;
+    body = `${sv ? cont(sv, false) : ''}${svL ? cont(svL, true) : ''}${t6WorldHtml(w)}
+      ${modeGroupHtml(mode)}
+      ${dreamRowHtml(p)}
+      ${mentorRowHtml(p)}
+      <h2 class="wv-h">${sv || svL ? 'או משחק חדש — ' : ''}בחר דמות</h2>
+      <div class="wv-chars">${w.characters.map((c) => charCard(w, c, diffs[c.id], s)).join('')}</div>`;
   } else {
     const frontier = WORLDS.find((x) => P.isUnlocked(x.id) && !(p.stars[x.id] > 0)) || prev;
     body = `<div class="wv-locked">
@@ -841,43 +1133,90 @@ function renderWorld(id) {
       ${isDaily ? '' : '<p class="lb-note">טיפ: כל יום האתגר היומי בעולם אחר — גם בעולמות נעולים.</p>'}
     </div>`;
   }
-  html(`<div class="lb-shell lb-world">
+  html(`<div class="lb-shell lb-world ${un && modeNow(p) === 'learn' ? 'is-learn' : ''}">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
     <header class="wv-hero ${un ? '' : 'is-locked'}"><img src="${cardArt(w.id)}" alt="">
-      <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}</div></header>
+      <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}${p.best[w.id] ? `<span class="wv-best-sm">🏁 השיא שלך: ${int(p.best[w.id])} חודשים</span>` : ''}</div></header>
     <div class="wv-goal">
       <div><span>🎯 המטרה</span><b>${esc(w.goalLabel)}</b></div>
-      <div><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || '')}</b></div>
+      <div class="wv-new"><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || '')}</b></div>
       ${p.best[w.id] ? `<div><span>🏁 השיא שלך</span><b>${p.best[w.id]} חודשים</b></div>` : ''}
     </div>
     ${body}
   </div>`);
+  if (un) focusSoon('input[name="t4mode"]:checked');
+}
+function modeGroupHtml(mode) {
+  const opt = (v, t, sub) => `<label class="t4-opt ${mode === v ? 'on' : ''}"><input type="radio" name="t4mode" value="${v}" ${mode === v ? 'checked' : ''}><span><b>${t}</b><small>${sub}</small></span></label>`;
+  return `<fieldset class="t4-modes" role="radiogroup" aria-label="${T4.M0}"><legend class="sr">${T4.M0}</legend>${opt('normal', T4.M1, T4.M2)}${opt('learn', T4.M3, T4.M4)}</fieldset>`;
+}
+function dreamRowHtml(p) {
+  const list = dreamsList(); if (!list) return '';
+  const cur = p.dream ? dreamById(p.dream) : null;
+  // AC-C3: on the smallest phones (≤ 380 px) the optional picker starts as one line too, so the first character's play button stays in view
+  if (!dreamOpen && (cur || (typeof innerWidth === 'number' && innerWidth <= 380))) {
+    return `<div class="t4-dream-line"><button class="t4-dream-sum" data-act="dream-open" aria-expanded="false">${esc(cur ? T4.D9(cur.icon, cur.name) : '🎯 חלום לדרך (לא חובה) · לבחור')}</button></div>`;
+  }
+  const opt = (id, ic, name, line) => `<label class="t4-dopt ${(p.dream || '') === id ? 'on' : ''}"><input type="radio" name="t4dream" value="${id}" ${(p.dream || '') === id ? 'checked' : ''}><span class="t4-dic" aria-hidden="true">${esc(ic)}</span><span><b>${esc(name)}</b>${line ? `<small>${esc(line)}</small>` : ''}</span></label>`;
+  return `<fieldset class="t4-dreams" role="radiogroup" aria-label="${T4.D5}"><legend><b>${T4.D6}</b><small>${T4.D7}</small></legend>
+    <div class="t4-dgrid">${list.map((x) => opt(x.id, x.icon, x.name, x.line)).join('')}${opt('', '·', T4.D8, '')}</div></fieldset>`;
+}
+function mentorRowHtml(p) {
+  const L = mentorLevels(); if (!L) return '';
+  const cur = mentorAllowed(p.mentorPref, p) ? p.mentorPref || 'guide' : 'guide';
+  // one vocabulary with the game (review m-3): T2's MN.LEVEL_TEXT labels, T4's words only as a fallback
+  const LT = (ENG.MN && ENG.MN.LEVEL_TEXT) || {};
+  const name = { guide: (LT.guide && LT.guide.label) || T4.G3, hint: (LT.hint && LT.hint.label) || T4.G4, pro: (LT.pro && LT.pro.label) || T4.G5 };
+  const lock = { hint: T4.G7, pro: T4.G6 };
+  return `<fieldset class="t4-mentor" role="radiogroup" aria-label="${T4.G2}"><legend>${T4.G2}</legend>${['guide', 'hint', 'pro'].filter((x) => L.includes(x)).map((lv) => {
+    const ok = mentorAllowed(lv, p);
+    return `<label class="t4-mopt ${cur === lv ? 'on' : ''} ${ok ? '' : 'is-locked'}" ${ok ? '' : `title="${esc(lock[lv])}"`}><input type="radio" name="t4mentor" value="${lv}" ${cur === lv ? 'checked' : ''} ${ok ? '' : `disabled aria-label="${esc(name[lv] + ' ' + lock[lv])}"`}><span>${esc(name[lv])}${ok ? '' : ` <span aria-hidden="true">🔒</span><small>${esc(lock[lv].replace('🔒 ', ''))}</small>`}</span></label>`;
+  }).join('')}</fieldset>`;
 }
 function topMini() {
   const p = P.getProgress(); const me = net.me();
   return `<button class="lb-mini-player" data-act="profile">${pawnHtml(p.pawn, p.pawnColor, 'sm')}<span>${me ? esc(me.nickname) : 'אורח'}</span>${titleBadge(P.totalStars(p))}</button>`;
 }
+/** §5.4 the first number of the HUD: metrics(createGame()).cashflow (pure, cached per character). */
+const surplusCache = {};
+function surplusOf(w, c) {
+  const k = w.id + ':' + c.id;
+  if (!(k in surplusCache)) surplusCache[k] = safe(() => metrics(createGame({ worldId: w.id, charId: c.id, seed: 1 })).cashflow, characterCard(w, c).surplus);
+  return surplusCache[k];
+}
+/** §5.3 identity line, computed, no slash forms: "בן 31 · נשוי + ילד". */
+function identityLine(c) {
+  const f = c.gender === 'f'; const fam = c.family || {};
+  const partner = fam.partner === 'married' ? (f ? 'נשואה' : 'נשוי') : fam.partner === 'together' ? 'בזוגיות' : (f ? 'רווקה' : 'רווק');
+  const k = +fam.kids || 0;
+  return c.age ? `${f ? 'בת ' : 'בן '}${c.age} · ${partner}${k === 1 ? ' + ילד' : k > 1 ? ` + ${k} ילדים` : ''}` : '';
+}
 function charCard(w, c, d) {
-  const cc = characterCard(w, c); const T = starThresholds(w, c.id);
+  const cc = characterCard(w, c); const T = starThresholds(w, c.id); const meta = charMeta(w.id, c.id);
+  const cf = surplusOf(w, c); const neg = cf < 0;
   const salary = cc.salaryUsd ? `$${cc.salaryUsd.toLocaleString('en-US')}` : fmtM(cc.salary);
   const extras = [];
   for (const a of c.assets || []) extras.push(`🏷️ כבר יש לך: ${esc(a.n)}`);
   for (const [tk, q] of Object.entries(c.holdings || {})) extras.push(`📈 ${q.toLocaleString('en-US')} מניות ${esc(tk)}`);
   if (c.impact) extras.push(`💗 ${c.impact} נקודות השפעה מההתחלה`);
   if (cc.perk) extras.push(`✨ ${esc(cc.perk)}`);
-  return `<button class="wv-char" data-act="char" data-w="${w.id}" data-c="${c.id}">
-    <span class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b>${esc(c.name)}</b>${diffHtml(d || 2)}</span></span>
-    <span class="wv-desc">${esc(c.desc || '')}</span>
-    <span class="wv-nums">
-      <span><small>משכורת</small><b>${iso(salary)}</b></span>
-      <span><small>הוצאות</small><b>${iso(fmtM(cc.expenses))}</b></span>
-      <span><small>נשאר בחודש</small><b class="${cc.surplus > 0 ? 'pos' : cc.surplus < 0 ? 'neg' : ''}">${iso((cc.surplus > 0 ? '+' : '') + fmtM(cc.surplus))}</b></span>
-      <span><small>מזומן</small><b>${iso(fmtM(cc.cash))}</b></span>
-    </span>
-    <span class="wv-th"><i>★ עד ${T.maxMonths}</i><i>★★ עד ${T.t2}</i><i>★★★ עד ${T.t3}</i><small>חודשים</small>${T.happy != null || HAPPY_RULE ? `<i class="wv-happy">+ 😊 ${int(T.happy, 60)}</i>` : ''}<i class="wv-fund" title="★★★ דורש קרן חירום">🐷 קרן חירום ${int(T.fundMonths, 3)} חודשים</i></span>
-    ${extras.length ? `<span class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</span>` : ''}
-    <span class="wv-go">לשחק ←</span>
-  </button>`;
+  const exp = [...(c.expenses || [])].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const did = `wvd-${w.id}-${c.id}`;
+  const idl = identityLine(c);
+  return `<article class="wv-char" aria-labelledby="${did}-n" data-w="${w.id}" data-c="${c.id}">
+    <div class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b id="${did}-n">${esc(c.name)}</b>${idl ? `<small class="wv-id">${esc(idl)}</small>` : ''}</span>${diffHtml(d || 2)}</div>
+    <p class="wv-desc">${esc(c.desc || '')}</p>
+    ${meta ? `<p class="wv-sw wv-str">💪 ${iso(meta.strength)}</p><p class="wv-sw wv-weak">⚠️ ${iso(meta.weakness)}</p>` : ''}
+    <p class="wv-cf ${neg ? 'neg' : 'pos'}"><span>${neg ? T4.K2 : T4.K4}${neg ? (c.gender === 'f' ? T4.K3f : T4.K3m) : ''}</span><b>${iso((cf > 0 ? '+' : '') + fmt(cf))}</b></p>
+    <p class="wv-goalline">${esc(T4.Kgoal(T.maxMonths))}</p>
+    <div class="wv-details" id="${did}" hidden>
+      <div class="wv-nums"><span><small>${T4.Knet}</small><b>${iso(salary)}</b></span><span><small>${T4.Kcash}</small><b>${iso(fmtM(cc.cash))}</b></span></div>
+      ${exp.length ? `<p class="wv-exph">${T4.Kexp}</p><ul class="wv-exp">${exp.map(([l, a]) => `<li><span>${esc(l)}</span><b>${iso(fmtM(a))}</b></li>`).join('')}</ul>` : ''}
+      ${extras.length ? `<div class="wv-extra">${extras.map((x) => `<span>${x}</span>`).join('')}</div>` : ''}
+      <p class="wv-th">${esc(T4.K1(T.maxMonths, T.t2, T.t3, int(T.happy, 60), int(T.fundMonths, 3)))}</p>
+    </div>
+    <div class="wv-acts"><button class="wv-more" data-act="char-more" aria-expanded="false" aria-controls="${did}">${T4.Kmore}</button><button class="primary wv-go" data-act="char" data-w="${w.id}" data-c="${c.id}" aria-label="${esc(T4.Kplay + ' ' + c.name)}">${T4.Kplay}</button></div>
+  </article>`;
 }
 
 /* ============================================================ GROUP */
@@ -929,8 +1268,8 @@ function membersHtml(g) {
   const members = [...g.members].sort((a, b) => int(b.stars) - int(a.stars));
   const gifted = new Set((feedCache[g.id] && feedCache[g.id].gifted_today) || []);
   return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(int(m.stars))}<span class="gp-st">★ ${int(m.stars)}</span>${m.me ? '' : gifted.has(m.nickname)
-    ? '<button class="gp-send sent" disabled title="שלחת לו ⚡ היום">✓ נשלח</button>'
-    : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3⚡ (פעם ביום)">שלח ⚡</button>`}</li>`).join('');
+    ? '<button class="gp-send sent" disabled title="שלחת לו זריקות היום">✓ נשלח</button>'
+    : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3 זריקות (פעם ביום)">שלח ⚡ 3</button>`}</li>`).join('');
 }
 /* -------- group feed: friends' milestones + ranked results (net.groupFeed) */
 const feedCache = {};
@@ -946,7 +1285,7 @@ function feedLine(f) {
     case 'history_done': return ['⏳', `${who} חזר מ${esc((scenById(d.scenario) || {}).name || 'מכונת הזמן')}${d.beat ? ' — וניצח את המדד 🏆' : ''}${st}`];
     case 'ranked_won': return ['🏁', `${who} יצא מהמירוץ ${d.title ? `ב״${esc(d.title)}״` : d.mode ? 'ב' + esc(MODE_NAME[d.mode] || '') : 'באתגר'}${int(d.months) > 0 ? ` בחודש ${int(d.months)}` : ''}${st}`];
     case 'ranked_lost': { const pr = d.progress ?? (d.stats && d.stats.progress); return ['💪', `${who} סיים ${d.title ? `את ״${esc(d.title)}״` : d.mode ? 'את ' + esc(MODE_NAME[d.mode] || 'האתגר') : 'אתגר'}${pr != null && Number.isFinite(+pr) ? ` עם ${num(Math.round(Math.max(0, Math.min(1, +pr)) * 100) + '%')} מהדרך` : ''}`]; }
-    case 'gift': case 'energy': return ['⚡', `${who} שלח ⚡`];
+    case 'gift': case 'energy': return ['⚡', `${who} שלח זריקות ⚡`];
     case 'joined': return ['👋', `${who} הצטרף לקבוצה`];
     default: return ['•', `${who} ${esc(f.kind)}`];
   }
@@ -1029,7 +1368,8 @@ function chalHtml(g, c) {
 
 /* ============================================================ PROFILE */
 function renderProfile() {
-  view = { k: 'profile' }; ++token;
+  view = { k: 'profile' }; ++token; trace('profile');
+  loadQuality();
   const p = P.getProgress(); const me = net.me(); const total = P.totalStars(p); const nt = P.nextTitle(p); const si = P.streakInfo();
   const curMin = TITLES[titleIdx(total)].min;
   const pct = nt ? Math.round(((total - curMin) / (nt.min - curMin)) * 100) : 100;
@@ -1061,7 +1401,8 @@ function renderProfile() {
     <section class="lb-card pf-ach"><h2>הישגים <small>${num(p.achievements.filter((id) => achs.some((a) => a.id === id)).length + '/' + achs.length)}</small></h2>
       <div class="pf-agrid">${achs.map((a) => { const got = have.has(a.id); const hid = !got && a.hidden; const wn = a.world ? worldOf(a.world).name : a.meta ? 'מסע' : ''; return `<div class="pf-a ${got ? 'got' : ''} ${hid ? 'hid' : ''}" title="${hid ? 'הישג סודי' : esc(a.desc)}"><span class="pf-aic">${hid ? '?' : ACH_ICON[a.icon] || '🏅'}</span><b>${hid ? 'הישג סודי' : esc(a.name)}</b><small>${hid ? 'תגלה כשתשיג' : esc(a.desc)}</small>${wn && !hid ? `<em>${esc(wn)}</em>` : ''}</div>`; }).join('')}</div>
     </section>
-    <section class="lb-card pf-set"><h2>הגדרות</h2>${muteToggle()}</section>
+    ${dreamsProfileHtml(p)}
+    ${settingsHtml()}
     <section class="lb-card pf-recover"><h2>להעביר את השחקן למכשיר אחר</h2>
       ${me ? `<p class="lb-note">קוד השחזור מעביר את השחקן, הכוכבים והקבוצות למכשיר אחר. <b>אל תשלח אותו לאף אחד</b> — מי שמחזיק בו שולט בשחקן שלך.</p>
         <div class="pf-code"><button class="chip" data-act="code-show">👁️ להציג את הקוד</button><button class="chip" data-act="code-copy">📋 להעתיק</button></div><div id="pfCode" class="pf-codebox" hidden></div>` : '<p class="lb-note">יש לך שחקן במכשיר אחר? הדבק כאן את קוד השחזור שלו.</p>'}
@@ -1069,6 +1410,65 @@ function renderProfile() {
     </section>
   </div>`);
   refreshMuted();
+}
+
+/* -------- T4 F4 + T5 §7.3 settings: sound, "תצוגה ותנועה" (motion, graphics quality when the rendering lane ships it, מצב קל), help */
+let QM = null; let qmP = null;
+/** js/render/quality.js (T5, rendering lane) — optional: the quality group appears only when the module loads. */
+function loadQuality() {
+  if (QM || qmP) return;
+  qmP = import('./render/quality.js').then((m) => { if (m && typeof m.setQualityPref === 'function' && m.TIER_LABEL) { QM = m; if (view.k === 'profile' && lobbyVisible()) { const el = $('#pfSettings'); if (el) el.outerHTML = settingsHtml(); } } }).catch(() => { /* not shipped yet */ });
+}
+const readSettings = () => safe(() => JSON.parse(localStorage.getItem('rr2-settings') || '{}') || {}, {});
+function radios(name, legend, opts, cur, hint, extra = '') {
+  return `<fieldset class="lb-radios"><legend>${legend}</legend>${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}>${l}</label>`).join('')}${hint ? `<p class="lb-note">${hint}</p>` : ''}${extra}</fieldset>`;
+}
+function settingsHtml() {
+  const liteOk = safe(() => !G || !G.setLite ? false : true, false);
+  const lite = !!readSettings().lite;
+  const q = QM ? radios('quality', 'איכות גרפיקה', QM.PREFS.map((x) => [x, QM.TIER_LABEL[x]]), safe(() => QM.qualityPref(), 'auto'),
+    'חסכונית: בלי צללים ועם פחות קישוטים. מתאים לטלפונים ישנים. החלקת קצוות משתנה אחרי רענון.', `<p class="lb-note" data-q="now">עכשיו: ${esc(QM.TIER_LABEL[safe(() => QM.resolveTier(), 'high')] || '')}</p>`) : '';
+  return `<section class="lb-card pf-set" id="pfSettings"><h2>הגדרות</h2>${muteToggle()}
+    <h3 class="lb-sub">${T4.S0}</h3>
+    ${radios('motion', T4.S1leg, T4.S1opt, motionPref(), T4.S1hint)}
+    ${q}
+    ${liteOk ? `<button class="lb-toggle ${lite ? 'on' : ''}" data-act="lite" role="switch" aria-checked="${lite}"><span>${T4.lite}</span><i></i></button><p class="lb-note">${T4.liteHint}</p>` : ''}
+    <h3 class="lb-sub">${T4.Hhelp}</h3>
+    <div class="pf-help">
+      <button class="chip" data-act="help-tour">${T4.H7}</button>
+      <button class="chip" data-act="help-legend">${T4.H4}</button>
+      <button class="chip" data-act="help-tutorial">${T4.H5}</button>
+      <button class="chip" data-act="help-welcome">${T4.H8}</button>
+    </div></section>`;
+}
+/** F4 legend in the lobby: no game is running, so it lists what each sign means (the in-game legend adds your values). */
+const LEGEND = [
+  ['💰', 'מזומן', 'הכסף שבקופה עכשיו.'], ['💧', 'תזרים חודשי', 'מה נשאר בסוף כל חודש: הכנסות פחות הוצאות.'], ['📊', 'מד החופש', 'כמה מההוצאות ההכנסה הפסיבית כבר מכסה. מלא = יצאת מהמירוץ.'],
+  ['🎂', 'גיל', 'כל חודש במשחק הוא חודש בחיים.'], ['🔋', 'כוח', 'הכוח של הדמות בסיפור — לא ⚡ זריקות. מתחת ל־25 יש סכנת שחיקה.'], ['😊', 'אושר', 'ל־★★★ צריך לפחות 60.'],
+  ['🏦', 'דירוג אשראי', 'קובע כמה יעלו הלוואות. הלוואה כפויה מורידה אותו.'], ['🛒', 'אינפלציה', 'כמה המחירים עולים השנה.'], ['🛟', 'קרן חירום', 'כמה חודשי הוצאות שמורים בצד. ל־★★★ צריך 3.'],
+  ['📅', 'התוכנית', 'איך אתה מעביר את החודש: עבודה, שעות נוספות, לימודים, עסק צדדי או מנוחה.'], ['⚡', 'זריקות', 'כל הטלת קוביות במשחק רגיל עולה זריקה אחת. בתרגול חופשי — בלי הגבלה.'], ['🎯', 'המטרה והחלום', 'הצעד הבא בדרך, והמשימות של החלום שבחרת.'],
+];
+function openSheet(title, inner) {
+  closeLesson(false);
+  const opener = document.activeElement;
+  const el = document.createElement('div'); el.id = 'lbLesson'; el.className = 'lb-sheet';
+  el.innerHTML = `<div class="lb-sheet-card" role="dialog" aria-modal="true" aria-labelledby="lbLessonT"><h2 id="lbLessonT">${title}</h2>${inner}<button class="primary lb-wide" data-act="lesson-close">סגירה</button></div>`;
+  root().appendChild(el);
+  lessonRelease = trapFocus(el); lessonOpener = opener;
+  focusSoon(el.querySelector('[data-act="lesson-close"]'));
+}
+function legendHtml() {
+  return `<table class="t4-legend"><tbody>${LEGEND.map(([ic, n, t]) => `<tr><td aria-hidden="true">${ic}</td><th scope="row">${esc(n)}</th><td>${iso(t)}</td></tr>`).join('')}</tbody></table>`;
+}
+/** §6.3 S-D12 (P1): the current dream (changeable) and the badges per dream. */
+function dreamsProfileHtml(p) {
+  const list = dreamsList(); if (!list) return '';
+  const badges = list.map((d) => {
+    const got = (p.dreams[d.id] && p.dreams[d.id].done) || []; if (!got.length) return '';
+    const titles = got.map((id) => ((d.missions || []).find((m) => m.id === id) || {}).title || '').filter(Boolean);
+    return titles.map((t) => `<li>${esc(d.icon)} ${esc(t)} ✓</li>`).join('');
+  }).join('');
+  return `<section class="lb-card pf-dreams"><h2>${T4.D12}</h2>${dreamRowHtml({ ...p, dream: p.dream })}${badges ? `<ul class="pf-badges">${badges}</ul>` : '<p class="lb-empty">משימה שתשלים במשחק רגיל תופיע כאן.</p>'}</section>`;
 }
 
 /** "מה למדתי": principle mastery across games (progress.js, local) + the decision-quality trend. */
@@ -1093,6 +1493,8 @@ function learnProfileHtml() {
 
 /* ============================================================ END SCREEN */
 export function showEndScreen(e) { onGameEnd(e, 0); }
+/** T1 review m-5: main.js resumes a game after the 2D → 3D reload through the lobby's own launch (closeLobby + session bookkeeping) */
+export function resumeGame(cfg) { return cfg && cfg.worldId ? launch({ ...cfg, resume: true }) : Promise.resolve(false); }
 const LEAK_LABEL = {
   interest: 'ריבית על הלוואות ואשראי', interestPaid: 'ריבית על הלוואות ואשראי', credit: 'ריבית על חוב אשראי', loans: 'ריבית על הלוואות',
   toys: 'פיתויים שבחרת לקנות', wants: 'פיתויים שבחרת לקנות', doodad: 'הוצאות פתאומיות ופיתויים', subs: 'מנויים שהוספת',
@@ -1177,61 +1579,78 @@ function clearDuelParam() { safe(() => { const q = new URLSearchParams(location.
 
 function onGameEnd(e, delay) {
   if (!e || !e.worldId) return;
+  if (!RW && !t6Failed) { t6Mods().then(() => onGameEnd(e, delay)); return; }   // CR-33: normally already in (game.js imports them)
   const cfg = (G && G.activeConfig && safe(() => G.activeConfig())) || null;
   const same = !!(cfg && cfg.worldId === e.worldId && (cfg.mode || 'free') === (e.mode || 'free') && (e.worldId === 'h' || cfg.charId === e.charId));
   const hist = e.mode === 'history' || e.worldId === 'h';
   const seed = e.seed ?? (e.summary && e.summary.seed) ?? (same ? cfg.seed : null);
   if (hist) e = { ...e, mode: 'history', worldId: 'h', seed, scenarioId: e.scenarioId || (e.end && e.end.scenarioId) || (e.summary && e.summary.scenarioId) || (same && cfg.scenarioId) || null };
-  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', seed }))) || '') : freeKey(e.worldId);
-  // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags
+  const learnMode = !hist && !e.resultId && isLearnEnd(e);                     // T4 §7.3
+  if (learnMode) e = { ...e, learn: true };
+  const saveKey = e.resultId ? rankedKey(e.resultId) : hist ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed }))) || '') : slotKey(e.worldId, learnMode);
+  // the engine's one-time bail-out may have been used mid-game: it only shows in the saved state's flags (never for learning games)
   const saved = saveKey ? localSaveState(saveKey) : null;
-  if (saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
-  // lessons learned this game → library
+  if (!learnMode && saved && saved.flags && saved.flags.bailoutUsed) P.markBankruptcy();
+  // lessons learned this game → library (also in learning mode: learning is the point), with the engine's context (E-6)
   const lessonIds = [e.lessons, e.end && e.end.lessons, e.summary && e.summary.lessons, saved && saved.lessons].filter(Array.isArray).flat();
-  LIB.unlock(lessonIds);
-  const res = P.recordGame(e);
+  LIB.unlock(lessonIds, (e.end && Array.isArray(e.end.lessonList) && e.end.lessonList) || null);
+  // §7.1 learning: no stars, best, unlocks, titles, pawns, achievements, worldsPlayed, gamesPlayed, wins, ⚡, boards
+  // T6 §9.3: the end of a continuation after the win records nothing (stars, best and unlocks were recorded at the win)
+  const afterWin = !!(e.afterWin || (e.end && e.end.afterWin));
+  const res = afterWin ? { newPawns: [], newAchievements: [], titleBefore: '', titleAfter: '', afterWin: true } : learnMode ? P.recordLearnGame(e) : P.recordGame(e);
+  gamesThisSession++;
   res.newLessons = [...sessLessons]; sessLessons = [];
   const learning = (e.end && e.end.learning) || (e.summary && e.summary.learning) || null;
-  res.learn = safe(() => P.recordLearning(learning, [e.resultId || '', e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
-  res.quizEnergy = creditQuizAtEnd(e);
+  res.learn = afterWin ? null : safe(() => P.recordLearning(learning, [e.resultId || '', learnMode ? 'learn' : e.mode || 'free', e.worldId, e.seed ?? '', e.months, e.status].join('|')), null);
+  res.quizEnergy = afterWin ? 0 : creditQuizAtEnd(e);
   if (e.mode === 'daily') { res.energy = grantDaily(P.streakInfo().streak); res.energyWhy = 'על האתגר היומי — אפשר להמשיך לשחק'; }
-  logMilestones(e, res);
+  if (!learnMode && !afterWin && (e.mode || 'free') === 'free' && !hist) res.dream = safe(() => P.recordDream(e), null);   // §6.3 badges: free normal games only
+  if (!afterWin) logMilestones(e, res);
   lastEndSig = sigOf(e);
   const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
-  endCtx = { e, res, ranked, hist, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null };
+  endCtx = { e, res, ranked, hist, learn: learnMode, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null, dreamSaved: null,
+    ghosts: null, rivals: (e.t6 && e.t6.rivals) || 'off' };
   if (ranked) {
     // the replay log goes to verify, never into rr_finish's stats (16 KB cap); prefer the longer of summary / saved state
     const { actions: sumActions = null, ...summary } = e.summary || {};
     const actions = [sumActions, saved && saved.actions].filter(Array.isArray).sort((a, b) => b.length - a.length)[0] || null;
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
-  } else game().then((g) => g && g.clearSave && safe(() => g.clearSave(hist ? { mode: 'history', worldId: 'h', seed } : freeKey(e.worldId))));
+  } else if (!(e.t6 && e.t6.afterwinAllowed)) {   // T6 §9.3: a win that may continue keeps its (finished) save until the player decides
+    // review MINOR-2: the branch test needs no rewind.js (a failed lazy load must never clear the original slot)
+    // T6: a practice branch clears its OWN slot (rr2-save-branch-<w>), never the original's learn / free slot
+    const key = e.branch && typeof e.saveKey === 'string' && /^rr2-save-branch-/.test(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
+    game().then((g) => g && g.clearSave && safe(() => g.clearSave(key)));
+    // T6 review nit: the rr2-branches entry goes with its slot; the end screen keeps it (endCtx.t6meta) for "↩ חזרה למשחק המקורי"
+    if (e.branch && RW && RW.isBranchKey(key)) endCtx.t6meta = safe(() => RW.forgetBranch(e.worldId), null);
+  }
   setTimeout(() => {
     ensureCss(); install();
     const o = overlay(); if (!o) return;
     o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open');
     if (!booted) { booted = true; boot(); }
-    view = { k: 'end' };
-    renderEnd(true);
+    view = { k: 'end' }; trace('end');
+    renderEnd(true); focusView();   // a11y K-7: the end screen replaced the lobby — focus its title, not the removed node
     if (ranked) submitResult();
   }, delay);
 }
 function renderEnd(animate = false) {
   if (!endCtx) return renderHome();
+  if (flag('recap2') && endCtx.e && endCtx.e.t6 && !T6S && !t6Failed) { const c = endCtx; t6Mods().then(() => { if (endCtx === c && view.k === 'end') renderEnd(animate); }); return; }   // CR-33
   view = { k: 'end' }; ++token;
-  const { e, res, ranked, duel, hist } = endCtx;
+  const { e, res, ranked, duel, hist, learn } = endCtx;
   const sc = hist ? scenById(e.scenarioId) : null;
   const w = hist ? { id: 'h', name: sc ? sc.name : 'מכונת הזמן', lesson: (sc && sc.lesson) || '', goal: { type: 'netWorth', target: (e.end && e.end.benchmark && e.end.benchmark.netWorth) || 0 } } : worldOf(e.worldId);
   const c = hist ? null : charOf(w, e.charId); const end = e.end || {};
   const won = e.status === 'won'; const bankrupt = end.reason === 'bankrupt';
   const sprint = e.mode === 'daily';
   const stars = hist ? Math.max(0, Math.min(3, e.stars | 0)) : won ? Math.max(0, Math.min(3, e.stars | 0)) : 0;
-  const title = hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
+  const title = learn ? (won ? T4.L1 : T4.L2) : hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
   const prog = Math.max(0, Math.min(1, e.progress ?? end.progress ?? 0));
-  const near = end.nearMiss && end.nearMiss.text;
+  const near = nearMissText(end);
   const nextIdx = hist ? -1 : WORLDS.indexOf(w) + 1; const nextW = hist ? null : WORLDS[nextIdx] || null;
   const nextOpen = nextW && P.isUnlocked(nextW.id);
-  const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
+  const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : learn ? '🎓 תרגול' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
   const kicker = [w.name, c ? c.name : '', modeName].filter(Boolean).map(esc).join(' · ');
   const g = w.goal || {};
   const cell = (label, value, cls = '') => `<span><small>${label}</small><b class="${cls}">${iso(value)}</b></span>`;
@@ -1255,30 +1674,118 @@ function renderEnd(animate = false) {
     duelHtml = `<div class="end-duel"><div class="dl-side me"><small>אתה</small><b>${esc(resText(mine))}</b></div><div class="dl-vs">VS</div><div class="dl-side"><small>${esc(duel.by || 'החבר')}</small><b>${duel.r ? esc(resText(duel.r)) : '?'}</b></div>
       ${duel.r ? `<p class="dl-verdict ${v > 0 ? 'win' : v < 0 ? 'lose' : ''}">${v > 0 ? 'ניצחת בדו־קרב! 🏆' : v < 0 ? 'הפעם הוא ניצח. החזר לו אתגר!' : 'תיקו מושלם 🤝'}</p>` : ''}</div>`;
   }
+  const analysis = safe(() => (UIm && UIm.endAnalysisHtml ? UIm.endAnalysisHtml(end) : ''), '') || '';   // T2 §15.9 (was a MutationObserver in game.js)
+  if (flag('recap2') && e.t6 && T6S && GH && RW) return renderEndT6({ e, res, w, c, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate, prog, sprint, g });
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
       <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
       <p class="end-kicker">${kicker}</p>
       <h1 class="end-title">${title}</h1>
-      <div class="end-stars" aria-label="${stars} כוכבים">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}">★</span>`).join('')}</div>
+      ${learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
       ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
       ${duelHtml}
-      ${near ? `<p class="end-near">${iso(near)}</p>` : ''}
+      ${near && !(learn && /★/.test(near)) ? `<p class="end-near">${iso(near)}</p>` : ''}
       ${!won ? `<div class="end-prog"><div class="lb-bar-track big"><i style="width:${Math.round(prog * 100)}%"></i></div><small>${sprint ? 'הגעת ל־' : 'עשית '}${num(Math.round(prog * 100) + '%')} ${sprint ? 'מהחופש' : g.type === 'passive' ? 'מהדרך לחופש' : 'מהדרך ליעד'}</small></div>` : ''}
       ${hist ? benchHtml(e) : ''}
-      ${happyGateHtml(e, w, stars)}
+      ${learn ? '' : happyGateHtml(e, w, stars)}
       ${leaksHtml}
       <div class="end-stats">${statCells.join('')}</div>
       ${learnHtml(e, res)}
+      ${analysis}
+      ${practiceEndHtml(e)}
+      ${dreamEndHtml(e)}
+      ${mentorEndHtml(e)}
       ${lifeHtml(e, won)}
       <div class="end-new">${newsHtml(e, res, won ? resisted : '')}</div>
       <div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>
       ${endButtons(e, res, nextW, nextOpen)}
     </article>
   </div>`);
-  if (animate) animateEnd(stars, won, res);
+  if (animate) animateEnd(learn ? 0 : stars, won, res);
   else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
 }
+/* -------- T6 §6: the personal end summary (flag recap2). The old layout above stays the fallback. */
+let UIm = null; setTimeout(() => ui().then((m) => { UIm = m; }).catch(() => {}), 0);   // CR-33: after the first lobby render, not during it
+const T6END = { awLines: (A) => [`${A.months} חודשים אחרי היציאה`, `שווי נקי ${fmtSgn(A.nwDelta)} מאז היציאה`, `הכנסה פסיבית ${fmtSgn(A.passiveDelta)} מאז היציאה`,
+  A.hap0 != null && A.hap1 != null ? `אושר ${A.hap0} → ${A.hap1}` : A.happinessDelta != null ? `אושר ${A.happinessDelta > 0 ? '+' : ''}${Math.round(A.happinessDelta)} מאז היציאה` : '',
+  A.reason === 'afterWinBroke' && A.brokeM ? `החופש לא החזיק: בחודש ${A.brokeM} נגמר הכסף.` : A.stillFree ? 'ההכנסה הפסיבית עדיין מכסה את ההוצאות' : 'ההכנסה הפסיבית כבר לא מכסה את ההוצאות'].filter(Boolean) };
+const fmtSgn = (n) => (Math.round(+n || 0) > 0 ? '+' : '') + fmtM(+n || 0);
+/** the original of a finished branch (live learning slot) — only while it is still the same game (T6 M2) */
+function t6Origin(e) {
+  const meta = (endCtx && endCtx.e === e && endCtx.t6meta) || safe(() => RW.branchFor(e.worldId), null); if (!meta || meta.origin !== 'live') return null;
+  const o = safe(() => RW.originOf(meta), null); return o && o.cfg && !(o.state && o.state.over) ? o : null;
+}
+function t6Ctx() {
+  const { e } = endCtx; const t6 = e.t6 || {};
+  const ghostsOn = endCtx.rivals !== 'off';
+  const lg = safe(() => RW.lastGame(), null);
+  return { ghosts: endCtx.ghosts, rivals: ghostsOn ? (endCtx.ghosts ? 'done' : 'pending') : 'off', personas: safe(() => GH.personas(), T6S.PERSONAS_FALLBACK),
+    // M4: from the end of a finished free / learn game (rr2-last-game), never from a branch end (its log is not the last game)
+    rewindAllowed: !e.branch && !endCtx.ranked && RW.endAllowed({ mode: e.mode || 'free', worldId: e.worldId, learn: !!endCtx.learn, resultId: e.resultId || null }), lastGame: !!lg && !e.branch, afterwinAllowed: !!t6.afterwinAllowed, branchTl: t6.branchTl || null, graphId: 'end' };
+}
+/** director decision 5: a finished practice branch, side by side with its original (only while the original is still the same game —
+ *  T6 M2; game.js builds e.t6.branchCmp). Months, net worth, decision quality, luck; the luck row says that it was not held constant. */
+function branchCmpHtml(C) {
+  if (!C || !C.orig || !C.branch) return '';
+  const O = C.orig, B = C.branch;
+  const mo = (x) => (x.done ? (x.status === 'won' ? `יצאת בחודש ${x.months}` : `${x.months} חודשים`) : `עדיין משחק · חודש ${x.months}`);
+  const money = (v) => (v == null ? '—' : num(fmtM(v)));
+  const q = (v) => (v == null ? '—' : num(`${v}/100`));
+  const lk = (v) => (v == null ? '—' : num(v >= 0 ? `+${fmtM(v)}` : `−${fmtM(-v)}`));
+  const better = (a, b) => (a == null || b == null || a === b ? '' : b > a ? ' class="pos"' : ' class="neg"');
+  const rows = [['⏱️ זמן', mo(O), mo(B), ''], ['💰 שווי נקי', money(O.nw), money(B.nw), better(O.nw, B.nw)],
+    O.q != null || B.q != null ? ['🧠 איכות ההחלטות', q(O.q), q(B.q), better(O.q, B.q)] : null,
+    O.luck != null || B.luck != null ? ['🍀 מזל', lk(O.luck), lk(B.luck), ''] : null].filter(Boolean);
+  return `<section class="t6-bcmp" aria-label="הענף מול המשחק המקורי"><h3>🧪 הענף מול המשחק המקורי</h3>
+    <table><thead><tr><th scope="col"></th><th scope="col">המקורי</th><th scope="col">הענף</th></tr></thead><tbody>${rows.map(([l, a, b, c]) => `<tr><th scope="row">${l}</th><td>${a}</td><td${c}>${b}</td></tr>`).join('')}</tbody></table>
+    ${O.luck != null && B.luck != null && Math.abs(O.luck - B.luck) > 0 ? '<p class="t6-note">המזל לא נשאר זהה אחרי נקודת הפיצול — חלק מההבדל הוא מזל, לא רק ההחלטה.</p>' : ''}</section>`;
+}
+function renderEndT6(o) {
+  const { e, res, w, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate } = o;
+  const ctx = t6Ctx();
+  const A = end.afterWin || e.afterWin || null;
+  const head = `<p class="end-kicker">${kicker}</p>
+      <h1 class="end-title">${A ? esc(A.title || T6S.T6.afterwinTitle) : title}</h1>
+      ${A ? `<ul class="t6-awl">${(Array.isArray(A.lines) && A.lines.length ? A.lines : T6END.awLines(A)).map((l) => `<li>${iso(l)}</li>`).join('')}</ul>`
+        : learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
+      ${ranked ? `<div class="end-rank" id="endRank">${rankHtml()}</div>` : ''}
+      ${duelHtml}
+      ${near && !(learn && /★/.test(near)) && !A ? `<p class="end-near">${iso(near)}</p>` : ''}
+      ${hist ? benchHtml(e) : ''}`;
+  const more = T6S.renderMore(e, { ...ctx, learnHtml: leaksHtml + learnHtml(e, res), lifeHtml: lifeHtml(e, won), analysisHtml: analysis + mentorEndHtml(e) + practiceEndHtml(e),
+    newsHtml: `<div class="end-new">${newsHtml(e, res, won ? resistedOf(e) : '')}</div>${dreamEndHtml(e)}`, lessonHtml: `<div class="end-lesson"><b>📚 השיעור ${esc(P.inW(w.name))}</b><p>${iso(end.lesson || w.lesson || '')}</p>${end.tip && !(T6S.suggestionOf(end) || {}).text ? `<p class="end-tip">💡 ${iso(end.tip)}</p>` : ''}</div>`,
+    achOpen: !!(res.unlockedWorld || res.gained > 0) });
+  html(`<div class="lb-shell lb-end t6-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
+    <article class="end-card">
+      <div id="endTop">${head}${learn ? '' : happyGateHtml(e, w, stars)}${e.branch && !ctx.branchTl && !(e.t6 && e.t6.branchCmp) ? '<p class="t6-note">המשחק המקורי כבר לא זמין להשוואה.</p>' : ''}${e.branch ? branchCmpHtml(e.t6 && e.t6.branchCmp) : ''}${T6S.renderTop(e, ctx)}</div>
+      <div class="t6-btns">${endButtons(e, res, nextW, nextOpen)}</div>
+      ${more}
+      ${learn || A ? '' : ''}
+    </article>
+  </div>`);
+  const r = root(); T6S.wireSummary(r, (id) => (id === 'end' ? t6Graph() : null));
+  if (animate) animateEnd(learn ? 0 : stars, won, res);
+  else document.querySelectorAll('.end-new > *').forEach((x) => x.classList.add('in'));
+  if (ctx.rivals === 'pending') { const ends = safe(() => GH.ends(), null); if (ends && GH.status().state === 'done') onGhostsDone({ ends }); }
+}
+function t6Graph() {
+  const { e } = endCtx; const end = e.end || {}; const t6 = e.t6 || {};
+  const tl = (end.recap && end.recap.graph && end.recap.graph.tl) || t6.tl; if (!tl) return null;
+  const notes = (end.recap && end.recap.graph && end.recap.graph.notes) || [];
+  return { tl, opts: { alt: T6S.altOf(tl, end), recessions: T6S.recessionsOf(end), lowCushion: end.recap && end.recap.graph ? end.recap.graph.lowCushion : null, notes, compareTl: t6.branchTl || null, compareLabel: T6S.T6.lg.orig } };
+}
+/** ghosts finished (bus 'ghosts:done'): fill the comparison lines and the "מול היריבים" section in place */
+function onGhostsDone({ ends } = {}) {
+  if (!T6S || !endCtx || !endCtx.e || !endCtx.e.t6 || endCtx.rivals === 'off') return;
+  endCtx.ghosts = ends || null;
+  if (view.k !== 'end' || !flag('recap2')) return;
+  const ctx = t6Ctx(); const end = endCtx.e.end || {};
+  const dims = (end.recap && end.recap.dims) || endCtx.e.t6.dims;
+  const box = document.getElementById('t6Dims'); if (box && dims) box.outerHTML = T6S.dimRowsHtml(dims, ctx);
+  const sec = [...document.querySelectorAll('.t6-sec')].find((d) => d.querySelector('summary')?.textContent === T6S.T6.sec.rivals);
+  if (sec) { const b = sec.querySelector('.t6-secb'); if (b) b.innerHTML = T6S.rivalsSection(endCtx.e, ctx); }
+}
+bus.on('ghosts:done', onGhostsDone);
 /* -------- v3 end-screen blocks */
 /* "החלטות מול מזל" (spec §8): engine end.learning = {decisionQuality 0..100, luck:{total ₪}, principles:{id:{mastery,n}}, top, sentence}.
    Hidden when the block is missing (older engine / v2 saves). Principle names: local table, then the lesson library. */
@@ -1290,7 +1797,7 @@ const PRINCIPLES = {
   risk_size: ['🎯', 'גודל הסיכון', 'לא לשים על הימור אחד יותר ממה שמותר להפסיד.'],
   rate_risk: ['📉', 'סיכון ריבית', 'ריבית משתנה יכולה לעלות — ותזרים שנראה טוב נעלם.'],
   diversification: ['🧺', 'פיזור', 'לא כל הביצים בסל אחד.'],
-  time: ['⏳', 'זמן ואנרגיה', 'הזמן הוא הנכס הכי יקר, ושחיקה עולה כסף.'],
+  time: ['⏳', 'זמן וכוח', 'הזמן הוא הנכס הכי יקר, ושחיקה עולה כסף.'],
   time_in_market: ['📈', 'זמן בשוק', 'מי שנשאר מושקע לאורך זמן מנצח את מי שמנסה לתזמן.'],
   fees_tax: ['🧾', 'מסים ועמלות', 'מה שקובע זה מה שנשאר אחרי מס.'],
   knowledge: ['📚', 'ידע פיננסי', 'להבין את המושג לפני שהכסף על השולחן.'],
@@ -1431,8 +1938,8 @@ function newsHtml(e, res, resisted = '') {
   if (res.newBest) out.push(`<div class="end-news"><span class="end-news-ic">🏁</span><span><small>שיא אישי חדש</small><b>${res.best} חודשים</b><em>היה ${res.prevBest}</em></span></div>`);
   if (res.titleAfter !== res.titleBefore) out.push(`<div class="end-news end-title-up"><span class="end-news-ic">🎖️</span><span><small>עלית דרגה!</small><b>${titleBadge(res.totalAfter)}</b><em>מ${esc(res.titleBefore)} ל${esc(res.titleAfter)}</em></span></div>`);
   if (res.newLessons && res.newLessons.length) out.push(`<button class="end-news end-lessons" data-act="library"><span class="end-news-ic">📚</span><span><small>הספרייה גדלה</small><b>+${res.newLessons.length} ${res.newLessons.length === 1 ? 'שיעור חדש' : 'שיעורים חדשים'}</b><em>${num(LIB.counts().have + '/' + (LIB.counts().total || '?'))} בספרייה · לחץ לקרוא</em></span></button>`);
-  if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס אנרגיה</small><b>+${res.energy}⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
-  if (res.quizEnergy) out.push(`<div class="end-news"><span class="end-news-ic">🧠</span><span><small>הבנה שווה אנרגיה</small><b>+${int(res.quizEnergy)}⚡</b><em>על תשובות נכונות לשאלות של אבא עשיר</em></span></div>`);
+  if (res.energy) out.push(`<div class="end-news"><span class="end-news-ic">⚡</span><span><small>בונוס זריקות</small><b>+${EN.label(res.energy)} ⚡</b><em>${esc(res.energyWhy || '')}</em></span></div>`);
+  if (res.quizEnergy) out.push(`<div class="end-news"><span class="end-news-ic">🧠</span><span><small>הבנה שווה זריקות</small><b>+${EN.label(int(res.quizEnergy))} ⚡</b><em>על תשובות נכונות לשאלות של אבא עשיר</em></span></div>`);
   if (resisted) out.push(`<div class="end-news"><span class="end-news-ic">💪</span><span><small>שליטה עצמית</small><b>${iso(resisted)}</b><em>כל פיתוי שוויתרת עליו קירב אותך לחופש</em></span></div>`);
   for (const id of res.newPawns) {
     const pw = P.PAWNS.find((x) => x.id === id);
@@ -1446,7 +1953,46 @@ function newsHtml(e, res, resisted = '') {
   }
   return out.join('');
 }
+/** §7.4: instead of the stars row in learning mode. */
+function learnStarsHtml(would) {
+  return `<div class="end-learnmode"><p class="end-would">${esc(would > 0 ? T4.L3(starStr(would).replace(/☆/g, '')) : T4.L4)}</p><p class="lb-note">${esc(T4.L5)}</p></div>`;
+}
+/** §10.1 S-P9: practice answered this game (engine end.learning.transfer, E-10; hidden until the engine sends it). */
+function practiceEndHtml(e) {
+  const T = (e.end && e.end.learning && e.end.learning.transfer) || null; if (!T || typeof T !== 'object') return '';
+  let n = 0, r = 0; for (const v of Object.values(T)) { n += int(v && v.n); r += int(v && v.right); }
+  return n ? `<p class="end-practice">💡 ${esc(T4.P9(r, n))}</p>` : '';
+}
+/** §6.3/§6.4: the dream line (S-D18) in free/learn games, or the invitation (S-D10) when no dream is set yet. */
+function dreamEndHtml(e) {
+  if ((e.mode || 'free') !== 'free' || endCtx.hist || endCtx.duel || !dreamsList()) return '';
+  const d = e.dream || (e.end && e.end.dream) || null;
+  if (d && d.id && dreamById(d.id)) {
+    const meta = dreamById(d.id); const ms = Array.isArray(d.missions) ? d.missions : [];
+    const done = ms.filter((m) => m && m.done);
+    return `<section class="end-dream"><p><b>${esc(T4.D18(meta.icon, meta.name, done.length))}</b></p>${done.length ? `<ul>${done.map((m) => `<li>✓ ${esc(m.title || '')}</li>`).join('')}</ul>` : ''}</section>`;
+  }
+  const p = P.getProgress();
+  if (endCtx.dreamSaved && dreamById(endCtx.dreamSaved)) return `<section class="end-dream saved" role="status"><p>${esc(T4.D11(dreamById(endCtx.dreamSaved).name))}</p></section>`;
+  if (p.dream) return '';
+  return `<section class="end-dream ask"><h3>${T4.D10}</h3><div class="t4-dgrid">${dreamsList().map((x) => `<button class="t4-dbtn" data-act="end-dream" data-id="${x.id}"><span class="t4-dic" aria-hidden="true">${esc(x.icon)}</span><span><b>${esc(x.name)}</b><small>${esc(x.line || '')}</small></span></button>`).join('')}</div></section>`;
+}
+/** §6.5 S-G1: after the first completed game, offer less help (only when T2's mentor levels exist). */
+function mentorEndHtml(e) {
+  const p = P.getProgress();
+  if (!mentorLevels() || endCtx.hist || (e.mode || 'free') !== 'free' || (p.gamesPlayed + p.learnGames) !== 1 || p.mentorPref) return '';
+  return `<div class="end-mentor"><span>${esc(T4.G1)}</span><button class="lb-toggle" data-act="mentor-hint" role="switch" aria-checked="false"><span>${T4.G4}</span><i></i></button></div>`;
+}
 function endButtons(e, res, nextW, nextOpen) {
+  if (e.branch) {   // T6 review M1: from a branch end the way back is the original, never a silent new practice over it
+    const o = t6Origin(e);
+    return `<div class="end-acts">${o && o.cfg ? '<button class="primary lb-big" data-act="t6-origin">↩ חזרה למשחק המקורי</button>' : ''}<button class="${o && o.cfg ? '' : 'primary lb-big'}" data-act="end-learn">${T4.L7}</button></div>
+      <div class="end-more"><button class="chip" data-act="end-normal">${T4.L6}</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
+  }
+  if (endCtx.learn) {   // §7.4: no duel / share; normal game or more practice, same world and character
+    return `<div class="end-acts"><button class="primary lb-big" data-act="end-normal">${T4.L6}</button><button data-act="end-learn">${T4.L7}</button></div>
+      <div class="end-more"><button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
+  }
   const btns = [];
   const free = e.mode === 'free' || e.mode === 'history'; const won = e.status === 'won';
   const sameOk = free && !!endCtx.seed;
@@ -1457,7 +2003,8 @@ function endButtons(e, res, nextW, nextOpen) {
   else if (sameOk && !won) btns.push(same, `<button data-act="end-again">${againLabel === '↻ עוד פעם' ? '↻ לוח חדש' : againLabel}</button>`);
   else btns.push(`<button class="primary lb-big" data-act="end-again">${againLabel}</button>`);
   if (showNext && !res.unlockedWorld) btns.push(`<button data-act="end-next" data-id="${nextW.id}">לעולם הבא ←</button>`);
-  btns.push(`<a class="lb-wa" id="endShare" href="${waHref(shareText())}" target="_blank" rel="noopener" aria-label="לשתף בוואטסאפ">📲 ${free ? (endCtx.duel ? 'להחזיר אתגר' : 'לאתגר חבר') : 'לשתף'}<span class="lb-hide-sm"> בוואטסאפ</span></a>`);
+  const shareL = free ? (endCtx.duel ? 'להחזיר אתגר' : 'לאתגר חבר') : 'לשתף';   // T7 AX-2 label-in-name: the name starts with the visible words
+  btns.push(`<a class="lb-wa" id="endShare" href="${waHref(shareText())}" target="_blank" rel="noopener" aria-label="${shareL} בוואטסאפ"><span aria-hidden="true">📲 </span>${shareL}<span class="lb-hide-sm"> בוואטסאפ</span></a>`);
   const more = [];
   if (sameOk && won) more.push(`<button class="chip" data-act="end-same">↻ אותו לוח שוב</button>`);
   if (e.mode === 'history') more.push(`<button class="chip" data-act="history">תקופה אחרת</button>`);
@@ -1501,7 +2048,8 @@ function shareText() {
   return `${pre}${body} 🐭💰\nאותן קוביות לכולם — נראה אותך 👇\n${link}`;
 }
 function animateEnd(stars, won, res) {
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduce = reducedMotion();   // T5 CR-L1: the in-app motion setting wins over the OS
+
   sfx(won ? 'win' : 'lose');
   const els = [...document.querySelectorAll('.end-star')];
   let t = reduce ? 0 : 450;
@@ -1587,19 +2135,35 @@ function install() {
   if (installed) return;
   const r = root(); if (!r) return;
   installed = true;
+  window.__rrLobby = true;   // game.js: the end card renders ui.endAnalysisHtml itself (no MutationObserver)
   r.addEventListener('click', onClick);
   r.addEventListener('submit', onSubmit);
   r.addEventListener('change', onChange);
   r.addEventListener('error', (ev) => { if (ev.target && ev.target.tagName === 'IMG') imgFallback(ev.target); }, true);
+  r.addEventListener('pointerdown', () => { pointerAt = Date.now(); }, true);
+  safe(() => initMotion());   // <html data-motion> also when the lobby runs without game.js (T5 CR-S1 note)
+  // A11Y-1: keep the in-game DOM inert whenever #start covers it, whoever shows / hides it (lobby, game.js, main.js)
+  const o = overlay(); if (o && typeof MutationObserver === 'function') new MutationObserver(syncInert).observe(o, { attributes: true, attributeFilter: ['hidden'] });
   const wake = () => { if (view.k === 'group' && !document.hidden) refreshGroup(view.id); };
   document.addEventListener('visibilitychange', wake);
   addEventListener('focus', wake);
   addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !lobbyVisible()) return;
-    if (view.k === 'world' || view.k === 'group' || view.k === 'profile') { ev.preventDefault(); go({ k: 'home' }); }
+    if (!document.getElementById('gm')?.hidden && document.getElementById('gm')) return;   // a ui.modal on top owns Escape
+    // A11Y-2: topmost first — the lesson / legend sheet, then an open "עוד פרטים", then the view itself
+    if ($('#lbLesson')) { ev.preventDefault(); closeLesson(); return; }
+    const more = document.activeElement && document.activeElement.closest && document.activeElement.closest('.wv-char');
+    const openMore = more && more.querySelector('.wv-more[aria-expanded="true"]');
+    if (openMore) { ev.preventDefault(); openMore.click(); openMore.focus({ preventScroll: true }); return; }
+    if (view.k === 'world' || view.k === 'group' || view.k === 'profile' || view.k === 'library') { ev.preventDefault(); go({ k: 'home' }); }
   });
 }
 async function onClick(ev) {
+  // §5.1: the card is an <article> with two buttons; a tap on its plain area still plays (as the old whole-card button did)
+  const card = ev.target.closest('.wv-char');
+  if (card && !ev.target.closest('[data-act], .wv-details, a, input, label, summary')) { ev.preventDefault(); return startFree(card.dataset.w, card.dataset.c, { learn: modeNow() === 'learn' }); }
+  // review m-4: a locked mentor level explains itself on tap (phones hide the inline reason; title= never shows on touch)
+  const lk = ev.target.closest('.t4-mopt.is-locked'); if (lk && lk.title) { toast(lk.title); return; }
   const b = ev.target.closest('[data-act]'); if (!b || !root().contains(b)) return;
   const act = b.dataset.act; const id = b.dataset.id;
   if (b.tagName === 'A') { if (act === 'share') sfx('click'); return; }
@@ -1609,8 +2173,31 @@ async function onClick(ev) {
     case 'reload-home': cache.daily = null; return renderHome();
     case 'profile': sfx('click'); return go({ k: 'profile' });
     case 'world': sfx('click'); return go({ k: 'world', id });
-    case 'char': return startFree(b.dataset.w, b.dataset.c);
-    case 'continue-free': return continueFree(id);
+    case 'char': return startFree(b.dataset.w, b.dataset.c, { learn: modeNow() === 'learn' });
+    case 'continue-free': return continueFree(id, { learn: b.dataset.learn === '1' });
+    case 'char-more': {   // §5.1 disclosure inside the card (aria-expanded / aria-controls)
+      const el = document.getElementById(b.getAttribute('aria-controls')); if (!el) return;
+      const open = b.getAttribute('aria-expanded') !== 'true';
+      el.hidden = !open; b.setAttribute('aria-expanded', String(open)); b.textContent = open ? T4.Kless : T4.Kmore; return;
+    }
+    case 'dream-open': dreamOpen = true; if (view.k === 'profile') renderProfile(); else rerender(); return focusSoon('input[name="t4dream"]:checked, input[name="t4dream"]');   // A11Y-3
+    case 'learn-now': { sfx('click'); const p = P.getProgress(); const wid = P.isUnlocked(p.lastSeenWorld) ? p.lastSeenWorld : 'w1'; worldMode = 'learn'; return go({ k: 'world', id: wid, learn: true }); }
+    case 'end-normal': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, {});
+    case 'end-learn': sfx('click'); return startFree(endCtx.e.worldId, endCtx.e.charId, { learn: true, noAsk: true });
+    case 'end-dream': { P.setDream(id); endCtx.dreamSaved = id; sfx('click'); const box = $('.end-dream'); if (box) { box.outerHTML = dreamEndHtml(endCtx.e); focusSoon('.end-dream'); } return; }
+    case 'mentor-hint': { const on = b.getAttribute('aria-checked') !== 'true'; P.setMentorPref(on ? 'hint' : null); b.setAttribute('aria-checked', String(on)); b.classList.toggle('on', on); return; }
+    case 'lite': {
+      const on = b.getAttribute('aria-checked') !== 'true';
+      b.setAttribute('aria-checked', String(on)); b.classList.toggle('on', on);
+      const g = await game(); if (g && g.setLite) safe(() => g.setLite(on));   // T1: off → page reload into 3D
+      return;
+    }
+    case 'help-tour': writeReveal({ tourNext: true }); toast('🎬 הסיור יתחיל בפעם הבאה שתיכנס למשחק'); return;
+    case 'help-legend': return openSheet(esc(T4.T2), legendHtml());
+    case 'help-tutorial': P.requestTutorialReplay(); toast(T4.H6); return;
+    case 'help-welcome': sfx('click'); return go({ k: 'welcome' });
+    case 'welcome-pick': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); return go({ k: 'world', id: 'w1' });
+    case 'welcome-restore': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); go({ k: 'profile' }); return focusSoon('#pfRestore');
     case 'resume-active': sfx('click'); return closeLobby();
     case 'daily': return playRanked('daily');
     case 'weekly': return playRanked('weekly');
@@ -1633,14 +2220,26 @@ async function onClick(ev) {
     case 'rename-open': { const f = $('[data-form="rename"]'); if (f) { f.hidden = !f.hidden; if (!f.hidden) f.querySelector('input').select(); } return; }
     case 'code-show': { const box = $('#pfCode'); if (box) { box.hidden = !box.hidden; box.textContent = net.recoveryCode() || ''; b.textContent = box.hidden ? '👁️ להציג את הקוד' : '🙈 להסתיר'; } return; }
     case 'code-copy': return copyText(net.recoveryCode() || '', 'קוד השחזור הועתק. שמור אותו במקום בטוח');
+    case 't6-rewind': sfx('click'); return bus.emit('t6:rewind', { k0: +b.dataset.k0, origin: 'last' });       // T6 §7.4 (rewind.js refuses ranked)
+    case 't6-moments': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
+    case 't6-afterwin': sfx('click'); return bus.emit('game:afterwin', {});                                       // T6 §9.3
+    case 't6-branch': sfx('click'); { if (!(await t6Mods())) return; const bs = RW.branchSave(id); if (bs) return launch({ ...bs.cfg, resume: true }); return; }
+    case 't6-branch-del': { if (!(await t6Mods())) return; const ok = await ui().then((u) => (u.confirmBox ? u.confirmBox(RW.STR.deleteQ, { yes: RW.STR.del, no: RW.STR.cancel }) : true)); if (ok) { RW.deleteBranch(id); rerender(); } return; }
+    case 't6-last': sfx('click'); return bus.emit('t6:moments', { origin: 'last' });
+    case 't6-origin': { sfx('click'); const o = endCtx && endCtx.e ? t6Origin(endCtx.e) : null; if (o) return launch({ ...o.cfg, resume: true }); toast('המשחק המקורי כבר לא זמין'); return; }
     case 'end-again': sfx('click'); return endAgain(false);
     case 'end-same': sfx('click'); return endAgain(true);
     case 'life-image': return lifeImage();
-    case 'energy': return toast(EN.get() >= EN.MAX ? `⚡ מלא: ${EN.get()} הטלות. כל הטלה עולה ⚡ אחד.` : `⚡ ${EN.get()}/${EN.MAX} · עוד ⚡ בעוד ${EN.fmtWait(EN.msUntilNext())} · מלא בעוד ${EN.fmtWait(EN.msUntilFull())}`);
+    case 'energy': return toast(`⚡ ${EN.get()}/${EN.MAX} זריקות. כל הטלת קוביות עולה זריקה אחת.${EN.get() >= EN.MAX ? '' : ` עוד זריקה בעוד ${EN.fmtWait(EN.msUntilNext())}.`}`);
     case 'library': sfx('click'); return go({ k: 'library' });
     case 'lesson': sfx('click'); return openLesson(id);
-    case 'lesson-close': { const el = $('#lbLesson'); if (el) el.remove(); const c = $('.map-lib'); if (c) c.outerHTML = libraryCard(); return; }
-    case 'welcome-go': sfx('click'); safe(() => localStorage.setItem(ONBK, '1')); return go(P.getProgress().gamesPlayed ? { k: 'home' } : { k: 'world', id: 'w1' });
+    case 'lesson-close': closeLesson(); return;
+    case 'welcome-go': {   // F1: straight into the first game (teacher, w1, tutorial). A returning player goes home instead.
+      sfx('click'); safe(() => localStorage.setItem(ONBK, '1'));
+      if (completedAny()) return go({ k: 'home' });
+      worldMode = 'normal';
+      return startFree('w1', 'teacher', { quick: true });   // review M-4: asks before replacing a saved game, like every new game
+    }
     case 'groups-view': return go({ k: 'groups' });
     case 'history': sfx('click'); return go({ k: 'history' });
     case 'history-go': return startHistory(id, false);
@@ -1648,7 +2247,7 @@ async function onClick(ev) {
     case 'send-energy': {
       if (b.disabled) return;
       b.disabled = true;
-      try { await net.sendEnergy(b.dataset.g, b.dataset.n); sfx('coin'); toast(`⚡ שלחת 3⚡ ל${b.dataset.n}`); b.textContent = '✓ נשלח'; b.classList.add('sent'); }
+      try { await net.sendEnergy(b.dataset.g, b.dataset.n); sfx('coin'); toast(`⚡ שלחת 3 זריקות ל${b.dataset.n}`); b.textContent = '✓ נשלח'; b.classList.add('sent'); }
       catch (e) { toast(e.message); b.disabled = false; if (/כבר שלחת/.test(e.message)) { b.textContent = '✓ נשלח היום'; b.disabled = true; } }
       return;
     }
@@ -1696,7 +2295,7 @@ async function onSubmit(ev) {
     if (kind === 'restore') {
       const code = f.code.value.trim(); if (!code) throw new Error('הדבק קוד שחזור');
       const prof = await net.restore(code);
-      P.mergeProfile(prof); await P.pushNow();
+      P.mergeProfile(prof); await P.pushNow(); revealAfterMerge();
       cache.daily = cache.weekly = cache.groups = null; cache.group = {};
       sfx('unlock'); toast(`השחקן שוחזר. ברוך שובך, ${prof.nickname}!`); return renderProfile();
     }
@@ -1706,6 +2305,17 @@ async function onSubmit(ev) {
 }
 function onChange(ev) {
   const s = ev.target;
+  if (s.name === 't4mode') { worldMode = s.value === 'learn' ? 'learn' : 'normal'; P.setLastMode(worldMode); document.querySelectorAll('.t4-opt').forEach((l) => l.classList.toggle('on', l.contains(s))); $('.lb-world')?.classList.toggle('is-learn', worldMode === 'learn'); return; }
+  if (s.name === 't4dream') {
+    P.setDream(s.value || null); sfx('click');
+    s.closest('fieldset')?.querySelectorAll('.t4-dopt').forEach((l) => l.classList.toggle('on', l.contains(s)));
+    // collapse to one line only after a pointer choice: arrow keys fire 'change' on every step (A11Y-4)
+    if (Date.now() - pointerAt < 800 && s.value) { dreamOpen = false; const f = s.closest('fieldset'); if (f) { f.outerHTML = dreamRowHtml(P.getProgress()); focusSoon('[data-act="dream-open"]'); } }
+    return;
+  }
+  if (s.name === 't4mentor') { P.setMentorPref(s.value); document.querySelectorAll('.t4-mopt').forEach((l) => l.classList.toggle('on', l.contains(s))); return; }
+  if (s.name === 'motion') { setMotionPref(s.value); return; }
+  if (s.name === 'quality' && QM) { const t = safe(() => QM.setQualityPref(s.value), null); const n = $('[data-q="now"]'); if (n && t) n.textContent = 'עכשיו: ' + (QM.TIER_LABEL[t] || ''); return; }
   if (s.name === 'world' && s.closest('[data-form="newchal"]')) {
     const cs = s.form.char; cs.innerHTML = charOptions(worldOf(s.value));
   }
@@ -1715,5 +2325,11 @@ function onChange(ev) {
 // game.js already plays its celebration before emitting, so the end screen follows almost immediately
 bus.on('game:end', (e) => onGameEnd(e, 250));
 bus.on('reward', onQuizReward);
-bus.on('achievement', (p) => { const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); }); });
+bus.on('achievement', (p) => {
+  const cfg = G && G.activeConfig ? safe(() => G.activeConfig()) : null;
+  if (cfg && cfg.learn) return;                            // T4 §7.1: learning games record no achievements and grant no ⚡
+  const fresh = P.addAchievements((p && p.ids) || []); fresh.forEach((a, i) => { EN.grantOnce('ach:' + a.id, ACH_ENERGY, 'achievement'); setTimeout(() => achToast(a), i * 900); });
+});
+// T4 §4.6: the tutorial counts as done when the intro card closes (onboard.js), not when the game is launched
+bus.on('onboard:done', () => P.setTutorialDone());
 LIB.onUnlock((ids) => { if (!lobbyVisible()) LIB.lessons().then((L) => { const l = L.find((x) => x.id === ids[0]); if (l) ui().then((u) => u.toast && u.toast(`📚 שיעור חדש בספרייה: ${l.title}`)); }); });

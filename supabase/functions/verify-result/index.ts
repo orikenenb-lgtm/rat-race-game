@@ -83,7 +83,11 @@ const ROW = (tx: any, q: any) => tx`select r.status, r.world, r.profession, r.mo
     case when r.challenge_id is not null then (select c.seed from game.challenges c where c.id = r.challenge_id)
          when r.weekly_key is not null then abs(hashtext('ratrace-' || r.weekly_key))::bigint
          when r.daily_key is not null then abs(hashtext('ratrace-daily-' || r.daily_key))::bigint end as seed,
-    case when r.daily_key is not null then 24 end as max_months
+    case when r.daily_key is not null then 24 end as max_months,
+    r.daily_key::text as daily_key,
+    case when r.weekly_key is not null then to_char(to_date(r.weekly_key, 'IYYY-"W"IW'), 'YYYY-MM-DD') end as weekly_start,
+    (select to_char(c.created_at at time zone 'Asia/Jerusalem', 'YYYY-MM-DD') from game.challenges c where c.id = r.challenge_id) as challenge_day,
+    to_char(coalesce(r.finished_at, now()) at time zone 'Asia/Jerusalem', 'YYYY-MM-DD') as finished_day
   from game.results r where r.id = ${q.resultId}::uuid and r.player_id = ${q.id}::uuid`;
 
 async function handleVerify(req: Request, body: any) {
@@ -117,7 +121,7 @@ async function handleVerify(req: Request, body: any) {
   const ms = Math.round(performance.now() - t0);
   const r = out.result;
   const detail = { engine: ENGINE_SHA256, ms, client: clientEngine(req.headers.get('user-agent')), cfg: out.cfg, result: r,
-    diff: out.diff, source: q.actions ? 'request' : 'stats' };
+    diff: out.diff, source: q.actions ? 'request' : 'stats', ...(out.rulesFallback ? { rulesFallback: true } : {}) };
   // 4. store (guarded: never overwrites a verified row, never touches a row that is still playing)
   let stored = false;
   if (full) {

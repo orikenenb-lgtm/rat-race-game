@@ -2,7 +2,7 @@
 import { bus } from './bus.js';
 import { getWorld, starsFor, starThresholds } from './engine.js';
 let active = null; let ended = false;
-export function saveKeyFor(cfg) { if (!cfg) return null; if (cfg.mode === 'free' || !cfg.mode) return 'rr2-save-free-' + (cfg.worldId || 'w1'); if (cfg.resultId) return 'rr2-save-' + cfg.resultId; return `rr2-save-${cfg.mode}-${cfg.worldId || 'w1'}-${cfg.seed >>> 0}`; }
+export function saveKeyFor(cfg) { if (!cfg) return null; if ((cfg.mode === 'free' || !cfg.mode) && cfg.learn) return 'rr2-save-learn-' + (cfg.worldId || 'w1'); if (cfg.mode === 'free' || !cfg.mode) return 'rr2-save-free-' + (cfg.worldId || 'w1'); if (cfg.resultId) return 'rr2-save-' + cfg.resultId; return `rr2-save-${cfg.mode}-${cfg.worldId || 'w1'}-${cfg.seed >>> 0}`; }
 const keyOf = (cfg) => (typeof cfg === 'string' ? cfg : saveKeyFor(cfg));
 window.__cfgs = [];
 export async function startGame(cfg) {
@@ -48,7 +48,7 @@ window.__stubEnd = (status = 'won', months = 20, extra = {}) => {
   ended = true;
   const { state, ...plain } = cfg;
   localStorage.setItem(keyOf(cfg), JSON.stringify({ cfg: plain, state: { over: status, turn: 99 }, month: months }));
-  window.__lastEnd = { seed: cfg.seed, summary: extra.summary || null, scenarioId: cfg.scenarioId, status, stars, months, netWorth, passive, expenses, progress, worldId: w.id, charId: cfg.charId, mode: cfg.mode, resultId: cfg.resultId || null, challengeId: cfg.challengeId || null, groupId: cfg.groupId || null, title: cfg.title || '', end, stats: end.stats };
+  window.__lastEnd = { seed: cfg.seed, summary: extra.summary || null, scenarioId: cfg.scenarioId, status, stars, months, netWorth, passive, expenses, progress, worldId: w.id, charId: cfg.charId, mode: cfg.mode, learn: !!cfg.learn, dream: extra.dream || null, resultId: cfg.resultId || null, challengeId: cfg.challengeId || null, groupId: cfg.groupId || null, title: cfg.title || '', end, stats: end.stats };
   bus.emit('game:end', window.__lastEnd);
 };
 document.getElementById('stubWin').onclick = () => window.__stubEnd('won', 18);

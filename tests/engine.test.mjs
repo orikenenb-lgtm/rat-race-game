@@ -26,9 +26,14 @@ function randomChoice(ev, r, n) {
 }
 /** Play one turn with a decision function. Returns {sig, end}. */
 function turn(st, decide) {
+  if (st.pending) { let ev0 = E.currentEvent(st); let k = 0; while (ev0 && !st.over) { const [id, p] = decide(ev0, k); ev0 = E.choose(st, ev0, id, p).event; k++; } if (st.over) return { sig: 'over', end: st.result }; } // T4: the tutorial intro card
   const roll = E.rollDice(st);
   let ev = E.landing(st);
-  const sig = `${roll.die}|${ev.type}|${ev.type === 'business' ? '' : ev.title}`; // the K tile shows YOUR business (decision-dependent text, same draws)
+  // the K tile shows YOUR business (decision-dependent text, same draws); T3: a life card may be substituted / a car repair swapped
+  // by a pure function of YOUR state (rules 4) — the DRAWN card is what must be identical for everyone
+  const p = st.pending || {};
+  const drawn = ev.type === 'life' ? (p.drawn || p.sub || p.eventId) : ev.type === 'doodad' && p.card && p.card.swapped ? p.card.swapped : ev.title;
+  const sig = `${roll.die}|${ev.type}|${ev.type === 'business' ? '' : drawn}`;
   let n = 0, end = null;
   while (ev) {
     const [id, params] = decide(ev, n);
@@ -123,13 +128,16 @@ function checkEvent(st, ev, where) {
   assert.equal(new Set(ids).size, ids.length, where + ' duplicate option ids ' + ids);
   assert.ok(ev.options.some((o) => o.enabled), where + ' no enabled option');
   const nPrim = ev.options.filter((o) => o.primary).length;
-  if (ev.type === 'mystery' && ev.data.kind === 'quiz') assert.equal(nPrim, 0, where + ' quiz must not highlight an answer');
+  if (st.mentor !== 'guide') assert.equal(nPrim, 0, where + ' T2: no highlighted option at hint/pro');
+  else if (ev.type === 'mystery' && ev.data.kind === 'quiz') assert.equal(nPrim, 0, where + ' quiz must not highlight an answer');
+  else if (ev.type === 'life' && ev.data.chain) assert.ok(nPrim <= 1, where + ' T3 chain card: at most the guide pick (car / transport, financial steps)');
+  else if (ev.type === 'life' && ev.data.values) assert.equal(nPrim, 1, where + ' director (T2 A1): a lifestyle trade-off highlights the cheapest reasonable option at guide');
   else if (ev.type === 'life' && ev.data.personal) assert.equal(nPrim, 0, where + ' a personal life choice has no highlighted answer');
   else assert.equal(nPrim, 1, where + ' exactly one primary');
   for (const o of ev.options) assert.equal(typeof o.primary, 'boolean', where + ' primary must be boolean');
   if (ev.auto) { assert.equal(ev.options.length, 1, where + ' auto card must have one option'); assert.ok(ev.toastText && ev.toastText.length > 0, where + ' auto card needs toastText'); }
   for (const o of ev.options.filter((x) => x.kind === 'buy' && ev.type === 'deal')) { assert.ok(Number.isFinite(o.net) && typeof o.netLabel === 'string', where + ' buy option needs net/netLabel'); }
-  if (ev.type === 'deal' && !ev.auto) { const pr = ev.options.find((o) => o.primary); if (pr.kind === 'buy') assert.ok(pr.net > 0, where + ' primary buy must add money every month'); }
+  if (ev.type === 'deal' && !ev.auto && st.mentor === 'guide') { const pr = ev.options.find((o) => o.primary); if (pr.kind === 'buy') { const all = E.scoreOptions(st, ev); const sc = all.find((x) => x.id === pr.id); assert.ok(sc && sc.U >= Math.max(...all.map((x) => x.U)) - 0.1 - 1e-9, where + ' a primary buy must be the evaluator\'s top option (T2 §5.2, 0.1 tie band)'); } }
   if (['doodad', 'crisis'].includes(ev.type) && !ev.auto) { for (const k of ['pay', 'shortfall', 'loanAmount', 'loanMonthly']) assert.ok(Number.isFinite(ev.data[k]), where + ' missing ' + k); if (ev.data.shortfall > 0) assert.ok(ev.data.loanAmount >= ev.data.shortfall); }
   if (ev.type === 'doodad') assert.equal(!!ev.options.find((o) => o.id === 'skip'), !ev.data.need, where + ' wants (only) can be refused');
   for (const o of ev.options) {
@@ -153,7 +161,7 @@ for (const w of E.WORLDS) {
   test(`${w.id}: ${GAMES} random games — valid events, every option choosable, no NaN in metrics`, () => {
     for (let g = 0; g < GAMES; g++) {
       const ch = w.characters[g % w.characters.length];
-      const st = E.createGame({ worldId: w.id, charId: ch.id, seed: 50000 + g * 13, mode: g % 2 ? 'challenge' : 'free', tutorial: g % 7 === 0 });
+      const st = E.createGame({ worldId: w.id, charId: ch.id, seed: 50000 + g * 13, mode: g % 2 ? 'challenge' : 'free', tutorial: g % 7 === 0, mentor: ['guide', 'hint', 'pro'][Math.floor(g / 2) % 3] });
       const r = prng(g + 1);
       const deep = g < 40; // full option-by-option check on the first games, fast path afterwards
       for (let t = 0; t < 140 && !st.over; t++) {
@@ -161,6 +169,7 @@ for (const w of E.WORLDS) {
         if (r() < 0.05 && st.loans) E.repayLoan(st);
         if (!st.over && r() < 0.05 && st.credit) E.payCredit(st);
         if (st.over) break;
+        if (st.pending) { let ev = E.currentEvent(st); let k = 0; while (ev && !st.over) { const [id, p] = randomChoice(ev, r, k); ev = E.choose(st, ev, id, p).event; k++; } if (st.over) break; } // T4: the tutorial intro card opens the game
         const roll = E.rollDice(st);
         assert.ok(roll.die >= 2 && roll.die <= 12 && roll.dice.length === 2 && roll.dice[0] + roll.dice[1] === roll.die && roll.dice.every((d) => d >= 1 && d <= 6));
         assert.equal(roll.steps.length, roll.die);
@@ -220,7 +229,7 @@ test('payday on corners incl. passing; months advance only on paydays (v1 rule)'
 });
 
 test('auto bank loan when cash < 0, in small units, at the bank-loan rate', () => {
-  const st = E.createGame({ worldId: 'w1', charId: 'driver', seed: 1 });
+  const st = E.createGame({ worldId: 'w1', charId: 'driver', seed: 1 }); st.econ = null; // T2: no cycle add-on on the rate
   st.cash = -7200; st.phase = 'roll';
   // force via a doodad-like path: emulate payday handling through takeLoan/ensure by choosing a doodad
   const w = E.getWorld('w1');
@@ -300,10 +309,10 @@ test('checkEnd: win / time-out / bankrupt results are complete', () => {
   assert.ok(endings.bankrupt > 0, 'bankruptcy should be reachable by random play');
 });
 
-test('tutorial (free only): first roll lands on a deal = the starter deal (no loan needed), no crisis in 3 turns, RNG not shifted', () => {
+test('tutorial (free only, rules 3 = the v3 tutorial; rules 4: tests/t4_engine.test.mjs): first roll lands on a deal = the starter deal (no loan needed), no crisis in 3 turns, RNG not shifted', () => {
   for (const w of E.WORLDS) for (const ch of w.characters) for (const seed of [1234, 77, 9001]) {
-    const a = E.createGame({ worldId: w.id, charId: ch.id, seed, tutorial: true });
-    const b = E.createGame({ worldId: w.id, charId: ch.id, seed });
+    const a = E.createGame({ worldId: w.id, charId: ch.id, seed, tutorial: true, rules: 3 });
+    const b = E.createGame({ worldId: w.id, charId: ch.id, seed, rules: 3 });
     const ra = E.rollDice(a); E.rollDice(b);
     const ev = E.landing(a);
     assert.equal(ev.type, 'deal', `${w.id}/${ch.id}: tutorial first card is ${ev.type}`);
@@ -522,7 +531,7 @@ test('compound interest, bank-loan cost and inflation have exact known values', 
   assert.equal(LIFE.compound(10000, 0.005, 12), 10617); // 10,000 × 1.005^12 = 10,616.78
   assert.equal(LIFE.compound(100000, 0.07 / 12, 120), 200966); // 7%/yr monthly for 10 years
   // the game's bank loan is interest-only: ₪5,000 at 3% a month costs ₪150 every month until repaid
-  const st = W1(); E.takeLoan(st); assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 150);
+  const st = W1(); st.econ = null; E.takeLoan(st); assert.equal(E.metrics(st).expenseLines.find((l) => l.id === 'loan').amount, 150); // T2: no cycle add-on
   // Israeli CPI: ₪10,000 of June 2021 in June 2023 prices (real data, exact month index)
   const cpi = REAL.SERIES.cpiIL; const i0 = (2021 - +cpi.start.slice(0, 4)) * 12 + (6 - +cpi.start.slice(5, 7)); const i1 = i0 + 24;
   assert.equal(E.inflate(10000, '2021-06', '2023-06'), Math.round(10000 * cpi.values[i1] / cpi.values[i0]));
@@ -581,7 +590,7 @@ test('v2 saves (st.v = 1, 24-tile board) migrate to v3 with defaults; junk is re
     old.v = 1; old.pos = 13; old.phase = 'roll'; old.pending = null; delete old.life; delete old.lessons; delete old.taxes; delete old.actions;
     delete old.rng.life; delete old.rng.index; delete old.holdings.IDX; delete old.prices.IDX;
     const mig = E.deserialize(JSON.stringify(old));
-    assert.equal(mig.v, 3); assert.ok(mig.pos >= 0 && mig.pos < 40 && w.board[mig.pos] !== 'P');
+    assert.equal(mig.v, 4); assert.ok(mig.pos >= 0 && mig.pos < 40 && w.board[mig.pos] !== 'P');
     assert.ok(mig.life && mig.life.energy > 0 && Array.isArray(mig.lessons) && mig.holdings.IDX && mig.prices.IDX === 100);
     assert.ok(Math.abs(E.metrics(mig).salary - E.metrics(st).salary) <= 20, 'take-home preserved');
     playOut(mig, prng(2), 15); // and it plays on
@@ -600,7 +609,7 @@ test('two dice: both drawn every roll (also in the tutorial), doubles give a sma
     assert.ok(r.dice[0] >= 1 && r.dice[0] <= 6 && r.dice[1] >= 1 && r.dice[1] <= 6 && r.die === r.dice[0] + r.dice[1]);
     assert.deepEqual(st.lastRoll.dice, r.dice);
     if (r.dice[0] === r.dice[1]) { doubles++; assert.ok(r.double && r.news.some((n) => n.kind === 'double')); if (r.double.kind === 'energy') assert.ok(st.life.energy >= Math.min(100, e0)); else assert.equal(st.life.peek, true); } else assert.equal(r.double, null);
-    const t = E.createGame({ worldId: 'w1', seed, tutorial: true }); E.rollDice(t); assert.equal(t.rng.dice, st.rng.dice, 'tutorial consumes both dice');
+    const t = E.createGame({ worldId: 'w1', seed, tutorial: true }); E.choose(t, null, 'skip'); E.rollDice(t); assert.equal(t.rng.dice, st.rng.dice, 'tutorial consumes both dice');
   }
   assert.ok(doubles > 25 && doubles < 80, 'about 1 in 6 rolls is a double: ' + doubles);
   for (const w of E.WORLDS) { const b = E.boardInfo(w.id); assert.equal(b.length, 40); assert.deepEqual(b.corners, [0, 10, 20, 30]); assert.ok(b.every((t) => t.type && t.color && t.icon && t.name)); }
@@ -618,6 +627,7 @@ test('negotiation: the seller\'s answer is sealed with the card; offering never 
       if (off) {
         tried++;
         const res = E.choose(a, ea, 'offer:10');
+        if (res.rival && res.rival.lost) { tried--; ea = null; eb = null; b.pending = null; b.phase = 'roll'; continue; } // T6: another investor closed first (the offer is not evaluated)
         assert.equal(res.negotiation.accepted, a.pending ? true : false);
         if (res.negotiation.accepted) { acc++; assert.ok(res.event && !res.event.options.some((o) => o.kind === 'offer') && res.event.data.negotiated.pct === 10); assert.ok(res.event.data.cost < eb.data.cost); ea = res.event; } else ea = null;
         assert.equal(res.negotiation.accepted, b.pending.negR < off.chance, 'same answer for everyone with this card');
@@ -647,7 +657,7 @@ test('plans: overtime pays less than +25% net (marginal tax), burnout is determi
 });
 
 test('credit score: forced loans hurt, repaying helps, a poor score blocks voluntary loans', () => {
-  const st = W1();
+  const st = W1(); st.econ = null; // T2: the cycle's loan add-on is tested in t2.test.mjs
   st.life.creditScore = 800; const lowPct = E.loanPct(st);
   st.life.creditScore = 500; assert.ok(E.loanPct(st) > lowPct); assert.equal(E.loanCap(st), 0);
   const r = E.takeLoan(st); assert.equal(r.ok, false); assert.ok(/דירוג האשראי/.test(r.error));
@@ -684,7 +694,7 @@ test('life events: every option of every dilemma is choosable and shows money + 
   for (const w of E.WORLDS) for (const E0 of LIFE.LIFE_EVENTS) for (const o0 of E0.options) {
     const st = E.createGame({ worldId: w.id, seed: 3 });
     st.pending = { id: 1, type: 'life', tile: 'L', pos: w.board.indexOf('L'), eventId: E0.id, r: 0.5 }; st.phase = 'event';
-    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, E0.personal && E0.options.length > 1 ? 0 : 1);
+    const ev = E.currentEvent(st); assert.equal(ev.options.filter((o) => o.primary).length, st.mentor !== 'guide' || (E0.personal && E0.options.length > 1) ? 0 : 1); // values cards: the director's guide pick (A1)
     const o = ev.options.find((x) => x.id === o0.id);
     for (const k of ['cash', 'monthly', 'months', 'happiness', 'energy']) assert.ok(Number.isFinite(o.effects[k]), `${E0.id}/${o.id}.${k}`);
     const res = E.choose(st, ev, o.id); assert.ok(res.ok && res.done, `${E0.id}/${o.id}`);
@@ -705,7 +715,7 @@ test('history mode (stub data): deterministic, real-data driven, ends against th
   E.registerRealData(stubReal());
   try {
     assert.deepEqual(E.scenarioList().map((s) => s.id), ['test']);
-    const run = (buy) => { const st = E.createGame({ mode: 'history', scenarioId: 'test', seed: 9 }); const r = prng(4); let heads = 0;
+    const run = (buy) => { const st = E.createGame({ mode: 'history', scenarioId: 'test', seed: 9, mentor: 'guide' }); const r = prng(4); let heads = 0;
       for (let t = 0; t < 200 && !st.over; t++) { const roll = E.rollDice(st); heads += roll.news.filter((x) => x.kind === 'headline').length; let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (buy && ev.type === 'trade' && ev.data.maxBuy > 0 && !ev.data.lastResult) { id = 'buy'; p = { qty: ev.data.maxBuy }; } const res = E.choose(st, ev, id, p); ev = res.event; } }
       return { st, heads }; };
     const a = run(true), b = run(true);
@@ -725,8 +735,8 @@ test('history mode (real data): every scenario plays to the end; panic selling l
   for (const sc of E.scenarioList()) {
     const res = {};
     for (const strat of ['hold', 'panic']) {
-      const st = E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7 });
-      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass'; if (ev.type === 'business') id = ev.options.find((o) => ['pass', 'ok'].includes(o.id)).id;
+      const st = E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7, mentor: 'guide' });
+      for (let t = 0; t < 400 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) { let id = (ev.options.find((o) => o.primary) || ev.options.find((o) => o.enabled)).id; let p; if (ev.type === 'deal') id = 'pass'; if (ev.type === 'business') id = ev.options.find((o) => ['pass', 'ok'].includes(o.id)).id; if ((ev.type === 'payday' || ev.type === 'edu') && ev.options.find((o) => o.id === 'plan:work' && o.enabled)) id = 'plan:work'; /* the same plan in both runs: only the index decision differs */
         if (ev.type === 'trade' && !ev.data.lastResult) { if (strat === 'hold' && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } if (strat === 'panic' && st.prices.IDX < 80 && ev.data.maxSell > 0) { id = 'sell'; p = { qty: ev.data.maxSell }; } if (strat === 'panic' && st.prices.IDX >= 95 && ev.data.maxBuy > 0) { id = 'buy'; p = { qty: Math.max(1, Math.floor(ev.data.maxBuy * 0.8)) }; } }
         ev = E.choose(st, ev, id, p).event; } }
       assert.ok(st.over && st.month === sc.months + 1, sc.id + ' ended at ' + st.month);
@@ -771,7 +781,7 @@ test('freedom must hold: the goal has to be met on 2 consecutive paydays', () =>
 test('managed business (business.js): K tile offer → open → monthly P&L, energy, owner-run is active income, a manager makes it passive', () => {
   let done = false;
   for (let seed = 1; seed < 600 && !done; seed++) {
-    const st = E.createGame({ worldId: 'w2', charId: 'lawyer', seed }); st.cash = 600000;
+    const st = E.createGame({ worldId: 'w2', charId: 'lawyer', seed, mentor: 'guide' }); st.cash = 600000;
     for (let t = 0; t < 30 && !done; t++) {
       E.rollDice(st); let ev = E.landing(st);
       if (ev.type === 'business' && ev.data.mode === 'offer') {
@@ -805,7 +815,7 @@ test('the engine uses the finance modules (no parallel formulas) and only determ
 
 /* ------------------------------------------------------------------ v3.2: education review */
 test('decision quality (§8): primary-follower scores high, risky play scores lower; deterministic; luck is separate', () => {
-  const runPol = (pol, seed, w) => { const st = E.createGame({ worldId: w, seed, mode: 'challenge' }); const r = prng(seed);
+  const runPol = (pol, seed, w) => { const st = E.createGame({ worldId: w, seed, mode: 'free', mentor: pol === 'primary' ? 'guide' : 'hint' }); const r = prng(seed); // T2: the highlight exists only at guide
     for (let t = 0; t < 70 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); let n = 0;
       while (ev) { let o; if (pol === 'primary') o = ev.options.find((x) => x.primary) || ev.options.find((x) => x.enabled && ['done', 'ok', 'pass', 'skip'].includes(x.id)) || ev.options.find((x) => x.enabled);
         else if (pol === 'reckless') o = n ? ev.options.find((x) => x.enabled && ['done', 'ok', 'pass'].includes(x.id)) || ev.options.find((x) => x.enabled) : (ev.options.find((x) => x.enabled && x.id === 'credit') || ev.options.find((x) => x.enabled && x.kind === 'buy') || ev.options.find((x) => x.enabled && x.id === 'pay') || ev.options.find((x) => x.enabled));
@@ -825,7 +835,10 @@ test('installments: 3 interest-free payments (bank.js) vs revolving credit; real
   const st = W1(); st.cash = 20000; const w = E.getWorld('w1'); const toy = w.doodads.find((d) => d.inst && !d.need);
   st.pending = { id: 41, type: 'doodad', tile: 'D', pos: 2, card: { ...toy } }; st.phase = 'event';
   const ev = E.currentEvent(st); const i3 = ev.options.find((o) => o.id === 'inst3');
-  assert.equal(i3.amounts.reduce((a, b) => a + b, 0), toy.a); assert.ok(/לחודש/.test(ev.options.find((o) => o.id === 'credit').label));
+  assert.equal(i3.amounts.reduce((a, b) => a + b, 0), toy.a);
+  assert.ok(!ev.options.find((o) => o.id === 'credit'), 'T2 §11.1: revolving credit is hidden whenever interest-free installments are offered');
+  { const lo = W1(); lo.life.creditScore = 550; lo.pending = { id: 42, type: 'doodad', tile: 'D', pos: 2, card: { ...toy } }; lo.phase = 'event'; const ev2 = E.currentEvent(lo);
+    assert.ok(!ev2.options.find((o) => o.id === 'inst3') && /לחודש/.test(ev2.options.find((o) => o.id === 'credit').label), 'a low score: no installments, revolving credit instead'); }
   const c0 = st.cash; E.choose(st, ev, 'inst3'); assert.equal(st.cash, c0 - i3.amounts[0]); assert.equal(st.credit, 0);
   assert.equal(E.metrics(st).expenseLines.filter((l) => /תשלומים/.test(l.label)).length, 1, 'next installment shows as an expense');
   // real capital gains: the inflation part is exempt

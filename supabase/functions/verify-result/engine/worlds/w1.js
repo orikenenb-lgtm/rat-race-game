@@ -1,6 +1,6 @@
 // World 1 — השכונה. v1 rules and numbers (balance must feel like v1), plus a mystery tile, golden deals and quizzes.
 // v2.1: debt order mortgage < bank loan (3%/mo, capped by income) < credit card (5%/mo); wants can be refused; crypto coins have a sealed fate.
-import { MENTOR, tilesFor, ring, INDEX_TICKER } from './common.js';
+import { MENTOR, tilesFor, ring, INDEX_TICKER, STAKE_KIND } from './common.js';
 
 const board = ring(['ODOLMOIOX', 'OOODKOMEO', 'ODMOLOIXO', 'DOML?OTMO']); // v3: 40 tiles, paydays on the corners
 
@@ -18,15 +18,17 @@ export default {
   // bank loan: 3% a month, the bank lends up to cap × monthly income; forced loans are rounded to autoUnit
   loan: { unit: 5000, autoUnit: 1000, pct: 3, cap: 1.5, bankrupt: 10 },
   creditPct: 5,
+  sideReportFee: 120, // T2: the accountant's monthly fee once side income is reported (₪)
   goal: { type: 'passive' },
   maxMonths: 52,
   // ★★ ≈ median, ★★★ = by T3 AND happiness ≥ 60 AND a 3-month emergency fund ≈ top ~12% of smart games (tools/balance-report.md)
   stars: { t2: 45, t3: 36 },
   daily: { chars: ['teacher', 'driver'], maxMonths: 24 },
   start: {},
-  models: { re: 'apartment', biz: 'business', side: 'business' },
+  models: { re: 'apartment', biz: 'business', side: 'business', stake: 'business' },
   bizOffers: ['coffee', 'toyshop'], // K tile: managed businesses (js/finance/business.js)
-  kinds: { re: { label: 'נדל"ן', debtLabel: 'משכנתא', rent: true }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' } },
+  lifeMoneyScale: 0.28, // rules 4 (review M4 c): personal / values life cards and the life chains move less money in the kids' world
+  kinds: { re: { label: 'נדל"ן', debtLabel: 'משכנתא', rent: true }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, stake: STAKE_KIND },
   tickers: {
     IDX: { ...INDEX_TICKER, model: 'stock' },
     TCHN: { name: 'TCHN · טכנולוגיה', start: 10, div: 0, step: [10, 100], model: 'stock', modelLabel: 'תיק מניות' },
@@ -55,7 +57,7 @@ export default {
       expenses: [['שכירות', 2900], ['רכב', 1200], ['אוכל ושוטף', 2700], ['החזר כרטיס אשראי', 600]] },
     { id: 'dev', gender: 'm', age: 29, family: { partner: 'together', kids: 0 }, name: 'מתכנת', icon: 'laptop', maxMonths: 66, stars: { t2: 45, t3: 36 }, desc: 'מרוויח יפה — ומוציא יפה. הרבה מזומן לקנות, אבל קו סיום רחוק.', salary: 22000, cash: 30000,
       expenses: [['משכנתא', 7500], ['ליסינג', 2800], ['אוכל ומסעדות', 5200], ['מנויים ובילויים', 2300], ['הלוואת רכב', 1200]] },
-    { id: 'doctor', gender: 'f', age: 35, family: { partner: 'married', kids: 2 }, name: 'רופאה', icon: 'stethoscope', maxMonths: 76, stars: { t2: 53, t3: 38 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 45000,
+    { id: 'doctor', gender: 'f', age: 35, family: { partner: 'married', kids: 2 }, name: 'רופאה', icon: 'stethoscope', maxMonths: 76, maxMonths4: 82, stars: { t2: 53, t3: 38 }, desc: 'המשכורת הכי גבוהה, וההוצאות הכי גבוהות. משכורת גבוהה ≠ חופש.', salary: 30000, cash: 45000,
       expenses: [['משכנתא', 11000], ['רכב יוקרה', 3800], ['אוכל ומסעדות', 6000], ['בית ספר פרטי', 3500], ['הלוואות לימודים', 2400]] },
   ],
 
@@ -103,7 +105,7 @@ export default {
     { n: 'ארוחה עם חברים במסעדה', a: 650, q: 'הוצאות קטנות הן לא הבעיה. הרגל של הוצאות קטנות — כן.' },
     { n: 'קונסולה חדשה', a: 2400, inst: true, q: 'שים לב לכפתור "באשראי". נראה קל — אבל כל חודש תשלם ריבית, והחוב עצמו לא יקטן עד שתסגור אותו.' },
     { n: 'קורס "תתעשר מהר" ברשת', a: 1800, inst: true, q: 'מי שמוכר קורס "איך להתעשר מהר" — מתעשר בעיקר מהקורס.' },
-    { n: 'תיקון לרכב', a: 2200, need: true, inst: true, d: 'הבלמים חורקים. בלי רכב אין עבודה.', q: 'את זה אי אפשר לדחות. בגלל זה צריך קרן חירום.' },
+    { n: 'תיקון לרכב', a: 2200, need: true, inst: true, car: true, d: 'הבלמים חורקים. בלי רכב אין עבודה.', q: 'את זה אי אפשר לדחות. בגלל זה צריך קרן חירום.' },
     { n: 'טיפול שיניים', a: 1600, need: true, inst: true, d: 'שן כואבת לא מחכה לסוף החודש.', q: 'הוצאה הכרחית. מי שיש לו כרית — משלם ושוכח. מי שאין — לוקח חוב.' },
     { n: 'המקרר התקלקל', a: 2800, need: true, inst: true, d: 'כל האוכל בסכנה. צריך מקרר — היום.', q: 'מקרר זה לא מותרות. השאלה היחידה: מזומן, או חוב?' },
   ],

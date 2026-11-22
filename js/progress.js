@@ -17,6 +17,8 @@
 //   setDaily({streak, best, last}) / streakInfo() → {streak, best, playedToday, alive}
 //   syncFromServer() / scheduleSync() / mergeProfile(profile) / setTutorialDone()
 //   recordLearning(end.learning, sig) → {improved, missed, strongest, dqAvgBefore} · learningSummary() · gamePrinciples(learning)
+//   T4: setDream(id|null) · requestTutorialReplay() · consumeTutorialReplay() → bool · setLastMode(m) · setMentorPref(l)
+//       recordLearnGame(e) → {learn:true, wouldStars, worldId, …} · recordDream(e) · DREAM_IDS
 import { net } from './net.js';
 import { WORLDS, getWorld } from './worlds/index.js';
 import { starThresholds } from './engine.js';
@@ -27,6 +29,10 @@ const WIDS = WORLDS.map((w) => w.id);
 const LEARN_GAMES = 20;          // decision-quality history kept ("מה למדתי")
 const LEARN_WEIGHT_CAP = 30;     // old decisions count at most this much against a new game (recent play matters)
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+/** T4 ids (declared up here: load() runs at import time). */
+export const DREAM_IDS = ['biz', 'family', 'stable', 'free'];
+const MODES = ['normal', 'learn'];
+const MENTOR_PREFS = ['guide', 'hint', 'pro'];
 
 export const PAWNS = [
   { id: 'classic', name: 'קלאסי', need: 0 },
@@ -51,6 +57,8 @@ function fresh() {
     pawnChosenAt: 0, gamesPlayed: 0, wins: 0, tutorialDone: false, lastSeenWorld: null, worldsPlayed: [],
     streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
     learn: freshLearn(),
+    // T4 §14.4 (local only — never in metaOf() / never synced)
+    learnGames: 0, dream: null, dreams: {}, tutorialReplay: false, lastMode: 'normal', mentorPref: null,
   };
 }
 
@@ -65,6 +73,7 @@ function load() {
   p.lastChar = { ...(p.lastChar || {}) };
   p.history = { ...(p.history || {}) };
   p.learn = cleanLearn(p.learn);
+  cleanT4(p);
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
@@ -141,6 +150,71 @@ export function setPawnColor(hex) { if (!PAWN_COLORS.some((c) => c.hex === hex))
 export function markWorldSeen(id) { if (!P.seenWorlds.includes(id)) { P.seenWorlds.push(id); changed(); } }
 export function setOnboarded() { if (!P.onboarded) { P.onboarded = true; changed(); } }
 export function setTutorialDone() { if (!P.tutorialDone) { P.tutorialDone = true; changed(); } }
+
+/* ---------------- T4: learning mode, dream goal, tutorial replay, mode / mentor preference (local only, never synced) */
+/** Old or hand-edited values → the T4 shape (additive: unknown keys are kept, nothing is deleted). */
+function cleanT4(p) {
+  p.learnGames = Math.max(0, Math.floor(+p.learnGames) || 0);
+  const okId = (x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x);   // unknown (future engine) dream ids are kept
+  p.dream = okId(p.dream) ? p.dream : null;
+  const d = p.dreams && typeof p.dreams === 'object' && !Array.isArray(p.dreams) ? p.dreams : {};
+  p.dreams = {};
+  for (const [id, v] of Object.entries(d)) {
+    if (!okId(id) || !v || typeof v !== 'object') continue;
+    p.dreams[id] = { done: [...new Set((Array.isArray(v.done) ? v.done : []).filter((x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x)))], games: Math.max(0, Math.floor(+v.games) || 0) };
+  }
+  p.tutorialReplay = p.tutorialReplay === true;
+  p.lastMode = MODES.includes(p.lastMode) ? p.lastMode : 'normal';
+  p.mentorPref = MENTOR_PREFS.includes(p.mentorPref) ? p.mentorPref : null;
+}
+/** The dream goal for the next free/learning game ('biz'|'family'|'stable'|'free'|null). Never touches stars or ranked. */
+export function setDream(id) { const v = DREAM_IDS.includes(id) ? id : null; if (P.dream !== v) { P.dream = v; changed(); } return v; }
+/** F4: "full tutorial in the next w1 game" — consumed once by startFree. */
+export function requestTutorialReplay() { if (!P.tutorialReplay) { P.tutorialReplay = true; changed(); } }
+export function consumeTutorialReplay() { if (!P.tutorialReplay) return false; P.tutorialReplay = false; changed(); return true; }
+export function setLastMode(m) { const v = MODES.includes(m) ? m : 'normal'; if (P.lastMode !== v) { P.lastMode = v; changed(); } return v; }
+export function setMentorPref(l) { const v = MENTOR_PREFS.includes(l) ? l : null; if (P.mentorPref !== v) { P.mentorPref = v; changed(); } return v; }
+/** Completed normal games (free / ranked / history) — learning games are not counted (they are not synced either). */
+export const completedGames = () => P.gamesPlayed;
+/** Review M-2: the very first game of a brand-new player (the only one whose first 10 rolls are free). */
+export const firstEverGame = () => !P.tutorialDone && !(P.gamesPlayed > 0) && !(P.learnGames > 0);
+/**
+ * A finished LEARNING game (§7.1): learnGames += 1, tutorialDone, lastChar. Nothing else — no stars, best, unlocks,
+ * titles, pawns, achievements, worldsPlayed, gamesPlayed, wins or hadBankruptcy. Returns what the end screen needs.
+ */
+let lastLearnSig = null; let lastLearnRes = null;
+export function recordLearnGame(e = {}) {
+  const sig = ['learn', e.worldId, e.charId, e.seed ?? '', e.status, e.months, Math.round(e.netWorth || 0)].join('|');
+  if (sig === lastLearnSig && lastLearnRes) return lastLearnRes;  // the same game:end delivered twice
+  const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
+  P.learnGames += 1;
+  P.tutorialDone = true;
+  if (e.charId) P.lastChar[wid] = e.charId;
+  session = new Set();                                             // achievements of this game are never reported
+  changed();
+  const won = e.status === 'won';
+  lastLearnSig = sig;
+  lastLearnRes = { learn: true, worldId: wid, wouldStars: won ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0, learnGames: P.learnGames,
+    newStars: P.stars[wid] || 0, prevStars: P.stars[wid] || 0, gained: 0, earned: 0, unlockedWorld: null, newPawns: [], newAchievements: [],
+    titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(), best: P.best[wid] ?? null, prevBest: P.best[wid] ?? null, newBest: false, bankedLocked: false };
+  return lastLearnRes;
+}
+/** Free NORMAL games only (§6.3/§7.1): merge the dream missions completed in this game (end.dream / e.dream) into the lifetime badges. */
+let lastDreamSig = null;
+export function recordDream(e = {}) {
+  const d = e.dream || (e.end && e.end.dream) || null;
+  if (!d || !/^[a-z0-9_]{2,32}$/.test(String(d.id)) || e.learn) return null;
+  const sig = [e.resultId || '', e.worldId, e.charId, e.seed ?? '', e.status, e.months, d.id].join('|');
+  if (sig === lastDreamSig) return null;                            // the same game:end delivered twice (review m-9)
+  lastDreamSig = sig;
+  const done = (Array.isArray(d.missions) ? d.missions.filter((m) => m && m.done).map((m) => m.id) : Array.isArray(d.done) ? d.done : Object.keys(d.done || {}))
+    .filter((x) => typeof x === 'string' && /^[a-z0-9_]{2,32}$/.test(x));
+  const prev = P.dreams[d.id] || { done: [], games: 0 };
+  const fresh = done.filter((x) => !prev.done.includes(x));
+  P.dreams = { ...P.dreams, [d.id]: { done: [...prev.done, ...fresh], games: prev.games + 1 } };
+  changed();
+  return { id: d.id, fresh, done: P.dreams[d.id].done };
+}
 /** The engine's one-time mentor bail-out is offered until the player has gone bankrupt (or been bailed out) once. */
 export function bailoutAvailable() { return !P.hadBankruptcy; }
 export function markBankruptcy() { if (!P.hadBankruptcy) { P.hadBankruptcy = true; changed(); } }
@@ -338,6 +412,8 @@ export function mergeProfile(prof) {
       if (P.best[w] == null || +v < P.best[w]) { P.best[w] = +v; ch = true; }
     }
     if (P.wins > P.gamesPlayed) P.gamesPlayed = P.wins;
+    // T4 §4.6 (review M-3): a player the server knows has finished games is never onboarded again on a new device
+    if (+m.games > 0 && !P.tutorialDone) { P.tutorialDone = true; ch = true; }
   }
   if (prof.pawn && !P.pawnChosenAt && prof.pawn !== P.pawn && PAWNS.some((x) => x.id === prof.pawn)) { P.pawn = prof.pawn; ch = true; }
   if (prof.daily_streak != null || prof.best_streak != null || prof.last_daily !== undefined) {
@@ -398,5 +474,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; changed(); }
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
 export { ACHIEVEMENTS, WIDS };
