@@ -1887,6 +1887,8 @@ const DESCRIBE = {
       const qs = []; for (const it of items) for (const c of it.options) qs.push(opt(`q:${it.itemId}:${c.id}`, `${it.title}: ${c.label}`, c.enabled, { kind: 'story', story: true, reason: c.reason, effects: c.effects, preview: c.preview, odds: c.odds, default: c.default }));
       ev.options = [...qs, ...ev.options];
       const s1 = sm; Object.assign(ev.data, { l1: clone(s1.l1), l2: clone(s1.l2), stage: s1.stage, stageName: s1.stageName, signature: s1.signature, calendar: calendarOf(st) });
+      // the structured block (data.l1 / l2) carries last month's numbers: ev.text no longer repeats them (summaryOnly = "the numbers are in l1")
+      if (a.bizRep) { ev.text = 'זמן להחליט: מחיר, עובדים, שיווק, משיכה — או למכור.'; ev.data.summaryOnly = true; }
     }
   },
 
