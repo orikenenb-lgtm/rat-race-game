@@ -15,6 +15,10 @@
 # Gating uses the DOM fallback marks (they exist on the base copy too); rr:* performance marks (CR-18) are recorded when present.
 # Noise (§3.9): a run is valid when the 1-min load average at its start is ≤ load_max (perf_budgets.json, env RR_PERF_LOAD_MAX
 # overrides — set 0 to force INCONCLUSIVE, PF-E). Timing gates from any noisy run print INCONCLUSIVE(noisy), never PASS.
+# Phase A (T5 verify D11): a new (unseeded) player — on the branch the T4 tutorial opens its first card with #roll disabled. Both copies
+# are measured with the SAME probe and the same unseeded storage; "roll" timings (clickToRollMs / navToRollMs / bytesBeforeRoll) end
+# at the first game input = #roll enabled OR the first card / coach button on screen (mark gameInput; rollEnabledMs is kept too).
+# On a copy without the tutorial card the two marks are the same moment, so base and branch stay comparable.
 # Not in part A (they exit 2 if asked): --long (PF-19), --trace (§3.3 freeze trace), --heap (§3.5 retainers), PF-15 hidden-tab draws.
 import asyncio, json, os, statistics, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +45,12 @@ INIT = r"""
     const l = document.getElementById('loading');
     if (document.querySelector('.lb-home') && (!l || l.hidden || getComputedStyle(l).display === 'none')) mark('lobbyUsable');
     if (vis(document.querySelector('.wv-chars'))) mark('worldView');
-    const r = document.getElementById('roll'); if (r && !r.disabled && document.getElementById('start') && document.getElementById('start').hidden) mark('rollEnabled');
+    const r = document.getElementById('roll'); const inGame = document.getElementById('start') && document.getElementById('start').hidden;
+    if (r && !r.disabled && inGame) { mark('rollEnabled'); mark('gameInput'); }
+    // T5 verify D11: a new player's game opens on the tutorial's first card / coach with #roll still disabled — that card is the
+    // first thing the player can act on, so it ends the "time to the first game input" just like an enabled roll does
+    const cardBtn = document.querySelector('#evm:not([hidden]) #evCard button:not([disabled]), #gm:not([hidden]) .acts button:not([disabled]), #coach:not([hidden]) .bubble button');
+    if (inGame && cardBtn && vis(cardBtn)) mark('gameInput');
   });
   mo.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'hidden', 'class', 'style'] });
   window.__markReset = (k) => { delete __m.marks[k]; };
@@ -101,14 +110,16 @@ async def new_page(b, cond, seeded):
     errs = []; pg.on('pageerror', lambda e: errs.append(str(e)[:200]))
     return ctx, pg, cdp, ext, errs
 
-async def start_game(pg, world, nth=0):
-    """Open `world`, click its nth character, wait for #roll enabled. → wall-clock ms from the character click."""
+async def start_game(pg, world, nth=0, first_input=False):
+    """Open `world`, click its nth character, wait for #roll enabled (first_input: or the first card / coach of a new player's
+    tutorial, mark gameInput — T5 verify D11). → wall-clock ms from the character click."""
     await pg.click(f'.map-card[data-id="{world}"]'); await pg.wait_for_selector('.wv-chars')
-    await pg.evaluate("window.__markReset('rollEnabled')")
+    await pg.evaluate("window.__markReset('rollEnabled'); window.__markReset('gameInput')")
     t0 = time.time(); await pg.locator('.wv-char').nth(nth).click()
+    ready = "document.querySelector('#start').hidden && __m.marks.gameInput != null" if first_input else "!document.querySelector('#roll').disabled && document.querySelector('#start').hidden"
     for i in range(2):   # a "replace the saved game?" confirm may appear
         try:
-            await pg.wait_for_function("!document.querySelector('#roll').disabled && document.querySelector('#start').hidden", timeout=8000 if i == 0 else TIMEOUT); break
+            await pg.wait_for_function(ready, timeout=8000 if i == 0 else TIMEOUT); break
         except Exception:  # noqa: BLE001
             if await pg.locator('#gm:not([hidden]) .acts button.primary').count(): await pg.click('#gm .acts button.primary')
             elif i: raise
@@ -146,15 +157,15 @@ async def phase_a(b, base, cond, mode='full', twod=False):
         lt = await pg.evaluate('__m.lt')
         idle = [d for s, d in lt if lu <= s < lu + 10000]
         r['lobbyIdleLongTaskMaxMs'] = max(idle or [0]); r['lobbyIdleLongTasks'] = len(idle)
-        r['clickToRollMs'] = await start_game(pg, 'w1')
+        r['clickToRollMs'] = await start_game(pg, 'w1', first_input=True)
         await pg.wait_for_timeout(1000)
     marks = await pg.evaluate('__m.marks'); lt = await pg.evaluate('__m.lt')
     res = await pg.evaluate(RES_JS)
     r.update({'loadavgStart': round(la0, 2), 'loadavgEnd': round(os.getloadavg()[0], 2), 'wallS': round(time.time() - t, 1),
-              'lobbyUsableMs': lu, 'navToRollMs': marks.get('rollEnabled') if mode == 'full' else None,
+              'lobbyUsableMs': lu, 'navToRollMs': marks.get('gameInput') if mode == 'full' else None, 'rollEnabledMs': marks.get('rollEnabled'),
               'rrMarks': await pg.evaluate("performance.getEntriesByType('mark').filter(m => m.name.startsWith('rr:')).map(m => [m.name, Math.round(m.startTime)])"),
               'longTasks': {'n': len(lt), 'maxMs': max([d for _, d in lt] or [0]), 'totalMs': sum(d for _, d in lt)},
-              **resources_summary(res, lu, marks.get('rollEnabled') if mode == 'full' else None),
+              **resources_summary(res, lu, marks.get('gameInput') if mode == 'full' else None),
               'liveGL': await pg.evaluate('__m.gl'), 'externalResponses': ext[:10], 'pageErrors': errs[:5]})
     r['noisy'] = la0 > LOAD_MAX
     await ctx.close(); return r
