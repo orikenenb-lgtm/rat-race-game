@@ -1,11 +1,6 @@
 {
   "_doc": "Ratchet allowlist for tests/a11y_e2e.py (T7 §4.1). Only QA§4.1 findings still present at T7 start, each mapped to its CR. A critical/serious violation that matches no entry fails at once; an entry that no longer occurs prints STALE (fails with --strict-allowlist). --strict ignores this file (release gate AX-3). screen and selector_regex are regular expressions.",
   "entries": [
-    {"rule": "aria-required-attr", "screen": ".*", "selector_regex": "#hGoal", "owner_lane": "shell + in-game UI", "cr": "CR-01", "note": "#hGoal role=meter without aria-valuenow/min/max"},
-    {"rule": "color-contrast", "screen": ".*", "selector_regex": ".*", "owner_lane": "in-game UI tokens + lobby", "cr": "CR-11", "note": ".lb-title 3.64:1, .pf-total 2.83:1, green/gold/red text on cream (T5 A-1/A-3, L1)"},
-    {"rule": "label-content-name-mismatch", "screen": ".*", "selector_regex": "#homeBtn|\\.lb-player|\\.lb-energy|#hEnergy", "owner_lane": "shell, in-game UI, lobby", "cr": "CR-12", "note": "visible label not contained in the accessible name"},
-    {"rule": "landmark-no-duplicate-banner", "screen": ".*", "selector_regex": ".*", "owner_lane": "shell + lobby", "cr": "CR-13", "note": "HUD banner exposed under the lobby (moderate; serious-equivalent in --strict)"},
-    {"rule": "landmark-unique", "screen": ".*", "selector_regex": ".*", "owner_lane": "shell + lobby", "cr": "CR-13", "note": "landmarks (moderate)"},
     {"rule": "region", "screen": ".*", "selector_regex": ".*", "owner_lane": "shell + lobby", "cr": "CR-13", "note": "content outside landmarks (moderate)"}
   ]
 }
