@@ -836,7 +836,11 @@ export function openEvent(ev, ctx, onChoose) {
       // a hint belongs to what was known when it was asked: an inspection (new facts) or a new card clears it
       if (evState.hint && (evState.hint.id !== nev.id || evState.hint.dd !== ddLevel(nev))) evState.hint = null;
       if (prev && prev.id !== nev.id) evState.imp.open = null;
+      const fa = document.activeElement; const had = !!fa && c.contains(fa);
+      const fk = had ? (fa.id ? `#${CSS.escape(fa.id)}` : fa.dataset.o ? `[data-o="${CSS.escape(fa.dataset.o)}"]` : fa.dataset.imp ? `[data-imp="${CSS.escape(fa.dataset.imp)}"]` : null) : null;
       const keep = c.scrollTop; renderEvent(false); c.scrollTop = keep;
+      // a re-render replaces the card's DOM: keep keyboard focus on the same control, else on the card's primary (never <body>)
+      if (had || !document.activeElement || document.activeElement === document.body) { const t = fk && c.querySelector(fk); if (t && !t.disabled) t.focus({ preventScroll: true }); else focusPrimary(); }
     },
     error(msg) { const e = c.querySelector('.err'); if (e) e.textContent = msg || ''; },
     busy(b) { c.classList.toggle('working', !!b); },

@@ -1588,7 +1588,7 @@ function onGameEnd(e, delay) {
     o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open');
     if (!booted) { booted = true; boot(); }
     view = { k: 'end' }; trace('end');
-    renderEnd(true);
+    renderEnd(true); focusView();   // a11y K-7: the end screen replaced the lobby — focus its title, not the removed node
     if (ranked) submitResult();
   }, delay);
 }
