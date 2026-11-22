@@ -83,7 +83,7 @@ export const CHAINS = {
           { id: 'bigger', label: 'דירה גדולה ומרווחת', dq: 'personal', fx: { cash: -0.3, rentAdd: 0.1, happiness: 5 }, path: 'bigger', next: [{ step: 'm2renew', at: 'renewal' }], memo: 'עברת לדירה גדולה יותר', lesson: ['lifestyle_creep'] },
           { id: 'stay', label: 'נשארים ומקבלים העלאה קטנה', dq: 'personal', fx: { rentAdd: 0.03 }, path: 'stay', next: [{ step: 'm2renew', at: 'renewal' }], memo: 'נשארת וקיבלת העלאה קטנה' },
           { id: 'smaller', label: 'דירה קטנה וזולה', dq: 'personal', fx: { cash: -0.2, rentAdd: -0.08, happiness: -4 }, path: 'smaller', next: [{ step: 'm2renew', at: 'renewal' }], memo: 'עברת לדירה קטנה יותר' },
-          { id: 'periphery', label: 'לעבור לפריפריה', dq: 'personal', fx: { cash: -0.25, rentPct: -25, set: { area: 'periphery', commute: -3 } }, path: 'periphery', next: [{ step: 'm3commute', in: 3 }], memo: 'עברת לפריפריה' },
+          { id: 'periphery', label: 'לעבור לפריפריה', dq: 'personal', fx: { cash: -0.25, rentPct: -25, set: { area: 'periphery', commute: -3 } }, hook: 'moveAway', path: 'periphery', next: [{ step: 'm3commute', in: 3 }], memo: 'עברת לפריפריה' },
         ] },
       m2renew: { title: 'חידוש חוזה', remember: '{rememberMove}',
         text: 'בעל הבית מבקש {raisePct}% יותר (אינפלציה בשנה שעברה: {inflLast}%) — עוד {raise} בחודש.',
@@ -94,7 +94,7 @@ export const CHAINS = {
           { id: 'roommates', label: 'לעבור עם שותפים', dq: 'personal', when: 'single', fx: { cash: -0.1, rentPct: -35, happiness: -4 }, next: [{ end: true, in: 0 }], lesson: ['housing_share'] },
           { id: 'smaller', label: 'לעבור לדירה קטנה יותר', dq: 'personal', fx: { cash: -0.2, rentPct: -10, happiness: -3 }, next: [{ end: true, in: 0 }], lesson: ['housing_share'] },
         ] },
-      m3commute: { title: 'הדרך לעבודה', remember: 'לפני 3 חודשים עברת לפריפריה וחסכת {saved} בשכירות.',
+      m3commute: { title: 'הדרך לעבודה', remember: 'לפני {ago} חודשים עברת לפריפריה וחסכת {saved} בשכירות.',
         text: 'עכשיו שעה וחצי לכל כיוון. איך נוסעים?',
         options: [
           { id: 'train', label: 'רכבת', dq: 'mixed', default: true, guide: true, fx: { line: { amt: 0.03, months: 0, label: 'רכבת', tag: 'transport' }, set: { commute: -2 } }, next: [{ step: 'm2renew', at: 'renewal' }] },

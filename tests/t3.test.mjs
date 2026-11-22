@@ -640,5 +640,55 @@ test('review M7: at guide the highlight checks a flagged deal first, values a se
   assert.ok(flagged > 20 && inspected === flagged, `flagged deals ${flagged}, inspect highlighted ${inspected}`);
   assert.ok(rested > 0 && restTired / rested >= 0.9, `rest highlighted ${rested}, tired / recovering ${restTired}`);
 });
+/* ------------------------------------------------------------------ T3 verify fix wave */
+/** Monthly expenses that are running this month (₪). */
+const runningExp = (st) => st.expenses.filter((x) => !x.until || x.until >= st.month).reduce((s, x) => s + x.amount, 0);
+const safeOpt = (e) => e.options.find((x) => x.enabled && ['ok', 'done', 'pass', 'skip', 'no', 'stay', 'keep'].includes(x.id)) || e.options.find((x) => x.enabled);
+function playUntil(st, pred, max = 400) {
+  for (let i = 0; i < max && !st.over && !pred(); i++) {
+    if (st.pending) { let e = E.currentEvent(st); let k = 0; while (e && k++ < 8) { const o = safeOpt(e); e = E.choose(st, e, o.id, o.needsQty ? { qty: 1 } : {}).event; } continue; }
+    E.rollDice(st); let e = E.landing(st); let k = 0; while (e && !st.over && k++ < 8) { const o = safeOpt(e); e = E.choose(st, e, o.id, o.needsQty ? { qty: 1 } : {}).event; }
+  }
+}
+function addChainItem(st, chainId, step) {
+  const S = st.story; const c = S.chains[chainId]; c.stage = 'item'; c.step = step; c.steps.push(step);
+  const it = { id: S.nextId++, kind: 'chain', chain: chainId, step, createdM: st.month, due: st.month + 2, seal: { a: 0.5, b: 0.5 }, data: {} }; S.inbox.push(it); c.item = it.id; return it;
+}
+test('T3 verify D1: the "זוכר?" saving equals the real accumulated saving (bus, selling the car, a lease returned for no car, the periphery move)', () => {
+  const W = [['w1', 'teacher'], ['w2', 'chef'], ['w3', 'exporter'], ['w4', 'engineer']];
+  for (const [w, ch] of W) {
+    // s1 bus → s2bus "כבר {ago} חודשים בלי רכב — חסכת {saved}."
+    let st = forced(w, 'car', 's1', { charId: ch, cash: 200000 }); let e0 = runningExp(st);
+    const chip = E.currentEvent(st).options.find((o) => o.id === 'bus').effects.flow;
+    resolveForced(st, 'car', 's1', 'bus'); const drop = e0 - runningExp(st); const m0 = st.month;
+    assert.ok(drop > 0, `${w}: the bus cuts the car lines`); assert.equal(chip, drop, `${w}: the bus chip = the real monthly saving`);
+    playUntil(st, () => st.story.inbox.some((x) => x.step === 's2bus'));
+    let card = E.inbox(st).find((x) => x.step === 's2bus'); assert.ok(card, `${w}: s2bus opens`);
+    const m = /כבר (\d+) חודשים בלי רכב — חסכת (.+)\./.exec(card.remember); assert.ok(m, card.remember);
+    assert.equal(+m[1], st.month - m0); assert.equal(m[2], E.fmtM(drop * (st.month - m0)), `${w}: ${card.remember}`);
+    assert.notEqual(m[2], E.fmtM(0));
+    // s2fix drop (sell the car) → the same saving is stored
+    st = forced(w, 'car', 's2fix', { charId: ch, item: true, path: 'fix' }); e0 = runningExp(st);
+    resolveForced(st, 'car', 's2fix', 'drop'); assert.equal(st.story.chains.car.data.savedPerMonth, e0 - runningExp(st), `${w}: s2fix drop`);
+    assert.ok(st.story.chains.car.data.savedPerMonth > 0);
+    // a lease → s3leaseEnd "noCar": the lease goes whole and the rest is cut; chip = saving = stored
+    st = forced(w, 'car', 's1', { charId: ch, cash: 200000 }); resolveForced(st, 'car', 's1', 'new');
+    addChainItem(st, 'car', 's3leaseEnd'); e0 = runningExp(st);
+    const lc = E.inbox(st).find((x) => x.step === 's3leaseEnd').options.find((o) => o.id === 'noCar').effects.flow;
+    resolveForced(st, 'car', 's3leaseEnd', 'noCar'); const d2 = e0 - runningExp(st);
+    assert.equal(st.story.chains.car.data.savedPerMonth, d2, `${w}: lease → no car stored`); assert.equal(lc, d2, `${w}: lease → no car chip`);
+    // m1 periphery (a renter of this world; homeowners get homeRepair, C2) → m3commute "לפני {ago} חודשים עברת לפריפריה וחסכת {saved} בשכירות."
+    const renter = E.getWorld(w).characters.map((c) => c.id).find((id) => E.createGame({ worldId: w, charId: id, seed: 21 }).expenses.some((x) => /שכירות|שכר דירה/.test(x.label)));
+    assert.ok(renter, `${w} has a renter`);
+    st = forced(w, 'move', 'm1', { charId: renter, cash: 200000 }); e0 = runningExp(st);
+    const pc = E.currentEvent(st).options.find((o) => o.id === 'periphery').effects.flow;
+    resolveForced(st, 'move', 'm1', 'periphery'); const d3 = e0 - runningExp(st); const m1 = st.month;
+    assert.ok(d3 > 0 && pc === d3, `${w}: periphery chip ${pc} = rent cut ${d3}`);
+    playUntil(st, () => st.story.inbox.some((x) => x.step === 'm3commute'));
+    card = E.inbox(st).find((x) => x.step === 'm3commute'); assert.ok(card, `${w}: m3commute opens`);
+    const p = /לפני (\d+) חודשים עברת לפריפריה וחסכת (.+) בשכירות\./.exec(card.remember); assert.ok(p, card.remember);
+    assert.equal(+p[1], st.month - m1); assert.equal(p[2], E.fmtM(d3 * (st.month - m1)), `${w}: ${card.remember}`);
+  }
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

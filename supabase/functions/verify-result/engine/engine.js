@@ -3663,15 +3663,16 @@ function addLine(st, label, amount, months, tag) {
   st.expenses.push(x); return x;
 }
 function addIncome(st, label, amount, months) { st.incomeExtra.push({ id: 'i' + st.nextId++, label, amount: Math.round(amount), until: months ? st.month + months - 1 : null }); }
-function goBus(st, c, out) { // C1: no car — every car-tagged line is cut and becomes public transport
+function goBus(st, c, saved) { // C1: no car — every car-tagged line is cut and becomes public transport
   const S = st.story; S.flags.noCar = true; S.flags.busM = st.month;
-  const saved = carLines(st).reduce((x, l) => x + l.amount, 0);
-  if (c) c.data.savedPerMonth = Math.round(saved * 0.6); c && (c.data.agoM = st.month);
+  // T3 verify D1: `saved` is the monthly cut the option really applied (applyCarCut's return, measured before the lines were
+  // retagged transport) — summing carLines() here, after the cut, always gave ₪0
+  if (c) { c.data.savedPerMonth = Math.max(0, Math.round(saved || 0)); c.data.agoM = st.month; }
 }
 const STORY_HOOKS = {
   carPaid: { apply(st, x) { const amt = r100((x.stepId === 's1' ? 0.4 : 0.25) * x.S); const d = x.c.data; d.paidNow = amt; if (x.stepId === 's1') { d.paid = amt; d.agoM = st.month; } d.spent = (d.spent || 0) + amt; } },
   leaseStart: { apply(st, x) { const l = st.expenses[st.expenses.length - 1]; if (l && /ליסינג/.test(l.label)) { x.c.data.leaseId = l.id; x.c.data.leaseEnd = st.month + 35; x.c.data.leaseAmt = l.amount; } } },
-  busStart: { preview(st, e) { void st; void e; }, apply(st, x) { goBus(st, x.c, x.out); } },
+  busStart: { preview(st, e) { void st; void e; }, apply(st, x) { goBus(st, x.c, x.carSaved); } },
   leaseKeep: { preview(st, e, x) { e.flow -= r10(0.02 * x.S); }, apply(st, x) { const l = leaseLine(st, x.c); if (l) l.amount += r10(0.02 * x.S); } },
   leaseExit: { preview(st, e, x) { const c = chainOf(st, 'car'); const l = c && leaseLine(st, c); if (l) { e.cash -= 3 * l.amount; e.flow += l.amount; e.months = Math.max(1, (l.until || st.month) - st.month + 1); } void x; },
     apply(st, x) { const l = leaseLine(st, x.c); if (l) { st.cash -= 3 * l.amount; st.expenses = st.expenses.filter((y) => y !== l); } } },
@@ -3680,7 +3681,9 @@ const STORY_HOOKS = {
   leaseReturn: { preview(st, e) { const c = chainOf(st, 'car'); const l = c && leaseLine(st, c); const base = carLines(st).filter((y) => y !== l); e.flow -= base.reduce((s, y) => s + r10(y.amount * 0.1), 0); },
     apply(st, x) { const l = leaseLine(st, x.c); if (l) st.expenses = st.expenses.filter((y) => y !== l); for (const y of carLines(st)) y.amount += r10(y.amount * 0.1); } },
   leaseBuyout: { apply(st, x) { const l = leaseLine(st, x.c); if (l) st.expenses = st.expenses.filter((y) => y !== l); } },
-  leaseNoCar: { preview(st, e) { e.flow += carLines(st).reduce((s, y) => s + r10(y.amount * 0.6), 0); }, apply(st, x) { const l = leaseLine(st, x.c); if (l) st.expenses = st.expenses.filter((y) => y !== l); applyCarCut(st, 0.6); goBus(st, x.c, x.out); } },
+  leaseNoCar: { preview(st, e) { const c = chainOf(st, 'car'); const l = c && leaseLine(st, c); const lA = l && carLines(st).includes(l) ? l.amount : 0; e.flow += lA + carLines(st).filter((y) => y !== l).reduce((s, y) => s + r10(y.amount * 0.6), 0); }, // a running lease goes whole, the rest is cut 60% (D1: chip = saving)
+    apply(st, x) { const l = leaseLine(st, x.c); const lA = l && carLines(st).includes(l) ? l.amount : 0; if (l) st.expenses = st.expenses.filter((y) => y !== l); goBus(st, x.c, lA + applyCarCut(st, 0.6)); } },
+  moveAway: { apply(st, x) { x.c.data.savedPerMonth = Math.max(0, x.rentSaved || 0); x.c.data.agoM = st.month; } }, // D1: m3commute's "{saved}" = the rent the move really cut × months since
   renewAccept: { preview(st, e) { const h = housingOf(st); const pct = +storyVars(st, 'move', { step: 'm2renew' }).raisePct; if (h.kind === 'rent') e.flow -= r10(h.line.amount * pct / 100); },
     apply(st) { const h = housingOf(st); const pct = +storyVars(st, 'move', { step: 'm2renew' }).raisePct; if (h.kind === 'rent') h.line.amount += r10(h.line.amount * pct / 100); } },
   renewNegotiate: { preview(st, e) { const h = housingOf(st); const pct = +storyVars(st, 'move', { step: 'm2renew' }).raisePct; const full = h.kind === 'rent' ? r10(h.line.amount * pct / 100) : 0; e.oddsMoney = { p: 0.55, hit: -Math.round(full / 2) * 24, miss: -full * 24 }; e.happinessRisk = -2; },
@@ -3730,7 +3733,8 @@ const STORY_HOOKS = {
   bizCutStaff: { preview(st, e) { const a = managedOf(st)[0]; if (a && a.biz.staff > 0) { const b = a.biz; const r = BIZ.applyDecisions(b, { fire: 1 }); if (r.ok) e.bizDelta3 = BIZ.forecast(r.business, null, 3).netProfit - BIZ.forecast(b, null, 3).netProfit; e.flow += Math.round((e.bizDelta3 || 0) / 3); e.months = 3; } },
     apply(st, x) { const a = managedOf(st)[0]; if (!a || !a.biz.staff) return; let r = BIZ.applyDecisions(a.biz, { fire: 1 }); if (r.ok && r.cashNeeded > 0) { const inj = r.cashNeeded; r = BIZ.applyDecisions(a.biz, { fire: 1, inject: inj }); st.cash -= inj; cashFx(x.out, -inj, `הזרמה לעסק ${fmtM(inj)}`); } if (r.ok) a.biz = r.business; } },
 };
-function applyCarCut(st, k) { for (const l of carLines(st)) { l.amount = Math.max(0, l.amount - r10(l.amount * k)); l.label = 'תחבורה ציבורית'; l.tag = 'transport'; } }
+/** Cut every car line by k and retag it public transport → the monthly saving (₪, what the lines really dropped by). */
+function applyCarCut(st, k) { let saved = 0; for (const l of carLines(st)) { const a0 = l.amount; l.amount = Math.max(0, l.amount - r10(l.amount * k)); saved += a0 - l.amount; l.label = 'תחבורה ציבורית'; l.tag = 'transport'; } return saved; }
 /** Sell every index unit at today's price, with the real capital-gains tax (crisis c1 "sell"; part of the 'Q' action, no 'I' logged). */
 function idxSellAll(st, out) {
   const h = st.holdings.IDX; const qty = h.qty; const price = st.prices.IDX;
@@ -3757,8 +3761,8 @@ function applyStoryFx(st, fx, x) {
   if (fx.line) addLine(st, fx.line.label, r10(fx.line.amt * S), fx.line.months || 0, fx.line.tag);
   const h = housingOf(st);
   if (fx.rentAdd && h.kind === 'rent') h.line.amount = Math.max(0, h.line.amount + r10(fx.rentAdd * S));
-  if (fx.rentPct && h.kind === 'rent') h.line.amount = Math.max(0, h.line.amount + r10(h.line.amount * fx.rentPct / 100));
-  if (fx.carCut) applyCarCut(st, fx.carCut);
+  if (fx.rentPct && h.kind === 'rent') { const r0 = h.line.amount; h.line.amount = Math.max(0, h.line.amount + r10(h.line.amount * fx.rentPct / 100)); x.rentSaved = (x.rentSaved || 0) + r0 - h.line.amount; }
+  if (fx.carCut) x.carSaved = (x.carSaved || 0) + applyCarCut(st, fx.carCut);
   if (fx.carLinePct) for (const l of carLines(st)) l.amount = Math.max(0, l.amount + r10(l.amount * fx.carLinePct / 100));
   if (fx.happiness) L.happiness = clamp(L.happiness + fx.happiness, 0, 100);
   if (fx.energy) L.energy = clamp(L.energy + fx.energy, 0, 100);
