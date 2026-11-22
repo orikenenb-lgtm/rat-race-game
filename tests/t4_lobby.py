@@ -538,18 +538,34 @@ async def t_dreamtut(b):
     check(got2, f'T4 §4.7: a dream mission toast queued before 8 info toasts is never dropped by the cap of 6 ({(await pg.evaluate("window.__toasts"))[:4]})')
     await ctx.close()
 
-async def drive(pg, rolls):
-    """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button)."""
-    n = 0; deadline = time.time() + 60 * 18
-    while n < rolls and time.time() < deadline:
-        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); continue
-        if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); continue
+SAVE_TURN = "(k)=>{try{const s=JSON.parse(localStorage.getItem(k)).state;return [s.turn|0,(s.actions||[]).length,!!s.over]}catch(e){return [0,0,false]}}"
+async def drive(pg, rolls, key=None, stall_s=240):
+    """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button).
+    key = the game's save slot: progress is the game's own turn counter (rolls the engine took), not clicks. T4 verify D4: no
+    wall-clock budget — a slow / loaded machine only takes longer; it gives up only when the game state has not changed for
+    stall_s seconds (a real hang). → rolls done"""
+    t0 = (await pg.evaluate(SAVE_TURN, key))[0] if key else 0
+    n = 0; sig = None; moved = time.time()
+    while time.time() - moved < stall_s:
+        if key:
+            tr, na, over = await pg.evaluate(SAVE_TURN, key); n = tr - t0
+            cur = (tr, na)
+            if over: break
+        else: cur = n
+        if n >= rolls: break
+        if cur != sig: sig = cur; moved = time.time()
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); moved = time.time(); continue
+        if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); moved = time.time(); continue
         if await pg.locator('#evm:not([hidden])').count():
             # real cards: options are button[data-o]; prefer the highlighted one, else the first enabled (JS click: no animation waits)
             await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()")
             await pg.wait_for_timeout(500); continue
         if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()"):
-            await pg.click('#roll'); n += 1; await pg.wait_for_timeout(1200); continue
+            await pg.click('#roll')
+            if not key: n += 1
+            try: await pg.wait_for_function("(()=>{const r=document.getElementById('roll');return !r || r.disabled})()", timeout=5000)   # the roll was taken
+            except Exception: pass  # noqa: BLE001 — the stall clock decides
+            continue
         await pg.wait_for_timeout(300)
     return n
 
@@ -560,9 +576,9 @@ async def t_learnreal(b):
     await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
     check(await pg.evaluate("document.querySelector('input[name=t4mode][value=learn]').checked"), 'lastMode learn preselected for a returning player')
     await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
-    n = await drive(pg, 40)
+    n = await drive(pg, 40, key='rr2-save-learn-w1')
     e1 = await ls(pg, 'rr2-energy'); hid = await pg.evaluate("[document.getElementById('hEnergy').hidden, document.getElementById('rollEn').hidden]")
-    check(n >= 40 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
+    check(n >= 40 and (e1 or {}).get('e', 25) == (e0 or {}).get('e', 25), f'AC-L1 {n} learning rolls (the engine turn counter) leave rr2-energy unchanged ({e0 and e0.get("e")} → {e1 and e1.get("e")})')
     check(all(hid), f'AC-L1 #hEnergy / #rollEn hidden in learning mode ({hid})')
     keys = await pg.evaluate("Object.keys(localStorage).filter(k=>k.startsWith('rr2-save-'))")
     check('rr2-save-learn-w1' in keys and 'rr2-save-free-w1' not in keys, f'IR-T4-1 the real game saves into rr2-save-learn-w1 ({keys})')
