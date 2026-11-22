@@ -362,6 +362,9 @@ function renderLife(m, ctx) {
   const L = m.life;
   if (!L) { box.hidden = true; document.body.classList.remove('has-life'); return; }
   box.hidden = false; document.body.classList.add('has-life');
+  // a re-render keeps keyboard focus on the same chip (the row is rebuilt every render)
+  const fa = document.activeElement; const fIn = fa && box.contains(fa) ? fa : null;
+  const focusKey = fIn ? (fIn.dataset.more ? '.lc.more' : fIn.dataset.life ? `${fIn.closest('.hlmore') ? '.hlmore ' : ':scope > '}[data-life="${fIn.dataset.life}"]` : null) : null;
   const en = Math.round(L.energy ?? 0), hp = Math.round(L.happiness ?? 0);
   const enc = en < 25 ? 'neg' : en < 50 ? 'warn' : 'pos';
   const hpe = hp >= 75 ? '😄' : hp >= 60 ? '🙂' : hp >= 40 ? '😐' : hp >= 25 ? '🙁' : '😣';
@@ -386,14 +389,73 @@ function renderLife(m, ctx) {
   if (rev) for (const [k, sel] of [['age', '.lc.age'], ['energy', '.lc.en'], ['happy', '.lc.hp'], ['credit', '.lc.cr'], ['cpi', '.lc.cpi'], ['fund', '.lc.fund'], ['plan', '.lc.plan'], ['focus', '.lc.focus'], ['focus', '.lc.econ']]) {
     const el = box.querySelector(sel); if (el) { el.hidden = !rev(k); revealPulse(k, el); }
   }
+  fitLife(box, focusKey);
+}
+/* T7 polish: the life row never overflows. When the chips do not fit on one line (390 px with 📬, the calendar and the T6 chips),
+   the lowest-priority chips move behind a "⋯" chip (44 px) that opens them as a list — together with the chips this width hides
+   by CSS (age, inflation, fund, calendar), so nothing is out of reach. Gradual-reveal chips (hidden attribute) stay hidden. */
+const LIFE_PRI = ['inbox urg', 'en', 'inbox', 'hp', 'focus', 'plan', 'cr', 'econ', 't6aw', 't6rv', 't6mo', 'cal', 'fund', 'cpi', 'age'];
+const lifePri = (el) => { const c = el.classList; const i = LIFE_PRI.findIndex((k) => k.split(' ').every((x) => c.contains(x))); return i < 0 ? LIFE_PRI.length : i; };
+let lifeMoreOpen = false, lifeWired = false;
+function fitLife(box, focusKey) {
+  const chips = [...box.querySelectorAll(':scope > .lc')];
+  const more = document.createElement('button');
+  more.type = 'button'; more.className = 'lc more'; more.dataset.more = '1'; more.hidden = true;
+  more.setAttribute('aria-haspopup', 'true'); more.setAttribute('aria-controls', 'hLifeMore'); more.setAttribute('aria-label', 'עוד בשורת החיים'); more.title = 'עוד';
+  more.innerHTML = '<span aria-hidden="true">⋯</span>';
+  box.appendChild(more);
+  const over = () => box.scrollWidth > box.clientWidth + 1;
+  const moved = [];
+  if (over()) {
+    more.hidden = false;
+    const cand = chips.filter((c) => !c.hidden && c.getClientRects().length).sort((a, b) => lifePri(b) - lifePri(a));
+    for (const c of cand) { if (!over()) break; c.hidden = true; c.dataset.ovf = '1'; moved.push(c); }
+  }
+  if (!moved.length) { more.remove(); lifeMoreOpen = false; document.body.classList.remove('hlife-more-open'); } else {
+    // the list: the chips moved here + the chips this width hides by CSS (never the not-yet-revealed ones)
+    const cssHidden = chips.filter((c) => !c.hidden && !c.getClientRects().length);
+    const items = [...moved, ...cssHidden].sort((a, b) => lifePri(a) - lifePri(b));
+    const pop = document.createElement('div'); pop.id = 'hLifeMore'; pop.className = 'hlmore'; pop.setAttribute('role', 'group'); pop.setAttribute('aria-label', 'עוד בשורת החיים');
+    for (const c of items) { const k = c.cloneNode(true); k.hidden = false; delete k.dataset.ovf; k.classList.add('in-more'); pop.appendChild(k); }   // full labels (CSS), same names as on desktop
+    pop.hidden = !lifeMoreOpen; box.appendChild(pop);
+    more.setAttribute('aria-expanded', String(lifeMoreOpen));
+  }
+  box.dataset.fitW = String(box.clientWidth);
+  if (focusKey) { const f = box.querySelector(focusKey); if (f && f.getClientRects().length) f.focus({ preventScroll: true }); }
+  if (!lifeWired) { lifeWired = true; wireLifeMore(box); }
+}
+/** the row's width changed without a render (HUD shown after the lobby, rotation, sheet): put the chips back and fit again */
+function refitLife(box) {
+  if (box.hidden || !box.clientWidth || String(box.clientWidth) === box.dataset.fitW) return;
+  box.querySelectorAll(':scope > .lc[data-ovf]').forEach((c) => { c.hidden = false; delete c.dataset.ovf; });
+  box.querySelector(':scope > .lc.more')?.remove(); box.querySelector('#hLifeMore')?.remove();
+  fitLife(box, null);
+}
+function setLifeMore(open, { focus = false } = {}) {
+  const box = $('#hLife'); const pop = $('#hLifeMore'); const more = box && box.querySelector('.lc.more');
+  lifeMoreOpen = !!open && !!pop;
+  if (pop) pop.hidden = !lifeMoreOpen;
+  if (more) more.setAttribute('aria-expanded', String(lifeMoreOpen));
+  document.body.classList.toggle('hlife-more-open', lifeMoreOpen);   // the open list sits above the board's bubbles (CSS)
+  if (focus && lifeMoreOpen) pop.querySelector('.lc')?.focus({ preventScroll: true });
+  else if (focus && more) more.focus({ preventScroll: true });
+}
+function wireLifeMore(box) {
+  box.addEventListener('click', (e) => {
+    if (e.target.closest('[data-more]')) { sfx('click'); setLifeMore(!lifeMoreOpen, { focus: e.detail === 0 }); return; }
+    if (e.target.closest('.hlmore [data-life]')) setLifeMore(false);   // game.js opens the chip's details (its own #hLife click handler)
+  });
+  box.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lifeMoreOpen) { e.stopPropagation(); setLifeMore(false, { focus: true }); } });
+  document.addEventListener('pointerdown', (e) => { if (lifeMoreOpen && !e.target.closest('#hLife')) setLifeMore(false); }, { passive: true });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => refitLife(box)).observe(box);
 }
 /** T6 HUD chips (game.js ctx.t6): 👥 rivals panel (flag rivals), ⏪ decision moments (flag rewind, free / learn), 🌴 after the win */
 function t6Chips(T) {
   if (!T) return '';
   const out = [];
   if (T.rivals) out.push(`<button class="lc t6rv" data-life="rivals" aria-label="יריבים על אותו לוח" title="יריבים על אותו לוח"><span aria-hidden="true">👥</span><b>יריבים</b></button>`);
-  if (T.moments) out.push(`<button class="lc t6mo" data-life="moments" title="לחזור לרגע של החלטה (ענף תרגול)"><span aria-hidden="true">⏪</span><b>רגעי החלטה</b></button>`);
-  if (T.afterWin) out.push(`<button class="lc t6aw" data-life="afterwin" title="אחרי החופש — אפשר לפרוש"><span aria-hidden="true">🌴</span><b>אחרי החופש · ${num(String(T.afterWin.n))} חודשים</b></button>`);
+  if (T.moments) out.push(`<button class="lc t6mo" data-life="moments" aria-label="רגעי החלטה" title="לחזור לרגע של החלטה (ענף תרגול)"><span aria-hidden="true">⏪</span><b>רגעי החלטה</b></button>`);
+  if (T.afterWin) out.push(`<button class="lc t6aw" data-life="afterwin" aria-label="${esc(`אחרי החופש · ${T.afterWin.n} חודשים`)}" title="אחרי החופש — אפשר לפרוש"><span aria-hidden="true">🌴</span><b>אחרי החופש · ${num(String(T.afterWin.n))} חודשים</b></button>`);
   return out.join('');
 }
 const FOCUS_ICON = { scout: '🔍', debt: '🏦', ops: '🏪', frugal: '✂️', network: '🤝', research: '📊', none: '🎯' };

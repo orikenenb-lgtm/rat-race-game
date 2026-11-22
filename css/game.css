@@ -1061,3 +1061,15 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 /* T2 verify D1: the guide's pick can be an inspection */
 .ddins .insp.primary .tagc.rec{display:block}
 .grid .row .big.rng{font-size:17px;white-space:normal;text-align:end;min-width:0}
+/* T7 polish: the life row's "⋯" overflow chip (ui.js fitLife) and its list; T6 chips are icon-only on phones like focus / plan */
+.hlife{position:relative}
+.hlife>.lc{flex:none;min-width:var(--tap);justify-content:center}   /* chips never squeeze into each other: what does not fit goes behind ⋯ */
+.hlife .lc.more{flex:none;min-width:var(--tap);justify-content:center;font-size:18px;font-weight:800;line-height:1}
+.hlife .lc.more[aria-expanded=true]::before{background:var(--paper3);box-shadow:0 0 0 2px var(--line),var(--shadow-s)}
+.hlife .hlmore{position:absolute;top:calc(100% + 8px);inset-inline-end:0;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:2px;min-width:210px;max-width:calc(100vw - 16px);max-height:min(60dvh,420px);overflow:auto;padding:6px;border-radius:16px;background:var(--paper);border:1.5px solid var(--line);box-shadow:var(--shadow)}
+.hlife .hlmore .lc{display:inline-flex!important;margin:0;padding:0 10px;justify-content:flex-start;min-height:var(--tap);font-size:14px;gap:6px}
+.hlife .hlmore .lc::before{inset:2px 0;box-shadow:none;background:var(--paper2)}
+.hlife .hlmore .lc b,.hlife .hlmore .lc .sh{display:inline!important}
+.hlife .hlmore .lc b{max-width:none;font-size:14px}
+body.hlife-more-open .hud{z-index:45}
+@media (max-width:600px){ .hlife .lc.t6rv b,.hlife .lc.t6mo b,.hlife .lc.t6aw b{display:none} .hlife .lc.t6rv,.hlife .lc.t6mo,.hlife .lc.t6aw{padding:0 8px} }
