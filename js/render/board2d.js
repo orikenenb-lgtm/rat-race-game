@@ -16,7 +16,7 @@ const TILE_ICON = [
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
   [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'],
 ];
-const HISTORY_COLORS = { board: '#efe4c8', boardEdge: '#5b4127', center: '#e6d6b0' };
+const HISTORY_COLORS = { board: '#daceb8', boardEdge: '#5b4127', center: '#e6d6b0' };
 
 let root = null, boardEl = null, gridEl = null, cityEl = null, capEl = null, pawnEl = null, fxEl = null;
 let n = 40, side = 10, pos = 0, speed = 1, paused = false, camMode = 'follow', rect = null, gridN = 4;

@@ -838,7 +838,7 @@ function govern(dt, now) {
 }
 
 /** "מכונת הזמן": sepia newspaper world, whatever the data theme says. */
-export const HISTORY_THEME = (t = {}) => ({ ...t, sky: ['#efe2c4', '#c9b089'], fog: '#d8c7a3', board: '#efe4c8', boardEdge: '#5b4127', center: '#e6d6b0', accent: '#c8a24a', decor: 'history',
+export const HISTORY_THEME = (t = {}) => ({ ...t, sky: ['#efe2c4', '#c9b089'], fog: '#d8c7a3', board: '#daceb8', boardEdge: '#5b4127', center: '#e6d6b0', accent: '#c8a24a', decor: 'history',
   light: { hemiSky: '#fff1d6', hemiGround: '#6b5236', sun: '#ffe2b0' } });
 function decorHistory(T) {
   island(33, std('#d9c7a0', { roughness: 1 }), '#7a5f3e');

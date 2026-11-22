@@ -26,7 +26,8 @@ export const WORLD_STYLE = Object.freeze({
   w2: { name: 'העיר הגדולה', mood: 'dusk neon', sky: ['#1e2a4a', '#ff7e67'], board: '#3b4252', edge: '#1f2433', center: '#2e3440', decor: 'skyline', accent: '#ff4fd8', accent2: '#22d3ee', accentInk: ['#9d1784', '#ff4fd8'], rim: '#ff4fd8', rimGlow: true, motif: 'neon', caption: 'העיר שלך' },
   w3: { name: 'הנמל הגלובלי', mood: 'noon by the sea', sky: ['#7dd3fc', '#e0f2fe'], board: '#e9d5a8', edge: '#8b5e34', center: '#f3e3bf', decor: 'sea', accent: '#0ea5e9', accentInk: ['#0b5f78', '#38bdf8'], rim: '#0ea5e9', rimGlow: false, motif: 'waves', caption: 'הנמל שלך' },
   w4: { name: 'עמק העתיד', mood: 'night aurora', sky: ['#050816', '#1b1f4b'], board: '#e8f1ff', edge: '#94a3b8', center: '#dbeafe', decor: 'stars', accent: '#22d3ee', accent2: '#a78bfa', accentInk: ['#6d28d9', '#22d3ee'], rim: '#22d3ee', rimGlow: true, motif: 'stars', caption: 'העמק שלך' },
-  h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#efe4c8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
+  // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
+  h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
 /** world object or id → its WORLD_STYLE entry (history mode → h; unknown → w1). */
 export function worldStyle(w) {
