@@ -61,6 +61,8 @@ const cushionOf = (liq, exp) => (exp > 0 ? (liq * 100) / exp : 99);
 
 /* ============================================================ the five dimensions (§5.1, §14.5) */
 /** the five dimensions in their fixed order; titles / icons / order texts are the engine's (E.DIM_META, js/systems/recap.js) */
+/** month counts in Hebrew (engine.js heMonths rule): 1 → חודש, 2 → חודשיים, else "n חודשים" */
+const heM = (n) => (+n === 1 ? 'חודש' : +n === 2 ? 'חודשיים' : `${n} חודשים`);
 export const DIMS = ['speed', 'resilience', 'decisions', 'happiness', 'business'].map((id) => { const d = (E.DIM_META || {})[id] || {}; return { id, icon: d.icon || '', title: d.title || id, order: d.orderText || '' }; });
 const oneDec = (x) => (Math.round(x * 10) / 10).toFixed(1).replace(/\.0$/, '');
 /** Fallback dims while the engine has no result.recap (T6 ENGINE part pending): facts read from checkEnd()/metrics() output and the
@@ -80,13 +82,13 @@ export function dimsFallback({ end = {}, m = null, tl = null, worldId, charId, s
   for (const r of rows) { const c = cushionOf(r[2], r[5]); if (c < 1) under1++; if (minC == null || c < minC) { minC = c; minM = r[0]; } }
   const forced = int(st.autoLoans);
   const resilience = { facts: { crises: int(st.crises), crisisNoLoan: int(st.crisisNoLoan), forcedLoans: forced, forcedTotal: int(st.forcedLoans), negMonths: int(st.negMonths), minCushion: minC == null ? null : Math.round(minC * 10) / 10, minCushionM: minM, monthsUnder1: under1, bailout: !!(end.bailoutUsed) } };
-  const low = minC == null ? '' : fill(' הכרית הכי נמוכה: {x} חודשים (חודש {m}).', { x: oneDec(Math.max(0, minC)), m: minM });
+  const low = minC == null ? '' : fill(' הכרית הכי נמוכה: {x} (חודש {m}).', { x: heM(oneDec(Math.max(0, minC))), m: minM });
   resilience.headline = (int(st.crises) ? fill('עברת {c} משברים — {n} בלי הלוואה כפויה.', { c: int(st.crises), n: int(st.crisisNoLoan) }) : 'לא היו משברים.') + low;
   resilience.short = `${forced} הלוואות כפויות`;
   // decisions: the engine's verdict counts (learning.verdicts)
   const L = end.learning || (summary && summary.learning) || {}; const V = L.verdicts || {};
-  const s = int(V.strong), o = int(V.ok) + int(V.mixed), w = int(V.costly) + int(V.risky), n = int(L.decisions ?? (s + o + w));
-  const decisions = { facts: { strong: s, ok: o, weak: w, n, hints: int(L.hints) }, headline: fill('{s} החלטות חזקות · {o} סבירות · {w} חלשות', { s, o, w }), short: `${s} חזקות · ${w} חלשות` };
+  const s = int(V.strong), o = int(V.ok), mx = int(V.mixed), w = int(V.costly) + int(V.risky), n = int(L.decisions ?? (s + o + mx + w));   // mixed = "יש מה לשפר", not "סבירה"
+  const decisions = { facts: { strong: s, ok: o, mixed: mx, weak: w, n, hints: int(L.hints) }, headline: fill('{s} החלטות חזקות · {o} סבירות{mx} · {w} חלשות', { s, o, w, mx: mx ? ` · ${mx} עם מה לשפר` : '' }), short: `${s} חזקות · ${w} חלשות` };
   // happiness: start / end / min from the timeline, the engine's average when it gave one, else the timeline's
   const hs = rows.map((r) => r[7]);
   const ls = end.lifeSummary || {};
@@ -110,7 +112,7 @@ export function dimsFallback({ end = {}, m = null, tl = null, worldId, charId, s
       if (b.stageName && !stage) stage = b.stageName;
     }
     business = { facts: { had: true, months: t, profitMonths: p, lossMonths: t - p, worstNp: worst, worstM, stage } };
-    business.headline = stage ? fill('העסק הרוויח ב־{p} מתוך {t} חודשים · שלב "{stage}"', { p, t, stage }) : fill('העסק הרוויח ב־{p} מתוך {t} חודשים', { p, t });
+    business.headline = stage ? fill('העסק הרוויח ב־{p} מתוך {t} · שלב "{stage}"', { p, t: heM(t), stage }) : fill('העסק הרוויח ב־{p} מתוך {t}', { p, t: heM(t) });
     business.short = `${p} מתוך ${t} רווחיים`;
   } else business = { facts: { had: false }, headline: 'לא ניהלת עסק במשחק הזה', short: '—' };
   return { speed, resilience, decisions, happiness, business, fallback: true };

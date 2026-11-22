@@ -8,15 +8,17 @@
 const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
 const oneDec = (x) => (Math.round(x * 10) / 10).toFixed(1).replace(/\.0$/, '');
 const pctOf = (x) => Math.max(0, Math.min(100, Math.floor((+x || 0) * 100)));
+/** month counts in Hebrew — the same rule as engine.js heMonths (this module imports no engine code): 1 → חודש, 2 → חודשיים */
+const heMonths = (n) => (+n === 1 ? 'חודש' : +n === 2 ? 'חודשיים' : `${n} חודשים`);
 export const T = {
   speedWon: 'יצאת בחודש {m} (★★ עד חודש {m2})', speedNot: 'הגעת ל־{p}% מהדרך לחופש', speedShortWon: 'חודש {m}', speedShortNot: '{p}% מהדרך',
-  resCrises: 'עברת {c} משברים — {n} בלי הלוואה כפויה. הכרית הכי נמוכה: {x} חודשים (חודש {m}).', resNone: 'לא היו משברים. הכרית הכי נמוכה: {x} חודשים (חודש {m}).', resShort: '{f} הלוואות כפויות',
-  decLine: '{s} החלטות חזקות · {o} סבירות · {w} חלשות', decShort: '{s} חזקות · {w} חלשות',
+  resCrises: 'עברת {c} משברים — {n} בלי הלוואה כפויה. הכרית הכי נמוכה: {xm} (חודש {m}).', resNone: 'לא היו משברים. הכרית הכי נמוכה: {xm} (חודש {m}).', resShort: '{f} הלוואות כפויות',
+  decLine: '{s} החלטות חזקות · {o} סבירות{mx} · {w} חלשות', decMixed: ' · {x} עם מה לשפר', decShort: '{s} חזקות · {w} חלשות',
   hapLine: 'התחלת ב־{s} וסיימת ב־{e} · ממוצע {a} · {b}', hapShort: 'ממוצע {a}',
-  bizLine: 'העסק הרוויח ב־{p} מתוך {t} חודשים · שלב "{stage}"', bizLineNoStage: 'העסק הרוויח ב־{p} מתוך {t} חודשים', bizNone: 'לא ניהלת עסק במשחק הזה', bizShort: '{p} מתוך {t} רווחיים',
+  bizLine: 'העסק הרוויח ב־{p} מתוך {tm} · שלב "{stage}"', bizLineNoStage: 'העסק הרוויח ב־{p} מתוך {tm}', bizNone: 'לא ניהלת עסק במשחק הזה', bizShort: '{p} מתוך {t} רווחיים',
   alt: 'שווי נקי: התחלת ב־{a}, שיא {b} בחודש {m}, סיום ב־{c}.',
-  crisisTitle: 'המשבר הגדול: חודשים {from}–{to}', crisisTrough: 'השווי הנקי ירד ב־{depth}. הכרית הכי נמוכה: {x} חודשים (חודש {m}).',
-  crisisBack: 'חזרת לשווי שלפני המשבר אחרי {n} חודשים.', crisisNotBack: 'עד סוף המשחק לא חזרת לשווי שלפני המשבר.', crisisNone: 'לא היה משבר גדול במשחק הזה.',
+  crisisTitle: 'המשבר הגדול: חודשים {from}–{to}', crisisTrough: 'השווי הנקי ירד ב־{depth}. הכרית הכי נמוכה: {xm} (חודש {m}).',
+  crisisBack: 'חזרת לשווי שלפני המשבר אחרי {nm}.', crisisNotBack: 'עד סוף המשחק לא חזרת לשווי שלפני המשבר.', crisisNone: 'לא היה משבר גדול במשחק הזה.',
   rForced: 'חודש {m}: הבנק נתן הלוואה כפויה של {x}', rSell: 'חודש {m}: מכרת את {name} ב־{x}', rPlan: 'חודש {m}: עברת לתוכנית "{plan}"', rFocus: 'חודש {m}: מוקד החודש — {focus}', rStory: 'חודש {m}: {text}',
   next: 'בפעם הבאה: {why}', strengthen: 'כדאי לחזק: {name} — {tip}',
 };
@@ -71,12 +73,13 @@ export function dimsOf(I, rows) {
   const forced = s.autoLoans || 0;
   const resilience = { facts: { crises: s.crises || 0, crisisNoLoan: s.crisisNoLoan || 0, forcedLoans: forced, forcedTotal: s.forcedLoans || 0, negMonths: s.negMonths || 0,
     minCushion: minC == null ? null : Math.round(Math.max(0, minC) * 10) / 10, minCushionM: minM, monthsUnder1: under1, recoveryMonths: recovery, bailout: !!I.bailout } };
-  const xm = { c: s.crises || 0, n: s.crisisNoLoan || 0, x: oneDec(Math.max(0, minC ?? 0)), m: minM ?? I.months };
+  const xm = { c: s.crises || 0, n: s.crisisNoLoan || 0, x: oneDec(Math.max(0, minC ?? 0)), m: minM ?? I.months }; xm.xm = heMonths(xm.x);
   resilience.headline = fill(s.crises ? T.resCrises : T.resNone, xm);
   resilience.short = fill(T.resShort, { f: forced });
-  const V = I.verdicts || {}; const st = V.strong || 0, ok = (V.ok || 0) + (V.mixed || 0), wk = (V.costly || 0) + (V.risky || 0);
-  const decisions = { facts: { strong: st, ok, weak: wk, n: I.nDecisions ?? st + ok + wk, hints: I.hints || 0 } };
-  decisions.headline = fill(T.decLine, { s: st, o: ok, w: wk }); decisions.short = fill(T.decShort, { s: st, w: wk });
+  // 'mixed' ("יש מה לשפר") is its own count — it is not a "סבירה" decision
+  const V = I.verdicts || {}; const st = V.strong || 0, ok = V.ok || 0, mix = V.mixed || 0, wk = (V.costly || 0) + (V.risky || 0);
+  const decisions = { facts: { strong: st, ok, mixed: mix, weak: wk, n: I.nDecisions ?? st + ok + mix + wk, hints: I.hints || 0 } };
+  decisions.headline = fill(T.decLine, { s: st, o: ok, w: wk, mx: mix ? fill(T.decMixed, { x: mix }) : '' }); decisions.short = fill(T.decShort, { s: st, w: wk });
   let hMin = null, hMinM = null; for (const r of rows) if (hMin == null || r.hap < hMin) { hMin = r.hap; hMinM = r.m; }
   const hs = rows.map((r) => r.hap); const hEnd = hs.length ? hs[hs.length - 1] : 0; const hStart = hs.length ? hs[0] : hEnd;
   const avg = I.hapAvg != null ? I.hapAvg : (hs.length ? Math.round(hs.reduce((a, b) => a + b, 0) / hs.length) : hEnd);
@@ -86,7 +89,7 @@ export function dimsOf(I, rows) {
   const B = I.biz;
   const business = B && B.had && B.months > 0
     ? { facts: { had: true, months: B.months, profitMonths: B.profitMonths, lossMonths: B.lossMonths, worstNp: B.worstNp, worstM: B.worstM, stage: B.stage || '' },
-      headline: fill(B.stage ? T.bizLine : T.bizLineNoStage, { p: B.profitMonths, t: B.months, stage: B.stage }), short: fill(T.bizShort, { p: B.profitMonths, t: B.months }) }
+      headline: fill(B.stage ? T.bizLine : T.bizLineNoStage, { p: B.profitMonths, t: B.months, tm: heMonths(B.months), stage: B.stage }), short: fill(T.bizShort, { p: B.profitMonths, t: B.months }) }
     : { facts: { had: false }, headline: T.bizNone, short: '—' };
   void fmt;
   const out = { speed, resilience, decisions, happiness, business };
@@ -158,8 +161,8 @@ export function recapOf(I) {
     resp.sort((a, b) => a.m - b.m);
     const x = oneDec(Math.max(0, cushion(tro)));
     crisis = { from: drop.from, to: drop.to, trough: { m: tro.m, cushion: Math.round(Math.max(0, cushion(tro)) * 10) / 10, nw: tro.nw }, depth: drop.depth, recoveredAt: back ? back.m : null,
-      responses: resp.slice(0, 4), title: fill(T.crisisTitle, drop), text: fill(T.crisisTrough, { depth: fmt(drop.depth), x, m: tro.m }),
-      outcome: back ? fill(T.crisisBack, { n: back.m - drop.to }) : T.crisisNotBack };
+      responses: resp.slice(0, 4), title: fill(T.crisisTitle, drop), text: fill(T.crisisTrough, { depth: fmt(drop.depth), x, xm: heMonths(x), m: tro.m }),
+      outcome: back ? fill(T.crisisBack, { n: back.m - drop.to, nm: heMonths(back.m - drop.to) }) : T.crisisNotBack };
   }
   // one focused suggestion (rule order)
   let suggestion = null;
