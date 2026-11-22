@@ -40,6 +40,9 @@ async def wait_idle(pg, timeout=90):
             await pg.screenshot(path=f'{SHOTS}/{PFX}modal_{int(time.time())}.png')
             await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(300); continue
         if s['card'] or s['roll'] or s['start']: return s
+        # T6 §6.1 / A11Y-13: the life-story overlay no longer closes by itself — tap its button
+        if await pg.evaluate("() => { const x = document.querySelector('#story'); return !!x && !x.hidden && !!document.querySelector('#stGo'); }"):
+            await pg.click('#stGo'); await pg.wait_for_timeout(400); continue
         await pg.wait_for_timeout(250)
     raise Exception('stuck: ' + json.dumps(await st(pg), ensure_ascii=False))
 
