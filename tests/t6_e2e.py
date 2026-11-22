@@ -33,6 +33,13 @@ def stand_in_policies():
     if not os.path.exists(dst) or 'TEST-ONLY stand-in' in open(dst, encoding='utf8').read(): raise SystemExit('the copy has no real js/systems/archetypes.js')
     NOTES.append('archetypes: the engine lane module (ARCH_API 2)')
 
+async def life_click(pg, kind):
+    """tap a HUD life chip; on a narrow row it may sit behind the "⋯" chip (T7 polish: overflow list) — open the list first"""
+    if not await pg.locator(f'#hLife > [data-life={kind}]:not([hidden])').count() and await pg.locator('#hLife > .lc.more').count():
+        if await pg.get_attribute('#hLife > .lc.more', 'aria-expanded') != 'true': await pg.click('#hLife > .lc.more')
+        await pg.click(f'#hLifeMore [data-life={kind}]'); return
+    await pg.click(f'#hLife > [data-life={kind}]')
+
 async def page(b, vp=PHONE, saves=(), flags=FLAGS, extra=''):
     ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, device_scale_factor=1)
     fb = FB.FakeBackend(); SINKS.append(await FB.install_mode(ctx, fb, MODE))
@@ -208,8 +215,12 @@ async def t_rewind(b, F):
         # M2: rr2-last-game now holds another game → no "המקור" any more
         keep = await ls(pg, 'rr2-last-game')
         await pg.evaluate("() => { const r = JSON.parse(localStorage.getItem('rr2-last-game')); r.rcfg = { ...r.rcfg, seed: (r.rcfg.seed + 1) >>> 0 }; localStorage.setItem('rr2-last-game', JSON.stringify(r)); }")
-        await pg.wait_for_timeout(300); await pg.click('#t6branch [data-b=compare]'); await pg.wait_for_timeout(700)
-        tt = await pg.evaluate("() => ({ toast: document.querySelector('#toast').textContent, sheet: !!document.querySelector('#gm:not([hidden]) .t6-limits') })")
+        await pg.wait_for_timeout(300); await pg.click('#t6branch [data-b=compare]')
+        # toasts are queued (6 kept): the answer may wait behind a toast already on screen — poll for it (≤ 15 s)
+        for _ in range(60):
+            await pg.wait_for_timeout(250)
+            tt = await pg.evaluate("() => ({ toast: document.querySelector('#toast').className.includes('on') ? document.querySelector('#toast').textContent : '', sheet: !!document.querySelector('#gm:not([hidden]) .t6-limits') })")
+            if 'כבר לא זמין' in tt['toast'] or tt['sheet']: break
         check(not tt['sheet'] and 'כבר לא זמין' in tt['toast'], f'M2: another game in rr2-last-game → "the original is no longer available", no compare ({tt})')
         await pg.evaluate("(v) => localStorage.setItem('rr2-last-game', v)", keep)
         await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', timeout=30000)
@@ -258,7 +269,7 @@ async def t_live(b, F):
         s = await st(pg)
         if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
         await step(pg)
-    await pg.click('#hLife [data-life=rivals]'); await pg.wait_for_selector('#t6rpBody', timeout=10000)
+    await life_click(pg, 'rivals'); await pg.wait_for_selector('#t6rpBody', timeout=10000)
     for i in range(60):
         n = await pg.evaluate("() => document.querySelectorAll('#t6rpBody .t6rp-row .t6bar').length")
         if n >= 5: break
@@ -270,7 +281,7 @@ async def t_live(b, F):
     await shot(pg, 'rivals_phone')
     await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(300)
     h0 = None
-    await pg.click('#hLife [data-life=moments]'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=20000)
+    await life_click(pg, 'moments'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=20000)
     await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]')[1].click()")
     await wait_ready(pg, 120); await pg.wait_for_timeout(500)
     lb = await pg.evaluate("() => ({ ms: window.__t6branchMs, err: window.__t6branchErr, banner: !!(document.querySelector('#t6branch') && !document.querySelector('#t6branch').hidden) })")
@@ -386,9 +397,11 @@ async def t_deal(b, F):
         await step(pg)
     await pg.click('#roll')
     ok = False
-    for i in range(80):
+    for i in range(120):   # phones: the line waits in the one overlay queue until the board is clear — answer what opens
         ok = await pg.evaluate("() => !!document.querySelector('#t6news.on')")
         if ok: break
+        s = await st(pg)
+        if s['card'] or s['gm'] or s['coach'] or s['story']: await step(pg)
         await pg.wait_for_timeout(250)
     txt = await pg.evaluate("() => (document.querySelector('#t6news') || {}).textContent || ''")
     check(ok and len(txt) > 5, f'reveal news (real payday): a sticky line ({txt[:60]})')
@@ -420,7 +433,7 @@ async def t_afterwin(b, F):
         if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
         await step(pg)
     await shot(pg, 'afterwin_hud_phone')
-    await pg.click('#hLife [data-life=afterwin]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000)
+    await life_click(pg, 'afterwin'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000)
     await pg.click('#gm .acts button.primary')
     ok = False
     for i in range(160):
@@ -454,7 +467,7 @@ async def t_aw15(b, F):
         s = await st(pg)
         if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
         await step(pg)
-    await pg.click('#hLife [data-life=afterwin]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000); await pg.click('#gm .acts button.primary')
+    await life_click(pg, 'afterwin'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000); await pg.click('#gm .acts button.primary')
     for i in range(160):
         if await pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')"): break
         await pg.wait_for_timeout(250)
@@ -483,7 +496,7 @@ async def t_perf(b, F):
         await step(pg)
     bms = []
     for rep in range(3):   # AC-20: createBranch at mid-game, 4× throttled (w1)
-        await pg.click('#hLife [data-life=moments]'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=20000)
+        await life_click(pg, 'moments'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=20000)
         await pg.evaluate("() => { window.__t6branchMs = null; window.__t6branchErr = null; }")
         await pg.evaluate("(i) => document.querySelectorAll('.t6mo-list button[data-k0]')[i].click()", 2 + rep)
         await pg.wait_for_function('() => window.__t6branchMs != null || window.__t6branchErr', timeout=60000)

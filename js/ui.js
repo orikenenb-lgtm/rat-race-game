@@ -418,7 +418,7 @@ function renderLife(m, ctx) {
 /* T7 polish: the life row never overflows. When the chips do not fit on one line (390 px with 📬, the calendar and the T6 chips),
    the lowest-priority chips move behind a "⋯" chip (44 px) that opens them as a list — together with the chips this width hides
    by CSS (age, inflation, fund, calendar), so nothing is out of reach. Gradual-reveal chips (hidden attribute) stay hidden. */
-const LIFE_PRI = ['inbox urg', 'en', 'inbox', 'hp', 'focus', 'plan', 'cr', 'econ', 't6aw', 't6rv', 't6mo', 'cal', 'fund', 'cpi', 'age'];
+const LIFE_PRI = ['inbox urg', 'en', 't6aw', 'inbox', 'hp', 'focus', 'plan', 'cr', 'econ', 't6rv', 't6mo', 'cal', 'fund', 'cpi', 'age'];   // 🌴 (retire after the win) is an action: it stays
 const lifePri = (el) => { const c = el.classList; const i = LIFE_PRI.findIndex((k) => k.split(' ').every((x) => c.contains(x))); return i < 0 ? LIFE_PRI.length : i; };
 let lifeMoreOpen = false, lifeWired = false;
 function fitLife(box, focusKey) {
