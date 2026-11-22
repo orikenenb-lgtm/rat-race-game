@@ -36,12 +36,13 @@ saves|0|all|node|tests/saves.test.mjs:T1|none|n/a|n/a|300|node tests/saves.test.
 flags|0|all|node|tests/flags.test.mjs:T1|none|n/a|n/a|300|node tests/flags.test.mjs
 render_api|0|all|node|tests/render_api.test.mjs:T1|none|n/a|n/a|300|node tests/render_api.test.mjs
 contrast|0|all|node|tests/contrast.test.mjs:T5|none|n/a|n/a|300|node tests/contrast.test.mjs
+preload|0|all|node|tests/preload.test.mjs:T7|none|n/a|n/a|120|node tests/preload.test.mjs
 build_edge_check|0|all|node|tools/build-edge.mjs:engine|none|n/a|n/a|120|node tools/build-edge.mjs --check
 fakebackend_test|0|all|python|tests/fakebackend_test.py:T7|fake|replay|swiftshader|900|python3 tests/fakebackend_test.py
 backend_contract|0|all|node|tests/backend_contract.mjs:T7|fake|replay|n/a|900|node tests/backend_contract.mjs
 verify|1|engine,backend,tests|node|tests/verify.test.mjs:engine|none|n/a|n/a|1200|node tests/verify.test.mjs
 determinism|1|engine,backend,tests|node|tests/determinism.test.mjs:engine|none|n/a|n/a|1800|node tests/determinism.test.mjs
-engine|1|engine,backend,tests|node|tests/engine.test.mjs:engine|none|n/a|n/a|2400|node tests/engine.test.mjs
+engine|1|engine,backend,tests|node|tests/engine.test.mjs:engine|none|n/a|n/a|5400|node tests/engine.test.mjs
 t2|1|engine,backend,tests|node|tests/t2.test.mjs:engine (T2)|none|n/a|n/a|1800|node tests/t2.test.mjs
 stories|1|engine,backend,tests|node|tests/stories.test.mjs:stories (T3)|none|n/a|n/a|1800|node tests/stories.test.mjs
 t4_engine|1|engine,backend,tests|node|tests/t4_engine.test.mjs:onboarding (T4)|none|n/a|n/a|1200|node tests/t4_engine.test.mjs
@@ -60,10 +61,9 @@ game_e2e_all|2|engine,shell,rendering,ui|browser|tests/game_e2e.py:game|none|n/a
 game_e2e_phone|2|engine,shell,rendering,ui|browser|tests/game_e2e.py:game|none|n/a|swiftshader|3600|python3 tests/game_e2e.py w1 12 --phone --base=$G --prefix=run_
 game_e2e_2d|2|shell,rendering|browser|tests/game_e2e.py:game|none|n/a|2d|3600|python3 tests/game_e2e.py w1 12 --base=$G?ff=board2d:on --prefix=run2d_
 stability_e2e|2|shell,rendering|browser|tests/stability_e2e.py:T1|none|n/a|mixed|3600|python3 tests/stability_e2e.py --base=${RL}index.html
-t4_onboarding|2|ui,lobby|browser|tests/t4_onboarding.py:onboarding (T4)|fake|n/a|swiftshader|1800|python3 tests/t4_onboarding.py
-t4_a11y|2|ui,lobby|browser|tests/t4_a11y.py:onboarding (T4)|fake|n/a|swiftshader|1800|python3 tests/t4_a11y.py
+t4_lobby|2|ui,lobby,shell,engine|browser|tests/t4_lobby.py:onboarding (T4)|fake|n/a|swiftshader|5400|python3 tests/t4_lobby.py --lobby=$L --real=$RL --shots=$OUT/shots/t4
 t5_render_e2e|2|rendering,ui,shell|browser|tests/t5_render_e2e.py:rendering (T5)|none|n/a|swiftshader|2400|python3 tests/t5_render_e2e.py $RL
-journey_e2e|2|engine,shell,lobby,backend,tests|browser|tests/journey_e2e.py:T7 (P1)|fake|replay|swiftshader|1800|python3 tests/journey_e2e.py $RL
+t6_e2e|2|ui,lobby,shell,engine|browser|tests/t6_e2e.py:T6|fake|replay|2d|2400|python3 tests/t6_e2e.py --real=$RL --copy=$COPY_DIR/rr2real --shots=$OUT/shots/t6
 a11y_e2e|2|shell,ui,lobby,tests|browser|tests/a11y_e2e.py:T7|fake|accept|swiftshader|3600|python3 tests/a11y_e2e.py $RL $STRICTA --out=$OUT/a11y.json
 a11y_strict|3||browser|tests/a11y_e2e.py:T7|fake|accept|swiftshader|3600|python3 tests/a11y_e2e.py $RL --strict --strict-allowlist --out=$OUT/a11y_strict.json
 lobby_shots|3||browser|tests/lobby_shots.py:T7|fake|accept|swiftshader|2400|python3 tests/lobby_shots.py $L
@@ -72,7 +72,15 @@ perf_gate|2|shell,rendering,lobby|perf|tests/perf_probe.py:T7|none|n/a|swiftshad
 perf_gate_3g|2|shell,rendering,lobby|perf|tests/perf_probe.py:T7|none|n/a|swiftshader|7200|python3 tests/perf_probe.py --base=$RL --cond=3g --runs=3 --twod --gate --out=$OUT/perf-3g.json
 EOF
 )
-MANUAL="manual device run (§3.10)|screen-reader pass (§4.4)|agent + human playtests (§5.4)|live contract vs staging (§2.8, needs CR-22)|perf --long=60 (PF-19, not implemented in part A)"
+MANUAL="manual device run (§3.10)|screen-reader pass (§4.4)|agent + human playtests (§5.4)|live contract vs staging (§2.8, needs CR-22)|perf --long=60 (PF-19, not implemented in part A)|journey_e2e.py (RG-4, never written)"
+# Matrix notes (T7 F-9 / F-11 / F-8):
+# - T4 shipped ONE browser suite, tests/t4_lobby.py (onboarding, library, settings, first minute, skip, hints, practice, wall…),
+#   not the planned t4_onboarding.py / t4_a11y.py: those two rows are replaced by t4_lobby (stub lobby copy + real copy). The T4
+#   keyboard / axe checks live in a11y_e2e.py. T6 shipped tests/t6_e2e.py (rivals, end summary, rewind, ranked gates) — wired in.
+# - journey_e2e.py (RG-4) was never written: it is not a matrix row any more (a missing file is not a suite) and is listed with the
+#   manual items above, so a tier-3 summary still says it was not done.
+# - engine: 5 400 s (it needs ~4 700 s on the loaded 2-core box; 2 400 s timed out with no functional failure).
+# - balance_gates: a run that read no balance files (" · files none", or no row with a real verdict) is FAIL(no inputs), never PASS.
 
 in_list() { local x=$1 l=$2; [ -n "$l" ] && [[ ",$l," == *",$x,"* ]]; }
 selected() { # name tier lanes
@@ -127,6 +135,8 @@ for row in "${ROWS[@]}"; do
     elif [ $rc = 3 ] && [[ $n == balance_gates* ]]; then st=STALE
     else st=FAIL; fi
     grep -q "^SKIPPED" "$OUT/$n.log" && [ $rc = 0 ] && st="SKIPPED($(head -c 60 "$OUT/$n.log" | tr -d '\n'))"
+    # F-8: a hollow balance gate (no input files → every row MISSING) checked nothing — it must not read as PASS
+    if [[ $n == balance_gates* ]] && [ $rc = 0 ] && { grep -q "files none" "$OUT/$n.log" || ! grep -Eq "^[A-Z][A-Za-z0-9-]+ +(PASS|FAIL|REPORT|ACCEPTED)" "$OUT/$n.log"; }; then st="FAIL(no inputs)"; fi
     [[ $st == FAIL* || $st == STALE ]] && FAILED=1
   fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$st" "$be" "$vf" "$rd" "$dur" "$rc" "$t" >> "$RES"
