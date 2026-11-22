@@ -239,6 +239,16 @@ async def keys(b):
         except Exception as e: rec('K-3 lobby → w1 → character → game in ≤ 12 key presses', 'FAIL', f'game did not start ({e!r})'[:200])  # noqa: BLE001
         await pg.wait_for_function("!document.querySelector('#roll').disabled", timeout=TO); await pg.wait_for_timeout(1500)
         while await pg.evaluate("!!document.querySelector('#coach') && !document.querySelector('#coach').hidden"): await pg.keyboard.press('Enter'); await pg.wait_for_timeout(600)
+        for _ in range(8):   # precondition: a card / dialog already open at the start (payday, tutorial) is answered first — K-4 needs a free
+            # board and K-5 measures the focus of the card the ROLL opens (blurring an open card made K-5 read <body>)
+            if await pg.evaluate("!document.querySelector('#evm').hidden"):
+                bb = pg.locator('#evCard button.choice:enabled, #evCard button.primary:enabled').last
+                if not await bb.count(): bb = pg.locator('#evCard button:enabled').last
+                if await bb.count(): await bb.click(); await pg.wait_for_timeout(1200); continue
+            if await pg.locator('#gm:not([hidden]) .acts button').count(): await pg.click('#gm .acts button >> nth=0'); await pg.wait_for_timeout(600); continue
+            if await pg.evaluate("!!document.querySelector('#coach') && !document.querySelector('#coach').hidden"): await pg.keyboard.press('Escape'); await pg.wait_for_timeout(600); continue
+            if await pg.evaluate("!document.querySelector('#roll').disabled"): break
+            await pg.wait_for_timeout(600)
         await pg.evaluate("document.activeElement && document.activeElement.blur()")
         n = None
         for i in range(30):
