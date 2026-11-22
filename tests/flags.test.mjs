@@ -2,7 +2,7 @@
 import * as F from '../js/flags.js';
 let fails = 0, n = 0;
 const eq = (a, b, msg) => { n++; if (JSON.stringify(a) !== JSON.stringify(b)) { fails++; console.log('FAIL', msg, JSON.stringify(a), '≠', JSON.stringify(b)); } };
-const D = { board2d: 'auto', recover: true, rivals: false, rewind: false, recap2: false, afterwin: false }; // T6 adds four practice/summary flags
+const D = { board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true }; // T6's four practice/summary flags: ON by default (director decision)
 const store = (raw) => ({ getItem: (k) => (k === 'rr2-flags' ? raw : null) });
 
 F._resetForTests({ search: '', storage: store(null) });
@@ -30,5 +30,13 @@ F._resetForTests({ search: '?ff=rewind,afterwin,rivals', storage: store(null) })
 eq([F.flagFor('rewind', { mode: 'free' }), F.flagFor('afterwin', { mode: 'free', learn: true })], [true, true], 'flagFor: free / learn follow the flag');
 eq(['daily', 'weekly', 'challenge'].map((m) => F.flagFor('rewind', { mode: m })), [false, false, false], 'flagFor rewind: ranked modes forced off');
 eq([F.flagFor('afterwin', { mode: 'free', resultId: 'r1' }), F.flagFor('rivals', { mode: 'daily' })], [false, true], 'flagFor: resultId counts as ranked; rivals is not practice-only');
+// the flags stay the rollback switch: rr2-flags and ?ff=-name turn them off; ranked still forces the practice-only ones off
+F._resetForTests({ search: '', storage: store('{"rivals":false,"rewind":false,"recap2":false,"afterwin":false}') });
+eq([F.flag('rivals'), F.flag('rewind'), F.flag('recap2'), F.flag('afterwin')], [false, false, false, false], 'rollback through rr2-flags');
+F._resetForTests({ search: '?ff=-rivals,-rewind,-recap2,-afterwin', storage: store(null) });
+eq([F.flag('rivals'), F.flag('rewind'), F.flag('recap2'), F.flag('afterwin')], [false, false, false, false], 'rollback through ?ff=-name');
+F._resetForTests({ search: '', storage: store(null) });
+eq([F.flagFor('rewind', { mode: 'free' }), F.flagFor('rewind', { mode: 'daily' }), F.flagFor('afterwin', { mode: 'weekly' }), F.flagFor('afterwin', { mode: 'free', resultId: 'r9' }), F.flagFor('rivals', { mode: 'challenge' })], [true, false, false, false, true],
+  'defaults on: rewind / afterwin stay practice-only in ranked (PRACTICE_ONLY)');
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

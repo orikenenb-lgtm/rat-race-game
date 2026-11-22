@@ -127,7 +127,7 @@ lap('AC-17 (main thread)');
   ok(one.tl.m.length === 60 && !('debt' in one.tl) && !('en' in one.tl) && one.marks.length <= 12, 'shrunk entry: timeline to the player end + tail, panel columns only, ≤ 12 marks');
   ok(JSON.stringify(allC[0]).length < 10 * 1024, `one shrunk 4-ghost entry < 10 KB (${JSON.stringify(allC[0]).length} bytes)`);
   GH.stop();
-  F._resetForTests({ search: '', storage: '{}' });
+  F._resetForTests({ search: '', storage: '{"rivals":false}' });   // rivals is ON by default: the rollback switch turns it off
   ok(GH.start(st) === null && GH.view(5).state === 'off', 'flag rivals off → no ghosts at all');
   F._resetForTests({ search: '', storage: JSON.stringify({ rivals: true, rewind: true, recap2: true }) });
 }

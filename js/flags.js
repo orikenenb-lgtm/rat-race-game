@@ -1,7 +1,9 @@
 // UI-layer feature flags. NEVER imported by engine.js or anything it imports (that would change the verify pin).
 // Sources, low → high: DEFAULTS < localStorage['rr2-flags'] (JSON object) < URL ?ff= (comma list: name:value, bare name = true,
 // -name = false). Values outside ALLOWED are ignored, corrupt JSON is ignored. Nothing is read at import time (Node tests).
-export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true, rivals: false, rewind: false, recap2: false, afterwin: false });
+// Director decision (after the T6 verification): rivals, rewind, recap2 and afterwin are ON by default; the flags stay the rollback
+// switch (rr2-flags / ?ff=-name). rewind and afterwin remain practice-only in ranked games (PRACTICE_ONLY / flagFor below).
+export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true });
 const ALLOWED = { board2d: ['auto', 'on', 'off'], recover: [true, false], rivals: [true, false], rewind: [true, false], recap2: [true, false], afterwin: [true, false] };
 const KEY = 'rr2-flags';
 let F = null;
