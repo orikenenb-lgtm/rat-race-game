@@ -1617,8 +1617,9 @@ function onGameEnd(e, delay) {
     addPending({ pid: net.me()?.id, resultId: e.resultId, status: e.status, months: e.months, passive: e.passive || 0, expenses: e.expenses || 0, netWorth: e.netWorth || 0,
       actions, stats: { ...(e.summary ? summary : { stats: e.stats || {} }), progress: e.progress ?? null, stars: e.stars || 0, world: e.worldId, char: e.charId } });
   } else if (!(e.t6 && e.t6.afterwinAllowed)) {   // T6 §9.3: a win that may continue keeps its (finished) save until the player decides
+    // review MINOR-2: the branch test needs no rewind.js (a failed lazy load must never clear the original slot)
     // T6: a practice branch clears its OWN slot (rr2-save-branch-<w>), never the original's learn / free slot
-    const key = e.branch && e.saveKey && RW && RW.isBranchKey(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
+    const key = e.branch && typeof e.saveKey === 'string' && /^rr2-save-branch-/.test(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
     game().then((g) => g && g.clearSave && safe(() => g.clearSave(key)));
     // T6 review nit: the rr2-branches entry goes with its slot; the end screen keeps it (endCtx.t6meta) for "↩ חזרה למשחק המקורי"
     if (e.branch && RW && RW.isBranchKey(key)) endCtx.t6meta = safe(() => RW.forgetBranch(e.worldId), null);

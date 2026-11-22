@@ -53,8 +53,11 @@ const iLobby = html.indexOf('<link rel="stylesheet" href="css/lobby.css">');
 ok(iGame > 0 && iPlay > iGame && iLobby > iPlay, 'playCss placeholder sits between game.css and lobby.css');
 ok(!/<link[^>]*\shref="css\/game-play\.css"/.test(html), 'game-play.css has no href in the markup (not fetched at boot)');
 ok(existsSync(join(ROOT, 'css/game-play.css')), 'css/game-play.css exists');
-ok(/window\.__rrPlayCss\s*=\s*function/.test(html), 'index.html defines window.__rrPlayCss()');
-ok(/__rrPlayCss/.test(read('js/main.js')) && /__rrPlayCss/.test(read('js/lobby.js')) && /__rrPlayCss/.test(read('js/game.js')), 'main.js, lobby.js and game.js enable it');
+// review MAJOR-1: the loader is a module (js/playcss.js), not an inline script — a strict CSP cannot leave the game unstyled
+ok(/window\.__rrPlayCss\s*=\s*playCss/.test(read('js/playcss.js')), 'js/playcss.js defines window.__rrPlayCss');
+ok(!/__rrPlayCss\s*=/.test(html), 'index.html has no inline __rrPlayCss loader');
+ok(/from '\.\/playcss\.js'/.test(read('js/main.js')), 'main.js imports playcss.js statically (before lobby.js / game.js)');
+ok(/playCss\(\)/.test(read('js/main.js')) && /__rrPlayCss/.test(read('js/lobby.js')) && /__rrPlayCss/.test(read('js/game.js')), 'main.js, lobby.js and game.js enable it');
 const play = read('css/game-play.css');
 for (const sel of ['.hud{', '#evCard', '#sheet', '#coach', '#toast']) ok(play.includes(sel), `game-play.css styles ${sel}`);
 const core = read('css/game.css');

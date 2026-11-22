@@ -23,6 +23,7 @@
      Lobby-critical modules only: the in-game graph (game.js, ui.js, scene, three…) loads after the lobby is open.
      Kept in sync with the real import graph by tests/preload.test.mjs. -->
 <link rel="modulepreload" href="js/main.js">
+<link rel="modulepreload" href="js/playcss.js">
 <link rel="modulepreload" href="js/engine.js">
 <link rel="modulepreload" href="js/lobby.js">
 <link rel="modulepreload" href="js/bus.js">
@@ -120,17 +121,6 @@
     <ol id="loadSteps" class="lsteps" hidden></ol>
     <div id="loadErr" class="lerr" hidden role="alertdialog" aria-labelledby="loadErrT"></div></div>
 </div>
-<script>/* T7 CR-33: enable css/game-play.css (idempotent) → a promise that settles when it has loaded, failed, or after 20 s. */
-window.__rrPlayCss = function () {
-  var l = document.getElementById('playCss'); if (!l) return Promise.resolve();
-  if (!l._p) l._p = new Promise(function (res) {
-    var done = function () { window.__rrPlayCssDone = 1; res(); };
-    l.addEventListener('load', done, { once: true }); l.addEventListener('error', done, { once: true }); setTimeout(done, 20000);
-    if (!l.getAttribute('href')) { l.rel = 'stylesheet'; l.href = l.getAttribute('data-href'); }
-    try { if (l.sheet && l.sheet.cssRules.length) done(); } catch (e) { /* not loaded yet */ }
-  });
-  return l._p;
-};</script>
 <script>/* boot watchdog: if the game has not opened after BOOT_SLOW_MS (20 s), offer a reload (the overlay stays; a late boot still completes) */
 setTimeout(function () {
   var l = document.getElementById('loading'), d = l && l.querySelector('.ld');

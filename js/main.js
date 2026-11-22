@@ -1,5 +1,6 @@
 // מירוץ העכברים 2.0 — boot: load the 3D world, then hand over to the lobby (js/lobby.js).
 // If the lobby module is missing or fails, a minimal built-in picker (world + character + free play) keeps the game playable.
+import { playCss } from './playcss.js';   // CR-33 review MAJOR-1: sets window.__rrPlayCss before lobby.js / game.js load
 import { bus } from './bus.js';
 import { unlock, sfx } from './audio.js';
 import { flag } from './flags.js';
@@ -9,8 +10,8 @@ const { worldList, getWorld, fmtM, sgn, achievementById, starThresholds } = EN;
 
 // T7 CR-33: the lobby home must not wait for in-game modules. ui.js (+ summary.js) and game.js (+ its whole graph: ghosts,
 // rewind, onboard, scene…) are loaded on demand — cached promises, never re-fetched; a failed load degrades, never throws here.
-let UI = null, uiP = null;
-const loadUI = () => (uiP ||= import('./ui.js').then((m) => (UI = m)).catch((e) => { console.warn('ui.js failed to load', e); uiP = null; return null; }));
+let UI = null, uiP = null;   // review MINOR-1: loadUI also waits for game-play.css (ui.js toasts are styled by it)
+const loadUI = () => (uiP ||= Promise.all([import('./ui.js'), playCss()]).then(([m]) => (UI = m)).catch((e) => { console.warn('ui.js failed to load', e); uiP = null; return null; }));
 const toast = (text) => { loadUI().then((u) => u && u.toast(text)); };
 let T6S = null, t6P = null;   // T6: graph + five dimensions in the built-in end screen too (flag recap2)
 const loadT6 = () => (t6P ||= import('./summary.js').then((m) => (T6S = m)).catch((e) => { console.warn('summary.js failed to load', e); t6P = null; return null; }));
@@ -50,7 +51,7 @@ let G = null, gameP = null;
 // T1: no error text on screen at boot — startGame() reports problems itself (loading stages / error panel)
 function loadGame() {
   if (!gameP) {
-    if (window.__rrPlayCss) window.__rrPlayCss();   // CR-33: the in-game styles (css/game-play.css) come with the game
+    playCss();   // CR-33: the in-game styles (css/game-play.css) come with the game
     gameP = import('./game.js').then((g) => { G = g; g.initGame().catch((e) => console.warn('init failed (startGame will report it)', e)); return g; });
     gameP.catch((e) => console.warn('game.js failed to load', e));
   }
@@ -66,7 +67,7 @@ async function boot() {
     if (typeof mod.resumeGame === 'function') lobbyResume = mod.resumeGame;
   } catch (e) {
     console.warn('lobby.js not available — using the built-in picker.', e);
-    await Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), window.__rrPlayCss && window.__rrPlayCss()]);
+    await Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), playCss()]);
     useFallback();
   }
   bus.on('lobby:open', (p) => safeOpen(p || {}));
@@ -95,7 +96,8 @@ function afterBoot() {
   }
 }
 function safeOpen(p) {
-  const fail = (e) => { console.error(e); Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), window.__rrPlayCss && window.__rrPlayCss()]).then(() => { useFallback(); fallbackLobby(p); }); };
+  // review MINOR-3: while the built-in picker loads, the loading overlay is back (the boot overlay was already hidden)
+  const fail = (e) => { console.error(e); const ld = document.getElementById('loading'); if (ld) ld.hidden = false; Promise.all([loadGame().catch(() => null), loadUI(), loadT6(), loadOV(), playCss()]).then(() => { useFallback(); fallbackLobby(p); hideLoading(); }).catch((e2) => { console.error(e2); hideLoading(); }); };
   try { const r = openLobby(p); if (r && r.catch) r.catch(fail); }
   catch (e) { fail(e); }
 }
