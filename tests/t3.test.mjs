@@ -713,5 +713,68 @@ test('T3 verify D2: every business news has a name and words — a decision resu
   }
   assert.ok(decided >= 3 && expired >= 3 && monthly > 50, `decided ${decided}, expired ${expired}, monthly ${monthly}`);
 });
+test('T3 verify D3: the monthly business sentence is true — ≥ 5,000 simulated months with random decisions: no ₪0 claim, direction words match the signs, reasons push the same way, "אבל" only between opposite directions', () => {
+  const sg = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0); const money = (t) => +t.replace(/[₪,]/g, '');
+  let months = 0; const seen = { aval: 0, approx: 0, more: 0, less: 0, despite: 0, flat: 0, first: 0, reasonP: 0, reasonC: 0 };
+  for (const t of T3TYPES) for (let i = 0; i < N(60); i++) {
+    let s = (7919 * (i + 1) + t.length * 104729) >>> 0; const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    const each = (b) => { // a random owner: price moves, marketing on / off, draws, orders, staff, cash injections
+      const d = {}; const p = b.p;
+      if (r() < 0.25) d.price = Math.max(p.minPrice, Math.min(p.maxPrice, Math.round(b.price * (0.85 + 0.3 * r()))));
+      if (r() < 0.2) d.marketing = [0, p.mktHalf || 0, 2 * (p.mktHalf || 0)][Math.floor(r() * 3)];
+      if (r() < 0.3) d.draw = Math.floor(r() * 5) * 1000;
+      if (p.stock === 'inventory' && r() < 0.25) d.order = Math.floor(r() * 6) * 100;
+      if (r() < 0.08) d.hire = 1; else if (r() < 0.08 && b.staff > 0) d.fire = 1;
+      if (r() < 0.05) d.inject = Math.floor(r() * 4) * 5000;
+      const x = BIZ.applyDecisions(b, d); return x.ok ? x.business : b;
+    };
+    const { reps } = bizRun(t, 31 + i * 17, 40, { each, cal0: i % 12, pick: (ch) => { const en = ch.choices.filter((c) => c.enabled); return en[Math.floor(r() * en.length)].id; } });
+    let prev = null;
+    for (const { r: rr } of reps) {
+      const R = rr.report; const S = R.why.sentence; const np = R.netProfit, dc = R.cash.change, gap = dc - np; months++;
+      const tag = `${t} m${R.month}: "${S}" [np ${np}, Δnp ${prev == null ? '—' : np - prev}, cash ${dc}]`;
+      assert.ok(!/ב־₪0(?![\d,])|₪-|undefined|NaN/.test(S), 'no zero / broken amounts: ' + tag);
+      assert.ok((S.match(/, אבל /g) || []).length <= 1 && (S.match(/ כי /g) || []).length <= 1, 'one contrast, one cause: ' + tag);
+      assert.ok(!/כי (פחת|חוב אבוד|מע״מ|ציוד חדש)/.test(S), '"כי" is followed by a clause: ' + tag);
+      // the profit clause
+      let d1;
+      if (prev == null) { seen.first++; d1 = sg(np); assert.ok(np > 0 ? S.includes(`ברווח של ${E.fmtM(np)}`) : np < 0 ? S.includes(`בהפסד של ${E.fmtM(-np)}`) : S.includes('בלי רווח ובלי הפסד'), 'first month: ' + tag); }
+      else {
+        const dNp = np - prev; const m0 = /^(?:הרווח (עלה|ירד)|ההפסד (קטן|גדל)) ב־(₪[\d,]+)/.exec(S); const m = m0 && [m0[0], m0[1] || (m0[2] === 'קטן' ? 'עלה' : 'ירד'), m0[3]];
+        if (m0) assert.equal(!!m0[2], np < 0 && prev < 0, '"ההפסד קטן / גדל" exactly when both months lost: ' + tag);
+        if (Math.abs(dNp) < 200) { d1 = 0; assert.ok(S.startsWith(np < 0 && prev < 0 ? 'ההפסד כמעט לא השתנה' : 'הרווח כמעט לא השתנה'), 'small profit change: ' + tag); }
+        else {
+          d1 = sg(dNp); assert.ok(m && (m[1] === 'עלה') === (dNp > 0) && money(m[2]) === Math.abs(dNp), 'profit direction + amount: ' + tag);
+          const it = R.why.profit[R.why.refs.profit]; assert.ok(it, 'the profit reason is a bridge line: ' + tag);
+          assert.equal(sg(it.amount), d1, 'the profit reason pushed the same way: ' + tag); seen.reasonP++;
+          if (it.vol && it.k === 'season') { const sm = /\(ביקוש פי ([\d.]+)(?: במקום פי ([\d.]+))?\)/.exec(S); if (sm) assert.equal(sg(+sm[1] - (sm[2] != null ? +sm[2] : 1)), d1, 'the season words point the way the profit moved: ' + tag); }
+          if (it.vol && it.k === 'capacity') assert.equal(/לא קיבלו שירות/.test(S), d1 < 0, 'capacity words: ' + tag);
+          if (it.vol && it.k === 'stock') assert.equal(/מלאי שנגמר/.test(S), d1 < 0, 'stock words: ' + tag);
+          if (it.vol && it.k === 'noise') assert.ok(d1 > 0 ? /חזק|יותר קונים/.test(S) : /חלש|פחות קונים/.test(S), 'noise words: ' + tag);
+          if (!it.vol && /^(wages|manager|rent|fixed|marketing|royalty|fees|depreciation)$/.test(it.k)) assert.ok(S.includes(d1 > 0 ? 'בגלל ירידה ב' : 'בגלל עלייה ב'), 'cost words: ' + tag);
+        }
+      }
+      // the cash clause
+      const cm = /הקופה (עלתה|ירדה) ב־(₪[\d,]+)/.exec(S); let d2 = sg(dc);
+      if (dc === 0) { seen.flat++; assert.ok(S.includes('הקופה לא זזה') && !cm, 'cash unchanged: ' + tag); }
+      else assert.ok(cm && (cm[1] === 'עלתה') === (dc > 0) && money(cm[2]) === Math.abs(dc), 'cash direction + amount: ' + tag);
+      const same = np !== 0 && sg(np) === sg(dc);
+      if (/בערך כמו/.test(S)) { seen.approx++; assert.ok(same && Math.abs(gap) < Math.max(300, Math.abs(np) / 10), '"בערך כמו" only for a small gap, same way: ' + tag); }
+      if (/— יותר מ(הרווח|ההפסד)/.test(S)) { seen.more++; assert.ok(same && Math.abs(dc) > Math.abs(np), '"יותר מ…": ' + tag); }
+      if (/— פחות מ(הרווח|ההפסד)/.test(S)) { seen.less++; assert.ok(same && Math.abs(dc) < Math.abs(np), '"פחות מ…": ' + tag); }
+      if (/למרות/.test(S)) { seen.despite++; assert.ok(np && dc && sg(np) !== sg(dc), '"למרות": ' + tag); }
+      if (/(הרווח|ההפסד)/.test(S.split(', ').slice(1).join(', '))) { const w = /מ?(הרווח|ההפסד)(?=[ .,])/g; for (const x of S.slice(S.indexOf('הקופה')).matchAll(w)) assert.equal(x[1] === 'ההפסד', np < 0, '"הרווח" / "ההפסד" names this month\'s result: ' + tag); }
+      if (R.why.refs.cash != null) { const it = R.why.cash[R.why.refs.cash]; assert.ok(it && sg(it.amount) === sg(gap), 'the cash reason pushed the gap the same way: ' + tag); seen.reasonC++; }
+      // "אבל" exactly when the two clauses point opposite ways; never with a "no change" clause
+      const aval = /, אבל /.test(S); if (aval) seen.aval++;
+      assert.equal(aval, !!(d1 && d2 && d1 !== d2), '"אבל" iff opposite directions: ' + tag);
+      if (aval) assert.ok(!/כמעט לא|לא זזה/.test(S), 'no "אבל" next to "no change": ' + tag);
+      prev = np;
+    }
+  }
+  assert.ok(months >= 5000, 'business months ' + months);
+  for (const [k, v] of Object.entries(seen)) assert.ok(v > 0, `every sentence form occurs (${k}: ${v}) ${JSON.stringify(seen)}`);
+  console.log(`   D3: ${months} business months, ${JSON.stringify(seen)}`);
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

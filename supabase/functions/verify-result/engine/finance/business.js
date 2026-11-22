@@ -1142,7 +1142,7 @@ function whyOf(b, r, prev, c) {
     const volume = (r.grossProfit - prev.grossProfit) - priceEff - unitCost - waste;
     const pl = [];
     if (priceEff) pl.push({ k: 'price', amount: priceEff, text: `שינוי המחיר ל־${fmt(r.price)}` });
-    if (volume) { const f = volumeFactor(b, r, prev, c); pl.push({ k: f.k, amount: volume, text: f.text }); }
+    if (volume) { const f = volumeFactor(b, r, prev, c, volume); pl.push({ k: f.k, amount: volume, text: f.text, vol: true }); }
     if (unitCost) pl.push({ k: 'unitCost', amount: unitCost, text: unitCost < 0 ? 'עלייה בעלות המוצר' : 'ירידה בעלות המוצר' });
     if (waste) pl.push({ k: 'waste', amount: waste, text: r.cogs.wasteLabel });
     const NAMES = { wages: 'שכר עובדים', manager: 'שכר מנהל', rent: 'שכירות', fixed: 'הוצאות קבועות', marketing: 'שיווק', royalty: 'תמלוגים לרשת', fees: 'עמלות', depreciation: 'פחת', oneOff: 'הוצאה חד־פעמית', badDebt: 'חוב אבוד' };
@@ -1164,37 +1164,92 @@ function whyOf(b, r, prev, c) {
   add('inject', c.injected, 'הזרמת מהכיס');
   const rest = r.cash.change - r.netProfit - items.reduce((x, i) => x + i.amount, 0);
   add('vat', rest, 'מע״מ ותזמון תשלומים');
-  const top = (xs) => xs.slice().sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount))[0] || null;
-  const tp = top(profit.filter((x) => x.k !== 'other')) || top(profit); const tc = top(items);
-  const dNp = prev ? r.netProfit - prev.netProfit : 0; const dc = r.cash.change;
-  let sentence;
-  if (!prev) sentence = tc ? `החודש הראשון: ${tc.text}.` : 'החודש הראשון של העסק.';
-  else if (Math.abs(dNp) < 200 && Math.abs(dc - r.netProfit) < 200) sentence = 'חודש יציב — כמעט בלי שינוי.';
-  else {
-    // T3 review M6: noun-phrase reasons; the cash clause compares the cash change with the PROFIT (the profit is most of it)
-    const p1 = Math.abs(dNp) < 200 ? 'הרווח כמעט לא זז' : `הרווח ${dNp > 0 ? 'עלה' : 'ירד'} ב־${fmt(Math.abs(dNp))}${tp ? `, בעיקר בגלל ${tp.k === 'other' ? 'שינויים קטנים בהוצאות' : tp.text}` : ''}`;
-    const gap = dc - r.netProfit; const glue = (dc >= 0) !== (dNp >= 0) ? ', אבל ' : ', ו';
-    const moved = `הקופה ${dc >= 0 ? 'עלתה' : 'ירדה'} ב־${fmt(Math.abs(dc))}`;
-    const p2 = Math.abs(gap) < 500 ? `${glue}${moved} — בערך כמו הרווח` : `${glue}${moved} — ${fmt(Math.abs(gap))} ${gap > 0 ? 'יותר' : 'פחות'} מהרווח${tc ? `, בעיקר כי ${tc.text}` : ''}`;
-    sentence = `${p1}${p2}.`;
-  }
-  return { profit, cash: items, sentence };
+  const dNp = prev ? r.netProfit - prev.netProfit : 0;
+  const { sentence, refs } = whySentence(r.netProfit, r.cash.change, prev ? dNp : null, profit, items);
+  return { profit, cash: items, sentence, refs };
 }
-function volumeFactor(b, r, prev, c) {
-  const rat = (x, y) => (y ? Math.abs(x / y - 1) : 0);
+/**
+ * T3 verify D3: the one-sentence "why" — every clause is true by construction.
+ *  • profit clause: the change from last month (or the first month's result); its reason is the biggest bridge line that moved the SAME way;
+ *  • cash clause: the cash change set against this month's profit (or loss); its reason is the biggest cash-bridge line that pushed the
+ *    gap the same way; never "₪0" ("לא זזה"), "בערך כמו" only when the gap is small and both move the same way, "רק" / "יותר מ…" by size;
+ *  • "אבל" only when the two clauses point in opposite directions.
+ * refs = the bridge lines quoted ({profit, cash}: index into why.profit / why.cash, or null) — for tests.
+ */
+function whySentence(np, dc, dNp, profit, cash) {
+  const sg = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
+  const best = (xs, s, skip) => xs.filter((x) => sg(x.amount) === s && x.k !== skip).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount))[0] || null;
+  const refs = { profit: null, cash: null };
+  let p1, d1;
+  if (dNp == null) { d1 = sg(np); p1 = np > 0 ? `החודש הראשון נגמר ברווח של ${fmt(np)}` : np < 0 ? `החודש הראשון נגמר בהפסד של ${fmt(-np)}` : 'החודש הראשון נגמר בלי רווח ובלי הפסד'; }
+  else if (Math.abs(dNp) < 200) { d1 = 0; p1 = np < 0 && np - dNp < 0 ? 'ההפסד כמעט לא השתנה' : 'הרווח כמעט לא השתנה'; }
+  else {
+    d1 = sg(dNp); const it = best(profit, d1, 'other') || best(profit, d1); refs.profit = it ? profit.indexOf(it) : null;
+    const head = np < 0 && np - dNp < 0 ? `ההפסד ${dNp > 0 ? 'קטן' : 'גדל'}` : `הרווח ${dNp > 0 ? 'עלה' : 'ירד'}`; // a loss both months: the loss shrinks / grows
+    p1 = `${head} ב־${fmt(Math.abs(dNp))}${it ? `, בעיקר בגלל ${profitReason(it)}` : ''}`;
+  }
+  const gap = dc - np; const word = np < 0 ? 'ההפסד' : 'הרווח';
+  const cit = gap ? best(cash, sg(gap)) : null; const why = cit && Math.abs(gap) >= 300 ? `, כי ${cashReason(cit)}` : '';
+  let c1, d2 = sg(dc);
+  if (dc === 0) c1 = `הקופה לא זזה${why}`;
+  else {
+    const moved = `הקופה ${dc > 0 ? 'עלתה' : 'ירדה'}`; const same = np !== 0 && sg(np) === sg(dc);
+    if (same && Math.abs(gap) < Math.max(300, Math.abs(np) / 10)) c1 = `${moved} ב־${fmt(Math.abs(dc))} — בערך כמו ${word}`;
+    else if (same) c1 = `${moved} ב־${fmt(Math.abs(dc))} — ${Math.abs(dc) > Math.abs(np) ? 'יותר' : 'פחות'} מ${word}${why}`;
+    else c1 = `${moved} ב־${fmt(Math.abs(dc))}${np && !(d1 && d1 !== d2) ? ` למרות ${word}` : ''}${why}`; // cash against the profit's sign ("אבל" already contrasts)
+  }
+  if (why) refs.cash = cash.indexOf(cit);
+  const glue = d1 && d2 && d1 !== d2 ? ', אבל ' : ', ו';
+  return { sentence: `${p1}${glue}${c1}.`, refs };
+}
+/** A profit-bridge line as the noun phrase after "בעיקר בגלל" (the line's sign decides the words). */
+function profitReason(it) {
+  const up = it.amount > 0; const OPEX = { wages: 'שכר העובדים', manager: 'שכר המנהל', rent: 'שכירות', fixed: 'הוצאות הקבועות', marketing: 'הוצאות השיווק', royalty: 'תמלוגים לרשת', fees: 'עמלות', depreciation: 'פחת על הציוד' }; // after "ב": no article
+  if (OPEX[it.k] && !it.vol) return `${up ? 'ירידה' : 'עלייה'} ב${OPEX[it.k]}`;
+  switch (it.k) {
+    case 'oneOff': return up ? 'שאין החודש הוצאה חד־פעמית' : 'הוצאה חד־פעמית';
+    case 'badDebt': return up ? 'שאין החודש חוב אבוד' : 'חוב אבוד של לקוח';
+    case 'tax': return up ? 'מס חברות נמוך יותר' : 'מס חברות גבוה יותר';
+    case 'waste': return it.text === 'מלאי מת' ? `${up ? 'פחות' : 'יותר'} מלאי מת` : `${up ? 'פחות' : 'יותר'} סחורה שהתקלקלה ונזרקה`;
+    case 'other': return 'שינויים קטנים בהוצאות';
+    default: return it.text; // price, unit cost and the volume factor already say which way
+  }
+}
+/** A cash-bridge line as the clause after "כי" (a verb, so the clause reads as a sentence). */
+function cashReason(it) {
+  const a = fmt(Math.abs(it.amount));
+  switch (it.k) {
+    case 'depreciation': return 'הפחת על הציוד הוא הוצאה רק על הנייר';
+    case 'badDebt': return 'החוב האבוד הוא הפסד רק על הנייר — הכסף לא יצא מהקופה';
+    case 'stock': return `קנית מלאי ב־${a}`;
+    case 'cogsStock': return 'מכרת סחורה ששילמת עליה כבר קודם';
+    case 'ar': return it.amount < 0 ? `${a} עוד אצל לקוחות` : `נכנסו ${a} מלקוחות של החודשים הקודמים`;
+    case 'capex': return `קנית ציוד ב־${a}`;
+    case 'draw': return `משכת ${a} לכיס`;
+    case 'inject': return `הזרמת ${a} מהכיס`;
+    default: return it.amount < 0 ? 'מע״מ ותשלומים יצאו לפני שהכסף נכנס' : 'מע״מ ותשלומים נדחו לחודש הבא';
+  }
+}
+/** What moved the sales volume: the biggest change among the factors that pushed the SAME way as the volume line (T3 verify D3). */
+function volumeFactor(b, r, prev, c, volume = 0) {
+  const rat = (x, y) => (y ? Math.abs(x / y - 1) : 0); const sg = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
   const sNow = c.season ? c.season.mult : 1, sPrev = prev.season ?? 1;
   const econIds = new Set(['cycle_rec', 'cycle_exp', 'recession', 'shock']);
   const econ = b.effects.some((e) => e.kind === 'demand' && e.until >= b.month && econIds.has(e.id));
   const dem = Math.max(1, r.demand || r.units || 1);
+  const dShock = c.demShock - (prev.demShock ?? c.demShock); const lostCap = (r.lostSales.capacity || 0) - (prev.lostCap || 0); const lostStock = (r.lostSales.stock || 0) - (prev.lostStock || 0);
+  const dNoise = c.noise - (prev.noise ?? c.noise);
   const f = [
-    { k: 'season', v: rat(sNow, sPrev), text: c.season ? `${c.season.label} (ביקוש פי ${c.season.mult})` : 'סוף העונה' },
-    { k: econ ? 'econ' : 'event', v: rat(c.demShock, prev.demShock ?? c.demShock), text: econ ? 'מצב הכלכלה' : r.events.length ? r.events[0].title : 'השפעה של אירוע קודם' },
-    { k: 'marketing', v: rat(1 + c.lift, 1 + (prev.lift ?? c.lift)), text: `שיווק ${fmt(r.opex.marketing)} בחודש` },
-    { k: 'capacity', v: Math.abs((r.lostSales.capacity || 0) - (prev.lostCap || 0)) / dem, text: r.lostSales.capacity > (prev.lostCap || 0) ? 'לקוחות שלא קיבלו שירות (חסרו ידיים או מכונות)' : 'פחות לקוחות שלא קיבלו שירות' },
-    { k: 'stock', v: Math.abs((r.lostSales.stock || 0) - (prev.lostStock || 0)) / dem, text: r.lostSales.stock > (prev.lostStock || 0) ? 'מלאי שנגמר' : 'מלאי שחזר למדפים' },
-    { k: 'noise', v: rat(c.noise, prev.noise ?? c.noise), text: c.noise >= (prev.noise ?? c.noise) ? 'חודש חזק מהרגיל' : 'חודש חלש מהרגיל' },
+    { k: 'season', dir: sg(sNow - sPrev), v: rat(sNow, sPrev), text: !c.season ? (sPrev > 1 ? 'סוף העונה החזקה' : 'סוף העונה החלשה')   // the label alone only when it points the way the demand moved
+      : sg(sNow - 1) === sg(sNow - sPrev) && sPrev === 1 ? `${c.season.label} (ביקוש פי ${c.season.mult})` : `${c.season.label} (ביקוש פי ${sNow} במקום פי ${sPrev})` },
+    { k: econ ? 'econ' : 'event', dir: sg(dShock), v: rat(c.demShock, prev.demShock ?? c.demShock), text: econ ? (dShock > 0 ? 'מצב הכלכלה שהשתפר' : 'מצב הכלכלה שהחמיר') : r.events.length ? `האירוע "${r.events[0].title}"` : dShock > 0 ? 'סוף ההשפעה של אירוע קודם' : 'השפעה של אירוע קודם' },
+    { k: 'marketing', dir: sg((c.lift || 0) - (prev.lift ?? c.lift ?? 0)), v: rat(1 + c.lift, 1 + (prev.lift ?? c.lift)), text: (c.lift || 0) >= (prev.lift ?? c.lift ?? 0) ? `שיווק של ${fmt(r.opex.marketing)} בחודש` : 'פחות שיווק' },
+    { k: 'capacity', dir: -sg(lostCap), v: Math.abs(lostCap) / dem, text: lostCap > 0 ? 'לקוחות שלא קיבלו שירות (חסרו ידיים או מכונות)' : 'יותר לקוחות שקיבלו שירות' },
+    { k: 'stock', dir: -sg(lostStock), v: Math.abs(lostStock) / dem, text: lostStock > 0 ? 'מלאי שנגמר' : 'מלאי שחזר למדפים' },
+    { k: 'noise', dir: sg(dNoise), v: rat(c.noise, prev.noise ?? c.noise), text: dNoise >= 0 ? (c.noise > 1 ? 'חודש חזק מהרגיל' : 'יותר קונים מבחודש שעבר') : (c.noise < 1 ? 'חודש חלש מהרגיל' : 'פחות קונים מבחודש שעבר') },
   ];
-  return f.sort((x, y) => y.v - x.v)[0];
+  const s = sg(volume); const pick = f.filter((x) => x.dir === s && x.v > 0).sort((x, y) => y.v - x.v)[0];
+  return pick || { k: 'volume', text: s >= 0 ? 'יותר קונים מבחודש שעבר' : 'פחות קונים מבחודש שעבר' };
 }
 /** Bring a pre-T3 business of a rules-4 game up to T3 (save migration, idempotent): T3 event table, general expansion, state fields. */
 export function upgradeT3(b0) {
