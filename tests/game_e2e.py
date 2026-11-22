@@ -729,6 +729,13 @@ SEED_JS = """(a) => { window.__seeded = 'pending'; (async () => {
   sv.state = JSON.parse(E.serialize(st)); localStorage.setItem(key, JSON.stringify(sv));
   g.startGame({ ...sv.cfg, resume: true }); window.__seeded = 'started:' + a.n;
 })().catch((e) => { window.__seeded = 'error: ' + e; console.error(e); }); }"""
+# T3 verify D2: every toast text the page shows (queued ones included), so a suite can assert none reads "undefined"
+TOAST_SPY = """(() => { window.__toasts = []; const grab = () => { const el = document.getElementById('toast'); if (!el || !el.className.includes('on')) return;
+  const t = el.textContent || ''; if (t && window.__toasts[window.__toasts.length - 1] !== t) window.__toasts.push(t); };
+  const go = () => new MutationObserver(grab).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+  if (document.documentElement) go(); else document.addEventListener('DOMContentLoaded', go); })()"""
+async def toasts(pg):
+    return await pg.evaluate('() => window.__toasts || []')
 SEEDN = [0]
 async def seed(pg, world, kind, **kw):
     SEEDN[0] += 1; n = SEEDN[0]
@@ -759,6 +766,7 @@ async def test_t3(b, phone=False):
     vp = {'width': 390, 'height': 844} if phone else {'width': 1300, 'height': 820}
     ctx = await b.new_context(viewport=vp, device_scale_factor=1, has_touch=phone, is_mobile=phone)
     pg = await ctx.new_page(); tag = 't3' + ('-phone' if phone else ''); attach(pg, tag); sfx = '_phone' if phone else ''; rnd = random.Random(3)
+    await pg.add_init_script(TOAST_SPY)
     await pg.goto(BASE); await pg.evaluate("() => localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true}))")
     await start_world(pg, 'w2', 0); await clear_cards(pg, rnd, tag)
     # 1) chain entry card (tile L): life chips from `flow` — the bus saving is +/green, the lease cost −/red; totals; odds "במשחק"
@@ -820,6 +828,11 @@ async def test_t3(b, phone=False):
     a = await last_action(pg, 'w1'); assert a[0] == 'Q', f'q: option → resolveStory (Q): {a}'
     s = await st(pg); assert s['card'] and s['type'] == 'business' and await pg.locator('#evCard .bizq').count() == 0, 'the card stays open, the item is gone'
     await pg.click('#evCard button[data-o="ok"]'); s = await clear_cards(pg, rnd, tag)
+    # T3 verify D2: the decision's outcome reaches a "🏪 <name>: <text>" toast; no toast ever reads "undefined"
+    await pg.wait_for_function("() => (window.__toasts || []).some((t) => t.includes('🏪'))", timeout=30000)
+    tl = await toasts(pg); log(tag, 'toasts', json.dumps(tl[-6:], ensure_ascii=False))
+    assert not any('undefined' in t or 'null' in t or 'NaN' in t for t in tl), f'a toast renders undefined / null / NaN: {tl}'
+    STATS['t3_biz_toast' + sfx] = 1
     # 5) offer setups (a fresh w1 game: no business yet)
     await pg.goto(BASE); await start_world(pg, 'w1', 1); await clear_cards(pg, rnd, tag)
     for i in range(3):
@@ -850,6 +863,7 @@ async def test_t3(b, phone=False):
     await pg.click('#hDream'); await pg.wait_for_selector('#gm:not([hidden]) .dms li', timeout=10000)
     await shot(pg, 't4_dream', sfx)
     await pg.click('#gm .acts button')
+    tl = await toasts(pg); assert not any('undefined' in t or 'NaN' in t for t in tl), f'a toast renders undefined / NaN: {tl}'
     log(tag, 'T3 / T4 in-game checks passed'); STATS['t3' + sfx] = 1
     await ctx.close()
 

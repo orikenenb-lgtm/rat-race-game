@@ -4110,7 +4110,9 @@ function resolveBizItem(st, item, choiceId, out, isDefault = false) {
     st.story.inbox = st.story.inbox.filter((i) => i.assetId !== 'a' + a.id);
     out.despawn.push('a' + a.id); cashFx(out, sale.net, '+' + fmtM(sale.net)); lesson(st, out, 'biz_valuation');
   }
-  if (!isDefault || r.text) out.news.push({ kind: 'business', assetId: item.assetId, text: `${a.n}: ${r.text}` });
+  // T3 verify D2: a decision's result carries the business name and the outcome on their own fields (decision: true) — not the
+  // monthly shape (headline / why), so the UI never renders "🏪 undefined:" and the outcome text reaches the player
+  if (!isDefault || r.text) out.news.push({ kind: 'business', decision: true, ...(isDefault ? { expired: true } : {}), assetId: item.assetId, name: a.n, text: r.text || 'ההחלטה נכנסה לתוקף.' });
   if (st.cash < 0) ensureCash(st, out, 'business');
   return { ok: true };
 }
@@ -4148,7 +4150,7 @@ function bizStoryItems(st, out, reports) {
     if (!a.biz.decide || !(r.decide || []).length) continue;
     const key = 'a' + a.id;
     const ok = made === 0 && S.bizItemsM !== st.month + 1 && st.month - (S.lastBizItemM[key] ?? -99) >= (st.worldId === 'w1' ? 3 : 2) && openItems(st) < 3; // T3 review M8: w1 ≤ 4 business items a year
-    if (!ok) { const id = a.biz.decide.id; const res = BIZ.resolveEvent(a.biz, a.biz.decide.key, BIZ.defaultChoice(id, a.biz)); if (res.ok) a.biz = res.business; out.news.push({ kind: 'business', assetId: key, text: `${a.n}: ${res.text || ''} (ברירת מחדל — לא היה זמן להחליט)` }); continue; }
+    if (!ok) { const id = a.biz.decide.id; const res = BIZ.resolveEvent(a.biz, a.biz.decide.key, BIZ.defaultChoice(id, a.biz)); if (res.ok) a.biz = res.business; out.news.push({ kind: 'business', decision: true, expired: true, assetId: key, name: a.n, text: `${res.text || 'ההחלטה נכנסה לתוקף.'} (ברירת מחדל — לא היה זמן להחליט)` }); continue; }
     const item = { id: S.nextId++, kind: 'biz', assetId: key, key: a.biz.decide.key, ev: a.biz.decide.id, createdM: st.month + 1, due: st.month + 2, seal: { a: 0.5, b: 0.5 }, data: {} };
     S.inbox.push(item); S.lastBizItemM[key] = st.month; S.bizItemsM = st.month + 1; made++;
     (out.story ||= { created: [], expired: [] }).created.push(item.id);

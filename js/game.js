@@ -1216,6 +1216,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
+      if (n.decision) { if (n.text) ui.toast(`🏪 ${n.name ? n.name + ': ' : ''}${n.text}`); continue; }   // T3 verify D2: a decision's outcome (never "undefined")
       if (n.why && typeof ui.bizNews === 'function') { ui.bizNews(n, { decide: () => openInbox({ assetId: n.assetId }) }); continue; }   // T3 UI-4
       ui.toast(`🏪 ${n.name}: ${n.headline || ''}${n.net ? ` · לכיס שלך ${E.sgn(n.net)}` : ''}`, { kind: n.netProfit < 0 ? 'bad' : '' });
       for (const ev2 of (n.events || []).slice(0, 1)) if (ev2.title) ui.toast(`🏪 ${ev2.title}${ev2.text ? ': ' + ev2.text : ''}`);

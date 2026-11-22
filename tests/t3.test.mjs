@@ -690,5 +690,28 @@ test('T3 verify D1: the "זוכר?" saving equals the real accumulated saving (b
     assert.equal(+p[1], st.month - m1); assert.equal(p[2], E.fmtM(d3 * (st.month - m1)), `${w}: ${card.remember}`);
   }
 });
+test('T3 verify D2: every business news has a name and words — a decision result / expiry carries name + text (never "undefined"), a monthly report its headline', () => {
+  let decided = 0, expired = 0, monthly = 0;
+  const check = (res, tag) => {
+    for (const n of (res && res.news) || []) {
+      if (n.kind !== 'business') continue;
+      assert.ok(typeof n.name === 'string' && n.name.length > 0, `${tag}: business news without a name ${JSON.stringify(n).slice(0, 160)}`);
+      if (n.decision) { assert.ok(typeof n.text === 'string' && n.text.length > 3 && !/undefined|null|NaN/.test(n.text), `${tag}: decision text ${JSON.stringify(n)}`); assert.ok(!n.text.startsWith(n.name + ':'), 'the name is not glued into the text'); n.expired ? expired++ : decided++; }
+      else { assert.ok(typeof n.headline === 'string' && n.headline.length > 0, `${tag}: monthly headline ${JSON.stringify(n).slice(0, 160)}`); monthly++; }
+    }
+  };
+  for (const w of ['w1', 'w2', 'w3', 'w4']) for (let i = 0; i < N(6); i++) {
+    const st = E.createGame({ worldId: w, seed: 700 + i, mode: 'free' }); st.cash = 1e6; const r = prng(900 + i);
+    const offers = E.getWorld(w).bizOffers || []; if (!offers.length) continue;
+    st.pending = { id: 5, type: 'business', tile: 'K', pos: 3, mode: 'offer', typeId: offers[i % offers.length], seed: 99 + i }; st.phase = 'event'; E.choose(st, null, 'start');
+    for (let t = 0; t < 90 && !st.over; t++) {
+      const it = st.story.inbox.find((x) => x.kind === 'biz');
+      if (it && r() < 0.5) { const card = E.inbox(st).find((x) => x.itemId === it.id); const en = card.options.filter((o) => o.enabled); check(E.resolveStory(st, it.id, en[Math.floor(r() * en.length)].id), `${w}/${i} Q`); }
+      check(E.rollDice(st), `${w}/${i} roll`); let ev = E.landing(st);
+      while (ev) { const res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id); check(res, `${w}/${i} choose`); ev = res.event; }
+    }
+  }
+  assert.ok(decided >= 3 && expired >= 3 && monthly > 50, `decided ${decided}, expired ${expired}, monthly ${monthly}`);
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
