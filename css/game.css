@@ -780,6 +780,7 @@ details.imp>summary small{font-weight:600;color:var(--mut);font-size:var(--fs-ca
 details.imp>summary::after{content:"▾";color:var(--mut)}details.imp[open]>summary::after{content:"▴"}
 .imp-tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:thin}
 .imp-tabs .chip{flex:none;font-size:13px;background:var(--paper)}
+.imp-tabs .chip[aria-pressed=true]{background:var(--gold);color:var(--gold-ink);border-color:var(--gold2)}   /* T7 AX-2: the selected option kept the paper background under gold-ink text (dark mode 1.3:1) */
 .imp-body{padding-bottom:10px}
 table.ba{width:100%;border-collapse:collapse;font-size:14px}
 table.ba th,table.ba td{padding:4px 2px;border-bottom:1px dashed var(--line);text-align:start}
@@ -1009,7 +1010,7 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 .sbars i s{display:block;width:100%;height:calc(var(--h) * .7);min-height:4px;border-radius:4px 4px 2px 2px;background:light-dark(#c9b98f,#6f6347)}
 .sbars i.hi s{background:var(--gold,#f2b632)}
 .sbars i.lo s{background:light-dark(#a9b4c6,#4b5568)}
-.sbars i small{font-size:10px;line-height:1.4;color:var(--mut);white-space:nowrap}
+.sbars i small{font-size:12px;line-height:1.4;color:var(--mut);white-space:nowrap}
 .sbars i.cur{outline:2px solid var(--ink);outline-offset:1px}
 .sbars i.cur small{color:var(--ink);font-weight:800}
 .bridge{list-style:none;margin:4px 0 8px;padding:0;display:grid;gap:4px;font-size:14px}
@@ -1049,7 +1050,8 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 .dms small{color:var(--mut);font-weight:600}
 /* desktop: the side sheet waits for its reveal in a tutorial game */
 @media (min-width:821px){ body.t4-nosheet #sheet{display:none} }
-@media (prefers-reduced-motion:reduce){ .choice.dflt{outline-style:dashed} }
+@media (prefers-reduced-motion:reduce){ :root:not([data-motion=full]) .choice.dflt{outline-style:dashed} }
+:root[data-motion=reduce] .choice.dflt{outline-style:dashed}   /* T5 A-23: the app setting mirrors the OS rule */
 .pans button.right,.pans button.wrong{opacity:1}
 .pans button.right{box-shadow:inset 0 0 0 2px var(--green);color:var(--green);font-weight:800}
 .pans button.wrong{box-shadow:inset 0 0 0 2px var(--red);color:var(--red)}

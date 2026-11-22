@@ -146,8 +146,15 @@ async def game_screens(b, cfg, also_2d=True):
     if card:
         kind = await pg.evaluate("(document.querySelector('#evCard') || {}).className || ''")
         await axe(pg, f'09_card_{name}'); R['meta'][f'09_card_{name}'] = kind
-        b2 = pg.locator('#evCard button:enabled').last
-        if await b2.count(): await b2.click(); await pg.wait_for_timeout(1500)
+        for _ in range(6):   # answer the card (and any follow-up step) so the sheet below is reachable — a payday card's last button can be an impact tab
+            if not await pg.evaluate("!document.querySelector('#evm').hidden"): break
+            b2 = pg.locator('#evCard button.choice:enabled, #evCard button.primary:enabled').last
+            if not await b2.count(): b2 = pg.locator('#evCard button:enabled').last
+            if not await b2.count(): break
+            await b2.click(); await pg.wait_for_timeout(1500)
+        for _ in range(4):
+            if not await pg.locator('#gm:not([hidden]) .acts button').count(): break
+            await pg.click('#gm .acts button >> nth=0'); await pg.wait_for_timeout(600)
     else: na(f'09_card_{name}', 'N/A (first landing opened no card)')
     na(f'10_card_payday_plan_focus_{name}', 'NOT IMPLEMENTED (engine driver for forced cards: T7 part B)')
     na(f'11_story_inbox_{name}', 'NOT IMPLEMENTED (engine driver; T3 stories)')
@@ -266,6 +273,9 @@ async def keys(b):
     await ctx.close()
     ctx, pg = await new_page(b, PHONE[1], 'dark', is_mobile=True, has_touch=True)
     await pg.goto(BASE); await pg.wait_for_selector('.lb-home', state='visible'); await start_w1(pg)
+    for _ in range(8):   # precondition: the world's intro coach (it can open a moment after the start) is answered first — K-8 is about the sheet
+        await pg.wait_for_timeout(500)
+        if await pg.evaluate("!!document.querySelector('#coach') && !document.querySelector('#coach').hidden"): await pg.keyboard.press('Escape')
     if await pg.locator('#sheetBtn').is_visible():
         await pg.focus('#sheetBtn'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(900)
         sq = await tabs(pg, 12); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(600)
