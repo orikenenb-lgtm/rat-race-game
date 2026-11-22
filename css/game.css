@@ -542,7 +542,7 @@ h3.lk{font-size:14px;color:var(--mut);margin:12px 0 0}
 .noen-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .noen-acts button{min-height:52px;font-size:14px;font-weight:700;background:var(--paper2)}
 @media (max-width:420px){ .noen-acts{grid-template-columns:1fr} }
-.noen-acts.main{grid-template-columns:1fr}.noen-acts.main button.primary{background:var(--gold);color:var(--ink)}   /* director decision 6: the two ways on, first */
+.noen-acts.main{grid-template-columns:1fr}.noen-acts.main button.primary{background:var(--gold);color:var(--gold-ink)}   /* director decision 6: the two ways on, first */
 .noen-saved{background:rgba(21,128,61,.08);border-radius:10px;padding:8px 10px}
 
 /* ============================================================ v3: life HUD row */
@@ -776,6 +776,7 @@ button.hinted{outline:2px dashed var(--gold2);outline-offset:3px;position:relati
 .ddins .opt{flex:1 1 150px}
 .ddins button.insp{display:flex;flex-direction:column;align-items:center;gap:1px;min-height:52px;background:var(--paper2);border:1px solid var(--line);font-weight:700}
 .ddins button.insp small{font-size:var(--fs-cap);font-weight:700}
+.ddins button.insp.primary{background:var(--gold);color:var(--gold-ink);border-color:var(--gold2)}   /* the mentor's pick keeps the gold fill (the insp background hid it: dark-mode contrast, a11y AX-2) */
 
 /* T2 impact panel */
 details.imp{margin:10px 0 2px;border-radius:14px;background:var(--paper2);padding:0 12px}
