@@ -20,6 +20,7 @@
 # at the first game input = #roll enabled OR the first card / coach button on screen (mark gameInput; rollEnabledMs is kept too).
 # On a copy without the tutorial card the two marks are the same moment, so base and branch stay comparable.
 # Not in part A (they exit 2 if asked): --long (PF-19), --trace (§3.3 freeze trace), --heap (§3.5 retainers), PF-15 hidden-tab draws.
+# Phase B (--leak) uses no Playwright element handles (T7 F-3): see the note above phase_b().
 import asyncio, json, os, statistics, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPT = dict(a[2:].split('=', 1) if '=' in a else (a[2:], '1') for a in sys.argv[1:] if a.startswith('--'))
@@ -170,39 +171,82 @@ async def phase_a(b, base, cond, mode='full', twod=False):
     r['noisy'] = la0 > LOAD_MAX
     await ctx.close(); return r
 
+# Phase B drives the page WITHOUT Playwright element handles (T7 F-3 / PF-10): every ElementHandle that wait_for_selector() returns, and
+# the handles behind locator / selector clicks, stay registered with DevTools ("DevTools console" global handles in a heap snapshot)
+# until the context closes — they kept each replaced lobby home and world-view tree alive, ≈ +790 DOM nodes per re-entry on the
+# branch (≈ +600 on base), all of it harness. Here clicks are real mouse events at the element's centre (rect read by evaluate, which
+# returns plain values) and waits are wait_for_function predicates that return booleans.
+VIS_JS = "(a) => { const e = document.querySelectorAll(a[0])[a[1] || 0]; return !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden'; }"
+RECT_JS = "(a) => { const e = document.querySelectorAll(a[0])[a[1] || 0]; if (!e) return null; e.scrollIntoView({ block: 'center', inline: 'center' }); const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }"
+async def wait_vis(pg, sel, nth=0, timeout=TIMEOUT): await pg.wait_for_function(VIS_JS, arg=[sel, nth], timeout=timeout)
+async def tap(pg, sel, nth=0, timeout=TIMEOUT):
+    await wait_vis(pg, sel, nth, timeout); xy = await pg.evaluate(RECT_JS, [sel, nth])
+    if not xy: raise Exception(f'tap: {sel}[{nth}] is gone')
+    await pg.mouse.click(*xy)
+
+async def start_game_nh(pg, world, nth=0):
+    """start_game() without element handles (phase B). → wall-clock ms from the character click to #roll enabled."""
+    await tap(pg, f'.map-card[data-id="{world}"]'); await wait_vis(pg, '.wv-chars')
+    await pg.evaluate("window.__markReset('rollEnabled'); window.__markReset('gameInput')")
+    t0 = time.time(); await tap(pg, '.wv-char', nth)
+    ready = "!document.querySelector('#roll').disabled && document.querySelector('#start').hidden"
+    for i in range(2):   # a "replace the saved game?" confirm may appear
+        try:
+            await pg.wait_for_function(ready, timeout=8000 if i == 0 else TIMEOUT); break
+        except Exception:  # noqa: BLE001
+            if await pg.evaluate("!!document.querySelector('#gm:not([hidden]) .acts button.primary')"): await tap(pg, '#gm:not([hidden]) .acts button.primary')
+            elif i: raise
+    return round((time.time() - t0) * 1000)
+
+async def home_nh(pg): await tap(pg, '#homeBtn'); await wait_vis(pg, '.lb-home')
+
+async def snap_of(pg, cdp, step):
+    return {'step': step, **(await metrics(cdp, gc=True)), 'gl': dict(await pg.evaluate('__m.gl')), 'attached': await pg.evaluate("document.getElementsByTagName('*').length")}
+
 async def phase_b(b, base, cond):
     ctx, pg, cdp, ext, errs = await new_page(b, cond, seeded=True)
     la0 = os.getloadavg()[0]
-    await pg.goto(base); await pg.wait_for_selector('.lb-home', timeout=TIMEOUT)
-    out = {'loadavgStart': round(la0, 2), 'firstClickToRollMs': await start_game(pg, 'w1')}
+    await pg.goto(base); await wait_vis(pg, '.lb-home')
+    out = {'loadavgStart': round(la0, 2), 'firstClickToRollMs': await start_game_nh(pg, 'w1')}
     await pg.wait_for_timeout(2500)
     idle = await pg.evaluate(FPS, 4000); out['idleFps'] = idle['fps']
     await pg.wait_for_timeout(3000); out['framesQuiet5s'] = (await pg.evaluate(FPS, 5000))['framesDrawn']
+    # every DOM snapshot is taken in the same state: in a game, roll enabled, no card open (the re-entries: 2 s after their start).
+    # The first one used to be taken in the lobby, so PF-10b compared a lobby-home DOM with in-game DOMs (which keep the world view
+    # under the hidden lobby). Taken after the FPS samples (its forced GC must not disturb them), before the dice roll.
+    snap0 = await snap_of(pg, cdp, 'game1 (w1)')
     dice = await pg.evaluate("(ms) => { document.querySelector('#roll').click(); return (%s)(ms); }" % FPS, 3000); out['diceFps'] = dice['fps']
     await pg.wait_for_timeout(4000)
-    t0 = time.time(); await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', state='visible', timeout=TIMEOUT); out['homeToLobbyMs'] = round((time.time() - t0) * 1000)
+    t0 = time.time(); await home_nh(pg); out['homeToLobbyMs'] = round((time.time() - t0) * 1000)
     await pg.wait_for_timeout(1500); out['drawsLobbyOverGame'] = await pg.evaluate(DRAWS, 3000)
     out['resumeToRollMs'] = None
-    if await pg.locator('.lb-resume').count():
-        await pg.evaluate("window.__markReset('rollEnabled')"); t0 = time.time(); await pg.click('.lb-resume')
+    if await pg.evaluate("!!document.querySelector('.lb-resume')"):
+        await pg.evaluate("window.__markReset('rollEnabled')"); t0 = time.time(); await tap(pg, '.lb-resume')
         # back in the game = lobby gone and the game interactive (roll enabled, or the card left open by the dice roll above)
         await pg.wait_for_function("document.querySelector('#start').hidden && (!document.querySelector('#roll').disabled || !document.querySelector('#evm').hidden)", timeout=TIMEOUT)
         out['resumeToRollMs'] = round((time.time() - t0) * 1000)
-        await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', state='visible', timeout=TIMEOUT)
-    first = {'w1': {**(await metrics(cdp, gc=True)), 'gl': dict(await pg.evaluate('__m.gl'))}}
-    snaps = [{'step': 'game1 (w1)', **first['w1'], 'attached': await pg.evaluate("document.getElementsByTagName('*').length")}]
+        await home_nh(pg)
+    # GL baseline of w1 for PF-13: after the first game settled (as before), in the lobby
+    first = {'w1': {'gl': dict(await pg.evaluate('__m.gl'))}}
+    snaps = [snap0]
     switch = []; repeat = {}
     for i, w in enumerate(['w2', 'w1', 'w2', 'w1', 'w2']):
-        if i: await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', state='visible', timeout=TIMEOUT); await pg.wait_for_timeout(800)
-        ms = await start_game(pg, w, nth=(i + 1) % 3); switch.append(ms); await pg.wait_for_timeout(2000)
+        if i: await home_nh(pg); await pg.wait_for_timeout(800)
+        ms = await start_game_nh(pg, w, nth=(i + 1) % 3); switch.append(ms); await pg.wait_for_timeout(2000)
         m = await metrics(cdp, gc=True); gl = dict(await pg.evaluate('__m.gl'))
         snaps.append({'step': f're-entry {i + 1} ({w})', 'clickToRollMs': ms, **m, 'gl': gl, 'attached': await pg.evaluate("document.getElementsByTagName('*').length")})
         if w not in first: first[w] = {'gl': gl}
         else:
             for k in ('buf', 'vao', 'tex', 'prog'): repeat[k] = max(repeat.get(k, -10 ** 9), gl.get(k, 0) - first[w]['gl'].get(k, 0))
-    nodes = [s['nodes'] for s in snaps]; att = [s['attached'] for s in snaps]; lis = [s['listeners'] for s in snaps]
-    out.update({'snaps': snaps, 'nodesRange': max(nodes) - min(nodes), 'attachedRange': max(att) - min(att), 'listenersRange': max(lis) - min(lis),
-                'heapGrowthMB': round(snaps[-1]['heapMB'] - snaps[0]['heapMB'], 2), 'glRepeat': repeat,
+    # PF-10 / 10b / 11 / 12 are defined over the 5 re-entries (T7 §2: "max − min over 5 re-entries"): every one of them starts from the
+    # lobby with a paused game, like a player switching worlds. The first game (started from a lobby with no game behind it, before
+    # any dice roll / resume) is kept in snaps and reported apart (*All = all 6 snapshots, *FirstToRe1 = first game → re-entry 1).
+    re = snaps[1:]
+    rng = lambda xs, k: max(x[k] for x in xs) - min(x[k] for x in xs)
+    out.update({'snaps': snaps, 'nodesRange': rng(re, 'nodes'), 'attachedRange': rng(re, 'attached'), 'listenersRange': rng(re, 'listeners'),
+                'heapGrowthMB': round(re[-1]['heapMB'] - re[0]['heapMB'], 2),
+                'nodesRangeAll': rng(snaps, 'nodes'), 'attachedRangeAll': rng(snaps, 'attached'), 'heapGrowthAllMB': round(snaps[-1]['heapMB'] - snaps[0]['heapMB'], 2),
+                'nodesFirstToRe1': re[0]['nodes'] - snaps[0]['nodes'], 'attachedFirstToRe1': re[0]['attached'] - snaps[0]['attached'], 'glRepeat': repeat,
                 'worldSwitchToRollMs': statistics.median(switch), 'drawsHidden': None,
                 'loadavgEnd': round(os.getloadavg()[0], 2), 'externalResponses': ext[:10], 'pageErrors': errs[:5], 'noisy': la0 > LOAD_MAX})
     await ctx.close(); return out
@@ -222,7 +266,7 @@ def summarize(res):
     for k in ('bytesBeforeRollMB', 'bytesBeforeLobbyKB', 'requestsBeforeLobby', 'requestsBeforeRoll', 'glbViolations'): s['A'][k] = worst([r.get(k) for r in A])
     for k in ('lobbyUsableMs', 'navToRollMs', 'clickToRollMs'): s['T'][k] = med([r.get(k) for r in T])
     if res.get('B'):
-        B = res['B']; s['B'] = {k: B.get(k) for k in ('nodesRange', 'attachedRange', 'listenersRange', 'heapGrowthMB', 'drawsLobbyOverGame', 'drawsHidden', 'framesQuiet5s',
+        B = res['B']; s['B'] = {k: B.get(k) for k in ('nodesRange', 'attachedRange', 'listenersRange', 'heapGrowthMB', 'nodesRangeAll', 'attachedRangeAll', 'heapGrowthAllMB', 'nodesFirstToRe1', 'attachedFirstToRe1', 'drawsLobbyOverGame', 'drawsHidden', 'framesQuiet5s',
                                                       'homeToLobbyMs', 'resumeToRollMs', 'worldSwitchToRollMs', 'diceFps', 'idleFps')}
         s['B']['glRepeat'] = B.get('glRepeat') or {}
     runs = res['A'] + T + ([res['B']] if res.get('B') else [])
@@ -284,7 +328,8 @@ async def run_one(base, cond, label, twod=False, leak=False, runs=1, wait=600):
                 except Exception as e:  # noqa: BLE001 — record, never hide: the leak budgets then print N/A(missing)
                     res['B'] = None; res['leakError'] = repr(e)[:400]; log(f'  [{label} leak] ERROR {e!r}'[:300])
             if res['B']:
-                B = res['B']; log(f'  [{label} leak] nodesRange {B["nodesRange"]} attached {B["attachedRange"]} listeners {B["listenersRange"]} heap +{B["heapGrowthMB"]}MB glRepeat {B["glRepeat"]} drawsLobby {B["drawsLobbyOverGame"]}')
+                B = res['B']; log(f'  [{label} leak] nodesRange {B["nodesRange"]} attached {B["attachedRange"]} listeners {B["listenersRange"]} heap +{B["heapGrowthMB"]}MB glRepeat {B["glRepeat"]} drawsLobby {B["drawsLobbyOverGame"]}'
+                                  f' · all 6 snapshots: nodes {B.get("nodesRangeAll")} attached {B.get("attachedRangeAll")} heap +{B.get("heapGrowthAllMB")}MB · first game → re-entry 1: nodes {B.get("nodesFirstToRe1"):+} attached {B.get("attachedFirstToRe1"):+}')
             await b.close()
     res['summary'] = summarize(res)
     return res
