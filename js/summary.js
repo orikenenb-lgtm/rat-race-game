@@ -7,7 +7,8 @@
 //   2. HTML builders (strings): the money graph (inline SVG from integers) + its accessible table, the top block (#endTop) and the
 //      collapsed "more" sections. lobby.js / main.js / ui.js put them on screen and wire them with wireSummary(root).
 // Every sentence is a §14 string filled with engine numbers; the UI formats (fmtM) and orders, it computes no finance.
-import { fmtM, sgn, starThresholds } from './engine.js';
+import * as E from './engine.js';
+const { fmtM, sgn, starThresholds } = E;
 
 /* ============================================================ small helpers (no ui.js: it touches the DOM at import) */
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,7 +48,7 @@ const isTl = (t) => !!(t && Array.isArray(t.m) && Array.isArray(t.nw));
 /** The game's timeline: the engine's st.tl (exact, every payday) or the UI fallback S.ui.tl. null when neither exists. */
 export function tlOf(st) { if (!st) return null; if (isTl(st.tl)) return st.tl; if (st.ui && isTl(st.ui.tl)) return st.ui.tl; return null; }
 /** rows as arrays [m, nw, liq, debt, pas, exp, pg, hap, en] */
-export function tlRows(tl) { if (!isTl(tl)) return []; return tl.m.map((_, i) => TL_COLS.map((c) => int(tl[c][i]))); }
+export function tlRows(tl) { if (!isTl(tl)) return []; return tl.m.map((_, i) => TL_COLS.map((c) => int((tl[c] || [])[i]))); }   // a cached (shrunk) timeline may lack columns
 /** a copy holding only the rows with m ≤ month (R3: nothing after the player's month) */
 export function tlUpTo(tl, month) {
   if (!isTl(tl)) return null;
@@ -59,13 +60,8 @@ export function tlFromRows(rows, from) { const t = tlNew(from ?? (rows[0] ? rows
 const cushionOf = (liq, exp) => (exp > 0 ? (liq * 100) / exp : 99);
 
 /* ============================================================ the five dimensions (§5.1, §14.5) */
-export const DIMS = [
-  { id: 'speed', icon: '⏱️', title: 'מהירות', order: 'מסודר לפי: מי יצא קודם, ואחר כך מי התקדם יותר' },
-  { id: 'resilience', icon: '🛡️', title: 'חוסן', order: 'מסודר לפי: פחות הלוואות כפויות, ואחר כך כרית נמוכה פחות' },
-  { id: 'decisions', icon: '🧠', title: 'החלטות', order: 'מסודר לפי: חלק ההחלטות החלשות (פחות זה טוב)' },
-  { id: 'happiness', icon: '😊', title: 'אושר', order: 'מסודר לפי: אושר ממוצע' },
-  { id: 'business', icon: '🏪', title: 'עסק', order: 'מסודר לפי: חלק החודשים הרווחיים' },
-];
+/** the five dimensions in their fixed order; titles / icons / order texts are the engine's (E.DIM_META, js/systems/recap.js) */
+export const DIMS = ['speed', 'resilience', 'decisions', 'happiness', 'business'].map((id) => { const d = (E.DIM_META || {})[id] || {}; return { id, icon: d.icon || '', title: d.title || id, order: d.orderText || '' }; });
 const oneDec = (x) => (Math.round(x * 10) / 10).toFixed(1).replace(/\.0$/, '');
 /** Fallback dims while the engine has no result.recap (T6 ENGINE part pending): facts read from checkEnd()/metrics() output and the
  *  timeline only; headlines are the §14.5 templates. {end, m (metrics at the end), tl, worldId, charId}. */
@@ -149,15 +145,11 @@ export function placeOf(id, me, ghosts) {
   return { r, of, tie, best };
 }
 
-/* ============================================================ personas (display only; the engine owns them as E.RIVALS when T6 lands) */
-export const PERSONAS_FALLBACK = {
-  saver: { id: 'saver', icon: '🐢', name: 'רותם', label: 'חוסכת זהירה', g: 'f', rule: 'שומרת כרית של 6 חודשים. קונה רק נכס שמכניס כסף כל חודש, בלי הלוואה. בודקת כל עסקה עם סימן אזהרה. 20% מהעודף לקרן מדד.', strong: 'במשברים, במיתון ובריבית גבוהה', weak: 'כשהכלכלה צומחת והאשראי זול — היא יוצאת לאט' },
-  founder: { id: 'founder', icon: '🚀', name: 'עומר', label: 'יזם', g: 'm', rule: 'מעדיף עסקים. לוקח הלוואה כשהעסקה מכניסה יותר מהריבית. מנהל את העסק בעצמו.', strong: 'כשיש עסקים טובים על הלוח ובתקופת צמיחה', weak: 'בשחיקה, במיתון, וכשכל הכסף בעסק אחד' },
-  diversified: { id: 'diversified', icon: '🧺', name: 'מאיה', label: 'משקיעה מפוזרת', g: 'f', rule: '40% מהעודף לקרן מדד, נכס אחד מכל סוג, כרית של 3 חודשים.', strong: 'במשחקים ארוכים ובמחזורים מעורבים', weak: 'במרוץ קצר' },
-  gambler: { id: 'gambler', icon: '🎲', name: 'רועי', label: 'חובב סיכון', g: 'm', rule: "מינוף מקסימלי, קריפטו וצ'קים גדולים לסטארט־אפים. אף פעם לא בודק עסקה, ותמיד מנסה להוריד מחיר.", strong: 'כשיש מזל ובתקופת צמיחה', weak: 'כמעט בכל השאר — מורה טוב לכך שמזל הוא לא שיקול דעת' },
-};
+/* ============================================================ personas — the engine's table (E.RIVALS = js/systems/rivals.js ARCH) */
+export const PERSONAS = E.RIVALS || {};
+export const PERSONAS_FALLBACK = PERSONAS;   // old name, kept for callers (ui.js)
 export const ARCH_IDS = ['saver', 'founder', 'diversified', 'gambler'];
-export const escapedVerb = (p) => (p && p.g === 'f' ? 'יצאה' : 'יצא');
+export const escapedVerb = (p) => (p && p.escaped) || (p && p.g === 'f' ? 'יצאה' : 'יצא');
 
 /* ============================================================ copy (§14) */
 export const T6 = {
@@ -249,7 +241,7 @@ export function graphBlock(tl, opts = {}) {
   const notes = (opts.notes || []).slice(0, 3);
   const lg = series === 'happy' ? [['hap', T6.lg.hap], ['en', T6.lg.en]] : [['nw', T6.lg.nw], ['liq', T6.lg.liq], ['low', T6.lg.low], ...((opts.recessions || []).length ? [['rec', T6.lg.rec]] : [])];
   if (opts.compareTl) lg.push(['cmp', opts.compareLabel || T6.lg.orig]);
-  const tabs = `<div class="t6-tabs" role="tablist"><button type="button" role="tab" aria-selected="${series === 'money'}" data-t6="tab" data-s="money">${esc(T6.tabMoney)}</button><button type="button" role="tab" aria-selected="${series === 'happy'}" data-t6="tab" data-s="happy">${esc(T6.tabHappy)}</button>
+  const tabs = `<div class="t6-tabs" role="group" aria-label="מה להציג בגרף"><button type="button" aria-pressed="${series === 'money'}" data-t6="tab" data-s="money">${esc(T6.tabMoney)}</button><button type="button" aria-pressed="${series === 'happy'}" data-t6="tab" data-s="happy">${esc(T6.tabHappy)}</button>
     <button type="button" class="t6-tog" data-t6="table" aria-pressed="${table}">${esc(table ? T6.asGraph : T6.asTable)}</button></div>`;
   const body = table ? graphTable(tl, { all: opts.all }) : graphSvg(tl, { ...opts, series, alt }) + `<p class="t6-legend" aria-hidden="true">${lg.map(([k, t]) => `<span><i class="lg-${k}"></i>${esc(t)}</span>`).join('')}</p>`
     + (notes.length && series === 'money' ? `<ol class="t6-notes">${notes.map((n) => `<li>${bdi('חודש ' + n.m)} ${isoT(n.text)}</li>`).join('')}</ol>` : '');
@@ -276,8 +268,8 @@ export function wireSummary(root, get) {
 
 /* ============================================================ the end summary (§6.3 top block, §6.4 more sections) */
 /** ghost entries for the comparison: [{id, p (persona), dims, end, atMonth}] from {arch: end} */
-export function ghostList(ghosts, personas = PERSONAS_FALLBACK) {
-  return ARCH_IDS.map((id) => { const end = ghosts && ghosts[id]; const p = personas[id] || PERSONAS_FALLBACK[id]; return end && !end.error ? { id, p, end, dims: end.recap && end.recap.dims } : { id, p, end: null, dims: null }; });
+export function ghostList(ghosts, personas = PERSONAS) {
+  return ARCH_IDS.map((id) => { const end = ghosts && ghosts[id]; const p = personas[id] || PERSONAS[id] || { icon: '', name: id, label: '', rule: '', strong: '', weak: '' }; return end && !end.error ? { id, p, end, dims: end.recap && end.recap.dims } : { id, p, end: null, dims: null }; });
 }
 /** the one comparison line under a dimension (§5.2) */
 export function compareLine(id, me, gl) {
@@ -303,7 +295,7 @@ export function renderTop(e, ctx = {}) {
   const dims = (end.recap && end.recap.dims) || t6.dims || null;
   const out = [];
   if (tl && tlRows(tl).length) {
-    const notes = (end.recap && end.recap.graph && end.recap.graph.notes) || [];
+    const notes = ((end.recap && end.recap.graph && end.recap.graph.notes) || []).slice();
     if (end.afterWin && !notes.some((n) => n.kind === 'win')) notes.unshift({ m: end.afterWin.winMonths, kind: 'win', text: T6.winPin });
     out.push(graphBlock(tl, { id: ctx.graphId || 'end', alt: altOf(tl, end), recessions: recessionsOf(end), lowCushion: end.recap && end.recap.graph ? end.recap.graph.lowCushion : null, notes, compareTl: ctx.branchTl || null, compareLabel: T6.lg.orig }));
   }

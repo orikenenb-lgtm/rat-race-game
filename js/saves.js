@@ -129,7 +129,17 @@ function evictionList({ keep = null, protectSlotFuture = null, withQuarantine = 
   if (withFuture) out.push(...fut.map((x) => ({ kind: 'bak', ...x })));
   return out;
 }
-function evictOne(c) { return c.kind === 'quar' ? del(c.key) : dropItem(c.bk, c.item); }
+function evictOne(c) { return c.kind === 'quar' || c.kind === 'key' ? del(c.key) : dropItem(c.bk, c.item); }
+/** T6 review M3 — re-computable / practice data goes BEFORE any T1 backup: the ghost cache (rr2-ghosts), then other worlds' practice
+ *  branches (rr2-save-branch-<w>, oldest first; never `except`). */
+const BRANCH = 'rr2-save-branch-';
+function softList(except) {
+  const out = [];
+  if (get('rr2-ghosts') != null) out.push({ kind: 'key', key: 'rr2-ghosts' });
+  const savedAt = (k) => { try { return +JSON.parse(get(k)).savedAt || 0; } catch (e) { return 0; } };
+  out.push(...keys().filter((k) => k.startsWith(BRANCH) && k !== except).map((k) => ({ kind: 'key', key: k, at: savedAt(k) })).sort((a, b) => a.at - b.at));
+  return out;
+}
 /** Enforce the voluntary caps (items and bytes); never evicts `keep`. These are soft limits: they only drop ordinary
  *  backups, never 'future' backups or quarantined data — those go only under real quota pressure (write/backup paths). */
 function enforceCaps(keep) {
@@ -161,7 +171,8 @@ export function backup(key, raw, reason) {
   try { put(bk, val); }
   catch (e) {
     if (!isQuotaError(e)) return false;
-    // make room from OTHER slots' backups (never this slot's future item), retry once
+    // make room: the ghost cache / other practice branches first (T6 M3), then OTHER slots' backups (never this slot's future item)
+    for (const c of softList(key)) { evictOne(c); try { put(bk, val); enforceCaps(item); return true; } catch (e3) { if (!isQuotaError(e3)) return false; } }
     const list = evictionList({ keep: item, protectSlotFuture: key, withQuarantine: false }).filter((c) => c.bk !== bk);
     for (const c of list) evictOne(c);
     try { put(bk, val); } catch (e2) { return false; }
@@ -238,6 +249,12 @@ export function write(key, cfg, state) {
   try { put(key, val); return { ok: true }; }
   catch (e) {
     if (!isQuotaError(e)) return { ok: false, quota: false };
+    // T6 review M3: first the ghost cache, then other practice branches; a practice branch itself never evicts T1 backups
+    for (const c of softList(key)) {
+      evictOne(c);
+      try { put(key, val); return { ok: true, evicted: true }; } catch (e2) { if (!isQuotaError(e2)) return { ok: false, quota: false }; }
+    }
+    if (key.startsWith(BRANCH)) return { ok: false, quota: true };
     for (const c of evictionList({ withFuture: false })) {
       evictOne(c);
       try { put(key, val); return { ok: true, evicted: true }; } catch (e2) { if (!isQuotaError(e2)) return { ok: false, quota: false }; }

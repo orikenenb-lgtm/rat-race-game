@@ -8,7 +8,11 @@ import { bus } from './bus.js';
 import { flag } from './flags.js';
 import { ARCH_IDS, PERSONAS_FALLBACK } from './summary.js';
 
-export const CACHE_KEY = 'rr2-ghosts', CACHE_MAX = 8;
+export const CACHE_KEY = 'rr2-ghosts', CACHE_MAX = 8, CACHE_BYTES = 80 * 1024, TAIL_MONTHS = 12;
+// the policy version (ARCH_API + ARCH_V) is part of the cache key (review m1): loaded once on the main thread (a pure module)
+let POLTAG = null;
+const polP = import('./ghost-worker.js').then((m) => m.loadPolicies().then((p) => { POLTAG = m.polTag(p); return p; })).catch(() => { POLTAG = 'none'; return null; });
+export const policiesReady = () => polP;
 const PROTO_V = 1;
 let G = null;                // the current game's ghost state
 let worker = null, workerBroken = false;
@@ -26,17 +30,40 @@ export function baseKey(st) {
 /** may ghosts run for this game? (flag rivals; not in history mode — real market data is lazy and the comparison is the benchmark) */
 export function enabledFor(st) { return !!(st && flag('rivals') && st.mode !== 'history' && st.worldId !== 'h'); }
 
-/* ---------------------------------------------------------------- cache (finished ghost games only) */
-export function cacheRead(key) {
-  try { const all = JSON.parse(ls()?.getItem(CACHE_KEY) || '[]'); const e = Array.isArray(all) ? all.find((x) => x && x.key === key) : null; return e && e.ghosts ? e : null; } catch (e) { return null; }
-}
-export function cacheWrite(key, ghosts) {
+/* ---------------------------------------------------------------- cache (finished ghost games only; review M3: LRU ≤ 8 entries AND ≤ 80 KB) */
+let lastAt = 0; const stamp = () => (lastAt = Math.max(Date.now(), lastAt + 1));   // strictly increasing LRU stamps
+const readAll = () => { try { const a = JSON.parse(ls()?.getItem(CACHE_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => x && typeof x.key === 'string' && x.ghosts) : []; } catch (e) { return []; } };
+function writeAll(all) {
   const s = ls(); if (!s) return false;
-  let all = []; try { all = JSON.parse(s.getItem(CACHE_KEY) || '[]'); if (!Array.isArray(all)) all = []; } catch (e) { all = []; }
-  all = all.filter((x) => x && x.key !== key); all.unshift({ key, at: Date.now(), ghosts }); all = all.slice(0, CACHE_MAX);
-  for (let n = all.length; n > 0; n--) { try { s.setItem(CACHE_KEY, JSON.stringify(all.slice(0, n))); return true; } catch (e) { /* quota: drop the oldest */ } }
+  all = all.slice().sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, CACHE_MAX);
+  let raw = JSON.stringify(all);
+  while (all.length > 1 && raw.length > CACHE_BYTES) { all = all.slice(0, -1); raw = JSON.stringify(all); }   // least recently used out first
+  if (raw.length > CACHE_BYTES) return false;
+  for (let n = all.length; n > 0; n--) { try { s.setItem(CACHE_KEY, n === all.length ? raw : JSON.stringify(all.slice(0, n))); return true; } catch (e) { /* quota: drop the LRU entry */ } }
   return false;
 }
+/** an entry, and it becomes the most recently used one */
+export function cacheRead(key) {
+  const all = readAll(); const e = all.find((x) => x.key === key); if (!e) return null;
+  e.at = stamp(); writeAll(all);
+  return e;
+}
+/** keep only what the summary and a later replay of the seed show: dims, status, the timeline columns of the rivals panel / table up to
+ *  the player's end + 12 months, the last 12 marks */
+const KEEP = ['m', 'nw', 'liq', 'pas', 'pg', 'hap'];
+export function shrinkEnd(end, upTo = Infinity) {
+  if (!end || end.error) return end;
+  const tl = end.tl || null; let t2 = null;
+  if (tl && Array.isArray(tl.m)) { const keep = tl.m.map((m) => m <= upTo); t2 = { v: 1, step: tl.step || 1, from: tl.from || 1 }; for (const c of KEEP) t2[c] = (tl[c] || []).filter((_, i) => keep[i]); }
+  return { status: end.status, months: end.months, reason: end.reason || null, stars: end.stars || 0, recap: { dims: end.recap && end.recap.dims }, tl: t2, marks: (end.marks || []).filter((k) => k[0] <= upTo).slice(-12) };
+}
+export function cacheWrite(key, ghosts, upTo = Infinity) {
+  const small = {}; for (const [a, e] of Object.entries(ghosts || {})) small[a] = shrinkEnd(e, upTo);
+  const all = readAll().filter((x) => x.key !== key); all.unshift({ key, at: stamp(), ghosts: small });
+  return writeAll(all);
+}
+/** under storage pressure (js/saves.js evicts this first): drop the cache */
+export function cacheClear() { try { ls()?.removeItem(CACHE_KEY); return true; } catch (e) { return false; } }
 
 /* ---------------------------------------------------------------- worker */
 function ensureWorker() {
@@ -62,17 +89,13 @@ export function start(st) {
   stop();
   G = fresh(st);
   for (const a of ARCH_IDS) { G.rows[a] = []; G.marks[a] = []; }
-  const hit = scanCache(k);
-  if (hit) { G.ends = hit.ghosts; G.cacheKey = hit.key; G.state = 'cached'; G.mode = 'cache'; bus.emit('ghosts:state', { state: G.state }); return G; }
+  const hit = POLTAG && POLTAG !== 'none' ? cacheRead(k + '|' + POLTAG) : null;   // exact key: a policy bump recomputes (m1)
+  if (hit) { G.ends = hit.ghosts; G.cacheKey = hit.key; G.state = 'cached'; G.mode = 'cache'; bus.emit('ghosts:state', { state: G.state }); advance(st); return G; }
   if (ensureWorker()) { G.mode = 'worker'; postW({ t: 'init', v: PROTO_V, key: G.key, cfg: G.cfg, archs: ARCH_IDS }); }
   else { G.mode = 'none'; G.state = 'noworker'; }
   bus.emit('ghosts:state', { state: G.state });
   advance(st);
   return G;
-}
-/** any cached entry for this base key (whatever ARCH_V it carries) — the newest wins */
-function scanCache(base) {
-  try { const all = JSON.parse(ls()?.getItem(CACHE_KEY) || '[]'); return (Array.isArray(all) ? all : []).find((x) => x && typeof x.key === 'string' && (x.key === base || x.key.startsWith(base + '|'))) || null; } catch (e) { return null; }
 }
 /** after every player payday: upTo = S.month (monotonic) */
 export function advance(st) {
@@ -99,7 +122,7 @@ function onMsg(m) {
     if (!G || !m || m.key !== G.key) return;
     audit.msgs++;
     if (m.t === 'ready') {
-      G.polOk = !!m.pol; G.cacheKey = G.key + '|' + (m.archV ?? 0);
+      G.polOk = !!m.pol; G.cacheKey = G.key + '|' + (m.tag || 'none');
       if (!m.pol) { G.state = 'unavailable'; bus.emit('ghosts:state', { state: G.state }); }
       return;
     }
@@ -130,7 +153,7 @@ function maybeDone() {
   const left = ARCH_IDS.filter((a) => !G.ends[a] && !G.errors[a]);
   if (left.length) return;
   const ok = ARCH_IDS.filter((a) => G.ends[a]);
-  if (ok.length && G.cacheKey && ok.length === ARCH_IDS.length) cacheWrite(G.cacheKey, G.ends);
+  if (ok.length && G.cacheKey && ok.length === ARCH_IDS.length && !/\|none$/.test(G.cacheKey)) cacheWrite(G.cacheKey, G.ends, G.endMonth + TAIL_MONTHS);
   G.state = ok.length ? 'done' : 'unavailable';
   bus.emit('ghosts:done', { key: G.key, ends: { ...G.ends } });
 }
@@ -145,7 +168,7 @@ async function startIdle() {
   if (!pol) pol = await mod.loadPolicies();
   if (my.stop || G !== g0) return;
   if (!pol) { g0.state = 'unavailable'; bus.emit('ghosts:state', { state: g0.state }); return; }
-  g0.cacheKey = g0.key + '|' + (pol.v ?? 0);
+  g0.cacheKey = g0.key + '|' + mod.polTag(pol);
   const set = new mod.GhostSet({ key: g0.key, cfg: g0.cfg, pol, post: onMsg });
   set.finish(g0.cap);
   const ric = globalThis.requestIdleCallback || ((f) => setTimeout(() => f({ timeRemaining: () => 25, didTimeout: false }), 16));
@@ -166,11 +189,11 @@ async function startIdle() {
  */
 export function view(month) {
   if (!G) return { state: 'off', ghosts: {} };
-  const out = {}; const mo = month | 0;
+  const out = {}; const mo = G.over ? month | 0 : Math.min(month | 0, G.upTo);   // m7: never past the player's month while playing
   for (const a of ARCH_IDS) {
     let rows = G.rows[a] || [], marks = G.marks[a] || [], esc = G.escaped[a] || null;
     const end = G.ends[a];
-    if (end && end.tl && G.mode === 'cache') { rows = end.tl.m.map((m, i) => [m, end.tl.nw[i], end.tl.liq[i], end.tl.debt[i], end.tl.pas[i], end.tl.exp[i], end.tl.pg[i], end.tl.hap[i], end.tl.en[i]]); marks = end.marks || []; esc = end.status && end.status !== 'capped' ? { m: end.months, status: end.status } : null; }
+    if (end && end.tl && G.mode === 'cache') { const t = end.tl; const c = (k, i) => ((t[k] || [])[i] ?? 0); rows = t.m.map((m, i) => [m, c('nw', i), c('liq', i), c('debt', i), c('pas', i), c('exp', i), c('pg', i), c('hap', i), c('en', i)]); marks = end.marks || []; esc = end.status && end.status !== 'capped' ? { m: end.months, status: end.status } : null; }
     out[a] = { rows: rows.filter((r) => r[0] <= mo), marks: marks.filter((k) => k[0] < mo), escaped: esc && esc.m <= mo ? esc : null, error: G.errors[a] || null };
   }
   const state = G.state === 'cached' ? 'live' : G.state;
@@ -178,7 +201,7 @@ export function view(month) {
 }
 /** finished ghost results, only once the player's game is over */
 export function ends() { return G && G.over ? { ...G.ends } : null; }
-export function status() { return G ? { state: G.state, mode: G.mode, over: G.over, key: G.key, upTo: G.upTo, errors: { ...G.errors } } : { state: 'off' }; }
+export function status() { return G ? { state: G.state, mode: G.mode, over: G.over, key: G.key, cacheKey: G.cacheKey, upTo: G.upTo, cap: G.cap, errors: { ...G.errors } } : { state: 'off' }; }
 export function audited() { const p = audit.perf.slice().sort((a, b) => a - b); return { ...audit, perf: undefined, n: p.length, p95: p.length ? p[Math.floor(0.95 * (p.length - 1))] : 0, max: p.length ? p[p.length - 1] : 0 }; }
 export { audited as audit, onMsg as _msg };   // _msg: Node tests feed protocol messages
 if (typeof window !== 'undefined') window.__rrGhosts = { view, status, audit: audited, ends };

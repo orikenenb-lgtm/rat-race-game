@@ -8,18 +8,16 @@
 // Information limit (R3, §2.2) is enforced HERE as well as in ghosts.view(): while no 'finish' was received, a 'rows' message never
 // carries a row with m > upTo nor a mark with m ≥ upTo. The main thread never receives a ghost state.
 //
-// Policies: the archetypes are owned by the engine lane. They are loaded by feature detection from (in order) ./systems/archetypes.js
-// and ./rivals/policies.js (export ARCHETYPES = {saver, founder, diversified, gambler}, ARCH_V). Two contracts are accepted:
-//   ARCH_API === 2 (spec §2.3): decide(pv, ctx) → {id, params} | [id, params]; between(pv, ctx) → [action…] (applied here)
-//   otherwise (tools/sim.mjs shape): decide(st, ev, ctx) → [id, params]; between(st, ctx) applies its own actions.
-// No policy module → every ghost reports {t:'error', code:'no_policies'} and the UI hides the rivals (never invents a persona's play).
+// Policies: the engine lane's js/systems/archetypes.js (ARCHETYPES, ARCH_V, ARCH_API). Only ARCH_API === 2 is accepted (review m2): a policy
+// gets E.publicView(st) and nothing else — decide(pv, ctx) → {id, params}; between(pv, ctx) → [action…], applied here; quizzes are
+// answered by this driver with the archetype's quizSkill. Anything else → every ghost reports {t:'error', code:'no_policies'} and the UI
+// hides the rivals (it never invents a persona's play). Results come from the engine: E.endNow(st) for ghosts stopped at the cap (M6).
 import * as E from './engine.js';
 import { tlNew, tlPush, tlRowOf, tlRows, tlOf, dimsOf, TL_COLS } from './summary.js';
 
 export const PROTO_V = 1;
 export const ARCHS = ['saver', 'founder', 'diversified', 'gambler'];
 const ARCH_SALT = { saver: 0x51A7E001, founder: 0x51A7E002, diversified: 0x51A7E003, gambler: 0x51A7E004 };
-const QUIZ_SKILL = { cautious: 0.8, smart: 0.95, reckless: 0.4, tapper: 0.5 };
 const STEP_GUARD = 400;   // rolls per ghost-month (a stuck policy is an error, never a hang)
 
 /** mulberry32 on a mixed seed — the archetype's own tie-break PRNG; never touches st.rng */
@@ -28,14 +26,17 @@ export function ghostCfg(cfg, arch) { return { ...cfg, mentor: 'hint', learn: fa
 
 let POL = null;
 /** Load the archetype module once (feature detection). → {mod, api} | null */
-export async function loadPolicies(urls = ['./systems/archetypes.js', './rivals/policies.js']) {
+export async function loadPolicies(urls = ['./systems/archetypes.js']) {
   if (POL) return POL;
   for (const u of urls) {
-    try { const mod = await import(u); if (mod && mod.ARCHETYPES) { POL = { mod, api: mod.ARCH_API === 2 ? 2 : 1, v: mod.ARCH_V ?? 0 }; return POL; } } catch (e) { /* not there yet */ }
+    try { const mod = await import(u); if (setPolicies(mod)) return POL; } catch (e) { /* not there yet */ }
   }
   return null;
 }
-export function setPolicies(mod) { POL = mod ? { mod, api: mod.ARCH_API === 2 ? 2 : 1, v: mod.ARCH_V ?? 0 } : null; return POL; }
+/** accept a policy module only with the public-view contract (ARCH_API 2) */
+export function setPolicies(mod) { POL = mod && mod.ARCHETYPES && mod.ARCH_API === 2 ? { mod, api: 2, v: mod.ARCH_V ?? 0 } : null; return POL; }
+/** the cache key suffix of a policy module: contract + behaviour version (review m1) */
+export const polTag = (p) => (p ? `a${p.api}.${p.v}` : 'none');
 
 function applyAction(st, a) {
   if (!Array.isArray(a) || st.over) return;
@@ -74,15 +75,15 @@ class Ghost {
       if (ev.auto) choice = [ev.options[0].id];
       else if (ev.type === 'mystery' && ev.data && ev.data.kind === 'quiz') {   // quizzes are answered by the driver (archetype quizSkill)
         const c = (E.getWorld(st.worldId).mystery || []).find((x) => x.kind === 'quiz' && x.text === ev.data.question);
-        const sk = this.P.quizSkill ?? QUIZ_SKILL[this.P.quiz] ?? 0.7;
+        const sk = this.P.quizSkill ?? 0.7;
         choice = c ? [this.rnd() < sk ? 'a' + c.correct : 'a' + ((c.correct + 1) % c.answers.length)] : [ev.options.find((o) => o.enabled).id];
-      } else if (n >= 6) choice = [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled)).id];
-      else if (this.pol.api === 2) {
+      } else if (n >= 3) choice = [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled)).id];
+      else {
         const pv = E.publicView(st, { freeze: false, event: ev });
         const r = this.P.decide(pv, { rnd: this.rnd, n, tables: { dd: E.DD, cycle: E.CY, focus: E.FC, rivals: E.RIVALS } });
         choice = !r ? [] : Array.isArray(r) ? r : [r.id, r.params];
         if (!choice[0]) choice = [(ev.options.find((o) => o.enabled && ['ok', 'done', 'pass', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id];
-      } else choice = this.P.decide(st, ev, { r: this.rnd, n });
+      }
       let res = E.choose(st, ev, choice[0], choice[1] || {});
       if (!res.ok) { const f = ev.options.find((o) => o.enabled && ['done', 'pass', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled); res = E.choose(st, ev, f.id, f.needsQty ? { qty: 1 } : {}); }
       n++; ev = res.event;
@@ -91,8 +92,8 @@ class Ghost {
   }
   between() {
     const st = this.st;
-    if (this.pol.api === 2) { const acts = this.P.between(E.publicView(st, { freeze: false }), { rnd: this.rnd, n: 0, tables: { dd: E.DD, cycle: E.CY, focus: E.FC, rivals: E.RIVALS } }) || []; for (const a of acts) applyAction(st, a); }
-    else if (this.P.between) this.P.between(st, { r: this.rnd });
+    const acts = (this.P.between && this.P.between(E.publicView(st, { freeze: false }), { rnd: this.rnd, n: 0, tables: { dd: E.DD, cycle: E.CY, focus: E.FC, rivals: E.RIVALS } })) || [];
+    for (const a of acts) applyAction(st, a);
   }
   /** play until the month moves on (or the game ends / the cap) */
   stepMonth(cap = Infinity) {
@@ -109,7 +110,8 @@ class Ghost {
   /** the result: engine checkEnd() when the game ended, else a 'capped' summary from engine output only */
   result(extraDims = {}) {
     const st = this.st; const tl = this.tl(); const m = E.metrics(st);
-    let end = st.result || E.checkEnd(st);
+    // M6: the engine's own result for a ghost stopped at the cap (E.endNow) — the same recap dims as every finished player
+    let end = st.result || (typeof E.endNow === 'function' ? E.endNow(st) : E.checkEnd(st));
     if (!end) { const s = E.summaryForServer(st); end = { status: 'capped', reason: 'cap', months: st.month, stars: 0, progress: s.progress, stats: s.stats, learning: s.learning, happiness: s.life.happiness }; }
     const dims = dimsOf(end, { m, tl, worldId: st.worldId, charId: st.charId, ...extraDims });
     return { status: end.status, months: end.months, reason: end.reason || null, stars: end.stars || 0, tl: copyTl(tl), marks: this.marks().slice(), recap: { dims } };
@@ -177,7 +179,7 @@ if (isWorker) {
         const pol = await loadPolicies();
         for (const k of sets.keys()) if (k !== m.key) sets.delete(k);     // one game at a time
         sets.set(m.key, new GhostSet({ key: m.key, cfg: m.cfg, archs: m.archs || ARCHS, pol, post }));
-        post({ t: 'ready', key: m.key, pol: !!pol, archV: pol ? pol.v : null });
+        post({ t: 'ready', key: m.key, pol: !!pol, archV: pol ? pol.v : null, tag: polTag(pol) });
       } else if (m.t === 'advance') { const s = sets.get(m.key); if (s) { s.advance(m.upTo); kick(); } }
       else if (m.t === 'finish') { const s = sets.get(m.key); if (s) { s.finish(m.cap); kick(); } }
       else if (m.t === 'drop') sets.delete(m.key);
