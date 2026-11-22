@@ -138,12 +138,9 @@ function branchNotice() {
   const gone = typeof saves.takeRemovedBranches === 'function' ? saves.takeRemovedBranches() : [];
   for (const w of gone) { let name = w; try { name = E.getWorld(w).name || w; } catch (e) { /* unknown world id */ } toastWhenIdle(SS.S13.replace('{w}', name), { kind: 'bad', ms: 8000 }); }
 }
-/** ui.js keeps only the newest 4 queued toasts: hand an important one over when the toast pill has been idle twice in a row */
-function toastWhenIdle(text, opts, tries = 0) {
-  const idle = () => { const t = $('#toast'); return !t || !t.className.includes('on'); };
-  if (tries >= 60 || (idle() && tries > 0)) { ui.toast(text, opts); return; }
-  setTimeout(() => (idle() ? setTimeout(() => (idle() ? ui.toast(text, opts) : toastWhenIdle(text, opts, tries + 1)), 350) : toastWhenIdle(text, opts, tries + 1)), 500);
-}
+/** an important warning: ui.js never drops 'bad' toasts, and `urgent` puts it at the front of the queue (it used to wait for an
+ *  idle pill, which could take a minute behind a burst of lesson toasts — stability S10) */
+function toastWhenIdle(text, opts) { ui.toast(text, { ...opts, urgent: true }); }
 
 /* ============================================================ ranked server checkpoint (anti-replay) */
 // After every landing (the drawn card is then on the server) and every decision we push the whole state with a

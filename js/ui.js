@@ -86,7 +86,9 @@ export function toast(text, opts = {}) {
   // first — important feedback (opts.keep: level-down, milestones, dream missions, lessons; every 'bad' toast) is never dropped
   const it = { text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null, sub: opts.sub ? String(opts.sub) : '', keep: !!opts.keep || opts.kind === 'bad' };
   const last = tq[tq.length - 1]; if (last && last.text === it.text && last.sub === it.sub && !it.action) return;
-  tq.push(it);
+  // final-wave fix: an urgent warning (storage full, a removed practice branch) goes to the FRONT of the queue — it must not wait
+  // behind a burst of lesson / dream toasts (stability S10)
+  if (opts.urgent) tq.unshift(it); else tq.push(it);
   while (tq.length > 6) { const i = tq.findIndex((x) => !x.keep); if (i < 0) break; tq.splice(i, 1); }
   if (!tBusy) nextToast();
 }
