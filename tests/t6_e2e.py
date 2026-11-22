@@ -336,29 +336,100 @@ async def t_verdict(b, F):
 
 # ---------------------------------------------------------------- F. deal competition UI (engine data injected into a real deal card; the engine part is pending)
 async def t_deal(b, F):
+    """§12.1 with REAL engine data: a w1 state standing on a competed deal (found by the engine), resumed through the lobby; the interest
+    row / persona chips / per-step risk chips come from ev.data.rivals and o.rivalRisk; the lower offer loses (seed checked on a copy) →
+    the lost panel (no timed dismissal, no second sticky copy); 6 months later the reveal line stays until tapped / the next roll."""
     ctx, pg = await page(b, PHONE)
     await pg.goto(REAL + 'index.html'); await pg.wait_for_selector('.lb-home', timeout=120000)
-    r = await pg.evaluate("""async () => { const E = await import('/js/engine.js'); const u = await import('/js/ui.js');
-      const st = E.createGame({ worldId: 'w2', seed: 7, mode: 'free' }); let ev = null;
-      for (let i = 0; i < 200 && !ev; i++) { E.rollDice(st); let e = E.landing(st); let n = 0; while (e && n++ < 10) { if (e.type === 'deal' && e.data.dd && e.options.some((o) => o.kind === 'inspect')) { ev = e; break; } const o = e.options.find((x) => x.enabled && ['pass','ok','done','skip'].includes(x.id)) || e.options.find((x) => x.enabled); e = E.choose(st, e, o.id, o.needsQty ? { qty: 1 } : {}).event; } }
-      if (!ev) return { none: true };
-      ev = JSON.parse(JSON.stringify(ev));
-      ev.data.rivals = { n: 2, who: [{ id: 'founder', icon: '🚀', name: 'עומר', label: 'יזם' }, { id: 'diversified', icon: '🧺', name: 'מאיה', label: 'משקיעה מפוזרת' }], steps: 0, hazardNext: 0.35,
-        text: '👥 2 משקיעים מתעניינים: 🚀 עומר · 🧺 מאיה', note: 'קנייה עכשיו — העסקה שלך. כל בדיקה או הצעה נמוכה יותר נותנת להם הזדמנות לסגור לפניך.' };
-      for (const o of ev.options) if (o.kind === 'inspect' || /^offer:/.test(o.id)) o.rivalRisk = 0.35;
-      document.querySelector('#start').hidden = true;
-      u.openEvent(ev, { world: E.getWorld('w2'), st, cfg: {}, api: {} }, () => {});
-      await new Promise((r) => setTimeout(r, 300));
-      const c = document.querySelector('#evCard'); const chip = c.querySelector('.rvp[data-rv=founder]'); chip.click(); await new Promise((r) => setTimeout(r, 100));
-      const pop = c.querySelector('#rvPop'); const ins = c.querySelector('button[data-o="inspect:1"]'); const buy = c.querySelector('button[data-o^="buy"]');
-      return { row: !!c.querySelector('.rvrow'), chips: c.querySelectorAll('.rvp').length, pop: pop && !pop.hidden && pop.textContent.includes('מעדיף עסקים'), expanded: chip.getAttribute('aria-expanded'),
-        note: !!c.querySelector('.rvnote'), insName: ins ? ins.textContent : '', buyChip: buy ? !!buy.querySelector('.rvchip') : null, clock: /⏳/.test(c.textContent) }; }""")
-    if r.get('none'): check(False, 'deal UI: found a deal card with inspections'); await ctx.close(); return
-    check(r['row'] and r['chips'] == 2 and r['note'], f'§12.1 interest row with persona chips + explain line ({r})')
-    check(r['pop'] and r['expanded'] == 'true', 'tap a persona chip → its rule card (popover)')
-    check('35%' in r['insName'] and 'שיקדימו אותך' in r['insName'], 'delay chip on the inspect button, part of its accessible name')
-    check(r['buyChip'] is False and not r['clock'], 'no chip on buy buttons, no clock icon')
-    await shot(pg, 'deal_rivals_phone')
+    r = await pg.evaluate("""async () => { const E = await import('/js/engine.js');
+      for (let seed = 1; seed < 400; seed++) {
+        const st = E.createGame({ worldId: 'w1', seed, mode: 'free', mentor: 'hint' }); st.cash = 150000; const W = E.getWorld('w1');
+        st.pending = null; st.pos = W.board.indexOf('O'); st.phase = 'land';
+        const ev = E.landing(st); if (!ev || ev.type !== 'deal' || !ev.data.rivals || !(ev.data.rivals.n >= 1) || !ev.options.some((o) => o.kind === 'inspect')) continue;
+        const off = ev.options.filter((o) => /^offer:/.test(o.id) && o.enabled).pop(); if (!off) continue;
+        const tr = E.deserialize(E.serialize(st)); const rr = E.choose(tr, E.currentEvent(tr), off.id);
+        if (!(rr.rival && rr.rival.lost)) continue;
+        const cfg = { worldId: 'w1', charId: st.charId, seed, mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, bailout: true };
+        localStorage.setItem('rr2-save-free-w1', JSON.stringify({ v: 3, app: 'nl1', sv: E.SAVE_VERSION, cfg, state: JSON.parse(E.serialize({ ...st, ui: { seq: 0, coach: {}, firstPayday: true } })), savedAt: 1 }));
+        return { seed, offer: off.id, n: ev.data.rivals.n, text: ev.data.rivals.text, hz: ev.data.rivals.hazardNext, lostText: rr.rival.text }; }
+      return null; }""")
+    if not r: check(False, 'deal UI: the engine produced a competed deal whose lower offer loses (400 seeds)'); await ctx.close(); return
+    log('  real deal', r)
+    await to_world(pg); await pg.click('[data-act="continue-free"]:not([data-learn])'); await wait_ready(pg)
+    await pg.wait_for_selector('#evCard.ev-deal', timeout=60000); await pg.wait_for_timeout(500)
+    d = await pg.evaluate("""() => { const c = document.querySelector('#evCard'); const ins = c.querySelector('button[data-o="inspect:1"]'); const off = c.querySelector('button[data-o^="offer:"]'); const buy = c.querySelector('button[data-o^="buy"]');
+      return { row: (c.querySelector('.rvrow') || {}).textContent || '', chips: c.querySelectorAll('.rvp').length, note: !!c.querySelector('.rvnote'),
+        ins: ins ? ins.textContent : '', off: off ? off.textContent : '', buyChip: buy ? !!buy.querySelector('.rvchip') : null, clock: /⏳/.test(c.textContent) }; }""")
+    log('  card', d)
+    pct = f"{round(r['hz'] * 100)}%"
+    check('מתעניין' in d['row'] and d['chips'] == r['n'] and d['note'], f"§12.1 interest row from ev.data.rivals: {r['n']} persona chips + explain line")
+    check(pct in d['ins'] and 'שיקדימו אותך' in d['ins'] and pct in d['off'], f'o.rivalRisk ({pct}) on the inspect and offer buttons, part of their names')
+    check(d['buyChip'] is False and not d['clock'], 'no chip on buy, no clock icon')
+    await shot(pg, 'deal_live_phone')
+    await pg.click(f'#evCard button[data-o="{r["offer"]}"]')
+    await pg.wait_for_selector('#gm:not([hidden])', timeout=30000); await pg.wait_for_timeout(400)
+    lp = await pg.evaluate("() => ({ t: (document.querySelector('#gmTitle') || {}).textContent || '', b: (document.querySelector('#gm .acts button') || {}).textContent || '', sticky: !!document.querySelector('#t6news.on') })")
+    check(lp['t'] == r['lostText'] and lp['b'] == 'הבנתי' and not lp['sticky'], f'lost panel: out.rival.text, button "הבנתי", no duplicate sticky line ({lp})')
+    await shot(pg, 'deal_lost_phone')
+    await pg.wait_for_timeout(1500)
+    check(await pg.evaluate("() => !document.querySelector('#gm').hidden"), 'the lost panel is not dismissed by a timer')
+    await pg.click('#gm .acts button'); await pg.wait_for_timeout(500)
+    # 6 months later: move the reveal to this payday and stand one tile before payday → the next roll reveals it
+    await pg.evaluate("""async () => { const E = await import('/js/engine.js'); const G = await import('/js/game.js'); const k = 'rr2-save-free-w1';
+      const sv = JSON.parse(localStorage.getItem(k)); const st = sv.state; const W = E.getWorld('w1');
+      st.rivalDeals[0].revealAt = st.month; st.pos = (W.board.indexOf('P') - 1 + W.board.length) % W.board.length; st.pending = null; st.phase = 'roll';
+      localStorage.setItem(k, JSON.stringify(sv)); G.startGame({ ...sv.cfg, resume: true }); await new Promise((r) => setTimeout(r, 300)); }""")
+    await wait_ready(pg)
+    for i in range(20):
+        s = await st(pg)
+        if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
+        await step(pg)
+    await pg.click('#roll')
+    ok = False
+    for i in range(80):
+        ok = await pg.evaluate("() => !!document.querySelector('#t6news.on')")
+        if ok: break
+        await pg.wait_for_timeout(250)
+    txt = await pg.evaluate("() => (document.querySelector('#t6news') || {}).textContent || ''")
+    check(ok and len(txt) > 5, f'reveal news (real payday): a sticky line ({txt[:60]})')
+    await shot(pg, 'deal_reveal_phone')
+    await pg.wait_for_timeout(3000)
+    check(await pg.evaluate("() => !!document.querySelector('#t6news.on')"), 'the reveal line is not timed (still there after 3 s)')
+    await ctx.close()
+
+# ---------------------------------------------------------------- F2. continue after the win (W) and retire (X) with the engine's real functions
+async def t_afterwin(b, F):
+    if not F['nearEnd']: check(False, 'fixture: a near-end learn game'); return
+    ctx, pg = await page(b, PHONE, saves=[(F['nearEnd']['key'], F['nearEnd']['raw'])], flags={**FLAGS, 'afterwin': True})
+    await to_world(pg)
+    await pg.click('[data-act="continue-free"][data-learn="1"]'); await wait_ready(pg)
+    ended = await play_until(pg, lambda: pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')"), 500, 'to end')
+    check(ended, 'after-win: the learning game reached its win')
+    if not ended: await ctx.close(); return
+    await pg.wait_for_timeout(800)
+    n = await pg.locator('[data-act="t6-afterwin"]').count()
+    check(n >= 1, 'after-win: the "keep living" entry on the end screen (E.continueAfterWin exists, flag on)')
+    if not n: await ctx.close(); return
+    await pg.click('[data-act="t6-afterwin"]'); await wait_ready(pg); await pg.wait_for_timeout(800)
+    hud = await pg.evaluate("() => { const c = document.querySelector('#hLife [data-life=afterwin]'); return c ? c.textContent : null; }")
+    acts = json.loads(await ls(pg, F['nearEnd']['key']))['state']['actions']
+    check(hud and 'אחרי החופש' in hud and acts[-1][0] == 'W', f'W logged and the 🌴 chip shown ({hud}, last action {acts[-1]})')
+    await rolls(pg, 2)
+    for i in range(20):
+        s = await st(pg)
+        if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
+        await step(pg)
+    await shot(pg, 'afterwin_hud_phone')
+    await pg.click('#hLife [data-life=afterwin]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000)
+    await pg.click('#gm .acts button.primary')
+    ok = False
+    for i in range(160):
+        ok = await pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')")
+        if ok: break
+        await pg.wait_for_timeout(250)
+    acts = json.loads(await ls(pg, F['nearEnd']['key']) or '{"state":{"actions":[["?"]]}}')['state']['actions'] if await ls(pg, F['nearEnd']['key']) else [['cleared']]
+    check(ok, f'X: retiring ends the game on the after-win end screen (last action {acts[-1]})')
+    await shot(pg, 'afterwin_end_phone')
     await ctx.close()
 
 # ---------------------------------------------------------------- F3. AC-15 lobby after-win flow (free game) + AC-23 at 360 px
@@ -431,7 +502,7 @@ async def t_perf(b, F):
     check(a['n'] > 0 and a['p95'] <= 4, f"AC-19: ghost message handling p95 {a['p95']:.2f} ms ≤ 4 ms (4× throttled)")
     await ctx.close()
 
-TESTS = {'end': t_end, 'rewind': t_rewind, 'live': t_live, 'ranked': t_ranked, 'verdict': t_verdict, 'deal': t_deal, 'aw15': t_aw15, 'perf': t_perf}
+TESTS = {'end': t_end, 'rewind': t_rewind, 'live': t_live, 'ranked': t_ranked, 'verdict': t_verdict, 'deal': t_deal, 'afterwin': t_afterwin, 'aw15': t_aw15, 'perf': t_perf}
 async def main():
     FB.banner(MODE)
     stand_in_policies()

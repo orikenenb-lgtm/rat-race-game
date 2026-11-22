@@ -290,6 +290,8 @@ async def play_until_decision(pg, t0, shots, tag):
     while time.time() < deadline:
         if await pg.locator('[data-intro-opt="fix:pay"]:not([disabled])').count():
             return 'intro', await pg.evaluate('performance.now()')
+        if await pg.locator('[data-intro-opt="next"]:not([disabled])').count():   # §3 storyboard: beat 1 → "ממשיכים ←" → beat 2 (the first decision)
+            await pg.click('[data-intro-opt="next"]'); await pg.wait_for_timeout(200); continue
         if await pg.locator('#evm:not([hidden]) #evCard').count() and await pg.evaluate("!!(window.__t4trace||[]).find(x=>x.screen==='game')") is False:
             pass
         if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled && document.getElementById('start').hidden})()"):
@@ -317,12 +319,16 @@ async def t_first_minute(b, path):
         if kind == 'roll': pending(f'{path} {name}: measured to the enabled roll button — the intro card (E-3) is not in the engine yet')
         if path == 'f1' and name == 'phone':
             # storyboard: the roll coach (C-roll), then the first roll
+            if kind == 'intro':   # finish the intro card: a choice (beat 2) → result + next goal (beat 3) → the first roll
+                await pg.click('[data-intro-opt="fix:pay"]'); await pg.wait_for_selector('[data-intro-opt="go"]', timeout=20000)
+                await pg.wait_for_timeout(600); await pg.screenshot(path=SHOT + 't4_23a_f1_intro_result_phone.png')
+                await pg.click('[data-intro-opt="go"]')
             await pg.wait_for_timeout(1500); await pg.screenshot(path=SHOT + 't4_23_f1_4_roll_coach_phone.png')
             if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
             await pg.click('#roll'); await pg.wait_for_timeout(6000); await pg.screenshot(path=SHOT + 't4_24_f1_5_first_roll_phone.png')
             p = await ls(pg, 'rr2-progress'); e = await ls(pg, 'rr2-energy')
             turn = await pg.evaluate("import('./js/game.js').then(g=>g.activeConfig())")
-            check(p.get('tutorialDone') is True, 'tutorial game on screen → onboard:done → tutorialDone (engine without intro)')
+            check(p.get('tutorialDone') is True, 'onboard:done → tutorialDone (the intro card closed with "go", or the game is on screen for an engine without the intro)')
             check(turn.get('tutorialFree') is True and e is not None and e.get('e') == 7, f'D-9 the first-ever game: its roll cost no ⚡ (seeded 7 → {e and e.get("e")}; tutorialFree={turn.get("tutorialFree")})')
         await ctx.close()
 

@@ -28,6 +28,9 @@ async def run(b, name, vp, scheme):
     await pg.click('.map-card[data-id="w1"]'); await pg.wait_for_selector('.wv-chars'); await pg.wait_for_timeout(600)
     await pg.screenshot(path=f'{SHOT}real_{name}_world.png')
     await pg.click('.wv-char[data-c="driver"]'); await pg.wait_for_selector('#start', state='hidden', timeout=60000)
+    # a new player's first w1 game opens the engine's intro card (T4 E-3, rules 4): the roll stays disabled until it closes — skip it
+    await pg.wait_for_function("!document.querySelector('#roll').disabled || !!document.querySelector('[data-intro-opt=\"skip\"]')", timeout=60000)
+    if await pg.locator('[data-intro-opt="skip"]').count(): await pg.click('[data-intro-opt="skip"]')
     await pg.wait_for_function("!document.querySelector('#roll').disabled", timeout=60000)
     await pg.wait_for_timeout(1200)
     await pg.screenshot(path=f'{SHOT}real_{name}_game.png')
