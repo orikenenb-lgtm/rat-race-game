@@ -199,6 +199,8 @@ export function openLobby(v) {
   if (nv.k !== 'world') worldMode = nv.learn ? 'learn' : null;
   if (nv.k === 'end' && !endCtx) nv.k = 'home';
   if (pendingDuel && nv.k === 'home' && !duelShown) { duelShown = true; nv.k = 'duel'; }
+  // T4 verify D7: a player from before the welcome (progress, but no rr2-onboarded) is onboarded already — mark it, no welcome
+  if (!safe(() => localStorage.getItem(ONBK)) && (completedAny() || P.getProgress().onboarded)) safe(() => localStorage.setItem(ONBK, '1'));
   if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
   claimGifts();
   startEnergyTicker();

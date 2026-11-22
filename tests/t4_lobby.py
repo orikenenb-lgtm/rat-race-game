@@ -270,6 +270,16 @@ async def t_migrate(b):
     r = await ls(pg, 'rr2-reveal')
     check(r and r.get('all') is False, f'new player → rr2-reveal.all false ({r})')
     await ctx.close()
+    # T4 verify D7: a pre-welcome player (games played, no rr2-onboarded, progress.onboarded false) lands on home, not the welcome
+    for seed in ("{gamesPlayed:7, wins:2, tutorialDone:true, onboarded:false, stars:{w1:2}}", "{gamesPlayed:0, learnGames:2, onboarded:false}"):
+        ctx, pg = await page(b, onboarded=False, init=[f"if(!localStorage.getItem('rr2-progress'))localStorage.setItem('rr2-progress', JSON.stringify({seed}))"])
+        await pg.goto(LOBBY); await pg.wait_for_selector('.lb-home, .lb-welcome', timeout=40000); await pg.wait_for_timeout(400)
+        home = await pg.locator('.lb-home').count(); onb = await pg.evaluate("localStorage.getItem('rr2-onboarded')")
+        check(home == 1 and onb == '1', f'D7 old player {seed}: home (not the welcome), rr2-onboarded written ({home}, {onb!r})')
+        await ctx.close()
+    ctx, pg = await page(b, onboarded=False); await goto_lobby(pg, '.lb-welcome')
+    check(await pg.evaluate("localStorage.getItem('rr2-onboarded')") is None, 'D7 a brand-new player still gets the welcome')
+    await ctx.close()
 
 async def t_naming(b):
     ctx, pg = await page(b, init=[DREAMS, "localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,lastDaily:'2020-01-01',streak:4}))"])
