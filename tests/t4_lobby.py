@@ -465,7 +465,39 @@ async def t_hints(b):
     check(not log and (await ls(pg, 'rr2-reveal') or {}).get('all') is True, f'AC-T8 existing player: no coach / tip in {n} rolls ({[(k, c["small"], c["title"]) for k, c in log]})')
     await ctx.close()
 
-TOAST_OBS ="window.__toasts=[]; new MutationObserver(()=>{const e=document.querySelector('#toast'); if(e&&/\\bon\\b/.test(e.className)&&e.innerText) window.__toasts.push(e.innerText.replace(/\\n/g,' '))}).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})"
+PRACTICE_JS = """async () => {
+  const E = await import('./js/engine.js'), OB = await import('./js/onboard.js'), ui = await import('./js/ui.js');
+  if (typeof E.practiceDue !== 'function' || typeof ui.practiceChip !== 'function') return { skip: true };
+  document.getElementById('start').hidden = true;   // the board is "on screen" for onboard's alive() (no game is started)
+  const mk = () => { const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 7, mode: 'free' }); st.ui = { seq: 0, coach: {}, firstPayday: true }; st.lessons = ['gross_net', 'emergency_fund']; st.turn = 5; return st; };
+  const hooks = (S) => ({ S, CFG: { mode: 'free', worldId: 'w1' }, W: E.getWorld('w1'), my: 1, gen: () => 1, persist() {}, render() {}, isBusy: () => false });
+  const chip = () => !!document.getElementById('practiceChip');
+  const out = {};
+  const S1 = mk(); await OB.afterTurn(hooks(S1));
+  out.first = { chip: chip(), memo: JSON.parse(JSON.stringify(S1.ui.practice || null)) };
+  OB.hidePractice();
+  // "reload": the saved state comes back as a NEW object (JSON round trip of the slot, ui block included)
+  const S2 = JSON.parse(JSON.stringify(S1)); await OB.afterTurn(hooks(S2));
+  out.reload = { chip: chip() }; OB.hidePractice();
+  S2.turn += 3; await OB.afterTurn(hooks(S2));
+  out.later = { chip: chip(), memo: JSON.parse(JSON.stringify(S2.ui.practice || null)) }; OB.hidePractice();
+  document.getElementById('start').hidden = false;
+  return out;
+}"""
+async def t_practice(b):
+    """T4 verify D6 / AC-P2: the practice dose survives a reload — the memo is in the save (S.ui.practice), so a resumed game does not
+    offer again before 3 turns passed and never repeats an offered question."""
+    ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,tutorialDone:true}))", "localStorage.setItem('rr2-reveal', JSON.stringify({v:1,all:true,coached:[]}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    r = await pg.evaluate(PRACTICE_JS)
+    if r.get('skip'): pending('practice: engine practiceDue / ui.practiceChip missing'); await ctx.close(); return
+    f, rl, lt = r['first'], r['reload'], r['later']
+    check(f['chip'] and f['memo'] and f['memo']['lastTurn'] == 5 and len(f['memo']['offered']) == 1, f'D6 the offer is recorded in S.ui.practice ({f})')
+    check(not rl['chip'], f'D6 after a reload (a new state object at the same turn) no second offer: ≥ 3 turns apart holds per saved game ({rl})')
+    check(lt['chip'] and lt['memo']['lastTurn'] == 8 and len(lt['memo']['offered']) == 2 and len(set(lt['memo']['offered'])) == 2, f'D6 3 turns later the next question, never a repeat ({lt})')
+    await ctx.close()
+
+TOAST_OBS = "window.__toasts=[]; new MutationObserver(()=>{const e=document.querySelector('#toast'); if(e&&/\\bon\\b/.test(e.className)&&e.innerText) window.__toasts.push(e.innerText.replace(/\\n/g,' '))}).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})"
 async def t_dreamtut(b):
     """AC-D3 (T4 verify D3): in the tutorial game (F2 + dream 🗽 + developer) buying the tutorial coffee cart completes the dream's
     first mission — its "משימה הושלמה" toast is shown even though the buy emits a burst of other feedback (it is never dropped)."""
@@ -623,7 +655,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

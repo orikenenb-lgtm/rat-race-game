@@ -377,15 +377,27 @@ export function legend(h) {
 }
 
 /* ------------------------------------------------------------ §10 practice chip (needs E.practiceDue + ui.practiceChip) */
+// T4 verify D6: the dose memo (last offer turn, ids offered — answered or ignored) lives in S.ui.practice, so it travels with the save:
+// "≥ 3 turns apart / ≤ 6 per game / no repeat" hold per saved game, also after a reload or "להמשיך". doneA is per player (library).
 const practice = {
-  memo: { lastTurn: null, offered: [], doneA: [] }, S: null,
-  reset(h) { if (this.S !== h.S) { this.S = h.S; this.memo = { lastTurn: null, offered: [], doneA: doneTopics() }; } },
+  S: null, doneA: [],
+  reset(h) { if (this.S !== h.S) { this.S = h.S; this.doneA = doneTopics(); } },
+  rec(S) {
+    const U = S && S.ui; if (!U) return { lastTurn: null, offered: [] };
+    let P = U.practice;
+    if (!P || typeof P !== 'object' || Array.isArray(P)) P = U.practice = { lastTurn: null, offered: [] };
+    if (!Array.isArray(P.offered)) P.offered = [];
+    if (!(typeof P.lastTurn === 'number' && Number.isFinite(P.lastTurn)) || P.lastTurn > (S.turn || 0)) P.lastTurn = null;   // a rewound branch starts earlier
+    return P;
+  },
   offer(h) {
     if (typeof E.practiceDue !== 'function' || typeof ui.practiceChip !== 'function' || !h.CFG || (h.CFG.mode || 'free') !== 'free' || h.CFG.resultId) return;
     if (!alive(h) || !$('#coach').hidden) return;
-    let q = null; try { q = E.practiceDue(h.S, this.memo); } catch (e) { q = null; }
+    this.reset(h);
+    const P = this.rec(h.S);
+    let q = null; try { q = E.practiceDue(h.S, { lastTurn: P.lastTurn, offered: P.offered.slice(), doneA: this.doneA }); } catch (e) { q = null; }
     if (!q) return;
-    this.memo.offered.push(q.id); this.memo.lastTurn = h.S.turn;  // an ignored chip counts as offered
+    P.offered.push(q.id); P.lastTurn = h.S.turn; h.persist();  // an ignored chip counts as offered
     ui.practiceChip(q, async (idx) => {
       const r = h.answerPractice ? h.answerPractice(q.id, idx) : null;
       if (r && r.ok) bus.emit('practice', { topic: q.topic, right: !!r.right, qid: q.id });
