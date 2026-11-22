@@ -538,6 +538,73 @@ async def t_dreamtut(b):
     check(got2, f'T4 §4.7: a dream mission toast queued before 8 info toasts is never dropped by the cap of 6 ({(await pg.evaluate("window.__toasts"))[:4]})')
     await ctx.close()
 
+OUTCOME_FIX = """async () => {
+  const E = await import('./js/engine.js');
+  // a teacher game played until a story card offers "לחפש עבודה חדשה" (interview) or "להתמקח" (negotiate) in the inbox
+  for (let s = 1; s < 60; s++) {
+    const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: s, mode: 'free' });
+    let x = s * 7 + 3; const r = () => (x = (x * 16807) % 2147483647) / 2147483647;
+    const resolve = (ev) => { let k = 0; while (ev && k++ < 10 && !st.over) { const en = ev.options.filter((o) => o.enabled); const o = en.find((o) => ['study', 'plan:study'].includes(o.id)) || (k > 3 ? en.find((o) => ['ok', 'done', 'pass', 'skip'].includes(o.id)) : null) || en[Math.floor(r() * en.length)]; ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}).event; } };
+    for (let g = 0; g < 200 && !st.over; g++) {
+      const hit = E.inbox(st).find((it) => it.options.some((o) => o.enabled && (o.id === 'interview' || o.id === 'negotiate')));
+      if (hit && !st.pending && st.phase === 'roll') {
+        const cfg = { worldId: 'w1', charId: 'teacher', seed: st.seed, mode: 'free' };
+        const state = JSON.parse(E.serialize(st)); state.ui = { seq: 0, coach: {}, firstPayday: true, ibSeen: E.inbox(st).map((c) => c.itemId) };
+        localStorage.setItem('rr2-save-free-w1', JSON.stringify({ v: 3, app: 'nl1', sv: E.SAVE_VERSION, cfg, state, savedAt: Date.now() }));
+        return { seed: s, month: st.month, opt: hit.options.find((o) => o.id === 'interview' || o.id === 'negotiate').id, title: hit.title };
+      }
+      for (const it of E.inbox(st)) { const o = it.options.find((o) => o.enabled && o.default) || it.options.find((o) => o.enabled); if (o) E.resolveStory(st, it.itemId, o.id); }
+      if (st.pending) resolve(E.currentEvent(st)); if (st.over) break; E.rollDice(st); resolve(E.landing(st));
+    }
+  }
+  return null;
+}"""
+async def t_nearmiss(b):
+    """Playtest B1: the end-screen near miss never shows negative months — when the months already met the star line, it names what
+    stopped ★★★ (fund / happiness). Same text in ui.js (built-in end screen) and the lobby end screen."""
+    ctx, pg = await page(b, vp=DESK, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,tutorialDone:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    r = await pg.evaluate("""() => import('./js/ui.js').then((u) => [
+      u.nearMissText({ nearMiss: { text: 'עוד -5 חודשים פחות ו־★★★ היו שלך.', monthsToNext: -5 }, starsBlockedByFund: true }),
+      u.nearMissText({ nearMiss: { text: 'עוד 0 חודשים פחות ו־★★★ היו שלך.', monthsToNext: 0 }, starsBlockedByHappiness: true }),
+      u.nearMissText({ nearMiss: { text: 'עוד 3 חודשים פחות ו־★★ היו שלך.', monthsToNext: 3 } }),
+      u.nearMissText({ nearMiss: { text: 'x', monthsToNext: -2 } })])""")
+    check('-' not in ''.join(r[:2] + r[3:]) and 'קרן חירום' in r[0] and 'אושר' in r[1] and r[2] == 'עוד 3 חודשים פחות ו־★★ היו שלך.', f'B1 near-miss wording ({r})')
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'js', 'lobby.js'), encoding='utf8').read()
+    check('const near = nearMissText(end);' in src, 'B1 the lobby end screen uses the same wording')
+    await ctx.close()
+
+async def t_outcome(b):
+    """Playtest B4: the result of an odds choice on a story card ("לחפש עבודה חדשה" / "להתמקח") is shown — a 📖 toast that the queue
+    never drops."""
+    for vp in (DESK, PHONE): await t_outcome1(b, vp)
+async def t_outcome1(b, vp):
+    ctx, pg = await page(b, vp=vp, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,tutorialDone:true}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    fx = await pg.evaluate(OUTCOME_FIX)
+    if not fx: check(False, 'B4 fixture: no interview / negotiate story card found'); await ctx.close(); return
+    await pg.reload(); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
+    await pg.evaluate("document.querySelector('[data-act=continue-free]').click()"); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    await pg.wait_for_function("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()", timeout=60000)
+    for _ in range(10):
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
+        await pg.wait_for_timeout(300)
+    await pg.evaluate(TOAST_OBS)
+    await pg.evaluate("document.querySelector('#hLife [data-life=inbox]')?.click()")
+    for _ in range(20):
+        if await pg.locator(f"#evCard button[data-o={fx['opt']}]:not([disabled])").count(): break
+        if await pg.locator('#gm:not([hidden]) [data-item], #gm:not([hidden]) .ib-row button').count(): await pg.evaluate("document.querySelector('#gm [data-item], #gm .ib-row button')?.click()")
+        await pg.wait_for_timeout(400)
+    await pg.evaluate(f"document.querySelector('#evCard button[data-o={fx['opt']}]')?.click()")
+    want = 'מצאת' if fx['opt'] == 'interview' else 'בעל הבית'
+    got = False
+    for _ in range(60):
+        if any(want in t for t in await pg.evaluate('window.__toasts')): got = True; break
+        await pg.wait_for_timeout(250)
+    check(got, f'B4 {vp["width"]}px: the outcome of "{fx["opt"]}" ({fx["title"]}, month {fx["month"]}) is shown as a toast ({[t for t in await pg.evaluate("[...new Set(window.__toasts)]")][:4]})')
+    await ctx.close()
+
 SAVE_TURN = "(k)=>{try{const s=JSON.parse(localStorage.getItem(k)).state;return [s.turn|0,(s.actions||[]).length,!!s.over]}catch(e){return [0,0,false]}}"
 async def drive(pg, rolls, key=None, stall_s=240):
     """Roll `rolls` times, answering whatever opens (coach → next, card → first enabled option, modal → first button).
@@ -671,7 +738,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('outcome', t_outcome), ('nearmiss', t_nearmiss), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

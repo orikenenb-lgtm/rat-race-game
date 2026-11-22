@@ -1237,6 +1237,9 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'focus') { ui.toast('🎯 ' + n.text, { kind: n.disabled ? 'bad' : '' }); continue; }
     if (n.kind === 'dd') { ui.toast('🔎 ' + n.text, { kind: n.repair > 0 || n.surprise ? 'bad' : '' }); continue; }
     if (n.kind === 'rival') { ui.stickyNews?.(n.text); continue; }   // T6 §12.1: stays until tapped or the next roll
+    // playtest B4: the outcome of the player's own odds choice (job search, rent negotiation, ask for a raise…) is never dropped by the
+    // toast cap and is read out — it is the answer to "what happened?"
+    if (n.kind === 'story') { ui.toast('📖 ' + n.text, { keep: true, ms: 4200 }); ui.announce?.(n.text); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
   if (out.mentor) ui.mentor(out.mentor);

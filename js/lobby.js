@@ -564,6 +564,17 @@ function dreamsList() {
 const dreamById = (id) => { const l = dreamsList(); return (l && l.find((x) => x.id === id)) || (DREAM_META[id] ? { id, ...DREAM_META[id], missions: [] } : null); };
 /** T2 mentor levels (feature-detected): ['guide','hint','pro'] or null. */
 const mentorLevels = () => { const l = ENG.MENTOR_LEVELS || (ENG.MN && ENG.MN.LEVELS); return Array.isArray(l) && l.includes('guide') ? l : null; };
+/** (same as ui.js nearMissText — the lobby does not load ui.js) Playtest B1: the end-screen near miss never shows negative months. The engine's "עוד {d} חודשים פחות" is about TIME; when the
+ *  months already met the ★★★ (or ★★) line, what stopped the star was the fund or happiness — say that. */
+function nearMissText(end) {
+  const n = end && end.nearMiss; if (!n || !n.text) return '';
+  if (typeof n.monthsToNext !== 'number' || n.monthsToNext > 0) return n.text;
+  const f = !!end.starsBlockedByFund, h = !!end.starsBlockedByHappiness;
+  if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
+  if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
+  if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
+  return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
+}
 const completedAny = (p = P.getProgress()) => (p.gamesPlayed || 0) + (p.learnGames || 0) > 0;
 const hasTwoStars = (p = P.getProgress()) => Object.values(p.stars || {}).some((x) => x >= 2);
 function mentorAllowed(level, p = P.getProgress()) { return level === 'guide' || (level === 'hint' && completedAny(p)) || (level === 'pro' && hasTwoStars(p)); }
@@ -1606,7 +1617,7 @@ function renderEnd(animate = false) {
   const stars = hist ? Math.max(0, Math.min(3, e.stars | 0)) : won ? Math.max(0, Math.min(3, e.stars | 0)) : 0;
   const title = learn ? (won ? T4.L1 : T4.L2) : hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
   const prog = Math.max(0, Math.min(1, e.progress ?? end.progress ?? 0));
-  const near = end.nearMiss && end.nearMiss.text;
+  const near = nearMissText(end);
   const nextIdx = hist ? -1 : WORLDS.indexOf(w) + 1; const nextW = hist ? null : WORLDS[nextIdx] || null;
   const nextOpen = nextW && P.isUnlocked(nextW.id);
   const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : learn ? '🎓 תרגול' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');

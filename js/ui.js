@@ -66,6 +66,17 @@ export const ICON = {
   voice: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
+/** Playtest B1: the end-screen near miss never shows negative months. The engine's "עוד {d} חודשים פחות" is about TIME; when the
+ *  months already met the ★★★ (or ★★) line, what stopped the star was the fund or happiness — say that. */
+export function nearMissText(end) {
+  const n = end && end.nearMiss; if (!n || !n.text) return '';
+  if (typeof n.monthsToNext !== 'number' || n.monthsToNext > 0) return n.text;
+  const f = !!end.starsBlockedByFund, h = !!end.starsBlockedByHappiness;
+  if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
+  if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
+  if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
+  return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
+}
 /* ============================================================ toasts */
 const tq = []; let tBusy = false, tWait = 0, tCur = null;
 /** Short message pill under the HUD (queued). kind: ''|'gold'|'bad' */
@@ -1468,7 +1479,7 @@ const BODY = {
       const ar = R.now ? `<p class="note">🧾 לקוחות חייבים לעסק: ${num(fmtM(R.now))}${(R.terms || []).length ? ` · ${R.terms.map((t) => `${num(fmtM(t.amount))}${t.client ? ` (${escI(t.client)})` : ''} בחודש ${num(String(t.due))}`).join(' · ')}` : ''}</p>` : '';
       const stock = St ? `<p class="note">📦 במלאי ${num(N(St.units || 0))} יחידות${St.cover != null ? ` · מספיק לבערך ${num(String(St.cover))} חודשים` : ''}${St.onOrder ? ` · בדרך ${num(N(St.onOrder))}` : ''}${St.value ? ` · שווי ${num(fmtM(St.value))}` : ''}</p>` : '';
       const l3lines = (L3.lines || []).filter((x) => x.amount || x.always);
-      const l3 = l3lines.length ? `<details class="more bizl3"><summary>דוח מלא</summary>${grid(l3lines.map((x) => x.bold ? `<div class="row"><b>${esc(x.label)}</b><b class="num ${cls(x.amount)}">${sgn(x.amount)}</b></div>` : row(esc(x.label), sgn(x.amount), cls(x.amount))))}${(L3.notes || []).length ? `<ul class="bnotes">${L3.notes.slice(0, 6).map((t) => `<li>${escI(t)}</li>`).join('')}</ul>` : ''}${L3.breakEven && L3.breakEven.text ? `<p class="note">⚖️ ${escI(L3.breakEven.text)}</p>` : ''}${L3.totals && L3.totals.months ? `<p class="note">מאז הפתיחה (${num(String(L3.totals.months))} חודשים): מחזור ${num(fmtM(L3.totals.revenue || 0))} · רווח נקי ${num(sgn(L3.totals.netProfit || 0), cls(L3.totals.netProfit || 0))} · משכת ${num(fmtM(L3.totals.drawnNet || 0))}</p>` : ''}</details>` : '';
+      const l3 = l3lines.length ? `<details class="more bizl3"><summary>דוח מלא</summary>${grid(l3lines.map((x) => x.bold ? `<div class="row"><b>${esc(x.label)}</b><b class="num ${cls(x.amount)}">${sgn(x.amount)}</b></div>` : row(esc(x.label), sgn(x.amount), cls(x.amount))))}${(L3.notes || []).length ? `<ul class="bnotes">${L3.notes.slice(0, 6).map((t) => `<li>${escI(t && typeof t === 'object' ? t.text || '' : String(t ?? ''))}</li>`).join('')}</ul>` : ''}${L3.breakEven && L3.breakEven.text ? `<p class="note">⚖️ ${escI(L3.breakEven.text)}</p>` : ''}${L3.totals && L3.totals.months ? `<p class="note">מאז הפתיחה (${num(String(L3.totals.months))} חודשים): מחזור ${num(fmtM(L3.totals.revenue || 0))} · רווח נקי ${num(sgn(L3.totals.netProfit || 0), cls(L3.totals.netProfit || 0))} · משכת ${num(fmtM(L3.totals.drawnNet || 0))}</p>` : ''}</details>` : '';
       // a summary without the month's report (engine: manage card) has no cash change → show the business's cash instead of a fake ₪0
       const L1x = !L1.sentence && !L1.cashDelta && (L1.revenue || L1.profit) ? { ...L1, cashNow: s.cash || 0 } : L1;
       return `<p class="chipline">${kindChip}</p>` + stageRow(stage) + l1Html(L1x) +
