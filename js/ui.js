@@ -161,6 +161,18 @@ function nextAch() {
   });
 }
 
+/** T5 verify D2: focus goes back to the opener when it is still on screen; otherwise (a phone sheet row whose sheet closed, a
+ *  re-rendered chip) to the sheet button, else the HUD money — never to <body> */
+function restoreFocus(prev) {
+  const ok = (el) => !!el && el !== document.body && el.isConnected && el.getClientRects().length && !el.closest('[hidden],[inert],#sheet:not(.open)');
+  try { if (ok(prev)) { prev.focus({ preventScroll: true }); if (document.activeElement === prev) return; } } catch (e) { /* ignore */ }
+  if (!evState && shown('#gm')) return;   // another dialog took over: it places focus itself
+  if (evState) return;                     // an event card is open: it owns focus
+  const sb = $('#sheetBtn'), cash = $('#hCash');
+  const alt = ok(sb) ? sb : $('#roll') && ok($('#roll')) && !$('#roll').disabled ? $('#roll') : cash;
+  if (alt === cash && cash && !cash.hasAttribute('tabindex')) cash.setAttribute('tabindex', '-1');
+  try { alt && alt.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+}
 /* ============================================================ focus trap (T4 A11Y-1/2) */
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
 /** Tab / Shift+Tab cycle inside `root` while it is open. Returns release(). */
@@ -207,7 +219,7 @@ export function modal({ tag = '', color = '#2f6fdb', title = '', html = '', acti
   setTimeout(() => (c.querySelector('.acts button.primary:not(:disabled)') || c.querySelector('.acts button:not(:disabled)'))?.focus(), 40);
   const release = trapFocus(c);
   return new Promise((res) => {
-    const close = (v) => { release(); m.hidden = true; c.onclick = null; m.onkeydown = null; try { prevFocus && prevFocus.focus && prevFocus.focus(); } catch (e) { /* ignore */ } res(v); };
+    const close = (v) => { release(); m.hidden = true; c.onclick = null; m.onkeydown = null; restoreFocus(prevFocus); res(v); };
     c.onclick = (e) => {
       const b = e.target.closest('button[data-i]');
       if (!b) { if (onExtra) onExtra(e); return; }
@@ -648,6 +660,8 @@ export function toggleSheet(force) {
   if (sheetRelease) { sheetRelease(); sheetRelease = null; }
   if (open && innerWidth <= 820) sheetRelease = trapFocus(s);   // the bottom sheet is a dialog on phones / tablets (K-8)
   if (open) setTimeout(() => s.querySelector('.sh-close')?.focus(), 30);
+  // T5 verify D2: closing the sheet with focus inside it (Escape, ✕, a phone row that opens "פרטי הנכס") hands focus to its button
+  else { const a = document.activeElement, sb = $('#sheetBtn'); if (a && s.contains(a) && sb && sb.getClientRects().length) sb.focus({ preventScroll: true }); }
 }
 
 /* ============================================================ mentor */
@@ -742,7 +756,7 @@ export function flyCoins(from, n = 7) {
 }
 
 /* ============================================================ coach marks */
-let coachRes = null;
+let coachRes = null, coachRelease = null, coachPrev = null;
 /** Spotlight a target and explain it. Resolves 'next' | 'skip'. The target stays clickable. */
 export function coach({ target, title, text, step, total, label = 'הדרכה', skipLabel = 'דלג על ההדרכה' }) {
   hideCoach();
@@ -772,13 +786,21 @@ export function coach({ target, title, text, step, total, label = 'הדרכה', 
         <div class="acts"><button class="primary" data-c="next">הבנתי</button><button class="chip" data-c="skip">${esc(skipLabel)}</button></div></div>`;
     };
     place(); el.hidden = false; el._place = place;
+    // the bubble is the topmost thing: Tab stays in it (also over an open phone sheet); closing it gives focus back
+    coachPrev = document.activeElement; coachRelease = trapFocus(el);
     if (phoneQ()) { const vd = $('#verdict'); if (vd && vd.className.includes('on')) vd.className = vd.className.replace(/\bon\b/, '').trim(); } // one overlay at a time on phones
     el.onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; const v = b.dataset.c; hideCoach(v); };
     setTimeout(() => el.querySelector('[data-c="next"]')?.focus({ preventScroll: true }), 60);
   });
 }
 export function hideCoach(v = 'next') {
-  const el = $('#coach'); if (el) { el.hidden = true; el.innerHTML = ''; el._place = null; }
+  const el = $('#coach'); const was = !!el && !el.hidden;
+  if (el) { el.hidden = true; el.innerHTML = ''; el._place = null; }
+  if (coachRelease) { coachRelease(); coachRelease = null; }
+  if (was && coachPrev && el && (document.activeElement === document.body || !document.activeElement || el.contains(document.activeElement) || !document.activeElement.isConnected)) {
+    const pv = coachPrev; if (pv.isConnected && pv !== document.body && pv.getClientRects().length) try { pv.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+  }
+  coachPrev = null;
   if (coachRes) { const r = coachRes; coachRes = null; r(v); }
   pumpOv();
 }
