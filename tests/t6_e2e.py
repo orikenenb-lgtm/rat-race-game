@@ -28,9 +28,10 @@ def fixtures():
     return json.loads(out.stdout)
 
 def stand_in_policies():
+    """the ghosts run the engine lane's js/systems/archetypes.js (ARCH_API 2) — no stand-in any more (review m2 / M7)"""
     dst = os.path.join(COPY, 'js', 'systems', 'archetypes.js')
-    if os.path.exists(dst) and 'TEST-ONLY stand-in' not in open(dst, encoding='utf8').read(): NOTES.append('archetypes: the engine lane module'); return
-    shutil.copy(os.path.join(HERE, 'fixtures', 't6_archetypes.mjs'), dst); NOTES.append('archetypes: TEST-ONLY stand-in (engine module not landed)')
+    if not os.path.exists(dst) or 'TEST-ONLY stand-in' in open(dst, encoding='utf8').read(): raise SystemExit('the copy has no real js/systems/archetypes.js')
+    NOTES.append('archetypes: the engine lane module (ARCH_API 2)')
 
 async def page(b, vp=PHONE, saves=(), flags=FLAGS, extra=''):
     ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, device_scale_factor=1)
@@ -149,7 +150,13 @@ async def t_end(b, F):
     check(await pg.evaluate("() => !!document.querySelector('.end-analysis')"), 'ניתוח (ui.endAnalysisHtml) rendered by the lobby itself')
     last = await ls(pg, 'rr2-last-game')
     check(last is not None and json.loads(last)['cfg']['worldId'] == 'w1', 'rr2-last-game written at the end')
-    ghc = await ls(pg, 'rr2-ghosts'); check(ghc is not None and len(json.loads(ghc)) == 1, 'finished ghosts cached in rr2-ghosts')
+    ghc = await ls(pg, 'rr2-ghosts'); check(ghc is not None and len(json.loads(ghc)) == 1 and len(ghc) <= 80 * 1024, f'finished ghosts cached in rr2-ghosts ({len(ghc or "")} bytes)')
+    # AC-18: the browser worker's ghost games equal a Node run of the same key (same engine, same policies)
+    br = await pg.evaluate("() => ({ ends: window.__rrGhosts.ends(), cfg: JSON.parse(localStorage.getItem('rr2-last-game')).rcfg, cap: window.__rrGhosts.status().cap })")
+    tmp = os.path.join(COPY_DIR, 't6_ac18.json'); json.dump(br, open(tmp, 'w'))
+    out = subprocess.run(['node', os.path.join(HERE, 't6_ghost_node.mjs'), tmp], capture_output=True, text=True, timeout=600, cwd=os.path.join(COPY))
+    log('  AC-18 node', out.stdout.strip()[-300:], out.stderr.strip()[-300:])
+    check(out.returncode == 0 and 'SAME' in out.stdout, f'AC-18: browser worker ghosts == Node ghosts for the same key ({out.stdout.strip()[-120:]})')
     await ctx.close()
 
 # ---------------------------------------------------------------- B. rewind from the end screen (origin = rr2-last-game), branch, compare, lobby card
@@ -162,13 +169,19 @@ async def t_rewind(b, F):
     await pg.wait_for_selector('#endTop', timeout=20000)
     ORIG = ['rr2-save-free-w1', 'rr2-save-learn-w1', 'rr2-last-game']
     h0 = await hashes(pg, ORIG)
-    await pg.click('#endTop [data-act=t6-moments]')
-    await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=30000)
-    n = await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]').length")
-    check(n >= 3, f'"רגעי החלטה" sheet lists decisions of the last game ({n})')
-    await shot(pg, 'moments_phone')
     t0 = time.time()
-    await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]')[3].click()")
+    if await pg.locator('#endTop [data-act=t6-rewind]').count():   # the engine's suggestion carries its decision's card start (rule 1)
+        k0 = await pg.evaluate("() => +document.querySelector('#endTop [data-act=t6-rewind]').dataset.k0")
+        check(k0 > 0, f'suggestion CTA "🔁 לנסות את ההחלטה הזו אחרת" carries k0 = {k0}')
+        await pg.click('#endTop [data-act=t6-rewind]')
+    else:
+        await pg.click('#endTop [data-act=t6-moments]')
+        await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=30000)
+        n = await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]').length")
+        check(n >= 3, f'"רגעי החלטה" sheet lists decisions of the last game ({n})')
+        await shot(pg, 'moments_phone')
+        await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]')[3].click()")
+    await pg.wait_for_function('() => window.__t6branchMs != null || window.__t6branchErr', timeout=60000)
     okb = await wait_ready(pg, 120)
     ms = await pg.evaluate('() => window.__t6branchMs')
     check(okb, f'branch started (createBranch {ms} ms, total {time.time() - t0:.1f} s)')
@@ -192,6 +205,13 @@ async def t_rewind(b, F):
         check(cmpi['lim'] == 5 and cmpi['lines'] >= 1, f'compare sheet: both lines + the 5 limits ({cmpi})')
         await shot(pg, 'compare_phone')
         await pg.click('#gm .acts button.primary')
+        # M2: rr2-last-game now holds another game → no "המקור" any more
+        keep = await ls(pg, 'rr2-last-game')
+        await pg.evaluate("() => { const r = JSON.parse(localStorage.getItem('rr2-last-game')); r.rcfg = { ...r.rcfg, seed: (r.rcfg.seed + 1) >>> 0 }; localStorage.setItem('rr2-last-game', JSON.stringify(r)); }")
+        await pg.wait_for_timeout(300); await pg.click('#t6branch [data-b=compare]'); await pg.wait_for_timeout(700)
+        tt = await pg.evaluate("() => ({ toast: document.querySelector('#toast').textContent, sheet: !!document.querySelector('#gm:not([hidden]) .t6-limits') })")
+        check(not tt['sheet'] and 'כבר לא זמין' in tt['toast'], f'M2: another game in rr2-last-game → "the original is no longer available", no compare ({tt})')
+        await pg.evaluate("(v) => localStorage.setItem('rr2-last-game', v)", keep)
         await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', timeout=30000)
     await pg.evaluate("() => document.querySelector('[data-act=\"world\"][data-id=\"w1\"]').click()"); await pg.wait_for_selector('.lb-world')
     card = await pg.evaluate("() => ({ br: !!document.querySelector('[data-act=t6-branch]'), del: !!document.querySelector('[data-act=t6-branch-del]'), last: !!document.querySelector('[data-act=t6-last]') })")
@@ -201,13 +221,38 @@ async def t_rewind(b, F):
     gone = await pg.evaluate("() => localStorage.getItem('rr2-save-branch-w1') === null && !document.querySelector('[data-act=t6-branch]')")
     check(gone, 'delete: the branch slot is gone, its card too')
     check(await hashes(pg, ORIG) == h0, 'AC-27: origin keys unchanged after delete')
+    # M1: an unfinished learning game exists; a branch is played to ITS end; "עוד תרגול" must not clear the learning game silently
+    await pg.evaluate("(a) => localStorage.setItem(a[0], a[1])", [F['midLearn']['key'], F['midLearn']['raw']])
+    hl = await hashes(pg, [F['midLearn']['key']])
+    await pg.click('[data-act=t6-last]'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=30000)
+    await pg.evaluate("() => document.querySelectorAll('.t6mo-list button[data-k0]')[0].click()")   # the newest decision: the branch ends quickly
+    await wait_ready(pg, 120)
+    bend = await play_until(pg, lambda: pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')"), 500, 'branch to end')
+    check(bend, 'M1: the practice branch was played to its own end')
+    if bend:
+        await pg.wait_for_selector('#endTop', timeout=20000); await shot(pg, 'branch_end_phone')
+        btn = await pg.evaluate("() => [...document.querySelectorAll('.end-acts button, .end-more button')].map((x) => x.dataset.act)")
+        check(await hashes(pg, [F['midLearn']['key']]) == hl, f'M1: the branch end did not touch the learning slot (buttons {btn})')
+        await pg.evaluate("() => { window.__t6confirm = 0; }")
+        await pg.click('[data-act="end-learn"]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000)
+        q = await pg.evaluate("() => document.querySelector('#gm').textContent")
+        check('ימחק' in q, f'M1: "עוד תרגול" after a branch asks before replacing the learning game ({q[:60]})')
+        await pg.click('#gm .acts button:not(.primary)'); await pg.wait_for_timeout(500)
+        check(await hashes(pg, [F['midLearn']['key']]) == hl, 'M1: cancelled → the learning game is untouched')
     await ctx.close()
 
 # ---------------------------------------------------------------- C. in-game: rivals panel (clamped), live branch from a free game
 async def t_live(b, F):
-    ctx, pg = await page(b, PHONE, saves=[(F['mid']['key'], F['mid']['raw'])])
+    ctx, pg = await page(b, PHONE, saves=[(F['mid']['key'], F['mid']['raw']), (F['midLearn']['key'], F['midLearn']['raw'])])
     await to_world(pg)
+    # M4: a live FREE game has no "רגעי החלטה" (it would be a look-ahead tool for a game that still earns rewards)
     await pg.click('[data-act="continue-free"]:not([data-learn])'); check(await wait_ready(pg), 'free game resumed (mid-game fixture)')
+    await pg.wait_for_timeout(600)
+    fm = await pg.evaluate("() => ({ mo: !!document.querySelector('#hLife [data-life=moments]'), rv: !!document.querySelector('#hLife [data-life=rivals]') })")
+    check(not fm['mo'] and fm['rv'], f'M4: a live free game shows 👥 but no ⏪ רגעי החלטה ({fm})')
+    await pg.click('#homeBtn'); await pg.wait_for_selector('.lb-home', timeout=30000)
+    await pg.evaluate("() => document.querySelector('[data-act=\"world\"][data-id=\"w1\"]').click()"); await pg.wait_for_selector('.lb-world')
+    await pg.click('[data-act="continue-free"][data-learn="1"]'); check(await wait_ready(pg), 'learning game resumed (mid-game fixture)')
     await rolls(pg, 4)
     for i in range(40):
         s = await st(pg)
@@ -233,7 +278,7 @@ async def t_live(b, F):
     ORIG = ['rr2-save-free-w1', 'rr2-save-learn-w1', 'rr2-last-game']
     h0 = await hashes(pg, ORIG)
     k = await rolls(pg, 8)
-    check(await hashes(pg, ORIG) == h0, f'AC-27 (live origin): the free slot is unchanged after {k} branch rolls')
+    check(await hashes(pg, ORIG) == h0, f'AC-27 (live learning origin): the original slots are unchanged after {k} branch rolls')
     for i in range(30):
         s = await st(pg)
         if s['roll'] and not s['card'] and not s['gm']: break
@@ -250,7 +295,7 @@ async def t_ranked(b, F):
     r = await pg.evaluate("""async () => { const RW = await import('/js/rewind.js'); const F = await import('/js/flags.js'); const out = {};
       out.flag = ['daily','weekly','challenge'].map((m) => F.flagFor('rewind', { mode: m }) || F.flagFor('afterwin', { mode: m }));
       out.allowed = ['daily','weekly','challenge'].map((m) => RW.allowed({ mode: m, worldId: 'w1' }));
-      out.free = RW.allowed({ mode: 'free', worldId: 'w1' });
+      out.free = RW.endAllowed({ mode: 'free', worldId: 'w1' }) && !RW.allowed({ mode: 'free', worldId: 'w1' }) && RW.allowed({ mode: 'free', worldId: 'w1', learn: true });   // M4: live branches in learn games only
       try { await RW.createBranch({ origin: 'live', w: 'w1', k0: 1, originKey: 'rr2-save-free-w1', cfg: { mode: 'daily', worldId: 'w1' } }); out.thrown = null; } catch (e) { out.thrown = e.message; }
       const g = await import('/js/game.js'); out.diverged = g.pickRankedState({ seed: 1, ui: { seq: 9 }, actions: [['r'], ['l'], ['c','x']] }, { seed: 1, ui: { seq: 2 }, actions: [['r'], ['l'], ['c','y']] }).ui.seq;
       return out; }""")
@@ -316,11 +361,45 @@ async def t_deal(b, F):
     await shot(pg, 'deal_rivals_phone')
     await ctx.close()
 
+# ---------------------------------------------------------------- F3. AC-15 lobby after-win flow (free game) + AC-23 at 360 px
+async def t_aw15(b, F):
+    if not F['nearEndFree']: check(False, 'fixture: a near-end free game'); return
+    ctx, pg = await page(b, {'width': 360, 'height': 780}, saves=[(F['nearEndFree']['key'], F['nearEndFree']['raw'])], flags={**FLAGS, 'afterwin': True})
+    await to_world(pg)
+    await pg.click('[data-act="continue-free"]:not([data-learn])'); await wait_ready(pg)
+    ended = await play_until(pg, lambda: pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')"), 500, 'free to win')
+    check(ended, 'AC-15: the free game reached its win')
+    if not ended: await ctx.close(); return
+    await pg.wait_for_selector('#endTop', timeout=20000); await pg.wait_for_timeout(800)
+    h = await pg.evaluate("() => ({ h: document.querySelector('#endTop').scrollHeight, vh: innerHeight, aw: !!document.querySelector('[data-act=t6-afterwin]') })")
+    check(h['h'] <= 1.5 * h['vh'], f"AC-23 at 360×780 (free, won, after-win offered): #endTop {h['h']} px ≤ 1.5 × {h['vh']}")
+    await shot(pg, 'end_free_360')
+    sv = await ls(pg, 'rr2-save-free-w1')
+    check(h['aw'] and sv is not None, 'AC-15: the won save is kept while "keep living" is offered')
+    prog0 = await ls(pg, 'rr2-progress'); ach0 = await pg.evaluate("() => JSON.parse(localStorage.getItem('rr2-progress') || '{}').achievements || null")
+    await pg.click('[data-act="t6-afterwin"]'); await wait_ready(pg); await pg.wait_for_timeout(600)
+    await rolls(pg, 3)
+    for i in range(20):
+        s = await st(pg)
+        if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
+        await step(pg)
+    await pg.click('#hLife [data-life=afterwin]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000); await pg.click('#gm .acts button.primary')
+    for i in range(160):
+        if await pg.evaluate("() => !!document.querySelector('#start:not([hidden]) .lb-end')"): break
+        await pg.wait_for_timeout(250)
+    await pg.wait_for_selector('#endTop', timeout=20000); await pg.wait_for_timeout(600)
+    e = await pg.evaluate("() => ({ title: document.querySelector('.end-title').textContent, lines: [...document.querySelectorAll('.t6-awl li')].map((x) => x.textContent), h: document.querySelector('#endTop').scrollHeight })")
+    check(e['title'] == 'מה החופש נתן לך' and len(e['lines']) >= 5, f"AC-15: the continuation end shows the engine's after-win lines ({e['lines'][:2]})")
+    check(await ls(pg, 'rr2-progress') == prog0, 'AC-15: the continuation end records nothing (rr2-progress unchanged: no recordGame, achievements, milestones)')
+    check(e['h'] <= 1.5 * 780, f"AC-23 at 360×780 (after-win end): #endTop {e['h']} px ≤ {1.5 * 780:.0f}")
+    await shot(pg, 'afterwin_end_360')
+    await ctx.close()
+
 # ---------------------------------------------------------------- G. perf: main-thread cost of the ghosts with 4× CPU throttling (CDP)
 async def t_perf(b, F):
-    ctx, pg = await page(b, PHONE, saves=[(F['mid']['key'], F['mid']['raw'])])
+    ctx, pg = await page(b, PHONE, saves=[(F['midLearn']['key'], F['midLearn']['raw'])])
     cdp = await ctx.new_cdp_session(pg)
-    await to_world(pg); await pg.click('[data-act="continue-free"]:not([data-learn])'); await wait_ready(pg)
+    await to_world(pg); await pg.click('[data-act="continue-free"][data-learn="1"]'); await wait_ready(pg)
     await cdp.send('Emulation.setCPUThrottlingRate', {'rate': 4})
     await pg.evaluate("""() => { window.__lt = []; try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: 'longtask', buffered: false }); } catch (e) {} }""")
     t0 = time.time(); k = await rolls(pg, 14)
@@ -347,11 +426,12 @@ async def t_perf(b, F):
     check(all(x is not None and x <= 1000 for x in bms), f'AC-20: createBranch ≤ 1.0 s at 4× ({bms} ms)')
     await cdp.send('Emulation.setCPUThrottlingRate', {'rate': 1})
     log(f'  perf (4× CPU): {k} rolls in {time.time() - t0:.0f} s; ghost messages {a["msgs"]} (rows {a["rowMsgs"]}), handler p95 {a["p95"]:.2f} ms, max {a["max"]:.2f} ms; long tasks (all sources) n={len(lt)} max={max(lt) if lt else 0} ms; ghosts {st6}')
+    NOTES.append('CDP CPU throttling slows the page only, not dedicated workers: worker timing is measured in Node (tests/t6_ghost_node.mjs --time)')
     NOTES.append(f'perf 4×: ghost message handler p95 {a["p95"]:.2f} ms, max {a["max"]:.2f} ms over {a["n"]} messages; page long tasks n={len(lt)}, max {max(lt) if lt else 0} ms (all sources, incl. 3D)')
     check(a['n'] > 0 and a['p95'] <= 4, f"AC-19: ghost message handling p95 {a['p95']:.2f} ms ≤ 4 ms (4× throttled)")
     await ctx.close()
 
-TESTS = {'end': t_end, 'rewind': t_rewind, 'live': t_live, 'ranked': t_ranked, 'verdict': t_verdict, 'deal': t_deal, 'perf': t_perf}
+TESTS = {'end': t_end, 'rewind': t_rewind, 'live': t_live, 'ranked': t_ranked, 'verdict': t_verdict, 'deal': t_deal, 'aw15': t_aw15, 'perf': t_perf}
 async def main():
     FB.banner(MODE)
     stand_in_policies()

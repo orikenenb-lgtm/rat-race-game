@@ -28,7 +28,10 @@ let ne = null;
 for (const seed of [101, 202, 303, 404, 505, 606, 707]) { ne = nearEnd('w1', 'teacher', seed); if (ne) break; }
 const mid = (() => { const { st } = play('w1', 'teacher', 9090, 'smart', 14); const s2 = E.replay(E.replayConfig(st), st.actions); s2.ui = ui(); return withTl(s2); })();
 const cfg = (s, extra) => ({ worldId: s.worldId, charId: s.charId, seed: s.seed, mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, bailout: true, ...extra });
+const midL = (() => { const { st } = play('w1', 'teacher', 7171, 'smart', 14); const s2 = E.replay(E.replayConfig(st), st.actions); s2.ui = ui(); return withTl(s2); })();
 console.log(JSON.stringify({
+  nearEndFree: ne ? { key: 'rr2-save-free-w1', raw: wrap(cfg(ne, {}), ne), month: ne.month } : null,
+  midLearn: { key: 'rr2-save-learn-w1', raw: wrap(cfg(midL, { learn: true }), midL), month: midL.month },
   nearEnd: ne ? { key: 'rr2-save-learn-w1', raw: wrap(cfg(ne, { learn: true }), ne), month: ne.month } : null,
   mid: { key: 'rr2-save-free-w1', raw: wrap(cfg(mid, {}), mid), month: mid.month, over: !!mid.over },
 }));
