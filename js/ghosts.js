@@ -9,10 +9,12 @@ import { flag } from './flags.js';
 import { ARCH_IDS, PERSONAS_FALLBACK } from './summary.js';
 
 export const CACHE_KEY = 'rr2-ghosts', CACHE_MAX = 8, CACHE_BYTES = 80 * 1024, TAIL_MONTHS = 12;
-// the policy version (ARCH_API + ARCH_V) is part of the cache key (review m1): loaded once on the main thread (a pure module)
-let POLTAG = null;
-const polP = import('./ghost-worker.js').then((m) => m.loadPolicies().then((p) => { POLTAG = m.polTag(p); return p; })).catch(() => { POLTAG = 'none'; return null; });
-export const policiesReady = () => polP;
+// the policy version (ARCH_API + ARCH_V) is part of the cache key (review m1): read once on the main thread from the policy module.
+// T7 CR-33 / PF-5: on demand (first game input), not at import — and straight from js/systems/archetypes.js with ghost-worker.js's
+// own rule (ARCH_API 2 → "a2.<ARCH_V>", else "none"), so ghost-worker.js itself is fetched once, by the worker only.
+let POLTAG = null, polP = null;
+const polTagOf = (m) => (m && m.ARCHETYPES && m.ARCH_API === 2 ? `a2.${m.ARCH_V ?? 0}` : 'none');
+export const policiesReady = () => (polP ||= import('./systems/archetypes.js').then((m) => (POLTAG = polTagOf(m))).catch(() => (POLTAG = 'none')));
 const PROTO_V = 1;
 let G = null;                // the current game's ghost state
 let worker = null, workerBroken = false;
@@ -89,13 +91,43 @@ export function start(st) {
   stop();
   G = fresh(st);
   for (const a of ARCH_IDS) { G.rows[a] = []; G.marks[a] = []; }
-  const hit = POLTAG && POLTAG !== 'none' ? cacheRead(k + '|' + POLTAG) : null;   // exact key: a policy bump recomputes (m1)
-  if (hit) { G.ends = hit.ghosts; G.cacheKey = hit.key; G.state = 'cached'; G.mode = 'cache'; bus.emit('ghosts:state', { state: G.state }); advance(st); return G; }
-  if (ensureWorker()) { G.mode = 'worker'; postW({ t: 'init', v: PROTO_V, key: G.key, cfg: G.cfg, archs: ARCH_IDS }); }
-  else { G.mode = 'none'; G.state = 'noworker'; }
+  if (POLTAG && useCache(G)) { advance(st); return G; }
+  if (typeof Worker !== 'function' || workerBroken) { G.mode = 'none'; G.state = 'noworker'; bus.emit('ghosts:state', { state: G.state }); advance(st); return G; }
+  // T7 CR-33 / PF-5: the worker (a second copy of the engine graph) and the policy tag load after the player's first input — the
+  // first roll never waits behind them. Until then the ghosts are 'computing' (as while the worker starts), upTo is kept.
+  G.mode = 'pending'; G.startMonth = st.month | 0;
   bus.emit('ghosts:state', { state: G.state });
+  armKick(G);
   advance(st);
   return G;
+}
+/** exact-key cache hit (a policy bump recomputes, m1) → cache mode */
+function useCache(g) {
+  const hit = POLTAG && POLTAG !== 'none' ? cacheRead(g.key + '|' + POLTAG) : null;
+  if (!hit) return false;
+  g.ends = hit.ghosts; g.cacheKey = hit.key; g.state = 'cached'; g.mode = 'cache'; bus.emit('ghosts:state', { state: g.state });
+  return true;
+}
+let unarm = null;
+function armKick(g) {
+  if (unarm) unarm();
+  if (typeof addEventListener !== 'function') return;
+  const go = () => { if (unarm) unarm(); setTimeout(() => kick(g), 0); };
+  const evs = ['pointerdown', 'keydown', 'click'];
+  evs.forEach((t) => addEventListener(t, go, { capture: true, passive: true }));
+  unarm = () => { evs.forEach((t) => removeEventListener(t, go, { capture: true })); unarm = null; };
+}
+async function kick(g) {
+  if (!g || g !== G || g.mode !== 'pending') return;
+  g.mode = 'kicking'; if (unarm) unarm();
+  await policiesReady();
+  if (g !== G) return;
+  if (useCache(g)) { if (g.over) setTimeout(() => bus.emit('ghosts:done', { key: g.key, ends: g.ends }), 0); return; }
+  if (ensureWorker()) {
+    g.mode = 'worker'; postW({ t: 'init', v: PROTO_V, key: g.key, cfg: g.cfg, archs: ARCH_IDS });
+    if (g.upTo) postW({ t: 'advance', key: g.key, upTo: g.upTo });
+    if (g.over) postW({ t: 'finish', key: g.key, cap: g.cap });
+  } else { g.mode = 'none'; g.state = 'noworker'; bus.emit('ghosts:state', { state: g.state }); if (g.over) startIdle(); }
 }
 /** after every player payday: upTo = S.month (monotonic) */
 export function advance(st) {
@@ -103,6 +135,7 @@ export function advance(st) {
   const m = st.month | 0; if (m <= G.upTo) return;
   G.upTo = m;
   if (G.mode === 'worker') postW({ t: 'advance', key: G.key, upTo: m });
+  else if (G.mode === 'pending' && m > G.startMonth) kick(G);   // a payday came without a pointer / key event (e.g. scripted play)
 }
 /** the player's game ended: run the ghosts to their own end or the cap (§2.6) */
 export function finish(st) {
@@ -112,9 +145,11 @@ export function finish(st) {
   G.cap = st.mode === 'free' ? Math.max(G.endMonth, Math.ceil(1.6 * lim)) : Math.max(G.endMonth, lim + 1);
   if (G.mode === 'cache') { setTimeout(() => bus.emit('ghosts:done', { key: G.key, ends: G.ends }), 0); return; }
   if (G.mode === 'worker') postW({ t: 'finish', key: G.key, cap: G.cap });
+  else if (G.mode === 'pending') kick(G);   // kick() posts 'finish' (or uses the cache / idle fallback) once it is ready
+  else if (G.mode === 'kicking') { /* kick() in progress sees G.over */ }
   else startIdle();
 }
-export function stop() { if (G && worker) postW({ t: 'drop', key: G.key }); stopIdle(); G = null; }
+export function stop() { if (G && worker) postW({ t: 'drop', key: G.key }); stopIdle(); if (unarm) unarm(); G = null; }
 
 function onMsg(m) {
   const t0 = performance.now();

@@ -30,7 +30,8 @@ const num = (t) => `<bdi dir="ltr" class="lb-num">${esc(t)}</bdi>`;
 /** Server / other-player numbers → a safe integer before they touch markup (strings like "<img …>" become the fallback). */
 const int = (v, d = 0) => { const n = Math.floor(+v); return Number.isFinite(n) ? n : d; };
 const HEX_RE = /^#[0-9a-f]{3,8}$/i;
-const cardArt = (wid) => asset(`assets/${wid}/card.png`);
+// T7 CR-33 / PF-5: WebP copies of the 800×480 card PNGs (q90, ~20 KB instead of ~280 KB each, PSNR ≥ 36 dB); the PNGs stay in assets/
+const cardArt = (wid) => asset(`assets/${wid}/card.webp`);
 const freeKey = (wid) => 'rr2-save-free-' + wid;
 /** T4 IR-T4-1: learning games have their own slot (rr2-save-learn-<w>); game.js saveKeyFor owns the rule, this is the fallback. */
 const slotKey = (wid, learn = false) => (learn ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'free', worldId: wid, learn: true }))) || 'rr2-save-learn-' + wid) : freeKey(wid));
@@ -855,7 +856,7 @@ function closeLesson(restore = true) {
 }
 
 /* ============================================================ ⏳ מכונת הזמן (history mode) */
-const HIST_ART = asset('assets/history/card.png');
+const HIST_ART = asset('assets/history/card.webp');
 let SCEN = null; let scenP = null;
 /** E.scenarioList() → [{id, name, start, months, blurb, lesson}] (needs js/data/real.js; null while unavailable). */
 function scenarios() {

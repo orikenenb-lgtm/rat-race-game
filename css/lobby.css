@@ -74,18 +74,19 @@ body.lb-lobby-open { overflow: hidden; }
 .lb-t4 { background: linear-gradient(135deg, #ffd25e, #c98a12); color: #3a1f00; }
 .lb-t5 { background: linear-gradient(90deg, #ff5f6d, #ffc371, #47e08a, #4fa3ff, #b06bff); color: #1d0f2b; }
 
+/* T7 CR-33: pawns.webp = lossless WebP of pawns.png (exact: identical RGBA pixels, 73 KB instead of 100 KB) */
 .lb-pawn { --pw: 28px; position: relative; display: inline-block; flex: none; width: var(--pw); height: calc(var(--pw) * 1.371); isolation: isolate; vertical-align: middle; }
 .lb-pawn::before, .lb-pawn::after { content: ''; position: absolute; inset: 0; }
 .lb-pawn::before {
-  background: url(../assets/pawns/pawns.png) no-repeat;
+  background: url(../assets/pawns/pawns.webp) no-repeat;
   background-size: calc(var(--pw) * 6.4516) auto;
   background-position: calc(var(--pw) * var(--x0, 31) / -124) calc(var(--pw) * -58 / 124);
   filter: grayscale(1) brightness(1.22) contrast(1.08);
 }
 .lb-pawn::after {
   background: var(--pc, #f2b632);
-  -webkit-mask: url(../assets/pawns/pawns.png) no-repeat;
-  mask: url(../assets/pawns/pawns.png) no-repeat;
+  -webkit-mask: url(../assets/pawns/pawns.webp) no-repeat;
+  mask: url(../assets/pawns/pawns.webp) no-repeat;
   -webkit-mask-size: calc(var(--pw) * 6.4516) auto; mask-size: calc(var(--pw) * 6.4516) auto;
   -webkit-mask-position: calc(var(--pw) * var(--x0, 31) / -124) calc(var(--pw) * -58 / 124);
   mask-position: calc(var(--pw) * var(--x0, 31) / -124) calc(var(--pw) * -58 / 124);

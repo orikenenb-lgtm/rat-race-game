@@ -195,7 +195,7 @@ async def csp_check(b):
     csp = (f"default-src 'self'; script-src 'self' 'sha256-{h}'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; "
            f"img-src 'self' data: blob:; connect-src 'self' {SB}; object-src 'none'; base-uri 'self'")
     M = Mock(); ctx, pg = await page(b, DESK, 'light', 'csp', mock=M, csp=csp)
-    await ctx.route('**/assets/history/card.png', lambda r: r.fulfill(status=404, body='nope'))
+    await ctx.route('**/assets/history/card.webp', lambda r: r.fulfill(status=404, body='nope'))
     await pg.goto(BASE); await pg.wait_for_selector('.lb-home'); await pg.wait_for_timeout(1500)
     check(await pg.evaluate("!!document.querySelector('.map-hist-art img') && getComputedStyle(document.querySelector('.map-hist-art img')).display === 'none'"), 'broken history art hides itself (no inline onerror)')
     await pg.evaluate("import('./js/progress.js').then(P => P._reset({ stars: { w1: 1 }, tutorialDone: true, gamesPlayed: 2 }))")
