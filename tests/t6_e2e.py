@@ -70,6 +70,14 @@ async def step(pg, rolls_max=1):
     if s['card']: await answer(pg); await pg.wait_for_timeout(350); return s
     if s['roll'] and not s['start']: await pg.click('#roll'); await pg.wait_for_timeout(600); return s
     await pg.wait_for_timeout(300); return s
+async def click_calm(pg, sel, tries=12):
+    """click `sel`; a T4 coach bubble (e.g. the 🛟 fund hint) that opens meanwhile intercepts pointer events by design — dismiss it
+    (step() presses its button) and try again. Toasts hide by themselves (each try waits up to 10 s for them)."""
+    for i in range(tries):
+        try: await pg.click(sel, timeout=10000); return
+        except Exception:  # noqa: BLE001
+            if i == tries - 1: raise
+            if (await st(pg))['coach']: await step(pg)
 async def play_until(pg, cond, limit=400, label=''):
     for i in range(limit):
         if await cond(): return True
@@ -205,9 +213,9 @@ async def t_rewind(b, F):
     if not s['end'] and not s['start']:
         for i in range(20):
             s = await st(pg)
-            if s['roll'] and not s['card'] and not s['gm']: break
+            if s['roll'] and not s['card'] and not s['gm'] and not s['coach']: break
             await step(pg)
-        await pg.click('#t6branch [data-b=compare]'); await pg.wait_for_selector('#gm:not([hidden]) .t6-limits', timeout=10000)
+        await click_calm(pg, '#t6branch [data-b=compare]'); await pg.wait_for_selector('#gm:not([hidden]) .t6-limits', timeout=10000)
         cmpi = await pg.evaluate("() => ({ lines: document.querySelectorAll('#gm svg .g-cmp, #gm svg .g-nw').length, lim: document.querySelectorAll('#gm .t6-limits li').length })")
         check(cmpi['lim'] == 5 and cmpi['lines'] >= 1, f'compare sheet: both lines + the 5 limits ({cmpi})')
         await shot(pg, 'compare_phone')
@@ -215,7 +223,7 @@ async def t_rewind(b, F):
         # M2: rr2-last-game now holds another game → no "המקור" any more
         keep = await ls(pg, 'rr2-last-game')
         await pg.evaluate("() => { const r = JSON.parse(localStorage.getItem('rr2-last-game')); r.rcfg = { ...r.rcfg, seed: (r.rcfg.seed + 1) >>> 0 }; localStorage.setItem('rr2-last-game', JSON.stringify(r)); }")
-        await pg.wait_for_timeout(300); await pg.click('#t6branch [data-b=compare]')
+        await pg.wait_for_timeout(300); await click_calm(pg, '#t6branch [data-b=compare]')
         # toasts are queued (6 kept): the answer may wait behind a toast already on screen — poll for it (≤ 15 s)
         for _ in range(60):
             await pg.wait_for_timeout(250)
