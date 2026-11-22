@@ -1,34 +1,32 @@
-## Reading (engine lane, after T3 + the T2 review fixes, 2026-11-22)
+## Reading (engine lane, after T4 + T6 engine parts, the director's balance decisions and the T3 review fixes, 2026-11-22)
 
-**What changed since the T2 report.** T3 (chains, the story inbox, business seasons / events / setups, the w1 life-money scale), the
-review fixes (M2 range widths from the claimed numbers, M1 research redesign, m1–m3) and the M4 tuning (DD priors w1 .40/.30/.18/.12
-with a harsher risk-3 cashflow range, w2 .30/.33/.24/.13 on the hard table, w4 .20/.28/.30/.22 with CF_W4; w1 `lifeMoneyScale` 0.28).
-The smart policy now uses v3's business-offer rule (review M3 / gate A5) and resolves story items with the evaluator (financial and
-mixed; the default on personal items); guideTapper takes the highlighted story option, blindTapper a random one half the time.
+**Engine measured.** `7f5b5ef06ed5` (HEAD after the T3 review batch, measured on `git archive HEAD`, not the shared working tree). The
+later commit `3d5afa2` (T6 client CRs: `endNow`, decision labels, `out.rival.dd`, after-win fields) is outcome-neutral, so these numbers
+stand for it; its engine id is `e9d0b3c299cf`. The machine ran 2 matrix processes plus the test suites on 2 cores, so the A10 speed row
+(3.3 games/s) is not a measurement of the engine (pre-T2 baseline 12.3 on an idle box).
 
-**Engines measured.** w1 = `0d3b65e979f1` (final). w2–w4 = `52a975f645f6`: the only differences to the final engine are w1 data and
-one business note string, so their numbers stand for the final engine.
+**What changed since the previous report.**
+* T6 deal competition (stream `rival`): a delay step on a card others want can lose the deal; buying now never loses. Archetypes are
+  now the pure `js/systems/archetypes.js` policies (ghost players), with literal rule cards — saver never buys with a loan and never buys
+  a flagged deal unchecked, gambler never inspects and always offers 15 %, diversified auto-invests 40 % of the surplus, founder buys a
+  rent asset only after a business-kind one. Their in-time rates moved accordingly (saver 7–67 %, gambler 0–7 %).
+* Director decision (a): rules-4 time limits `maxMonths4` — w1 doctor 76 → 82, w4 engineer 60 → 69 (★★ / ★★★ unchanged).
+* Director decision (b) + T3 review M8: `CH.TRIGGER` (crisis signal 0.4 / tile 0.15 / index drop 0.4; career warn 0.35 / degree 0.4 /
+  promo 0.25 from month 24), sealed entry odds for car / moving / friend (0.7 / 0.7 / 0.65; w3 friend 1), cooldowns 30, one friend and
+  one crisis run. The stories table now measures **time-limited** games (the spec's mode) and the months each business really ran.
+* T3 review M7: guide highlights a flagged deal's inspection, prices a setup's capital, and follows the careful plan rule (rest only when
+  tired / recovering). M3: reporting side income is the better choice (the late annual return bills the accountant too).
 
-**Met:** A2, A4, A5 (f:ops is now best in 7 cells and worse than f:none in 4 — the smart business rule made the ops focus usable), A6,
-A6b, A9; director targets: blindTapper ≤ 30%, smart ≥ naive + 5 pp in every world (w1 91 vs 84 — believing the seller no longer wins
-the kids' world), the w1 habit gap on personal / values cards 10 pp (94 vs 84; it was 95 vs 63 before the scale).
+**Balance decisions — met.**
+* (a) guideTapper per character ≥ 50 % in every world: w1 doctor 59 % (was 47 %), w4 engineer 56 % (was 37 %); the lowest characters
+  are now w2 pm 54 % and w4 engineer 56 %. smart stays ≤ 80 % in w2–w4 (75 / 66 / 73 %).
+* (b) chain starts: career 59–74 % (≤ 80 %), crisis 67–83 % (≤ 85 %); car 29–43 %, move 39–48 %, friend 34–43 % (band 25–60 %).
 
-**Not met, with the reason:**
-* **smart / adaptive too high in w1 (91 / 88) and w2 (79 / 78)**, just above in w4 (74 / 71); w3 is inside (75 / 75). Lowering the
-  life-card money (needed for M4 c) made w1 easier for every careful policy. **guideTapper < 60% in w4 (54%, engineer 37%)** and
-  A1's per-character floor in w1 (doctor 47%). The levers tried move smart and guideTapper together (the T2 finding still holds: the
-  smart − guide gap is 15–25 pp); the harder DD tables pushed w4's guide under 60 while smart only fell 83 → 74. Hitting all three
-  targets at once needs either a better guide highlight on the cards that decide w4 (business offers, the w4 deal mix) or per-character
-  time limits for rules 4 — both are design decisions, so they are left to the director (recommendation: rules-4 per-character limits
-  for doctor / engineer, and keep the DD tables).
-* **A7**: `plan:study` is still top in every appearance until the degree is done (study early is dominant since v3), plus w2
-  `upgrade:trim`. Unchanged from T2; needs a study-plan rebalance.
-* **A10 sim speed**: 8.5 games/s (pre-T2 baseline 12.3, T2 14.2) measured while other lanes ran browser suites on the same 2 cores —
-  T3 adds the story month, the business `why` / stage (a valuation per simulated month) and the policies' inbox reads (business
-  previews run 3-month forecasts). The generated A10 row says "met" because the perf file has no baseline; read it as ~69% of the
-  pre-T2 speed (target ≥ 75%), unconfirmed on an idle box. describe p95 0.13 ms and impactFor p95 1.3 ms are well inside budget.
-* **T3 stories table**: crisis (90–98%) and career (81–90%) start more often than the [TUNE] ceilings (85% / 80%) even with the sealed
-  trigger odds, and chain items per 12 months have a median of ≈ 1.4 (target 2–3). Pacing holds everywhere (≤ 2 open items, ≤ 2 open
-  chains, no standalone repeat inside 12 months, completion ≈ 90%), business items ≈ 2.4–2.9 per business-year (target 2–4). The
-  frequency and the item-count targets pull in opposite directions; content (more steps per chain) is the way to raise items without
-  starting chains more often.
+**Not met / to note.**
+* A1's pooled ≥ 65 %: w2 guide 60 %, w4 63 % (w1 67 %, w3 76 %) — the per-character floor holds everywhere. The T3-review guide
+  highlights raised w4 guide 54 → 63 % (engineer 37 → 56 %) without touching smart; w2 fell 65 → 60 % with competition on.
+* smart in w1 stays high (91 %); the director accepted the current smart levels.
+* Chain items per 12 months fell to a median ≈ 1.0–1.2 (target 2–3) with fewer starts; the review's follow-up steps (promo six months in,
+  a second renewal, a friend follow-up, a back-to-the-car nudge) are content work for the stories lane.
+* A7: `tax:report` is now always the better option when offered (T3 §9.3 honesty over T2's "not always better"); `plan:study` stays
+  dominant until the degree (review m13 open).

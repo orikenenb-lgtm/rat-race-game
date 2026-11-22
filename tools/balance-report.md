@@ -8,122 +8,120 @@ Policies: **guideTapper** (mentor מתחיל, taps the highlighted option and th
 
 | gate | result | numbers |
 |---|---|---|
-| A1 guideTapper in time ≥ 65%, no character < 50% | **NOT met** | w1 67% (worst doctor 47%) · w2 65% (worst lawyer 60%) · w3 79% (worst exporter 70%) · w4 54% (worst engineer 37%) |
-| A2 blindTapper in time ≤ 30% | met | w1 2% · w2 10% · w3 5% · w4 7% |
-| A2b naive in time ≤ 40% (target, not blocking) | not met (reported) | w1 84% · w2 51% · w3 38% · w4 65% |
-| A3 smart and adaptive 55–75% | **NOT met** | w1 smart 91% (med 46) / adaptive 88% (med 47) · w2 smart 79% (med 44) / adaptive 78% (med 47) · w3 smart 75% (med 49) / adaptive 75% (med 50) · w4 smart 74% (med 58) / adaptive 71% (med 59) |
-| A4 no policy best in > 60% of cells | met | 31 cells: smart 47% · guideTapper 19% · adaptive 18% · naive 11% · founder 4% · cautious 0% · greedy 0% · saver 0% · diversified 0% · gambler 0% |
-| A5 every focus best in ≥ 1 cell and worse than f:none in ≥ 1 | met | f:scout best 1 / worse 26 · f:debt best 4 / worse 16 · f:ops best 7 / worse 4 · f:frugal best 18 / worse 3 · f:network best 5 / worse 25 · f:research best 1 / worse 26 |
-| A6 dd:flagged beats never & always (pooled, ≥ 3 worlds) | met | pooled: flagged 81% med 50 · never 79% med 50 · always 77% med 52 · worlds beaten: w1,w2,w4 |
-| A6b dd:always worse than dd:never in ≥ 1 world (desirable) | met | w1 no · w2 yes · w3 yes · w4 yes |
-| A7 no option top in > 85% (allowlist: save, skip on wants; personal/values life cards and quizzes listed separately) | **NOT met** | w1 payday:plan:study 130/130 · w1 edu:plan:study 30/30 · w2 upgrade:trim:e2 30/30 · w2 edu:plan:study 25/25 · w2 upgrade:trim:e1 59/64 · w2 payday:plan:study 142/145 · w3 edu:plan:study 48/49 · w3 payday:plan:study 226/233 — no-answer cards (personal/values life events score 100 for every option; quiz = knowledge): w1 life:withdraw 23/23 · w1 life:take 32/33 · w1 life:later 22/22 · w2 life:take 56/64 · w2 life:public 49/49 · w2 mystery:a1 24/24 · w2 life:later 22/22 · w3 life:bus 23/23 · w3 life:object 24/24 · w3 life:public 24/24 · w3 life:take 45/46 · w4 life:later 20/20 · w4 life:take 39/39 · w4 life:bus 25/25 |
-| A8 ramp | **NOT met** | smart w1 91% w2 79% w3 75% w4 74% · guideTapper w1 67% w2 65% w3 79% w4 54% |
-| A9 ablation changes smart in time by ≥ 3 points in ≥ 1 world | met | abl:noCycle: w1 -1pt/-1mo w2 0pt/+1mo w3 5pt/0mo w4 2pt/-2mo · abl:noDD: w1 7pt/-7mo w2 9pt/-3mo w3 14pt/-5mo w4 17pt/-9mo · f:none: w1 -1pt/-2mo w2 0pt/+1mo w3 2pt/-1mo w4 5pt/-1mo |
-| A10 performance | met | describe p95 0.126 ms · impactFor p95 1.265 ms (740 calls) · sim 8.52 games/s |
+| A1 guideTapper in time ≥ 65%, no character < 50% | **NOT met** | w1 67% (worst doctor 59%) · w2 60% (worst pm 54%) · w3 76% (worst exporter 67%) · w4 63% (worst engineer 56%) |
+| A2 blindTapper in time ≤ 30% | met | w1 2% · w2 7% · w3 5% · w4 6% |
+| A2b naive in time ≤ 40% (target, not blocking) | not met (reported) | w1 83% · w2 51% · w3 38% · w4 72% |
+| A3 smart and adaptive 55–75% | **NOT met** | w1 smart 91% (med 47) / adaptive 89% (med 48) · w2 smart 75% (med 49) / adaptive 72% (med 52) · w3 smart 66% (med 55) / adaptive 65% (med 55) · w4 smart 73% (med 60) / adaptive 71% (med 62) |
+| A4 no policy best in > 60% of cells | met | 31 cells: smart 40% · guideTapper 26% · naive 16% · adaptive 12% · greedy 3% · saver 3% · cautious 0% · founder 0% · diversified 0% · gambler 0% |
+| A5 every focus best in ≥ 1 cell and worse than f:none in ≥ 1 | met | f:scout best 1 / worse 27 · f:debt best 6 / worse 14 · f:ops best 10 / worse 3 · f:frugal best 20 / worse 5 · f:network best 3 / worse 27 · f:research best 2 / worse 24 |
+| A6 dd:flagged beats never & always (pooled, ≥ 3 worlds) | **NOT met** | pooled: flagged 77% med 53 · never 77% med 52 · always 62% med 61 · worlds beaten: w1,w4 |
+| A6b dd:always worse than dd:never in ≥ 1 world (desirable) | met | w1 yes · w2 yes · w3 yes · w4 yes |
+| A7 no option top in > 85% (allowlist: save, skip on wants; personal/values life cards and quizzes listed separately) | **NOT met** | w1 payday:plan:study 334/338 · w1 edu:plan:study 101/102 · w2 upgrade:trim:e2 100/100 · w2 edu:plan:study 45/45 · w2 upgrade:trim:e1 136/149 · w2 payday:plan:study 283/293 · w2 upgrade:trim:e6 38/40 · w2 upgrade:trim:e5 29/32 · w2 upgrade:trim:e4 96/107 · w2 business:biz:price:up 69/74 · w3 edu:plan:study 84/85 · w3 payday:plan:study 501/513 — no-answer cards (personal/values life events score 100 for every option; quiz = knowledge): w1 life:withdraw 52/52 · w1 life:registry 29/29 · w1 life:private 96/104 · w1 life:bus 56/56 · w1 life:take 123/132 · w1 life:periphery 22/23 · w1 life:local 60/69 · w1 life:later 57/57 · w1 life:object 32/32 · w2 life:object 45/45 · w2 life:take 153/162 · w2 life:public 153/153 · w2 life:later 73/73 · w2 life:bus 41/41 · w2 life:withdraw 35/36 · w2 life:registry 22/22 · w3 life:bus 39/39 · w3 life:public 97/97 · w3 life:withdraw 36/36 · w3 life:object 40/40 · w3 life:take 138/138 · w3 life:later 41/41 · w3 life:smaller 20/20 · w4 life:withdraw 41/41 · w4 life:object 36/36 · w4 life:later 62/62 · w4 life:take 135/135 · w4 life:bus 58/58 · w4 life:registry 27/27 |
+| A8 ramp | **NOT met** | smart w1 91% w2 75% w3 66% w4 73% · guideTapper w1 67% w2 60% w3 76% w4 63% |
+| A9 ablation changes smart in time by ≥ 3 points in ≥ 1 world | met | abl:noCycle: w1 -1pt/0mo w2 1pt/-2mo w3 5pt/0mo w4 2pt/-2mo · abl:noDD: w1 7pt/-7mo w2 13pt/-8mo w3 24pt/-11mo w4 19pt/-11mo · f:none: w1 0pt/-1mo w2 1pt/-2mo w3 3pt/-2mo w4 3pt/-1mo |
+| A10 performance | met | describe p95 0.13 ms · impactFor p95 1.802 ms (742 calls) · sim 3.26 games/s |
 
 ## Director targets (T2 review M4, owner wants a harder game)
 
 | target | result | numbers |
 |---|---|---|
-| smart and adaptive: w1 70–85%, w2–w4 55–72% | **NOT met** | w1 91% / 88% · w2 79% / 78% · w3 75% / 75% · w4 74% / 71% |
-| guideTapper ≥ 60% | **NOT met** | w1 67% · w2 65% · w3 79% · w4 54% |
-| blindTapper ≤ 30% | met | w1 2% · w2 10% · w3 5% · w4 7% |
-| smart ≥ naive + 5 pp in every world | met | w1 smart 91% vs naive 84% · w2 smart 79% vs naive 51% · w3 smart 75% vs naive 38% · w4 smart 74% vs naive 65% |
-| w1: cheapest vs most expensive habit on personal / values cards ≤ 10 pp | met | w1 94% vs 84% · w2 84% vs 60% · w3 75% vs 73% · w4 75% vs 69% |
+| smart and adaptive: w1 70–85%, w2–w4 55–72% | **NOT met** | w1 91% / 89% · w2 75% / 72% · w3 66% / 65% · w4 73% / 71% |
+| guideTapper ≥ 60% | met | w1 67% · w2 60% · w3 76% · w4 63% |
+| blindTapper ≤ 30% | met | w1 2% · w2 7% · w3 5% · w4 6% |
+| smart ≥ naive + 5 pp in every world | **NOT met** | w1 smart 91% vs naive 83% · w2 smart 75% vs naive 51% · w3 smart 66% vs naive 38% · w4 smart 73% vs naive 72% |
+| w1: cheapest vs most expensive habit on personal / values cards ≤ 10 pp | met | w1 94% vs 84% · w2 82% vs 56% · w3 67% vs 63% · w4 74% vs 68% |
 
 ## T3 stories & business (`node tools/sim.mjs --stories N wX`: blindTapper, guideTapper, smart, sideHustler, owner × N each)
 
 | world | car / move / friend / career / crisis start | side (side-plan ≥ 15 mo) | completion | steps / run | chain items / 12 mo (med · p90) | business items / business-year (med · p90) | defaults share | standalone repeats < 12 mo | max open items / chains | stage distribution (0/1/2/3) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| w1 | 56% / 60% / 61% / 90% / 90% | 100% | 94% | 1.84 | 1.38 · 1.89 | 2.4 · 10 | 27% | 0 | 2 / 2 | 66/191/13/1 |
-| w2 | 67% / 67% / 72% / 86% / 95% | 100% | 93% | 1.7 | 1.41 · 1.97 | 2.37 · 3.48 | 26% | 0 | 2 / 2 | 38/220/66/3 |
-| w3 | 55% / 52% / 51% / 81% / 95% | 100% | 89% | 1.91 | 1.44 · 1.88 | 2.53 · 3.43 | 23% | 0 | 2 / 2 | 119/227/150/0 |
-| w4 | 64% / 64% / 59% / 84% / 98% | 100% | 91% | 1.81 | 1.43 · 1.95 | 2.87 · 4 | 24% | 0 | 2 / 2 | 81/196/149/7 |
+| w1 | 37% / 39% / 39% / 71% / 67% | 100% | 93% | 1.96 | 1.02 · 1.5 | 2.4 · 3.17 | 26% | 0 | 2 / 2 | 38/108/7/1 |
+| w2 | 43% / 48% / 43% / 74% / 83% | 100% | 94% | 2.01 | 1.09 · 1.74 | 2.54 · 3.29 | 25% | 0 | 2 / 2 | 20/129/38/0 |
+| w3 | 29% / 39% / 41% / 59% / 83% | 100% | 92% | 2.21 | 1.2 · 1.78 | 2.93 · 3.64 | 20% | 0 | 2 / 2 | 66/159/81/0 |
+| w4 | 38% / 40% / 34% / 73% / 83% | 100% | 93% | 2.07 | 1.04 · 1.68 | 3 · 3.87 | 21% | 0 | 2 / 2 | 45/110/94/3 |
 
 ## In time by world × policy (all characters pooled)
 
 | policy | w1 | w2 | w3 | w4 |
 |---|---|---|---|---|
-| guideTapper | 67% · med 55 · ★★★ 0% | 65% · med 49 · ★★★ 0% | 79% · med 49 · ★★★ 0% | 54% · med 64 · ★★★ 0% |
-| blindTapper | 2% · med 72 · ★★★ 0% | 10% · med 57 · ★★★ 0% | 5% · med 76 · ★★★ 0% | 7% · med 75 · ★★★ 0% |
-| naive | 84% · med 50 · ★★★ 0% | 51% · med 42 · ★★★ 0% | 38% · med 65 · ★★★ 0% | 65% · med 63 · ★★★ 0% |
-| smart | 91% · med 46 · ★★★ 8% | 79% · med 44 · ★★★ 9% | 75% · med 49 · ★★★ 3% | 74% · med 58 · ★★★ 3% |
-| adaptive | 88% · med 47 · ★★★ 8% | 78% · med 47 · ★★★ 6% | 75% · med 50 · ★★★ 3% | 71% · med 59 · ★★★ 3% |
-| cautious | 60% · med 61 · ★★★ 0% | 44% · med 57 · ★★★ 0% | 57% · med 57 · ★★★ 0% | 42% · med 67 · ★★★ 0% |
-| greedy | 52% · med 55 · ★★★ 0% | 44% · med 42 · ★★★ 0% | 68% · med 54 · ★★★ 0% | 45% · med 66 · ★★★ 0% |
-| saver | 9% · med 77 · ★★★ 0% | 16% · med 77 · ★★★ 0% | 35% · med 66 · ★★★ 0% | 51% · med 66 · ★★★ 1% |
-| founder | 87% · med 48 · ★★★ 8% | 73% · med 47 · ★★★ 7% | 42% · med 61 · ★★★ 2% | 61% · med 63 · ★★★ 2% |
-| diversified | 49% · med 61 · ★★★ 2% | 48% · med 62 · ★★★ 4% | 13% · med 72 · ★★★ 0% | 3% · med 83 · ★★★ 0% |
-| gambler | 18% · med 68 · ★★★ 0% | 22% · med 42 · ★★★ 0% | 21% · med 70 · ★★★ 0% | 12% · med 79 · ★★★ 0% |
-| f:none | 90% · med 44 · ★★★ 10% | 80% · med 45 · ★★★ 7% | 77% · med 48 · ★★★ 3% | 78% · med 57 · ★★★ 3% |
-| f:scout | 80% · med 53 · ★★★ 4% | 73% · med 50 · ★★★ 4% | 73% · med 49 · ★★★ 3% | 70% · med 58 · ★★★ 3% |
-| f:debt | 87% · med 49 · ★★★ 8% | 77% · med 47 · ★★★ 8% | 77% · med 48 · ★★★ 3% | 77% · med 57 · ★★★ 3% |
-| f:ops | 90% · med 44 · ★★★ 10% | 79% · med 45 · ★★★ 7% | 76% · med 48 · ★★★ 3% | 78% · med 57 · ★★★ 3% |
-| f:frugal | 94% · med 43 · ★★★ 10% | 80% · med 43 · ★★★ 8% | 77% · med 48 · ★★★ 3% | 78% · med 57 · ★★★ 2% |
-| f:network | 82% · med 50 · ★★★ 7% | 76% · med 47 · ★★★ 7% | 75% · med 49 · ★★★ 4% | 71% · med 59 · ★★★ 2% |
-| f:research | 84% · med 48 · ★★★ 7% | 73% · med 48 · ★★★ 6% | 73% · med 50 · ★★★ 3% | 73% · med 58 · ★★★ 2% |
-| dd:never | 87% · med 47 · ★★★ 8% | 78% · med 45 · ★★★ 8% | 77% · med 50 · ★★★ 3% | 70% · med 59 · ★★★ 3% |
-| dd:always | 89% · med 48 · ★★★ 6% | 75% · med 48 · ★★★ 8% | 72% · med 51 · ★★★ 3% | 67% · med 61 · ★★★ 3% |
-| dd:borderline | 91% · med 46 · ★★★ 7% | 79% · med 45 · ★★★ 9% | 79% · med 50 · ★★★ 4% | 71% · med 59 · ★★★ 3% |
-| abl:noCycle | 89% · med 45 · ★★★ 8% | 80% · med 45 · ★★★ 7% | 80% · med 49 · ★★★ 4% | 76% · med 56 · ★★★ 5% |
-| abl:noDD | 98% · med 39 · ★★★ 17% | 88% · med 41 · ★★★ 11% | 89% · med 44 · ★★★ 10% | 90% · med 49 · ★★★ 10% |
-| life:cheap | 94% · med 43 · ★★★ 11% | 84% · med 42 · ★★★ 9% | 75% · med 49 · ★★★ 3% | 75% · med 58 · ★★★ 3% |
-| life:dear | 84% · med 49 · ★★★ 5% | 60% · med 53 · ★★★ 3% | 73% · med 50 · ★★★ 3% | 69% · med 59 · ★★★ 2% |
+| guideTapper | 67% · med 56 · ★★★ 0% | 60% · med 51 · ★★★ 0% | 76% · med 50 · ★★★ 0% | 63% · med 65 · ★★★ 0% |
+| blindTapper | 2% · med 73 · ★★★ 0% | 7% · med 54 · ★★★ 0% | 5% · med 72 · ★★★ 0% | 6% · med 78 · ★★★ 0% |
+| naive | 83% · med 49 · ★★★ 0% | 51% · med 42 · ★★★ 0% | 38% · med 64 · ★★★ 0% | 72% · med 64 · ★★★ 0% |
+| smart | 91% · med 47 · ★★★ 8% | 75% · med 49 · ★★★ 7% | 66% · med 55 · ★★★ 3% | 73% · med 60 · ★★★ 3% |
+| adaptive | 89% · med 48 · ★★★ 7% | 72% · med 52 · ★★★ 4% | 65% · med 55 · ★★★ 3% | 71% · med 62 · ★★★ 3% |
+| cautious | 64% · med 60 · ★★★ 0% | 44% · med 57 · ★★★ 0% | 57% · med 58 · ★★★ 0% | 48% · med 67 · ★★★ 0% |
+| greedy | 56% · med 55 · ★★★ 0% | 46% · med 44 · ★★★ 0% | 69% · med 54 · ★★★ 0% | 48% · med 68 · ★★★ 0% |
+| saver | 7% · med 83 · ★★★ 0% | 15% · med 85 · ★★★ 0% | 28% · med 66 · ★★★ 0% | 67% · med 65 · ★★★ 2% |
+| founder | 73% · med 53 · ★★★ 0% | 62% · med 50 · ★★★ 0% | 34% · med 65 · ★★★ 0% | 66% · med 65 · ★★★ 0% |
+| diversified | 30% · med 66 · ★★★ 0% | 47% · med 58 · ★★★ 2% | 28% · med 67 · ★★★ 0% | 70% · med 64 · ★★★ 1% |
+| gambler | 0% · med 102 · ★★★ 0% | 2% · med 57 · ★★★ 0% | 7% · med 76 · ★★★ 0% | 2% · med 89 · ★★★ 0% |
+| f:none | 91% · med 46 · ★★★ 9% | 76% · med 47 · ★★★ 9% | 68% · med 53 · ★★★ 2% | 76% · med 59 · ★★★ 4% |
+| f:scout | 79% · med 53 · ★★★ 5% | 69% · med 57 · ★★★ 4% | 64% · med 55 · ★★★ 3% | 71% · med 60 · ★★★ 3% |
+| f:debt | 88% · med 49 · ★★★ 6% | 73% · med 51 · ★★★ 6% | 68% · med 53 · ★★★ 2% | 76% · med 59 · ★★★ 4% |
+| f:ops | 91% · med 46 · ★★★ 9% | 76% · med 47 · ★★★ 9% | 67% · med 53 · ★★★ 2% | 75% · med 59 · ★★★ 4% |
+| f:frugal | 94% · med 44 · ★★★ 10% | 75% · med 47 · ★★★ 7% | 69% · med 53 · ★★★ 3% | 76% · med 58 · ★★★ 3% |
+| f:network | 80% · med 53 · ★★★ 6% | 70% · med 55 · ★★★ 4% | 59% · med 56 · ★★★ 3% | 69% · med 62 · ★★★ 3% |
+| f:research | 86% · med 51 · ★★★ 7% | 70% · med 51 · ★★★ 4% | 65% · med 55 · ★★★ 3% | 72% · med 60 · ★★★ 3% |
+| dd:never | 88% · med 48 · ★★★ 7% | 77% · med 47 · ★★★ 6% | 72% · med 52 · ★★★ 3% | 69% · med 60 · ★★★ 3% |
+| dd:always | 81% · med 52 · ★★★ 5% | 62% · med 61 · ★★★ 4% | 39% · med 62 · ★★★ 1% | 61% · med 67 · ★★★ 3% |
+| dd:borderline | 89% · med 48 · ★★★ 7% | 75% · med 51 · ★★★ 6% | 72% · med 53 · ★★★ 3% | 70% · med 61 · ★★★ 3% |
+| abl:noCycle | 90% · med 47 · ★★★ 7% | 76% · med 47 · ★★★ 5% | 71% · med 55 · ★★★ 4% | 75% · med 58 · ★★★ 4% |
+| abl:noDD | 98% · med 40 · ★★★ 18% | 88% · med 41 · ★★★ 10% | 89% · med 44 · ★★★ 11% | 92% · med 49 · ★★★ 10% |
+| life:cheap | 94% · med 45 · ★★★ 11% | 82% · med 45 · ★★★ 7% | 67% · med 55 · ★★★ 3% | 74% · med 60 · ★★★ 2% |
+| life:dear | 84% · med 51 · ★★★ 5% | 56% · med 55 · ★★★ 3% | 63% · med 55 · ★★★ 3% | 68% · med 61 · ★★★ 3% |
 
 ## Per character (in time / median months)
 
-**w1** — guideTapper: teacher 80%/43, driver 78%/47, dev 63%/57, doctor 47%/76 · blindTapper: teacher 5%/64, driver 4%/80, dev 0%/94, doctor 0%/— · naive: teacher 81%/38, driver 87%/48, dev 85%/51, doctor 83%/64 · smart: teacher 92%/36, driver 98%/40, dev 88%/51, doctor 84%/63 · adaptive: teacher 90%/36, driver 96%/40, dev 85%/52, doctor 80%/64
+**w1** — guideTapper: teacher 70%/43, driver 75%/45, dev 63%/58, doctor 59%/79 · blindTapper: teacher 1%/70, driver 5%/79, dev 0%/100, doctor 0%/— · naive: teacher 81%/40, driver 84%/48, dev 83%/52, doctor 85%/66 · smart: teacher 93%/37, driver 97%/40, dev 87%/52, doctor 86%/66 · adaptive: teacher 89%/37, driver 96%/42, dev 83%/53, doctor 86%/67
 
-**w2** — guideTapper: lawyer 60%/48, chef 74%/48, pm 61%/51 · blindTapper: lawyer 4%/59, chef 15%/53, pm 10%/59 · naive: lawyer 48%/41, chef 58%/39, pm 48%/44 · smart: lawyer 74%/47, chef 90%/41, pm 74%/45 · adaptive: lawyer 74%/47, chef 89%/45, pm 72%/51
+**w2** — guideTapper: lawyer 59%/50, chef 67%/49, pm 54%/55 · blindTapper: lawyer 5%/54, chef 10%/52, pm 7%/70 · naive: lawyer 48%/40, chef 57%/39, pm 48%/45 · smart: lawyer 68%/52, chef 87%/43, pm 71%/51 · adaptive: lawyer 64%/58, chef 84%/47, pm 69%/56
 
-**w3** — guideTapper: importer 81%/49, exporter 70%/52, captain 86%/48 · blindTapper: importer 4%/74, exporter 6%/79, captain 5%/76 · naive: importer 34%/66, exporter 39%/63, captain 41%/66 · smart: importer 75%/48, exporter 72%/52, captain 79%/48 · adaptive: importer 75%/49, exporter 73%/52, captain 78%/48
+**w3** — guideTapper: importer 79%/50, exporter 67%/53, captain 83%/48 · blindTapper: importer 3%/74, exporter 8%/74, captain 5%/70 · naive: importer 34%/66, exporter 40%/63, captain 40%/66 · smart: importer 66%/55, exporter 61%/56, captain 70%/54 · adaptive: importer 63%/55, exporter 61%/56, captain 70%/55
 
-**w4** — guideTapper: founder 62%/62, engineer 37%/63, social 63%/72 · blindTapper: founder 9%/61, engineer 4%/76, social 7%/80 · naive: founder 74%/61, engineer 46%/62, social 74%/70 · smart: founder 78%/56, engineer 68%/55, social 75%/69 · adaptive: founder 76%/56, engineer 63%/55, social 74%/70
+**w4** — guideTapper: founder 64%/60, engineer 56%/67, social 68%/70 · blindTapper: founder 9%/75, engineer 6%/78, social 2%/103 · naive: founder 74%/61, engineer 68%/62, social 74%/70 · smart: founder 72%/56, engineer 76%/57, social 71%/70 · adaptive: founder 72%/55, engineer 71%/59, social 71%/70
 
 ## Cycle buckets (smart, in time)
 
-**w1** — B0_calm 91% (n 174) · B1_early 94% (n 53) · B2_late 90% (n 136) · B3_long 84% (n 37)
+**w1** — B0_calm 91% (n 170) · B1_early 94% (n 52) · B2_late 90% (n 136) · B3_long 88% (n 42)
 
-**w2** — B0_calm 67% (n 18) · B1_early 72% (n 18) · B2_late 85% (n 78) · B3_long 79% (n 186)
+**w2** — B0_calm 67% (n 18) · B1_early 56% (n 18) · B2_late 82% (n 78) · B3_long 75% (n 186)
 
-**w3** — B0_calm 67% (n 27) · B1_early 88% (n 48) · B2_late 65% (n 93) · B3_long 80% (n 132)
+**w3** — B0_calm 67% (n 27) · B1_early 67% (n 48) · B2_late 58% (n 93) · B3_long 70% (n 132)
 
-**w4** — B0_calm 58% (n 19) · B1_early 91% (n 11) · B2_late 62% (n 65) · B3_long 78% (n 205)
+**w4** — B0_calm 61% (n 18) · B1_early 100% (n 8) · B2_late 58% (n 57) · B3_long 77% (n 217)
 
 
-## Reading (engine lane, after T3 + the T2 review fixes, 2026-11-22)
+## Reading (engine lane, after T4 + T6 engine parts, the director's balance decisions and the T3 review fixes, 2026-11-22)
 
-**What changed since the T2 report.** T3 (chains, the story inbox, business seasons / events / setups, the w1 life-money scale), the
-review fixes (M2 range widths from the claimed numbers, M1 research redesign, m1–m3) and the M4 tuning (DD priors w1 .40/.30/.18/.12
-with a harsher risk-3 cashflow range, w2 .30/.33/.24/.13 on the hard table, w4 .20/.28/.30/.22 with CF_W4; w1 `lifeMoneyScale` 0.28).
-The smart policy now uses v3's business-offer rule (review M3 / gate A5) and resolves story items with the evaluator (financial and
-mixed; the default on personal items); guideTapper takes the highlighted story option, blindTapper a random one half the time.
+**Engine measured.** `7f5b5ef06ed5` (HEAD after the T3 review batch, measured on `git archive HEAD`, not the shared working tree). The
+later commit `3d5afa2` (T6 client CRs: `endNow`, decision labels, `out.rival.dd`, after-win fields) is outcome-neutral, so these numbers
+stand for it; its engine id is `e9d0b3c299cf`. The machine ran 2 matrix processes plus the test suites on 2 cores, so the A10 speed row
+(3.3 games/s) is not a measurement of the engine (pre-T2 baseline 12.3 on an idle box).
 
-**Engines measured.** w1 = `0d3b65e979f1` (final). w2–w4 = `52a975f645f6`: the only differences to the final engine are w1 data and
-one business note string, so their numbers stand for the final engine.
+**What changed since the previous report.**
+* T6 deal competition (stream `rival`): a delay step on a card others want can lose the deal; buying now never loses. Archetypes are
+  now the pure `js/systems/archetypes.js` policies (ghost players), with literal rule cards — saver never buys with a loan and never buys
+  a flagged deal unchecked, gambler never inspects and always offers 15 %, diversified auto-invests 40 % of the surplus, founder buys a
+  rent asset only after a business-kind one. Their in-time rates moved accordingly (saver 7–67 %, gambler 0–7 %).
+* Director decision (a): rules-4 time limits `maxMonths4` — w1 doctor 76 → 82, w4 engineer 60 → 69 (★★ / ★★★ unchanged).
+* Director decision (b) + T3 review M8: `CH.TRIGGER` (crisis signal 0.4 / tile 0.15 / index drop 0.4; career warn 0.35 / degree 0.4 /
+  promo 0.25 from month 24), sealed entry odds for car / moving / friend (0.7 / 0.7 / 0.65; w3 friend 1), cooldowns 30, one friend and
+  one crisis run. The stories table now measures **time-limited** games (the spec's mode) and the months each business really ran.
+* T3 review M7: guide highlights a flagged deal's inspection, prices a setup's capital, and follows the careful plan rule (rest only when
+  tired / recovering). M3: reporting side income is the better choice (the late annual return bills the accountant too).
 
-**Met:** A2, A4, A5 (f:ops is now best in 7 cells and worse than f:none in 4 — the smart business rule made the ops focus usable), A6,
-A6b, A9; director targets: blindTapper ≤ 30%, smart ≥ naive + 5 pp in every world (w1 91 vs 84 — believing the seller no longer wins
-the kids' world), the w1 habit gap on personal / values cards 10 pp (94 vs 84; it was 95 vs 63 before the scale).
+**Balance decisions — met.**
+* (a) guideTapper per character ≥ 50 % in every world: w1 doctor 59 % (was 47 %), w4 engineer 56 % (was 37 %); the lowest characters
+  are now w2 pm 54 % and w4 engineer 56 %. smart stays ≤ 80 % in w2–w4 (75 / 66 / 73 %).
+* (b) chain starts: career 59–74 % (≤ 80 %), crisis 67–83 % (≤ 85 %); car 29–43 %, move 39–48 %, friend 34–43 % (band 25–60 %).
 
-**Not met, with the reason:**
-* **smart / adaptive too high in w1 (91 / 88) and w2 (79 / 78)**, just above in w4 (74 / 71); w3 is inside (75 / 75). Lowering the
-  life-card money (needed for M4 c) made w1 easier for every careful policy. **guideTapper < 60% in w4 (54%, engineer 37%)** and
-  A1's per-character floor in w1 (doctor 47%). The levers tried move smart and guideTapper together (the T2 finding still holds: the
-  smart − guide gap is 15–25 pp); the harder DD tables pushed w4's guide under 60 while smart only fell 83 → 74. Hitting all three
-  targets at once needs either a better guide highlight on the cards that decide w4 (business offers, the w4 deal mix) or per-character
-  time limits for rules 4 — both are design decisions, so they are left to the director (recommendation: rules-4 per-character limits
-  for doctor / engineer, and keep the DD tables).
-* **A7**: `plan:study` is still top in every appearance until the degree is done (study early is dominant since v3), plus w2
-  `upgrade:trim`. Unchanged from T2; needs a study-plan rebalance.
-* **A10 sim speed**: 8.5 games/s (pre-T2 baseline 12.3, T2 14.2) measured while other lanes ran browser suites on the same 2 cores —
-  T3 adds the story month, the business `why` / stage (a valuation per simulated month) and the policies' inbox reads (business
-  previews run 3-month forecasts). The generated A10 row says "met" because the perf file has no baseline; read it as ~69% of the
-  pre-T2 speed (target ≥ 75%), unconfirmed on an idle box. describe p95 0.13 ms and impactFor p95 1.3 ms are well inside budget.
-* **T3 stories table**: crisis (90–98%) and career (81–90%) start more often than the [TUNE] ceilings (85% / 80%) even with the sealed
-  trigger odds, and chain items per 12 months have a median of ≈ 1.4 (target 2–3). Pacing holds everywhere (≤ 2 open items, ≤ 2 open
-  chains, no standalone repeat inside 12 months, completion ≈ 90%), business items ≈ 2.4–2.9 per business-year (target 2–4). The
-  frequency and the item-count targets pull in opposite directions; content (more steps per chain) is the way to raise items without
-  starting chains more often.
+**Not met / to note.**
+* A1's pooled ≥ 65 %: w2 guide 60 %, w4 63 % (w1 67 %, w3 76 %) — the per-character floor holds everywhere. The T3-review guide
+  highlights raised w4 guide 54 → 63 % (engineer 37 → 56 %) without touching smart; w2 fell 65 → 60 % with competition on.
+* smart in w1 stays high (91 %); the director accepted the current smart levels.
+* Chain items per 12 months fell to a median ≈ 1.0–1.2 (target 2–3) with fewer starts; the review's follow-up steps (promo six months in,
+  a second renewal, a friend follow-up, a back-to-the-car nudge) are content work for the stories lane.
+* A7: `tax:report` is now always the better option when offered (T3 §9.3 honesty over T2's "not always better"); `plan:study` stays
+  dominant until the degree (review m13 open).
 
-Engine measured: 0d3b65e979f1, 52a975f645f6 (sha256 of the canonical bundle, tools/build-edge.mjs).
+Engine measured: 7f5b5ef06ed5 (sha256 of the canonical bundle, tools/build-edge.mjs).
