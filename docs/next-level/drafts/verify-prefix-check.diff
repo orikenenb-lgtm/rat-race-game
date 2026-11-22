@@ -1,0 +1,39 @@
+# T6 §8.3 — NOT APPLIED — AWAITING OWNER APPROVAL. Do not apply, re-pin or deploy without the owner's explicit approval.
+# verify-result: the stored checkpoint's action log must be a prefix of the submitted final log (else verified = false).
+# Base: 0f601d8. After approval only: git apply docs/next-level/drafts/verify-prefix-check.diff, add the 4 tests
+# of README.md to tests/verify.test.mjs, then deploy the Edge Function (verify_core.js is not part of the engine pin).
+diff -ru a/supabase/functions/verify-result/index.ts b/supabase/functions/verify-result/index.ts
+--- a/supabase/functions/verify-result/index.ts
++++ b/supabase/functions/verify-result/index.ts
+@@ -78,6 +78,7 @@
+ const ROW = (tx: any, q: any) => tx`select r.status, r.world, r.profession, r.months, r.passive, r.expenses, r.net_worth,
+     r.stats->'progress' as claim_progress, r.stats->'stars' as claim_stars,
+     case when jsonb_typeof(r.stats->'actions') = 'array' then r.stats->'actions' end as stats_actions,
++    case when jsonb_typeof(r.checkpoint->'actions') = 'array' then r.checkpoint->'actions' end as ck_actions,
+     case when r.challenge_id is not null then 'challenge' when r.weekly_key is not null then 'weekly'
+          when r.daily_key is not null then 'daily' else 'unknown' end as mode,
+     case when r.challenge_id is not null then (select c.seed from game.challenges c where c.id = r.challenge_id)
+diff -ru a/supabase/functions/verify-result/verify_core.js b/supabase/functions/verify-result/verify_core.js
+--- a/supabase/functions/verify-result/verify_core.js
++++ b/supabase/functions/verify-result/verify_core.js
+@@ -118,6 +118,9 @@
+  */
+ export function verifyGame(E, row, actions) {
+   const cfg = configFor(E, row);
++  // T6 §8.3: the stored ranked checkpoint's log must be a prefix of the submitted log (a rewound line is stored verified = false)
++  if (Array.isArray(row.ck_actions) && row.ck_actions.length && !isPrefix(row.ck_actions, actions))
++    return { ok: false, error: 'rewind:checkpoint_prefix', result: null, diff: null, cfg };
+   const first = replayCompare(E, cfg, row, actions);
+   // review B1 defence in depth: a game the row dates before the cut-over may have been started by a v4 client — retry ONCE with
+   // rules 4. Never from 4 to 3. T3 review m3: rules 4 is NOT always harder (better on 12–15 % of seeds), so best-of-two is a real
+@@ -162,3 +165,10 @@
+   if (/Safari\//.test(ua) || /AppleWebKit/.test(ua)) return 'jsc';
+   return 'other';
+ }
++
++/** T6 §8.3: a is a prefix of b (element-wise JSON equality). */
++export function isPrefix(a, b) {
++  if (!Array.isArray(a) || !Array.isArray(b) || a.length > b.length) return false;
++  for (let i = 0; i < a.length; i++) if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
++  return true;
++}
