@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebacke
 MODE = FB.mode_from_argv(); GUARDS = []
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required']
 BASE = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--base=')), 'http://localhost:8770/index.html')
-SHOTS = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--shots=')), '/tmp/rrshots').rstrip('/')
+SHOTS = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--shots=')), os.environ.get('RR_SHOTS', '/tmp/rrshots')).rstrip('/')
 os.makedirs(SHOTS, exist_ok=True)
 PFX = next((a.split('=',1)[1] for a in sys.argv if a.startswith('--prefix=')), 'v32_')  # screenshot file prefix
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
@@ -506,9 +506,13 @@ async def test_v32(b, phone=False):
     for pos in (5, 14, 25, 35):
         await force_card(pg, 'w1', None, {'__pos': pos})
         await pg.wait_for_timeout(1800); await pg.screenshot(path=f'{SHOTS}/{PFX}follow_tile{pos}{sfx}.png')
-    # board tiles (new icons) from above
-    if not phone:
+    # board tiles (new icons) from above — 3D only: the flat 2D board has no camera, the app hides #camBtn there (game.js; T7 F-13)
+    renderer = await pg.evaluate("document.body.dataset.renderer || ''")
+    if not phone and renderer == '3d':
         await pg.click('#camBtn'); await pg.wait_for_timeout(1500); await pg.screenshot(path=f'{SHOTS}/{PFX}board_overview.png')
+    elif not phone:
+        assert not await pg.locator('#camBtn').is_visible(), f'#camBtn visible with renderer={renderer!r}'
+        log(tag, f'renderer={renderer!r}: no camera controls, overview shot skipped')
     await ctx.close()
 
 SAVE_JS = "(k) => { const s = JSON.parse(localStorage.getItem(k) || 'null'); return s && s.state; }"
