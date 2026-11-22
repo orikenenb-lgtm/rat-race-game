@@ -8,7 +8,7 @@ import * as RV from '../js/systems/rivals.js';
 import * as AR from '../js/systems/archetypes.js';
 import { STREAMS, next } from '../js/rng.js';
 import { CODES } from '../supabase/functions/verify-result/verify_core.js';
-import { prng } from './lib/random-player.mjs';
+import { prng, playOut } from './lib/random-player.mjs';
 
 await E.loadRealData();
 const SCALE = +(process.argv[2] || 1);
@@ -430,5 +430,15 @@ test('the ghost worker runs the archetype module (API 2): rows never ahead of up
   assert.ok(done.every((d) => d.end.recap && d.end.recap.dims && d.end.tl.m.length > 5));
 });
 
+test('review m8: crypto luck links to the buy that opened the position (not the sale), and replays byte-identically', () => {
+  let n = 0;
+  for (let i = 0; i < N(12); i++) {
+    const cfg = { worldId: 'w1', seed: 1031 + i * 7, mode: 'free', rules: 4 };
+    const st = playOut(E, cfg, prng(8 + i), { v4: true, stories: true });
+    for (const [, part, , k] of st.dq.luckLog) if (part === 'crypto') { n++; const a = st.actions[k]; assert.ok(a && a[0] === 'c' && a[1] === 'buy', `crypto luck k=${k} → ${JSON.stringify(a)}`); }
+    assert.equal(E.serialize(E.replay(cfg, st.actions)), E.serialize(st));
+  }
+  assert.ok(n > 0, 'some crypto luck was booked');
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

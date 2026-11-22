@@ -284,7 +284,7 @@ function launchCoin(st, r, first = false) {
   const C = W(st).crypto; const tk = C.tk; const h = st.holdings[tk];
   const prev = st.world.coin;
   const wiped = !first && h.qty > 0 ? { qty: h.qty, value: Math.round(h.qty * st.prices[tk]), oldName: prev.name } : null;
-  h.qty = 0; h.basis = 0; h.lowBuy = null;
+  h.qty = 0; h.basis = 0; h.lowBuy = null; delete h.k;
   const tot = C.fates.reduce((a, f) => a + f.w, 0); let acc = 0; let fate = C.fates[C.fates.length - 1];
   for (const f of C.fates) { acc += f.w / tot; if (r < acc) { fate = f; break; } }
   const gen = first ? 0 : prev.gen + 1;
@@ -3046,6 +3046,7 @@ const CHOOSE = {
     if (o.id === 'buy') {
       const cost = Math.round(qty * price);
       if (!(qty >= 1) || cost > st.cash) { out.ok = false; out.error = 'כמות לא חוקית'; return false; }
+      if (t.kind === 'crypto' && R4(st) && (!(h.qty > 0) || h.k == null)) h.k = CUR_K; // T6 §4.3 / review m8: the luck of this position links to the buy that opened it
       h.cpi = cpiMix(h, cost, st); st.cash -= cost; h.qty += qty; h.basis += cost;
       h.lowBuy = h.lowBuy == null ? price : Math.min(h.lowBuy, price);
       if (p.tk === 'IDX') { const L = st.life; L.idxBuys++; if (L.idxSince == null) L.idxSince = st.month; lesson(st, out, 'index_fund'); if (st.month - L.lastCrash <= 3) lesson(st, out, 'buy_the_dip'); }
@@ -3058,9 +3059,9 @@ const CHOOSE = {
       const avg = h.basis / h.qty; const proceeds = Math.round(qty * price); const cut = Math.round(avg * qty); const gain = proceeds - cut;
       const tax = gainTax(st, cut, proceeds, h.cpi, out);
       st.cash += proceeds - tax; h.basis = Math.max(0, h.basis - cut); h.qty -= qty;
-      const low = h.lowBuy; if (!h.qty) { h.lowBuy = null; h.basis = 0; }
+      const low = h.lowBuy; if (!h.qty) { h.lowBuy = null; h.basis = 0; delete h.k; }
       st.stats.tradeProfit += gain - tax;
-      if (t.kind === 'crypto') addLuck(st, 'crypto', gain + 0.124 * cut);
+      if (t.kind === 'crypto') addLuck(st, 'crypto', gain + 0.124 * cut, h.k ?? CUR_K);
       if (p.tk === 'IDX') st.life.idxSells = (st.life.idxSells || 0) + 1; // T4 E-8 (time in the market: no index sale in between)
       if (p.tk === 'IDX' && gain < 0) { st.life.idxSold++; st.life.idxSoldLoss += -gain; lesson(st, out, 'panic_selling', -gain); }
       sound(out, gain >= 0 ? 'sell' : 'loss'); cashFx(out, proceeds - tax, null);
@@ -3778,7 +3779,9 @@ function applyStoryOption(st, chainId, stepId, o, ctx, out) {
   const x = { chainId, stepId, o, c, item: ctx.item, hit, S, out };
   if (o.fx) applyStoryFx(st, o.fx, x);
   const hook = o.hook && STORY_HOOKS[o.hook]; if (hook && hook.apply) hook.apply(st, x);
-  if (eff.oddsMoney) { const real = hit ? eff.oddsMoney.hit : eff.oddsMoney.miss; addLuck(st, 'story', real - (eff.oddsMoney.p * eff.oddsMoney.hit + (1 - eff.oddsMoney.p) * eff.oddsMoney.miss)); }
+  // review m8: the odds are decided now, so the luck links to this choice (CUR_K: the 'c' / 'Q' action); an expired default (payday,
+  // no decision recorded) has no decision to link to → k −1 by design, never another decision's index
+  if (eff.oddsMoney) { const real = hit ? eff.oddsMoney.hit : eff.oddsMoney.miss; addLuck(st, 'story', real - (eff.oddsMoney.p * eff.oddsMoney.hit + (1 - eff.oddsMoney.p) * eff.oddsMoney.miss), ctx.expired ? -1 : CUR_K); }
   if (o.path) c.path = o.path;
   const vars = storyVars(st, chainId, ctx.item);
   const v = Math.round(st.cash - cash0 + (eff.flow || 0) * Math.min(eff.months || 24, 24) + (eff.salary || 0) * Math.min(eff.salaryMonths || 24, 24));
@@ -3845,7 +3848,7 @@ function storyExpire(st, out) {
     if (!def) continue;
     const label = def.label;
     if (it.kind === 'biz') resolveBizItem(st, it, def.id, out, true);
-    else { const o = stepOptions(st, it.chain, it.step).find((x) => x.id === def.id); applyStoryOption(st, it.chain, it.step, o, { seal: it.seal, item: it }, out); }
+    else { const o = stepOptions(st, it.chain, it.step).find((x) => x.id === def.id); applyStoryOption(st, it.chain, it.step, o, { seal: it.seal, item: it, expired: true }, out); }
     st.stats.storyDefaults++; S.defaults++;
     (out.story ||= { created: [], expired: [] }).expired.push(it.id);
     out.news.push({ kind: 'story', itemId: it.id, text: gz(st, tpl(CH.NEWS.noDecision, { label })) });
