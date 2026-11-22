@@ -210,7 +210,23 @@ export function closeLobby() {
   document.body.classList.remove('lb-lobby-open'); syncInert();
   closeLesson(false); worldMode = null; dreamOpen = false;
 }
-function go(v) {
+function go(v) { const r = goRender(v); focusView(); return r; }
+/** T7 K-2 / CR-03: after a view render focus never stays on <body> (or on a node the render replaced). A render's own initial
+ *  focus (focusSoon, 30 ms) wins; otherwise the view's heading (tabindex=-1), else its first control. */
+function focusView() {
+  setTimeout(() => {
+    if (!lobbyVisible()) return;
+    const a = document.activeElement, o = overlay(), r = root();
+    if (!r || (a && a !== document.body && a.isConnected && o && o.contains(a))) return;
+    if (a && a !== document.body && a.isConnected && a.closest('#gm:not([hidden]), #evm:not([hidden])')) return;   // a dialog over the lobby keeps it
+    const h = r.querySelector('h1') || r.querySelector('h2');
+    const t = h || r.querySelector(FOCUSABLE);
+    if (!t) return;
+    if (h && !h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
+    safe(() => t.focus({ preventScroll: true }));
+  }, 80);
+}
+function goRender(v) {
   view = v;
   if (v.k !== 'group') stopGroupRefresh();
   switch (v.k) {
@@ -425,12 +441,13 @@ if (typeof addEventListener === 'function') addEventListener('online', () => { i
 function topBar() {
   const p = P.getProgress(); const me = net.me(); const total = P.totalStars(p); const si = P.streakInfo();
   const streak = si.streak;
+  // T7 AX-2 (CR-12) label-in-name: the player and ⚡ buttons are named by their visible text plus a hidden lead-in (no aria-label)
   return `<header class="lb-top">
     <div class="lb-logo" aria-label="מירוץ העכברים">מירוץ<br>העכברים</div>
-    <button class="lb-player" data-act="profile" aria-label="הפרופיל שלי">
-      ${pawnHtml(p.pawn, p.pawnColor, 'md')}
+    <button class="lb-player" data-act="profile">
+      <span class="sr">הפרופיל שלי: </span>${pawnHtml(p.pawn, p.pawnColor, 'md')}
       <span class="lb-pl-txt"><b class="lb-pl-name">${me ? esc(me.nickname) : 'אורח'}</b>${titleBadge(total)}</span>
-      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים">★ ${total}</span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'wait'}" title="ימים ברצף באתגר היומי">🔥 ${streak}</span>` : ''}</span>
+      <span class="lb-pl-stats"><span class="lb-pl-star" title="כוכבים"><span aria-hidden="true">★</span> ${total}<span class="sr"> כוכבים</span></span>${streak ? `<span class="lb-pl-fire ${si.playedToday ? '' : 'wait'}" title="ימים ברצף באתגר היומי"><span aria-hidden="true">🔥</span> ${streak}<span class="sr"> ימים ברצף</span></span>` : ''}</span>
     </button>
     ${energyHtml()}
     ${muteBtn()}
@@ -623,8 +640,8 @@ const DAILY_ENERGY = 10;         // ⚡ for playing the daily
 const STREAK_ENERGY = { 3: 5, 7: 10, 30: 25 };
 function energyHtml(cls = '') {
   const e = EN.get(); const ms = EN.msUntilNext();
-  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy" aria-label="${EN.NAME}: ${e} מתוך ${EN.MAX}">
-    <span class="lb-en-ic" aria-hidden="true">⚡</span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
+  return `<button class="lb-energy ${e === 0 ? 'empty' : e < 5 ? 'low' : ''} ${cls}" data-act="energy">
+    <span class="lb-en-ic" aria-hidden="true">⚡</span><span class="sr">${EN.NAME}: </span><b data-energy="val">${num(e + '/' + EN.MAX)}</b>${ms ? `<small data-energy="wait">+1 בעוד ${num(EN.fmtWait(ms))}</small>` : '<small>מלא</small>'}</button>`;
 }
 let enTimer = null;
 function startEnergyTicker() {
@@ -1924,7 +1941,8 @@ function endButtons(e, res, nextW, nextOpen) {
   else if (sameOk && !won) btns.push(same, `<button data-act="end-again">${againLabel === '↻ עוד פעם' ? '↻ לוח חדש' : againLabel}</button>`);
   else btns.push(`<button class="primary lb-big" data-act="end-again">${againLabel}</button>`);
   if (showNext && !res.unlockedWorld) btns.push(`<button data-act="end-next" data-id="${nextW.id}">לעולם הבא ←</button>`);
-  btns.push(`<a class="lb-wa" id="endShare" href="${waHref(shareText())}" target="_blank" rel="noopener" aria-label="לשתף בוואטסאפ">📲 ${free ? (endCtx.duel ? 'להחזיר אתגר' : 'לאתגר חבר') : 'לשתף'}<span class="lb-hide-sm"> בוואטסאפ</span></a>`);
+  const shareL = free ? (endCtx.duel ? 'להחזיר אתגר' : 'לאתגר חבר') : 'לשתף';   // T7 AX-2 label-in-name: the name starts with the visible words
+  btns.push(`<a class="lb-wa" id="endShare" href="${waHref(shareText())}" target="_blank" rel="noopener" aria-label="${shareL} בוואטסאפ"><span aria-hidden="true">📲 </span>${shareL}<span class="lb-hide-sm"> בוואטסאפ</span></a>`);
   const more = [];
   if (sameOk && won) more.push(`<button class="chip" data-act="end-same">↻ אותו לוח שוב</button>`);
   if (e.mode === 'history') more.push(`<button class="chip" data-act="history">תקופה אחרת</button>`);

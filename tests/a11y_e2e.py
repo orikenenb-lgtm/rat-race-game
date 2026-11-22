@@ -55,11 +55,15 @@ async def new_page(b, vp, scheme, seeded=True, reduced=None, **kw):
 QUIET = """() => new Promise((res) => { let t = setTimeout(done, 400); const t0 = performance.now();
   const mo = new MutationObserver(() => { clearTimeout(t); if (performance.now() - t0 > 6000) return done(); t = setTimeout(done, 400); });
   function done() { mo.disconnect(); res(true); } mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true }); })"""
+# finite CSS / Web animations (the lobby view fade-in, the card "pop" scale) run to their end before axe or a size measurement:
+# a node caught mid-fade has a blended colour and a mid-scale box, which is not what the player sees (≤ 3 s; infinite ones ignored)
+SETTLE = """() => Promise.race([Promise.all(document.getAnimations().filter(a => { const t = a.effect && a.effect.getTiming(); return t && t.iterations !== Infinity && a.playState === 'running'; })
+  .map(a => a.finished.catch(() => {}))), new Promise(r => setTimeout(r, 3000))])"""
 AXE_RUN = """async (inc) => { const r = await axe.run(inc ? { include: [inc] } : document, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice'] }, resultTypes: ['violations'] });
   return r.violations.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.map(n => n.target.join(' ')) })); }"""
 
 async def axe(pg, screen, inc=None):
-    await pg.evaluate(QUIET)
+    await pg.evaluate(QUIET); await pg.evaluate(SETTLE)
     if not await pg.evaluate("typeof axe !== 'undefined'"):
         await pg.add_script_tag(path=AXE)
         v = await pg.evaluate('axe.version')
@@ -219,7 +223,7 @@ async def keys(b):
     if found:
         await pg.keyboard.press('Enter'); presses += 1; await pg.wait_for_selector('.wv-chars', state='visible'); await pg.evaluate(QUIET)
         for _ in range(40):
-            if await pg.evaluate("document.activeElement && document.activeElement.matches('.wv-char')"): break
+            if await pg.evaluate("document.activeElement && document.activeElement.matches('.wv-char .wv-go')"): break   # T4 CR-T7-T4-1: the card is an article, its button is .wv-go
             await pg.keyboard.press('Tab'); presses += 1
         await pg.keyboard.press('Enter'); presses += 1
         try:
@@ -302,7 +306,7 @@ async def checks(b):
             if scr == 'world': await pg.click('.map-card[data-id="w1"]'); await pg.wait_for_selector('.wv-chars', state='visible'); await pg.evaluate(QUIET)
             if scr == 'game':
                 await open_view(pg, 'home', '.lb-home'); await start_w1(pg); await roll_once(pg)
-            t = await pg.evaluate(TARGETS, PRIMARY); t_u24 += [f'{scr}@{w}: {x}' for x in t['u24']]; t_p44 += [f'{scr}@{w}: {x}' for x in t['p44']]
+            await pg.evaluate(SETTLE); t = await pg.evaluate(TARGETS, PRIMARY); t_u24 += [f'{scr}@{w}: {x}' for x in t['u24']]; t_p44 += [f'{scr}@{w}: {x}' for x in t['p44']]
             names += [f'{scr}@{w}: {x}' for x in await pg.evaluate(NONAME)]
         await ctx.close()
     rec('AX-T targets: 0 interactive elements below 24×24 (WCAG 2.5.8)', 'PASS' if not t_u24 else 'FAIL', t_u24[:10])
