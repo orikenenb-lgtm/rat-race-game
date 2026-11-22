@@ -1096,8 +1096,9 @@ function modeGroupHtml(mode) {
 function dreamRowHtml(p) {
   const list = dreamsList(); if (!list) return '';
   const cur = p.dream ? dreamById(p.dream) : null;
-  if (cur && !dreamOpen) {
-    return `<div class="t4-dream-line"><button class="t4-dream-sum" data-act="dream-open" aria-expanded="false">${esc(T4.D9(cur.icon, cur.name))}</button></div>`;
+  // AC-C3: on the smallest phones (≤ 380 px) the optional picker starts as one line too, so the first character's play button stays in view
+  if (!dreamOpen && (cur || (typeof innerWidth === 'number' && innerWidth <= 380))) {
+    return `<div class="t4-dream-line"><button class="t4-dream-sum" data-act="dream-open" aria-expanded="false">${esc(cur ? T4.D9(cur.icon, cur.name) : '🎯 חלום לדרך (לא חובה) · לבחור')}</button></div>`;
   }
   const opt = (id, ic, name, line) => `<label class="t4-dopt ${(p.dream || '') === id ? 'on' : ''}"><input type="radio" name="t4dream" value="${id}" ${(p.dream || '') === id ? 'checked' : ''}><span class="t4-dic" aria-hidden="true">${esc(ic)}</span><span><b>${esc(name)}</b>${line ? `<small>${esc(line)}</small>` : ''}</span></label>`;
   return `<fieldset class="t4-dreams" role="radiogroup" aria-label="${T4.D5}"><legend><b>${T4.D6}</b><small>${T4.D7}</small></legend>

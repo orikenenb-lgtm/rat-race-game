@@ -637,6 +637,7 @@ async function startInner(cfg, my) {
     frame(); scene.resetCamera();
     try { scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK); } catch (e) { console.warn(e); }   // T5 CR-B5
     if (!resumed && !S.over && !onboard.worldCoached(W.id)) { try { scene.introWorld?.(); } catch (e) { console.warn(e); } } // first game in this world
+    onboard.prepare?.(S, CFG, W);   // T4 §4.3: the gradual-reveal state of a new tutorial game (before the first HUD paint)
     render(false);
     ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
     const intro = E.intro(S, resumed);
@@ -692,10 +693,13 @@ function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
   track(m);
+  onboard.revealTick?.(S, { m, cfg: CFG });   // T4 §4.3: month thresholds (fund 4, happy / tools 6, credit 10, age 12) and ⚡ after the free rolls
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
   if (typeof ui.worldTag === 'function') ui.worldTag(!!(CFG && CFG.learn));       // T4 S-M7
-  if (typeof ui.renderDream === 'function') ui.renderDream(m.dream || null);      // T4 §6.4 (feature-detected: needs the engine's E-7)
+  const goalOn = !!(m.nextGoal && !m.nextGoal.done);
+  if (typeof ui.renderNext === 'function') ui.renderNext(m.nextGoal || null, { show: onboard.isRevealed('next') });   // T4 §4.3 `next`
+  if (typeof ui.renderDream === 'function') ui.renderDream(goalOn ? null : m.dream || null);      // T4 §6.4: the dream card replaces #hNext once the goal chain is done
   // T2: an "ops" focus from the agenda is ready → offer to open the business panel between rolls (once per month)
   const ops = !!(m.focus && m.focus.opsOpen);
   if (ops && !opsSeen && !busy && !ui.isEventOpen()) ui.toast('🏪 יום העבודה על העסק מחכה', { action: { label: 'לפתוח את לוח העסק', fn: () => openOps() } });
@@ -802,7 +806,7 @@ function showNoEnergy(en, info = false) {
 }
 
 async function updateRollEnergy() {
-  if (!S || !usesEnergy()) { ui.renderRollEnergy(null); return; }
+  if (!S || !usesEnergy() || !onboard.isRevealed('zr')) { ui.renderRollEnergy(null); return; }   // T4 §4.3 `zr`
   const en = await energyMod(); if (!en) { ui.renderRollEnergy(null); return; }
   ui.renderRollEnergy(safeCall(en, 'get', null), safeCall(en, 'msUntilNext', 0));
 }
@@ -811,7 +815,9 @@ async function lifeChip(kind) {
   if (kind === 'rivals') { openRivals(); return; }          // T6 §12.2
   if (kind === 'moments') { openMoments(); return; }        // T6 §7.4
   if (kind === 'afterwin') { retireFlow(); return; }        // T6 §9.2
+  if (kind === 'inbox') { openInbox(); return; }            // T3 UI-3
   const m = E.metrics(S);
+  if (kind === 'cal') { if (m.calendar) ui.calendarModal(m.calendar, { biz: (m.assets || []).some((a) => a.business) }); return; }   // T3 UI-7
   if (kind === 'econ') { if (m.econ) ui.econModal(m.econ); return; }
   if (kind === 'focus') {
     if (m.focus && m.focus.opsOpen) { openOps(); return; }
@@ -877,6 +883,64 @@ async function runPending(my) {
   if (my !== gen || stuck) return;
   busy = false;
   if (!S.over) { ui.setRollEnabled(true); ui.focusRoll(); }
+}
+/* ============================================================ T3: the story inbox (E.inbox / E.resolveStory = action Q) */
+const inboxOf = () => { try { return S && typeof E.inbox === 'function' ? E.inbox(S) || [] : []; } catch (e) { console.warn('inbox', e); return []; } };
+let storyBusy = false;
+/** 📬 chip / the business toast: between rolls only. One item → straight to its card; more → the list. */
+async function openInbox({ assetId = null } = {}) {
+  if (!S || S.over || storyBusy) return;
+  if (busy || ui.isEventOpen()) { ui.toast('אפשר לפתוח את ההחלטות בין תורות'); return; }
+  const cards = inboxOf(); if (!cards.length) { ui.toast('אין החלטות פתוחות'); return; }
+  const pick = (assetId && cards.find((c) => c.assetId === assetId)) || (cards.length === 1 ? cards[0] : await ui.inboxList(cards, { month: S.month }));
+  if (!pick || !S || S.over || busy || ui.isEventOpen()) return;
+  const my = gen; busy = true; ui.setRollEnabled(false);
+  try { await storyFlow(pick, my); }
+  catch (e) { if (my === gen && !stuck) enterStuck(e, 'story'); }
+  finally { if (my === gen && S && !S.over && !stuck) { busy = false; ui.setRollEnabled(true); ui.focusRoll(); } }
+}
+/** One inbox card in the event modal. "אחר כך" closes it untouched (the default applies at its payday; no timer). Resolves after the
+ *  result was applied (and after the end screen when the decision ended the game). */
+function storyFlow(card0, my) {
+  return new Promise((resolve) => {
+    storyBusy = true;
+    let working = false, closed = false;
+    const cur = card0;
+    if (cur.mentor) ui.mentor(cur.mentor);
+    sfx('card');
+    const closeUi = () => { if (closed) return; closed = true; if (card && card.ctl === ctl) card = null; ctl.close(); storyBusy = false; setTimeout(() => ui.focusRoll(), 30); };
+    const api = { mentor: () => (S ? E.metrics(S).mentor : null), later: () => { if (working) return; closeUi(); resolve(null); } };
+    const ctl = ui.openEvent(cur, { ...ctx(), api }, async (optId) => {
+      if (working || my !== gen) return;
+      working = true; ctl.busy(true);
+      let res;
+      try { res = E.resolveStory(S, cur.itemId, optId); }
+      catch (e) { console.error(e); working = false; ctl.busy(false); ctl.error('לא אפשרי עכשיו'); return; }
+      if (!res || res.ok === false) { working = false; ctl.busy(false); if (res && res.error === 'stale') { closeUi(); render(); resolve(null); return; } ctl.error((res && res.error) || 'לא אפשרי עכשיו'); sfx('loss'); return; }
+      checkpoint(); closeUi();
+      await applyOut(res); render(); persist();
+      onboard.revealTick?.(S, { out: res, cfg: CFG });
+      if (res.end) { busy = true; ui.setRollEnabled(false); await endGame(res.end, my); }
+      resolve(res);
+    });
+    card = { ctl, resolve: () => { closeUi(); resolve(null); } };
+  });
+}
+/** After the roll's paydays: the first NEW chain item opens before the landing card (others wait for the next rolls).
+ *  Business items get the "יש החלטה בעסק" toast (UI-4) and the 📬 badge instead. */
+async function autoInbox(my) {
+  const cards = inboxOf(); if (!cards.length || !UIS) return;
+  const seen = (UIS.ibSeen ||= []);
+  const fresh = cards.filter((c) => !seen.includes(c.itemId)); if (!fresh.length) return;
+  for (const c of fresh) if (c.kind === 'biz') seen.push(c.itemId);
+  const ch = fresh.find((c) => c.kind !== 'biz');
+  if (ch) seen.push(ch.itemId);
+  if (seen.length > 40) seen.splice(0, seen.length - 40);
+  persist();
+  if (!ch) return;
+  await pause(250); if (my !== gen || !S || S.over) return;
+  await storyFlow(ch, my);
+  render();
 }
 /** T2 §15.1: the mentor level, from the ❓ menu (free and history games; ranked shows the fixed level). */
 async function mentorMenu() {
@@ -968,6 +1032,9 @@ async function turnBody(my) {
   if (out.bailout) { await bailoutCard(out.bailout); flowTick++; if (my !== gen) return; render(); }
   const burn = out.burnout || (out.news || []).find((n) => n.kind === 'burnout');
   if (burn) { await burnoutCard(burn); flowTick++; if (my !== gen) return; render(); }
+  onboard.revealTick?.(S, { out, cfg: CFG });   // T4 §4.3 (paydays passed, inflation, loans)
+  await autoInbox(my);   // T3 UI-3: a new chain item opens after the roll and BEFORE the landing card (at most one per roll)
+  if (my !== gen || stuck || S.over) return;
   await handleLanding(my);
   if (my !== gen || stuck) return;
   busy = false;
@@ -1023,8 +1090,21 @@ async function landingBody(my) {
   }
 }
 
+/** T3: the manage card's summary carries no month report (no cash change, no "why", no bridges — engine CR): fill L1 / the cash
+ *  bridge from this session's last business news of the same month. Presentation only; the event object is not sent back. */
+const lastBizNews = new Map();
+function withBizNews(ev) {
+  const d = ev && ev.type === 'business' && ev.data && ev.data.mode === 'manage' ? ev.data : null;
+  if (!d || !d.l1 || d.l1.sentence) return ev;
+  const n = lastBizNews.get(d.assetId); const s0 = d.summary || {};
+  if (!n || !n.why || (s0.month != null && n.month !== s0.month)) return ev;
+  const l1 = { revenue: n.revenue || 0, profit: n.profit ?? n.netProfit ?? 0, cashDelta: n.cashDelta || 0, toOwner: n.toOwner || 0, sentence: n.why.sentence || '' };
+  const l2 = { ...(s0.l2 || {}), cashBridge: (s0.l2 && s0.l2.cashBridge && s0.l2.cashBridge.length) ? s0.l2.cashBridge : n.why.cash || [] };
+  return { ...ev, data: { ...d, l1, summary: { ...s0, l1, l2 } } };
+}
 /** Open a card for an event; resolves with the closing ChooseResult (or null when aborted). */
 function resolveCard(ev, my) {
+  ev = withBizNews(ev);
   return new Promise((resolve) => {
     if (ev.mentor) ui.mentor(ev.mentor);
     const jackpot = ev.type === 'mystery' && ev.data && ev.data.kind === 'cash' && ev.data.amount > 0;
@@ -1067,9 +1147,9 @@ function resolveCard(ev, my) {
       if (res.done) close();
       await applyOut(res, { inCard: !res.done });
       render(); persist();
-      if (res.done && res.rival && res.rival.lost) await ui.rivalLost(res.rival);   // T6 §12.1: no timed dismissal
+      if (res.done && res.rival && res.rival.lost) await ui.rivalLost({ ...res.rival, dd: res.rival.dd != null ? res.rival.dd : res.rival.how === 'inspect' && res.mentor ? res.mentor : null });   // T6 §12.1: no timed dismissal; a lost inspection still shows its result
       if (res.done) resolve(res);
-      else { cur = res.event; ctl.update(cur); }
+      else { cur = withBizNews(res.event); ctl.update(cur); }
       working = false; ctl.busy(false);
     }
     card = { ctl, resolve };
@@ -1126,7 +1206,7 @@ async function applyOut(out, opts = {}) {
     ui.lessonToast(out.lessons, (l) => ui.lessonCard(l));
   }
   if (out.reward) bus.emit('reward', out.reward); // quiz: reward = understanding (+1⚡ via the lobby; never in learning mode)
-  if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream); // T4 IR-T4-4 (E-7)
+  if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream, S ? safe0(() => E.metrics(S).dream) : null); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
   for (const n of out.news || []) {
@@ -1134,10 +1214,12 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
+      if (n.why && typeof ui.bizNews === 'function') { lastBizNews.set(n.assetId, n); ui.bizNews(n, { decide: () => openInbox({ assetId: n.assetId }) }); continue; }   // T3 UI-4
       ui.toast(`🏪 ${n.name}: ${n.headline || ''}${n.net ? ` · לכיס שלך ${E.sgn(n.net)}` : ''}`, { kind: n.netProfit < 0 ? 'bad' : '' });
       for (const ev2 of (n.events || []).slice(0, 1)) if (ev2.title) ui.toast(`🏪 ${ev2.title}${ev2.text ? ': ' + ev2.text : ''}`);
       continue;
     }
+    if (n.kind === 'rival' && out.rival && out.rival.lost && n.text === out.rival.text) continue;   // T6: the lost panel says it (no second, sticky copy)
     if (n.kind === 'inflation' && n.reality && S && S.ui) S.ui.inflReality = n.reality;
     if (n.kind === 'goalHold') { ui.toast('⏳ ' + n.text, { kind: 'gold' }); continue; }
     if (n.kind === 'goal') { ui.toast('🎯 ' + n.text, { kind: 'gold' }); continue; } // T4 IR-T4-4: tutorial goal chain (E-4)

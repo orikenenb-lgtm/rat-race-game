@@ -25,12 +25,55 @@ const REVEALK = 'rr2-reveal';
 const readReveal = () => { try { const r = JSON.parse(localStorage.getItem(REVEALK) || 'null'); return r && typeof r === 'object' && !Array.isArray(r) ? r : null; } catch (e) { return null; } };
 const writeReveal = (patch) => { try { localStorage.setItem(REVEALK, JSON.stringify({ v: 1, all: false, coached: [], tourNext: false, ...(readReveal() || {}), ...patch })); } catch (e) { /* ignore */ } };
 /** §4.3: is a HUD part visible? Gradual reveal exists only in a tutorial game whose state carries S.ui.reveal (UI lane). */
-let curS = null;
+let curS = null, tourAll = false;
 export function isRevealed(key) {
   const R = curS && curS.ui && curS.ui.reveal;
-  if (!R || R.skipped || !Array.isArray(R.keys)) return true;
+  if (tourAll || !R || R.skipped || !Array.isArray(R.keys)) return true;
   if (['cash', 'month', 'mentor', 'home', 'mute', 'help', 'roll'].includes(key)) return true;
   return R.keys.includes(key);
+}
+/* ------------------------------------------------------------ §4.3 reveal STATE WRITER (S.ui.reveal = {keys, skipped, coached, pd})
+   Created for a brand-new tutorial game (w1, the engine's intro card at its first beat, the player has no rr2-reveal.all), then fed by
+   what the game actually did: cards opened / closed, roll results, months. It never hides a part again; skip = everything. */
+const TFR = () => (typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORIAL_FREE_ROLLS : 10);
+export function prepare(S, CFG, W) {
+  curS = S;
+  if (!S || !S.ui || S.ui.reveal || S.over) return;
+  if (!CFG || !CFG.tutorial || !W || W.id !== 'w1' || !S.intro || S.intro.step !== 'salary') return;
+  const R0 = readReveal(); if (R0 && R0.all) return;
+  S.ui.reveal = { keys: [], skipped: false, coached: [], pd: 0 };
+}
+function revealAdd(S, ...keys) {
+  const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false;
+  let ch = false; for (const k of keys) if (k && !R.keys.includes(k)) { R.keys.push(k); ch = true; }
+  return ch;
+}
+function revealSkip(S) { const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false; R.skipped = true; return true; }
+/** info = {m (metrics), out (a roll / choose / resolveStory result), cfg}. Pure state edit; the caller renders. */
+export function revealTick(S, info = {}) {
+  if (S) curS = S;
+  const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false;
+  if (S.intro && S.intro.step === 'skipped') return revealSkip(S);
+  const { m, out, cfg } = info; let ch = false;
+  if (m) {
+    const mo = m.month || 0;
+    if (mo >= 4) ch = revealAdd(S, 'fund') || ch;
+    if (mo >= 6) ch = revealAdd(S, 'happy', 'tools') || ch;
+    if (mo >= 10) ch = revealAdd(S, 'credit') || ch;
+    if (mo >= 12) ch = revealAdd(S, 'age') || ch;
+    if ((m.assets || []).length) ch = revealAdd(S, 'goal') || ch;                    // first asset bought
+    if ((m.loans || 0) + (m.credit || 0) > 0) ch = revealAdd(S, 'credit') || ch;   // first loan or card debt
+    if ((S.turn || 0) >= TFR() && !(cfg && cfg.learn)) ch = revealAdd(S, 'zr') || ch;  // ⚡ after the free rolls (never in learning mode)
+  }
+  if (out) {
+    if ((out.paydays || []).length) ch = revealAdd(S, 'goal') || ch;                  // first payday passed
+    for (const n of out.news || []) {
+      if (n.kind === 'inflation') ch = revealAdd(S, 'cpi') || ch;
+      if (n.kind === 'savings' || n.kind === 'forcedLoan' || n.kind === 'loan') ch = revealAdd(S, 'fund') || ch;
+    }
+    if ((out.effects || []).some((e) => e.type === 'loan')) ch = revealAdd(S, 'credit', 'fund') || ch;
+  }
+  return ch;
 }
 
 /* ------------------------------------------------------------ onboard:done (once per game) */
@@ -115,7 +158,7 @@ export async function afterStart(h) {
 /** Between turns (roll enabled again). */
 export async function afterTurn(h) {
   curS = h.S;
-  if (wantCoach(h, 'meter')) {
+  if (wantCoach(h, 'meter') && isRevealed('goal')) {   // §4.4 C-meter runs once the meter is on screen
     const pass = h.W.goal.type === 'passive';
     await showCoach(h, 'meter', { target: '#hGoal', title: pass ? 'מד החופש' : 'היעד של העולם', text: pass ? 'כשההכנסה הפסיבית (כסף מנכסים) מכסה את כל ההוצאות — הפס מתמלא ויצאת מהמירוץ. זו המטרה.' : 'כשהפס מתמלא — ניצחת. כל החלטה מזיזה אותו.' });
     return;
@@ -125,6 +168,14 @@ export async function afterTurn(h) {
 /** A card was opened (in-card coaches). */
 export function onCard(ev, ctl, h) {
   curS = h.S; practice.hide();
+  if (ev && h.S && h.S.ui && h.S.ui.reveal && !h.S.ui.reveal.skipped) {   // §4.3 card triggers
+    const S = h.S; let ch = false;
+    if (ev.type === 'intro') ch = revealAdd(S, 'cf');
+    if (ev.type === 'payday' && (ev.options || []).some((o) => String(o.id).startsWith('plan:'))) { S.ui.reveal.pd = (S.ui.reveal.pd || 0) + 1; ch = revealAdd(S, 'energy', 'plan', S.ui.reveal.pd >= 3 ? 'focus' : null); }
+    if (ev.type === 'life') ch = revealAdd(S, 'happy', 'age') || ch;
+    if (ev.type === 'doodad' && (ev.options || []).some((o) => o.id === 'skip')) ch = revealAdd(S, 'happy') || ch;
+    if (ch) { h.persist(); h.render(false); }
+  }
   if (wantCoach(h, 'roi') && ev.type === 'deal' && ev.data && ev.data.down) {
     setTimeout(async () => {
       if (h.my !== h.gen() || !ui.isEventOpen()) return;
@@ -135,11 +186,30 @@ export function onCard(ev, ctl, h) {
 /** A card closed. The engine intro card (E-3) ends the tutorial core: bus 'onboard:done' {reason:'done'|'skip'}. */
 export function onCardClosed(ev, res, h) {
   if (ev && ev.type === 'intro') emitDone(h, h.S && h.S.intro && h.S.intro.step === 'skipped' ? 'skip' : 'done');
+  const S = h && h.S; const R = S && S.ui && S.ui.reveal;
+  if (!ev || !R || R.skipped) return;
+  let ch = false;
+  if (ev.type === 'intro') {
+    if (S.intro && S.intro.step === 'skipped') ch = revealSkip(S);
+    else {
+      if (S.intro && S.intro.choice === 'fix:diy') ch = revealAdd(S, 'energy') || ch;
+      if (S.intro && S.intro.goal) ch = revealAdd(S, 'next', S.intro.goal === 'cushion' || (S.intro.goal && S.intro.goal.id === 'cushion') ? 'fund' : null) || ch;
+      try { const g = E.metrics(S).nextGoal; if (g) ch = revealAdd(S, 'next', g.id === 'cushion' ? 'fund' : null) || ch; } catch (e) { /* ignore */ }
+    }
+  }
+  const last = Array.isArray(S.actions) ? S.actions[S.actions.length - 1] : null; const optId = last && last[0] === 'c' ? String(last[1]) : '';
+  if (ev.type === 'payday' && (ev.options || []).some((o) => String(o.id).startsWith('plan:'))) ch = revealAdd(S, 'sheet') || ch;
+  if (ev.type === 'doodad' && (optId === 'credit' || optId === 'inst3')) ch = revealAdd(S, 'credit') || ch;
+  if (res && res.ok !== false) ch = revealTick(S, { out: res }) || ch;
+  if (ch) { h.persist(); h.render(false); }
 }
+/** §4.5: the tour shows every part while it runs, then the reveal state again. */
+async function withAll(h, fn) { tourAll = true; try { h.render && h.render(false); return await fn(); } finally { tourAll = false; try { h.render && h.render(false); } catch (e) { /* ignore */ } } }
 
 /* ------------------------------------------------------------ F4: tour (5 marks over the current values) and legend */
 const fmt = (n) => (typeof E.fmtM === 'function' ? E.fmtM(n) : String(Math.round(n)));
-export async function tour(h) {
+export async function tour(h) { return withAll(h, () => tourInner(h)); }
+async function tourInner(h) {
   const m = E.metrics(h.S); const pay = m.payslip || {};
   const net = pay.net ?? m.salary ?? 0; const exp = m.expenses || 0; const pct = exp ? Math.round(((m.passive || 0) / exp) * 100) : 0;
   const steps = [

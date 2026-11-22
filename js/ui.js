@@ -6,6 +6,7 @@ import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
+import { levelText as stageText, levelHint as stageHint } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
 
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -59,25 +60,35 @@ export const ICON = {
 };
 
 /* ============================================================ toasts */
-const tq = []; let tBusy = false;
+const tq = []; let tBusy = false, tWait = 0;
 /** Short message pill under the HUD (queued). kind: ''|'gold'|'bad' */
 export function toast(text, opts = {}) {
   if (!text) return;
-  tq.push({ text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null });
+  tq.push({ text: String(text), kind: opts.kind || '', ms: opts.ms || 0, action: opts.action || null, sub: opts.sub ? String(opts.sub) : '' });
   if (tq.length > 4) tq.splice(0, tq.length - 4);
   if (!tBusy) nextToast();
 }
 function nextToast() {
   const el = $('#toast'); if (!el) return;
-  const t = tq.shift(); if (!t) { tBusy = false; return; }
+  if (!tq.length) { tBusy = false; return; }
+  // T2 verify D7 / T1 D-2: on phones a toast never floats over an open card, dialog or the life story (same rule as the verdict pill):
+  // it waits (no timer races, nothing dropped but the queue cap) and shows once the board is clear
+  if (phoneQ() && (evState || shown('#gm') || shown('#story'))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); return; }
+  const t = tq.shift();
   tBusy = true;
-  el.textContent = iso(t.text); el.className = 'on ' + t.kind + (t.action ? ' act' : '');
+  el.className = 'on ' + t.kind + (t.action ? ' act' : '') + (t.sub ? ' two' : '') + (t.text.length > 64 ? ' long' : '');
+  if (t.sub) {   // T3 UI-4: a second, smaller line (the business "why" sentence)
+    el.textContent = ''; const w = document.createElement('span'); w.className = 'tw';
+    const a = document.createElement('span'); a.className = 'tmain'; a.textContent = iso(t.text);
+    const s2 = document.createElement('small'); s2.className = 'tsub'; s2.textContent = iso(t.sub);
+    w.append(a, s2); el.appendChild(w);
+  } else el.textContent = iso(t.text);
   if (t.action) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'tbtn'; b.textContent = t.action.label;
     b.onclick = () => { try { t.action.fn(); } catch (e) { console.error(e); } el.className = t.kind; };
     el.appendChild(b);
   }
-  const ms = t.ms || Math.max(1300, Math.min(3200, 900 + t.text.length * 38)) * (tq.length ? 0.75 : 1) * (t.action ? 2.4 : 1);
+  const ms = t.ms || Math.max(1300, Math.min(t.sub ? 5200 : 3200, 900 + (t.text.length + t.sub.length) * 38)) * (tq.length ? 0.75 : 1) * (t.action ? 2.4 : 1);
   setTimeout(() => { el.className = t.kind; setTimeout(nextToast, 260); }, ms);
 }
 
@@ -103,6 +114,8 @@ function pumpOv() {
   if (coachOpen() || (ovq[0].kind === 'verdict' && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
   // T6 (UI fix): on phones a verdict pill never floats over an open card / dialog / life story (it covered the options):
   // it waits for the board; a verdict that waited > 9 s is about a decision long gone and is dropped
+  // T2 verify D7: on phones nothing else floats over an open card / dialog / life story either — it waits for the board (never dropped)
+  if (ovq[0].kind !== 'verdict' && (evState || shown('#gm') || shown('#story'))) { ovT = setTimeout(pumpOv, 400); return; }
   if (ovq[0].kind === 'verdict' && coversContent()) {
     if (performance.now() - ovq[0].t > 9000) { ovq.shift(); ovT = setTimeout(pumpOv, 50); return; }
     ovT = setTimeout(pumpOv, 400); return;
@@ -112,6 +125,8 @@ function pumpOv() {
   const done = () => { if (fin) return; fin = true; ovBusy = null; ovT = setTimeout(pumpOv, 220); };
   try { it.show(done); } catch (e) { console.error(e); done(); }
 }
+/** a toast that is on screen when a card / dialog opens on a phone steps aside (its timer ends as usual; it never covers the content) */
+function toastAside() { const el = $('#toast'); if (el && /\bon\b/.test(el.className)) el.className = el.className.replace(/\bon\b/, '').trim(); }
 const toastOn = () => { const t = $('#toast'); return !!t && t.className.includes('on'); };
 const shown = (sel) => { const el = $(sel); return !!el && !el.hidden; };
 /** something interactive fills the phone screen: an event card, a dialog, the life story or the lobby */
@@ -177,6 +192,7 @@ export function modal({ tag = '', color = '#2f6fdb', title = '', html = '', acti
   else { c.removeAttribute('aria-labelledby'); c.setAttribute('aria-label', tag || (c.querySelector('.d') || {}).textContent?.slice(0, 80) || 'הודעה'); }
   const prevFocus = document.activeElement;
   const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); // a dialog on top: the pill steps aside
+  if (phoneQ()) toastAside();   // T2 verify D7: and so does a toast on phones
   m.hidden = false; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
   if (onOpen) try { onOpen(c); } catch (e) { console.error(e); }
   setTimeout(() => (c.querySelector('.acts button.primary:not(:disabled)') || c.querySelector('.acts button:not(:disabled)'))?.focus(), 40);
@@ -314,6 +330,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   if (rev) {
     const set = (k, el) => { if (!el) return; el.hidden = !rev(k); revealPulse(k, el); };
     set('cf', $('#hCf')?.closest('.stat')); set('goal', g); set('sheet', $('#sheetBtn'));
+    document.body.classList.toggle('t4-nosheet', !rev('sheet'));   // desktop: the side sheet waits for its reveal too (freeRect sees it as absent)
     set('tools', $('#turboBtn')); if ($('#camBtn')?.dataset.kind === '3d') set('tools', $('#camBtn'));
   }
   injectHelp();
@@ -352,14 +369,18 @@ function renderLife(m, ctx) {
   const infl = L.inflationYear != null ? Math.round(L.inflationYear * 10) / 10 : null;
   const F = m.focus, X = m.econ;
   const fIcon = F ? (F.opsOpen ? '🏪' : FOCUS_ICON[F.current.id] || '🎯') : '';
-  box.innerHTML = `<button class="lc age" data-life="age" title="גיל"><span>🎂</span><b class="num">${Math.floor(L.age)}</b></button>
+  // T3 UI-3 / UI-7: 📬 open decisions (first, only when there are any) and the calendar (when it says something: a season, or a business)
+  const IB = m.inbox, CAL = m.calendar; const ownBiz = (m.assets || []).some((a) => a.business);
+  const ibChip = IB && IB.open ? `<button class="lc inbox ${IB.urgent ? 'urg' : ''}" data-life="inbox" aria-label="${esc(`החלטות פתוחות: ${IB.open}${IB.urgent ? `, ${IB.urgent} עד המשכורת הבאה` : ''}`)}" title="החלטות פתוחות"><span aria-hidden="true">📬</span><b class="num">${IB.open}</b></button>` : '';
+  const calChip = CAL && CAL.label && (CAL.season || ownBiz) ? `<button class="lc cal ${ownBiz ? 'biz' : ''}" data-life="cal" aria-label="${esc(`לוח השנה: ${CAL.label}${CAL.season ? ` · ${CAL.season}` : ''}`)}" title="לוח השנה"><span aria-hidden="true">🗓️</span><b>${esc(CAL.label)}${CAL.season ? ` · ${esc(CAL.season)}` : ''}</b></button>` : '';
+  box.innerHTML = `${ibChip}<button class="lc age" data-life="age" title="גיל"><span>🎂</span><b class="num">${Math.floor(L.age)}</b></button>
     <button class="lc en ${enc}" data-life="energy" title="כוח (${en}/100)"><span>🔋</span><i class="mb"><i style="width:${Math.max(3, en)}%"></i></i><b class="num">${en}</b></button>
     <button class="lc hp" data-life="happy" title="אושר (${hp}/100)"><span>${hpe}</span><b class="num">${hp}</b></button>
     <button class="lc cr ${BAND_CLS[L.creditBand] ?? ''}" data-life="credit" title="דירוג אשראי: ${esc(L.creditBand || '')}"><span>🏦</span><b class="num">${L.creditScore ?? '—'}</b></button>
     ${infl != null ? `<button class="lc cpi" data-life="cpi" title="${L.inflationLastYear != null ? 'אינפלציה בשנה שעברה' : 'אינפלציה צפויה'}"><span>🛒</span><b class="num">${infl}%</b></button>` : ''}
     ${m.emergency ? `<button class="lc fund ${m.emergency.covered ? 'pos' : ''}" data-life="fund" title="קרן חירום: ${m.emergency.months} חודשי הוצאות"><span>🛟</span><b class="num">${m.emergency.months}</b></button>` : ''}
     <button class="lc plan" data-life="plan" title="התוכנית החודשית — לשנות"><span>${PLAN_ICON[L.plan] || '📅'}</span><b>${esc(L.planLabel || '')}</b></button>
-    ${F ? `<button class="lc focus ${F.opsOpen ? 'ops' : ''} ${F.current.id !== 'none' ? 'on' : ''}" data-life="focus" aria-label="${F.opsOpen ? 'לפתוח את לוח העסק' : `מוקד החודש: ${esc(F.current.label)}`}" title="מוקד החודש"><span aria-hidden="true">${fIcon}</span><b>${esc(F.opsOpen ? 'לוח העסק' : F.current.id === 'none' ? 'מוקד' : F.current.label)}</b></button>` : ''}
+    ${calChip}${F ? `<button class="lc focus ${F.opsOpen ? 'ops' : ''} ${F.current.id !== 'none' ? 'on' : ''}" data-life="focus" aria-label="${F.opsOpen ? 'לפתוח את לוח העסק' : `מוקד החודש: ${esc(F.current.label)}`}" title="מוקד החודש"><span aria-hidden="true">${fIcon}</span><b>${esc(F.opsOpen ? 'לוח העסק' : F.current.id === 'none' ? 'מוקד' : F.current.label)}</b></button>` : ''}
     ${X ? `<button class="lc econ t${X.trend > 0 ? 'u' : X.trend < 0 ? 'd' : 'f'}" data-life="econ" aria-label="מד הכלכלה: ${esc(X.label)}, ${X.signal} מתוך 100" title="${esc(X.text || 'מד הכלכלה')}">${gaugeSvg(X.signal, 26)}<b>${esc(X.label)}</b><i class="tr" aria-hidden="true">${X.trend > 0 ? '↗' : X.trend < 0 ? '↘' : '→'}</i>${X.sharp ? '<i class="sh" aria-hidden="true">🔬</i>' : ''}</button>` : ''}${t6Chips(ctx && ctx.t6)}`;
   const rev = ctx && ctx.isRevealed;
   if (rev) for (const [k, sel] of [['age', '.lc.age'], ['energy', '.lc.en'], ['happy', '.lc.hp'], ['credit', '.lc.cr'], ['cpi', '.lc.cpi'], ['fund', '.lc.fund'], ['plan', '.lc.plan'], ['focus', '.lc.focus'], ['focus', '.lc.econ']]) {
@@ -703,7 +724,7 @@ const ddLevel = (ev) => (ev && ev.data && ev.data.dd ? ev.data.dd.level : -1);
 export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
   evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() } };
-  if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); } // phones: the new card wins
+  if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); } // phones: the new card wins
   renderEvent(true);
   m.hidden = false;
   c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
@@ -752,6 +773,7 @@ function onCardClick(e) {
   const roi = e.target.closest('[data-roi]');
   if (roi) { evState.roi = true; const b = $('#roiBox'); if (b) b.hidden = false; roi.setAttribute('aria-expanded', 'true'); sfx('click'); hideCoach(); return; }
   if (e.target.closest('[data-hint]')) { askHint(); return; }
+  if (e.target.closest('[data-later]')) { sfx('click'); try { evState.ctx.api.later(); } catch (x) { console.error(x); } return; }
   const rv = e.target.closest('[data-rv]'); if (rv) { sfx('click'); rivalPop(rv); return; }
   const it = e.target.closest('[data-imp]');
   if (it) { evState.imp.ref = it.dataset.imp; sfx('click'); paintImpact(); return; }
@@ -771,7 +793,7 @@ function onCardClick(e) {
 const mentorOf = () => { try { return (evState && evState.ctx.api && evState.ctx.api.mentor && evState.ctx.api.mentor()) || null; } catch (e) { return null; } };
 function hintable(ev, M) {
   if (!M || M.level === 'pro' || !evState.ctx.api || !evState.ctx.api.hint) return false;
-  if (ev.auto || ev.type === 'trade' || ev.type === 'intro' || (ev.type === 'mystery' && ev.data && ev.data.kind === 'quiz')) return false;
+  if (ev.auto || ev.type === 'trade' || ev.type === 'intro' || ev.type === 'story' || (ev.type === 'mystery' && ev.data && ev.data.kind === 'quiz')) return false;
   return !!M.canHint;
 }
 function askHint() {
@@ -819,7 +841,8 @@ function impactPanelHtml(ev, M) {
     const pr = ms.find((o) => o.primary);
     I.ref = (pr || ms.find((o) => o.kind === 'buy') || ms.find((o) => o.id === 'start') || ms[0]).id;
   }
-  if (I.open == null) I.open = !!(M && M.level === 'guide' && ms.some((o) => o.primary)); // guide: open for the highlighted option
+  // guide: open for the highlighted option — except on a T3 offer, whose setup tiles already carry the numbers (UI-6: setups first)
+  if (I.open == null) I.open = !!(M && M.level === 'guide' && ms.some((o) => o.primary)) && !(ev.type === 'business' && ev.data && Array.isArray(ev.data.setups) && ev.data.setups.length);
   const tabs = ms.length > 1 ? `<div class="imp-tabs" role="group" aria-label="איזו אפשרות?">${ms.map((o) => `<button type="button" class="chip" data-imp="${esc(o.id)}" aria-pressed="${o.id === I.ref}">${escI(shortLabel(o))}</button>`).join('')}</div>` : '';
   return `<details class="imp" id="impP" ${I.open ? 'open' : ''}><summary><span>📊 מה זה עושה לי?</span><small>${escI(ms.length > 1 ? 'לפני שבוחרים' : shortLabel(ms[0]))}</small></summary>${tabs}<div class="imp-body" aria-live="polite">${I.open ? impactBodyFor(I.ref) : ''}</div></details>`;
 }
@@ -880,16 +903,28 @@ function optButtons(ev, filter = () => true, extraCls = '', split = false) {
   return `<div class="acts ${long ? 'col' : ''} ${extraCls}">${opts.map((o, i) => { const sp = split && SPLIT_PAREN.test(o.label); return `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} ${o.kind === 'sell' ? 'sell' : ''} ${o.netLabel || sp ? 'hasnet' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>${optLabel(o, split)}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`; }).join('')}</div>`;
 }
 const PLAN_ICON = { work: '💼', overtime: '⏱️', study: '🎓', side: '🛠️', rest: '🌿' };
-/** Effect chips: ₪ now · ₪/month × months · 😊 · 🔋 */
-function effectChips(e = {}) {
+/** Effect chips (T3 UI-1 / UI-10). Every chip carries its sign and words, never colour alone.
+ *  ₪ now · `flow` = the signed change to YOUR monthly cashflow (a cost is negative, red) × months · net salary × months ·
+ *  😊 · ✨ · 🔋 · 🎓 · risk. Life and story options always carry `flow`; their deprecated `monthly` (= −flow) is never
+ *  rendered — that was the old money-sign bug (a baby's cost showed in green). Plan tiles pass `net` (money in hand). */
+function effectChips(e = {}, { odds = false } = {}) {
   const c = [];
-  if (e.cash) c.push(`<em class="fx ${cls(e.cash)}">${iso(sgn(e.cash))}</em>`);
-  if (e.net != null && e.net !== 0) c.push(`<em class="fx ${cls(e.net)}">${iso(sgn(e.net))} בחודש</em>`);
-  if (e.monthly) c.push(`<em class="fx ${cls(e.monthly)}">${iso(sgn(e.monthly))} בחודש${e.months ? ` × ${e.months}` : ''}</em>`);
-  if (e.happiness) c.push(`<em class="fx ${cls(e.happiness)}">😊 ${iso((e.happiness > 0 ? '+' : '−') + Math.abs(Math.round(e.happiness)))}</em>`);
-  if (e.glow) c.push(`<em class="fx pos">✨ ${iso('+' + Math.round(e.glow))} זמני</em>`);
-  if (e.risk) c.push(`<em class="fx neg">סיכון ${iso(fmtM(e.risk))}</em>`);
-  if (e.energy) c.push(`<em class="fx ${cls(e.energy)}">🔋 ${iso((e.energy > 0 ? '+' : '−') + Math.abs(Math.round(e.energy)))}</em>`);
+  const chip = (n, t) => `<em class="fx ${cls(n)}">${t}</em>`;
+  const signed = (n) => iso((n > 0 ? '+' : '−') + Math.abs(Math.round(n)));
+  if (e.cash) c.push(chip(e.cash, `${iso(sgn(e.cash))} עכשיו`));
+  if (e.net != null && e.net !== 0) c.push(chip(e.net, `${iso(sgn(e.net))} בחודש`));
+  const flow = 'flow' in e ? e.flow : null;
+  if (flow) c.push(chip(flow, `${iso(sgn(flow))} בחודש${e.months ? ` × ${e.months}` : ''}`));
+  else if (flow == null && e.monthly) c.push(chip(-e.monthly, `${iso(sgn(-e.monthly))} בחודש${e.months ? ` × ${e.months}` : ''}`)); // legacy card without flow: monthly is a cost
+  if (e.salary) c.push(chip(e.salary, `משכורת נטו ${iso(sgn(e.salary))} בחודש${e.salaryMonths ? ` × ${e.salaryMonths}` : ''}`));
+  const glow = Math.round(e.glow || 0), hap = Math.round((e.happiness || 0) - ('flow' in e ? glow : 0));
+  if (hap) c.push(chip(hap, `😊 ${signed(hap)}`));
+  if (glow) c.push(`<em class="fx pos">✨ ${iso('+' + glow)} זמני</em>`);
+  if (e.energy) c.push(chip(e.energy, `🔋 ${signed(e.energy)}`));
+  if (e.study) c.push(chip(e.study, `🎓 ${signed(e.study)} חודשי לימוד`));
+  const R = e.risk;
+  if (typeof R === 'number' && R) c.push(`<em class="fx neg">⚠ סיכון ${iso(fmtM(R))}</em>`);
+  else if (R && typeof R === 'object' && !odds) c.push(`<em class="fx neg">⚠ ${R.label ? escI(R.label) : `סיכון ${iso(fmtM(R.amount || 0))}`}</em>`);
   return c.join('');
 }
 /** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile. */
@@ -912,13 +947,47 @@ function planPicker(ev) {
     (raise ? `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>` : '') +
     (rest.length ? optButtons({ ...ev, options: rest }) : '') + (cur ? '' : '');
 }
-/** Life-event dilemmas: each option is a card with its money / energy / happiness consequences. */
+/** Life-event dilemmas, T3 chain cards (tile L with data.chain) and inbox story cards (type 'story'): each option is a card
+ *  with its consequences (chips), one 12/24-month total line and the "במשחק" odds; the default of an inbox item is marked and
+ *  announced through aria-describedby (UI-2, UI-10). */
+const ODDS_RE = /^\s*במשחק/;
+function oddsText(t) { const x = String(t || '').trim(); return !x ? '' : ODDS_RE.test(x) ? x : `במשחק: ${x}`; }
+function totalsLine(o) {
+  const e = o.effects || {}; const biz = !!o.preview;
+  if (biz) return o.preview.delta3 ? `<small class="tot">ברווח העסק ב־3 חודשים: ${num(sgn(o.preview.delta3), cls(o.preview.delta3))}</small>` : '';
+  const t12 = e.total12, t24 = e.total24;
+  if (t24 == null || (!t24 && !t12)) return '';
+  if (Math.round(t12) !== Math.round(t24) && t12 != null) return `<small class="tot">סה״כ ב־12 חודשים ${num(sgn(t12), cls(t12))} · ב־24 חודשים ${num(sgn(t24), cls(t24))}</small>`;
+  return `<small class="tot">סה״כ ב־24 חודשים: ${num(sgn(t24), cls(t24))}</small>`;
+}
+/** The line under the text: personal / trade-off tag, "שלב n מתוך m", the due chip, and the chain's "במשחק" hint. */
+function storyTagsHtml(ev) {
+  const d = ev.data || {};
+  const prog = ev.progress || (d.chain && d.chain.progress) || null;
+  const tags = [];
+  if (ev.type === 'life' || ev.type === 'story') {
+    if (d.personal || ev.personal) tags.push('<em class="b">החלטה אישית — אין כאן תשובה נכונה אחת</em>');
+    else if (d.values) tags.push('<em class="b">טרייד־אוף — אין כאן תשובה אחת</em>');
+  }
+  if (prog && prog.of > 1) tags.push(`<em class="b step">שלב ${num(String(prog.n))} מתוך ${num(String(prog.of))}</em>`);
+  if (d.dueText) tags.push(`<em class="b due ${d.due != null && d.due <= ((evState && evState.ctx.st && evState.ctx.st.month) || 0) + 1 ? 'urg' : ''}">📬 ${esc(d.dueText)}</em>`);
+  const hint = ev.hint || d.hint;
+  return (tags.length ? `<p class="chipline">${tags.join('')}</p>` : '') + (hint ? `<p class="godds hintl"><span aria-hidden="true">🎲</span> ${escI(oddsText(hint))}</p>` : '');
+}
 function effectChoices(ev) {
   const d = ev.data || {};
-  const chip = ev.type !== 'life' ? '' : d.personal ? '<p class="chipline"><em class="b">החלטה אישית — אין כאן תשובה נכונה אחת</em></p>'
-    : d.values ? '<p class="chipline"><em class="b">טרייד־אוף — אין כאן תשובה אחת</em></p>' : '';
-  return chip + `<div class="choices">${ev.options.map((o, i) => `<div class="opt"><button class="choice ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}>
-    <b>${escI(o.label)}</b>${o.primary && ev.options.length > 1 ? '<small class="tagc rec">הבחירה של המנטור</small>' : ''}<span class="fxs">${effectChips(o.effects)}</span>${o.effects && o.effects.note ? `<small class="pn">${escI(o.effects.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`).join('')}</div>`;
+  const story = ev.type === 'story' || !!d.chain;
+  const dflt = d.defaultId ? ev.options.find((o) => o.id === d.defaultId) : null;
+  const choice = (o, i) => {
+    const e = o.effects || {}; const od = o.odds && o.odds.text ? oddsText(o.odds.text) : '';
+    const isD = dflt && o.id === dflt.id;
+    const desc = [!o.enabled ? `why${i}` : '', isD ? 'evDflt' : ''].filter(Boolean).join(' ');
+    return `<div class="opt"><button class="choice ${story ? 'stc' : ''} ${o.primary ? 'primary' : ''} ${isD ? 'dflt' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'} ${desc ? `aria-describedby="${desc}"` : ''}>
+    <b>${escI(o.label)}</b>${o.primary && ev.options.length > 1 ? '<small class="tagc rec">הבחירה של המנטור</small>' : ''}${isD ? '<small class="tagc dflt">אם לא תחליט — זה מה שיקרה</small>' : ''}<span class="fxs">${effectChips(e, { odds: !!od })}</span>${totalsLine(o)}${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`;
+  };
+  return `<div class="choices">${ev.options.map(choice).join('')}</div>` +
+    (d.cushion && d.cushion.text && story ? `<p class="note cush">🛟 ${escI(d.cushion.text)}</p>` : '') +
+    (dflt ? `<p class="note dfl" id="evDflt">${escI(`אם לא תחליט ${d.dueText || 'עד המשכורת הבאה'}: ${dflt.label}`)}</p>` : '');
 }
 /** Negotiation: offer −5/−10/−15% with the acceptance chance (and the risk of losing the deal). */
 function offerRow(offers) {
@@ -946,7 +1015,8 @@ function say(text) {
 }
 function head(ev, M = null) {
   const hb = M ? hintBtnHtml(ev, M) : '';
-  return `${say(ev.mentor)}<div class="taghead"><span class="tag" style="--c:${esc(ev.color || '#2f6fdb')};--ink:${esc(ev.ink || '#fff')}">${esc(ev.tag || '')}</span>${hb}</div><h2 id="evTitle" tabindex="-1">${escI(ev.title)}</h2>${ev.text ? `<p class="d">${escI(ev.text)}</p>` : ''}${flagsHtml(ev)}`;
+  const rem = ev.remember || (ev.data && ev.data.remember);   // T3 UI-2: "זוכר?" — the world remembers (distinct style, under the title)
+  return `${say(ev.mentor)}<div class="taghead"><span class="tag" style="--c:${esc(ev.color || '#2f6fdb')};--ink:${esc(ev.ink || '#fff')}">${esc(ev.tag || '')}</span>${hb}</div><h2 id="evTitle" tabindex="-1">${escI(ev.title)}</h2>${rem ? `<p class="remember"><span aria-hidden="true">💭</span> ${escI(rem)}</p>` : ''}${ev.text ? `<p class="d">${escI(ev.text)}</p>` : ''}${flagsHtml(ev)}`;
 }
 /** T2 due diligence: the deal's public flags under the title — icon + text, never colour alone */
 function flagsHtml(ev) {
@@ -975,6 +1045,7 @@ function renderEvent(first) {
   const fn = BODY[ev.type] || (() => '');
   let body = '';
   try { body = fn(ev, ctx) || ''; } catch (e) { console.error('card body', e); }
+  if (ev.type === 'life' || ev.type === 'story') body += storyTagsHtml(ev);   // T3 UI-2: tags + the chain's odds right under the text
   const hasPlans = ev.options.some((o) => o.id.startsWith('plan:'));
   const hasEffects = ev.options.some((o) => o.effects && !o.id.startsWith('plan:'));
   const offers = ev.options.filter((o) => /^offer:/.test(o.id));
@@ -984,12 +1055,16 @@ function renderEvent(first) {
     : ev.type === 'mystery' && ev.data.kind === 'quiz' ? optButtons(quizView(ev), () => true, 'quiz')
     : ev.type === 'market' && ev.data.kind === 'sell' && ev.data.offers.length ? optButtons(ev, (o) => o.kind !== 'sell') // sales are buttons inside the list
     : ev.type === 'business' && ev.data.mode === 'manage' ? bizActions(ev)
+    : ev.type === 'business' && ev.data.mode === 'offer' && Array.isArray(ev.data.setups) && ev.data.setups.length ? bizOfferActions(ev)
     : hasPlans ? planPicker(ev)
     : hasEffects ? effectChoices(ev)
     : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id) && !inDd(o), '', ev.type === 'doodad' || ev.type === 'tax');
   const bizM = ev.type === 'business' && ev.data.mode === 'manage';
   const focus = (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
-  c.innerHTML = head(ev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + impactPanelHtml(ev, M) + '<p class="err" role="alert"></p>' + actions + focus;
+  // T3 UI-3: an inbox item can wait — no timer, the default applies at its payday
+  const later = ev.type === 'story' && ctx.api && ctx.api.later ? `<button type="button" class="linkbtn later" data-later>אחר כך${ev.data && ev.data.dueText ? ` · ${esc(ev.data.dueText)}` : ''}</button>` : '';
+  const hev = bizM && ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1)) ? { ...ev, text: '' } : ev;   // T3: L1 says the numbers once
+  c.innerHTML = head(hev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + impactPanelHtml(ev, M) + '<p class="err" role="alert"></p>' + actions + later + focus;
   markHint(c, ev);
   if (first) c.scrollTop = 0;
 }
@@ -1026,7 +1101,7 @@ function ddBox(ev) {
     const i1 = o.id === 'inspect:1';
     const base = i1 ? 'לבדוק בעצמי' : shortLabel(o);
     const cost = i1 ? (D.inspect1.free ? 'חינם החודש' : `−${D.inspect1.energy} 🔋`) : `${fmtM(D.inspect2.fee)}${D.inspect2.half ? ' · ½ מחיר' : ''}`;
-    return `<div class="opt"><button class="insp" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="dwhy${i}"`}><span><span aria-hidden="true">${i1 ? '🔍' : '🧾'}</span> ${esc(base)}</span><small class="net ${(i1 && D.inspect1.free) || (!i1 && D.inspect2.half) ? 'pos' : ''}">${iso(cost)}</small>${rvChip(o)}</button>${!o.enabled && o.reason ? `<small class="why" id="dwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
+    return `<div class="opt"><button class="insp ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="dwhy${i}"`}><span><span aria-hidden="true">${i1 ? '🔍' : '🧾'}</span> ${esc(base)}</span><small class="net ${(i1 && D.inspect1.free) || (!i1 && D.inspect2.half) ? 'pos' : ''}">${iso(cost)}</small>${o.primary ? '<small class="tagc rec">המנטור ממליץ לבדוק</small>' : ''}${rvChip(o)}</button>${!o.enabled && o.reason ? `<small class="why" id="dwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
   };
   return `<div class="ddbox lv${D.level}"><p class="mh">🔎 ${D.level === 0 ? 'לבדוק לפני שקונים?' : 'בדיקה מקצועית — מספרים מדויקים'}</p><div class="acts ddins">${ins.map(insBtn).join('')}</div></div>`;
 }
@@ -1058,19 +1133,22 @@ function introActions(ev) {
   const btn = (o) => d.step === 'glitch'
     ? `<div class="opt"><button class="choice" data-o="${esc(o.id)}" data-intro-opt="${esc(o.id)}" ${o.enabled === false ? 'disabled' : ''}><b>${escI(o.label)}</b><span class="fxs">${introChips(o.effects)}</span></button></div>`
     : `<div class="opt"><button class="${o.primary || main.length === 1 ? 'primary' : ''}" data-o="${esc(o.id)}" data-intro-opt="${esc(o.id)}" ${o.enabled === false ? 'disabled' : ''}>${escI(o.label)}</button></div>`;
-  return `<div class="${d.step === 'glitch' ? 'choices' : 'acts col'}">${main.map(btn).join('')}</div>${d.step === 'glitch' ? '<p class="note">אין כאן תשובה נכונה אחת. כל דרך עולה משהו אחר.</p>' : ''}${skip ? `<button class="linkbtn" data-o="skip" data-intro-opt="skip">${escI(skip.label)}</button>` : ''}`;
+  return `<div class="${d.step === 'glitch' ? 'choices' : 'acts col'}">${main.map(btn).join('')}</div>${d.step === 'glitch' ? `<p class="note">${escI(d.note || 'אין כאן תשובה נכונה אחת. כל דרך עולה משהו אחר.')}</p>` : ''}${skip ? `<button class="linkbtn" data-o="skip" data-intro-opt="skip">${escI(skip.label)}</button>` : ''}`;
 }
 
 /* ---------- per-type bodies */
 const BODY = {
-  intro(ev) {
-    const d = ev.data || {};
-    if (d.step === 'salary') return grid([row('נטו לחשבון', fmtM(d.net ?? 0)), row('הוצאות קבועות', fmtM(-(d.expenses ?? 0)), 'neg'), `<div class="row"><b>נשאר בסוף החודש</b>${big(d.cashflow ?? 0)}</div>`]) + (d.cash != null ? `<p class="note">בקופה עכשיו: ${num(fmtM(d.cash))}</p>` : '');
+  intro(ev) {   // T4 §4.2 with the engine's real fields: data.payslip {net, expenses, cashflow, cash}, data.result, data.goal
+    const d = ev.data || {}; const P = d.payslip || {};
+    if (d.step === 'salary') return grid([row('נטו לחשבון', fmtM(P.net ?? 0)), row('הוצאות קבועות', fmtM(-(P.expenses ?? 0)), 'neg'), `<div class="row"><b>נשאר בסוף החודש</b>${big(P.cashflow ?? 0)}</div>`]);
     if (d.step === 'result') {
-      const ch = Array.isArray(d.changes) ? d.changes : [];
-      const g = d.goal || null;
-      return (ch.length ? grid(ch.map((x) => row(escI(x.label), `${x.fmt === 'n' ? x.from : fmtM(x.from)} ← ${x.fmt === 'n' ? x.to : fmtM(x.to)}${x.note ? ' ' + x.note : ''}`))) : '') +
-        (g ? `<div class="nextgoal"><b>🎯 המטרה הבאה</b><p>${escI(g.text || '')}</p>${g.target ? `<div class="track"><i style="width:${Math.max(2, Math.min(100, (g.now / g.target) * 100))}%"></i></div><small class="num">${fmtM(g.now || 0)} / ${fmtM(g.target)}</small>` : ''}</div>` : '');
+      const R = d.result || {}; const g = d.goal || null; const rows = [];
+      if (R.cashBefore !== R.cashAfter) rows.push(row('בקופה', `${fmtM(R.cashBefore)} ← ${fmtM(R.cashAfter)}`, cls(R.cashAfter - R.cashBefore)));
+      if (R.cfBefore !== R.cfAfter) rows.push(row('נשאר בסוף החודש', `${fmtM(R.cfBefore)} ← ${fmtM(R.cfAfter)}${R.instMonths ? ` · ל־${R.instMonths} חודשים` : ''}`, cls(R.cfAfter - R.cfBefore)));
+      if (R.energyBefore !== R.energyAfter && R.energyAfter != null) rows.push(row('🔋 כוח', `${R.energyBefore} ← ${R.energyAfter}`, cls(R.energyAfter - R.energyBefore)));
+      const pct = g && g.target ? Math.max(2, Math.min(100, Math.round(((g.value || 0) / g.target) * 100))) : 0;
+      return (rows.length ? grid(rows) : '') +
+        (g ? `<div class="nextgoal"><b>${esc(d.goalHeading || '🎯 המטרה הבאה')}</b><p>${escI(g.text || g.title || '')}</p>${g.target ? `<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${g.target}" aria-valuenow="${g.value || 0}" aria-label="${esc(g.title || 'המטרה הבאה')}"><i style="width:${pct}%"></i></div><small class="num">${fmtM(g.value || 0)} / ${fmtM(g.target)}</small>` : ''}</div>` : '');
     }
     return '';
   },
@@ -1086,6 +1164,11 @@ const BODY = {
     const d = ev.data || {};
     return d.text ? `<p class="d">${escI(d.text)}</p>` : '';
   },
+  /* T3 inbox item (E.inbox card; resolved through E.resolveStory by game.js). A business item shows its last month first. */
+  story(ev) {
+    const B = ev.data && ev.data.biz; if (!B || !B.l1) return '';
+    return l1Html(B.l1, { compact: true }) + (B.signature && B.signature.text ? `<p class="note sig">${escI(`${B.signature.label}: ${B.signature.text}`)}</p>` : '');
+  },
   deal(ev, ctx) {
     const d = ev.data; const w = ctx.world;
     const rows = [row('מחיר', fmtM(d.cost))];
@@ -1097,11 +1180,17 @@ const BODY = {
     // T2 due diligence lives IN the grid: the cash-flow row says whose number it is (seller / range / verified)
     const D = d.dd, lv = D ? D.level : -1;
     const badge = D && (lv > 0 || ev.options.some((o) => o.kind === 'inspect')) ? (lv === 2 ? ' <em class="b ok">נבדק ✓</em>' : lv === 1 ? ' <em class="b">טווח מהבדיקה</em>' : ` <em class="b warn">${esc(D.claimed.label || 'לפי המוכר')} · לא נבדק</em>`) : '';
-    if (d.cfVar != null) {
+    // T2 verify D4: once checked, the big number is what the check says (level 1: the range, level 2: verified); the seller's claim is a
+    // secondary line. data.cf / cfVar / cfFix stay the seller's numbers until level 2 (engine contract).
+    const rng = D && lv === 1 && D.range && D.range.cf ? D.range.cf : null;
+    if (rng) {
+      rows.push(`<div class="row"><span>תזרים חודשי נטו${badge}</span><b class="big num rtl rng ${rng[0] < 0 ? 'neg' : 'pos'}">${iso(`${sgn(rng[0])} עד ${sgn(rng[1])}`)}</b></div>`);
+      if (d.cfVar != null) rows.push(row('המוכר אמר', `${sgn(d.cfVar)} (משתנה ${pctTxt(d.rate)}) · ${sgn(d.cfFix)} (קבועה ${pctTxt(d.fixedRate)})`, 'mut'));
+      else rows.push(row('המוכר אמר', `${sgn(D.claimed.cf)} בחודש`, 'mut'));
+    } else if (d.cfVar != null) {
       rows.push(`<div class="row"><span>תזרים בריבית משתנה (${num(pctTxt(d.rate))})${badge}</span>${big(d.cfVar)}</div>`);
       rows.push(`<div class="row"><span>תזרים בריבית קבועה (${num(pctTxt(d.fixedRate))})</span><b class="num ${cls(d.cfFix)}">${sgn(d.cfFix)}</b></div>`);
     } else rows.push(`<div class="row"><span>תזרים חודשי נטו${badge}</span>${big(d.cf)}</div>`);
-    if (D && lv >= 1 && D.range) rows.push(row('🔍 לפי הבדיקה', `${fmtM(D.range.cf[0])} עד ${fmtM(D.range.cf[1])} בחודש`));
     if (D && lv === 2) rows.push(row('המוכר אמר', `${sgn(D.claimed.cf)} בחודש`, 'mut'));
     if (D && lv >= 1 && ctx.world.goal.type !== 'passive') rows.push(lv === 2 && D.verified ? row('שווי שנבדק', fmtM(D.verified.value)) : D.range ? row('שווי לפי הבדיקה', `${fmtM(D.range.value[0])} עד ${fmtM(D.range.value[1])}`) : '');
     if (D && lv >= 1) rows.push(lv === 2 && D.verified ? row('🔧 תיקונים', D.verified.repair ? fmtM(D.verified.repair) : 'אין', D.verified.repair ? 'neg' : '') : D.range ? row('🔧 תיקונים צפויים', esc(REPAIR[D.range.repair] || D.range.repair)) : '');
@@ -1204,31 +1293,61 @@ const BODY = {
       grid([row('יעילות המטרה', `×${d.eff}`, d.eff >= 1 ? 'pos' : 'neg')]) +
       `<p class="note">${d.eff < 1 ? 'שים לב: חלק גדול מהכסף לא מגיע למטרה עצמה.' : 'תרומה נותנת קצת השפעה עכשיו, והשאר מגיע לאורך החודשים הבאים — וממשיך לגדול.'}${d.pledge ? ` הוראת קבע: ${num(fmtM(d.pledge.amount))} בחודש ← ${num('+' + d.pledge.impact)} השפעה כל חודש.` : ''}</p>`;
   },
-  /* v3.1 K tile: a managed business (offer → manage). Owner-run = active income; with a manager = passive. */
+  /* v3.1 K tile: a managed business (offer → manage). Owner-run = active income; with a manager = passive.
+     T3 (rules 4): layered — the offer leads with the setups and the seasons; the manage card leads with 3 numbers and one
+     "why" sentence (L1), then the open decisions; "פרטים" = L2 (groups, cash bridge, receivables, stock), "דוח מלא" = L3. */
   business(ev) {
     const d = ev.data || {};
+    const kind = (e) => `<div class="bizkind"><p><b>אתה עובד בו</b> = הכנסה <b>אקטיבית</b> (משרה נוספת) · 🔋 ${nrg(-(e.ownerEnergy || 0))} בחודש.</p><p><b>עם מנהל</b> = הכנסה <b>פסיבית</b> שנספרת ליעד · 🔋 ${nrg(-(e.managerEnergy || 0))} — אבל משלמים לו משכורת.</p></div>`;
     if (d.mode === 'offer') {
       const L = (d.forecast3 && d.forecast3.lines) || []; const ln = (k) => L.find((x) => x.k === k);
       const rev = ln('revenue'), gp = ln('gp'), np = ln('np');
       const A = d.archetype || {};
-      return `<p class="chipline"><em class="b">${BIZ_ICON[A.icon] || '🏪'} ${esc(A.short || A.name || 'עסק')}</em>${A.price ? `<em class="b">מחיר ל${esc(unitOne(A.unit))}: ${num(fmtP(A.price))}</em>` : ''}</p>` +
+      const chips = `<p class="chipline"><em class="b">${BIZ_ICON[A.icon] || '🏪'} ${esc(A.short || A.name || 'עסק')}</em>${A.price ? `<em class="b">מחיר ל${esc(unitOne(A.unit))}: ${num(fmtP(A.price))}</em>` : ''}</p>`;
+      if (Array.isArray(d.setups) && d.setups.length) return chips;   // T3 UI-6: the setups lead (bizOfferActions), then the seasons and the rest
+      return chips +
         grid([`<div class="row"><span>הון לפתיחה</span><b class="num">${fmtM(d.startCapital)}</b></div>`,
           rev ? row('הכנסות ב־3 החודשים הראשונים (בלי מע"מ)', fmtM(rev.amount)) : '',
           gp ? row(`רווח גולמי${gp.pct != null ? ` (${gp.pct}%)` : ''}`, fmtM(gp.amount), cls(gp.amount)) : '',
-          np ? `<div class="row"><span>רווח נקי צפוי ב־3 חודשים</span>${big(np.amount)}</div>` : '']) +
-        (d.breakEven && d.breakEven.text ? `<p class="note">⚖️ ${escI(d.breakEven.text)}</p>` : '') +
-        `<div class="bizkind"><p><b>אתה עובד בו</b> = הכנסה <b>אקטיבית</b> (משרה נוספת) · 🔋 ${nrg(-(d.ownerEnergy || 0))} בחודש.</p><p><b>עם מנהל</b> = הכנסה <b>פסיבית</b> שנספרת ליעד · 🔋 ${nrg(-(d.managerEnergy || 0))} — אבל משלמים לו משכורת.</p></div>` +
+          np ? `<div class="row"><span>רווח נקי צפוי ב־3 חודשים</span>${big(np.amount)}</div>` : '',
+          d.forecast3 && d.forecast3.cashChange != null ? row('הקופה אחרי 3 חודשים', sgn(d.forecast3.cashChange), cls(d.forecast3.cashChange)) : '']) +
+        (d.breakEven && d.breakEven.text ? `<p class="note">⚖️ ${escI(d.breakEven.text)}</p>` : '') + kind(d) +
         '<p class="note">תחזית בלבד: לקוחות, מחירים והפתעות משנים את התוצאה כל חודש.</p>';
     }
     const s = d.summary || {}; const h = s.hist || []; const last = h[h.length - 1];
     const passive = s.incomeKind === 'passive' || s.manager;
-    return `<p class="chipline"><em class="b ${passive ? 'ok' : 'warn'}">${passive ? 'עם מנהל — הכנסה פסיבית (נספרת ליעד)' : 'אתה עובד בו — הכנסה אקטיבית (לא נספרת ליעד)'}</em><em class="b">🔋 ${nrg(-(s.ownerEnergy || 0))} בחודש</em></p>` +
+    const settings = grid([row('מחיר', fmtP(s.price ?? 0)), row('עובדים', String(s.staff ?? 0) + (s.manager ? ' + מנהל' : '')),
+      row('שיווק בחודש', fmtM(s.marketing || 0)), row('משיכה לכיס שלך בחודש', fmtM(s.draw || 0)),
+      row('בקופת העסק', fmtM(s.cash || 0), cls(s.cash || 0)), s.valuation ? row('שווי אם תמכור', fmtM(s.valuation.price || 0)) : '']);
+    const sparkH = h.length > 1 ? `<div class="mini"><p class="mh">רווח נקי לפי חודש</p>${spark(h.map((x) => x.np), { color: (last && last.np >= 0) ? 'var(--green)' : 'var(--red)', w: 300, h: 34 })}</div>` : '';
+    const kindChip = `<em class="b ${passive ? 'ok' : 'warn'}">${passive ? 'עם מנהל — הכנסה פסיבית (נספרת ליעד)' : 'אתה עובד בו — הכנסה אקטיבית (לא נספרת ליעד)'}</em><em class="b">🔋 ${nrg(-(s.ownerEnergy || 0))} בחודש</em>`;
+    const L1 = d.l1 || s.l1;
+    if (L1) {   // T3 layered card
+      const L2 = s.l2 || {}, L3 = s.l3 || {};
+      const stage = d.stage ?? s.stage; const sig = d.signature || s.signature; const cal = d.calendar;
+      const groups = (L2.groups || []).filter((g) => g.amount || g.k === 'profit');
+      const gHtml = groups.length ? `<p class="mh">החודש האחרון בקבוצות</p>${grid(groups.map((g) => g.k === 'profit' ? `<div class="row"><b>${esc(g.label)}</b>${big(g.amount)}</div>` : row(esc(g.label), sgn(g.amount), cls(g.amount))))}` : '';
+      const bridge = (L2.cashBridge || []).filter((x) => x.amount);
+      const bHtml = bridge.length ? `<p class="mh">מהרווח לקופה</p><ul class="bridge">${bridge.map((x) => `<li><span>${escI(x.text)}</span>${num(sgn(x.amount), cls(x.amount))}</li>`).join('')}</ul>` : '';
+      const R = L2.receivables || {}; const St = L2.stock;
+      const ar = R.now ? `<p class="note">🧾 לקוחות חייבים לעסק: ${num(fmtM(R.now))}${(R.terms || []).length ? ` · ${R.terms.map((t) => `${num(fmtM(t.amount))}${t.client ? ` (${escI(t.client)})` : ''} בחודש ${num(String(t.due))}`).join(' · ')}` : ''}</p>` : '';
+      const stock = St ? `<p class="note">📦 במלאי ${num(N(St.units || 0))} יחידות${St.cover != null ? ` · מספיק לבערך ${num(String(St.cover))} חודשים` : ''}${St.onOrder ? ` · בדרך ${num(N(St.onOrder))}` : ''}${St.value ? ` · שווי ${num(fmtM(St.value))}` : ''}</p>` : '';
+      const l3lines = (L3.lines || []).filter((x) => x.amount || x.always);
+      const l3 = l3lines.length ? `<details class="more bizl3"><summary>דוח מלא</summary>${grid(l3lines.map((x) => x.bold ? `<div class="row"><b>${esc(x.label)}</b><b class="num ${cls(x.amount)}">${sgn(x.amount)}</b></div>` : row(esc(x.label), sgn(x.amount), cls(x.amount))))}${(L3.notes || []).length ? `<ul class="bnotes">${L3.notes.slice(0, 6).map((t) => `<li>${escI(t)}</li>`).join('')}</ul>` : ''}${L3.breakEven && L3.breakEven.text ? `<p class="note">⚖️ ${escI(L3.breakEven.text)}</p>` : ''}${L3.totals && L3.totals.months ? `<p class="note">מאז הפתיחה (${num(String(L3.totals.months))} חודשים): מחזור ${num(fmtM(L3.totals.revenue || 0))} · רווח נקי ${num(sgn(L3.totals.netProfit || 0), cls(L3.totals.netProfit || 0))} · משכת ${num(fmtM(L3.totals.drawnNet || 0))}</p>` : ''}</details>` : '';
+      // a summary without the month's report (engine: manage card) has no cash change → show the business's cash instead of a fake ₪0
+      const L1x = !L1.sentence && !L1.cashDelta && (L1.revenue || L1.profit) ? { ...L1, cashNow: s.cash || 0 } : L1;
+      return `<p class="chipline">${kindChip}</p>` + stageRow(stage) + l1Html(L1x) +
+        (sig && sig.text ? `<p class="note sig">📌 ${escI(sig.label)}: ${escI(sig.text)}</p>` : '') +
+        bizItemsHtml(ev) + calLine(s.seasonProfile, cal) +
+        `<details class="more bizl2"><summary>פרטים</summary>${gHtml}${bHtml}${ar}${stock}${seasonStrip(s.seasonProfile, cal, null)}<p class="mh">ההגדרות של העסק</p>${settings}${sparkH}</details>` + l3 +
+        (d.forecast3 != null ? `<p class="note">אם לא משנים כלום — תחזית ל־3 חודשים: ${num(sgn(d.forecast3), cls(d.forecast3))} רווח נקי.</p>` : '');
+    }
+    return `<p class="chipline">${kindChip}</p>` +
       grid([last ? `<div class="row"><span>רווח נקי בחודש האחרון</span>${big(last.np)}</div>` : '',
         row('מחיר', fmtP(s.price ?? 0)), row('עובדים', String(s.staff ?? 0) + (s.manager ? ' + מנהל' : '')),
         row('שיווק בחודש', fmtM(s.marketing || 0)), row('משיכה לכיס שלך בחודש', fmtM(s.draw || 0)),
         row('בקופת העסק', fmtM(s.cash || 0), cls(s.cash || 0)),
-        s.valuation ? row('שווי אם תמכור', fmtM(s.valuation.price || 0)) : '']) +
-      (h.length > 1 ? `<div class="mini"><p class="mh">רווח נקי לפי חודש</p>${spark(h.map((x) => x.np), { color: (last && last.np >= 0) ? 'var(--green)' : 'var(--red)', w: 300, h: 34 })}</div>` : '') +
+        s.valuation ? row('שווי אם תמכור', fmtM(s.valuation.price || 0)) : '']) + sparkH +
       (s.breakEven && s.breakEven.text ? `<p class="note">⚖️ ${escI(s.breakEven.text)}</p>` : '') +
       (d.forecast3 != null ? `<p class="note">אם לא משנים כלום — תחזית ל־3 חודשים: ${num(sgn(d.forecast3), cls(d.forecast3))} רווח נקי.</p>` : '');
   },
@@ -1253,11 +1372,80 @@ const nrg = (n) => `<span class="num">${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.
 const BIZ_ICON = { coffee: '☕', washer: '🧺', pizza: '🍕', rocket: '📱', box: '📦' };
 const unitOne = (u) => ({ 'כוסות': 'כוס', 'כביסות': 'כביסה', 'פיצות': 'פיצה', 'הזמנות': 'הזמנה', 'מנויים': 'מנוי' }[u] || 'יחידה');
 const BIZ_DONE = { 'biz:suggest': 'ההמלצה בוצעה', 'biz:manager': 'עדכנת את המנהל', 'biz:price:up': 'המחיר עלה', 'biz:price:down': 'המחיר ירד', 'biz:mkt:up': 'יותר שיווק', 'biz:mkt:down': 'פחות שיווק', 'biz:hire': 'גייסת עובד', 'biz:fire': 'פיטרת עובד', 'biz:draw:up': 'תמשוך יותר לכיס', 'biz:draw:down': 'תמשוך פחות', 'biz:order': 'הזמנת מלאי', 'biz:expand': 'העסק מתרחב' };
+/* ---------- T3 business layers (UI-4/5/6): L1 three numbers + one sentence, growth stage, the seasons calendar */
+const MON_SHORT = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+const MON_LONG = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+/** L1: מחזור / רווח / מזומן (this month's change in the business's cash) + the engine's one "why" sentence. */
+export function l1Html(L, { compact = false } = {}) {
+  if (!L) return '';
+  const empty = !L.revenue && !L.profit && !L.cashDelta;
+  const cell = (k, v, signed) => `<div class="l1n"><small>${k}</small><b class="num ${signed ? cls(v) : ''}">${signed ? sgn(v) : fmtM(v)}</b></div>`;
+  if (empty) return `<p class="note l1e">עוד אין חודש מלא בעסק — המספרים יופיעו אחרי יום המשכורת.</p>`;
+  return `<div class="l1 ${compact ? 'sm' : ''}" role="group" aria-label="החודש האחרון בעסק">${cell('מחזור', L.revenue || 0, false)}${cell('רווח נקי', L.profit || 0, true)}${L.cashNow != null ? cell('בקופת העסק', L.cashNow, false) : cell('מזומן בקופה', L.cashDelta || 0, true)}</div>` +
+    (L.sentence ? `<p class="why1">${escI(L.sentence)}</p>` : '') + (L.toOwner ? `<p class="note">לכיס שלך: ${num(fmtM(L.toOwner), 'pos')}</p>` : '');
+}
+/** Growth stage pips — the same words as the city (T5 vocab.levelText / levelHint). */
+function stageRow(stage) {
+  if (stage == null || !Number.isFinite(+stage)) return '';
+  const L = { kind: 'biz', n: +stage }; const t = stageText(L); if (!t) return '';
+  return `<div class="alevel bizstage"><span class="pips" role="img" aria-label="${esc(t)}">${[1, 2, 3].map((i) => `<i class="${i <= +stage ? 'on' : ''}"></i>`).join('')}</span><b>${esc(t)}</b><small>${escI(stageHint(L) || '')}</small></div>`;
+}
+/** 12 mini bars (game month 1 = January); the current month outlined; the text names the strong / weak months (no colour-only info). */
+function seasonStrip(profile, cal, A) {
+  const P = Array.isArray(profile) ? profile : null; if (!P || P.length !== 12) return cal && cal.label ? `<p class="note">🗓️ ${esc(cal.label)}${cal.season ? ` · ${esc(cal.season)}` : ''}</p>` : '';
+  const max = Math.max(1.2, ...P.map((x) => x.mult || 1));
+  const cur = cal && cal.m ? cal.m : null;
+  const strong = P.filter((x) => x.mult >= 1.15).sort((a, b) => b.mult - a.mult), weak = P.filter((x) => x.mult <= 0.85);
+  const txt = [strong.length ? `חזקים: ${strong.map((x) => MON_LONG[x.m - 1]).join(', ')}` : '', weak.length ? `חלשים: ${weak.map((x) => MON_LONG[x.m - 1]).join(', ')}` : ''].filter(Boolean).join(' · ') || 'בלי עונות חזקות במיוחד';
+  void A;
+  return `<div class="seasons"><p class="mh">🗓️ עונות בעסק${cal && cal.label ? ` · עכשיו ${esc(cal.label)}${cal.season ? ` (${esc(cal.season)})` : ''}` : ''}</p>
+    <div class="sbars" aria-hidden="true">${P.map((x) => `<i class="${x.m === cur ? 'cur' : ''} ${x.mult >= 1.15 ? 'hi' : x.mult <= 0.85 ? 'lo' : ''}" style="--h:${Math.round(((x.mult || 1) / max) * 100)}%"><s></s><small>${MON_SHORT[x.m - 1]}</small></i>`).join('')}</div>
+    <p class="note">${esc(txt)}</p></div>`;
+}
+/** One calendar line for the manage card: now + the strong / weak months (the bars are in "פרטים"). */
+function calLine(profile, cal) {
+  const P = Array.isArray(profile) && profile.length === 12 ? profile : null; if (!cal || !cal.label) return '';
+  const strong = P ? P.filter((x) => x.mult >= 1.15).sort((a, b) => b.mult - a.mult).map((x) => MON_LONG[x.m - 1]) : [];
+  return `<p class="note calln">🗓️ עכשיו ${esc(cal.label)}${cal.season ? ` (${esc(cal.season)})` : ''}${strong.length ? ` · חודשים חזקים: ${esc(strong.join(', '))}` : ''}</p>`;
+}
+/** T3 UI-6: the offer's setups as choices — start capital, 3-month profit AND cash, a loan when needed, the setup's note. */
+function bizOfferActions(ev) {
+  const d = ev.data || {}; const S = d.setups || [];
+  const starts = ev.options.filter((o) => /^start(:|$)/.test(o.id)); const rest = ev.options.filter((o) => !/^start(:|$)/.test(o.id));
+  const tile = (o, i) => {
+    const su = S.find((x) => x.id === o.id) || {}; const f = su.forecast3 || {};
+    const chips = [`<em class="fx">הון ${iso(fmtM(su.startCapital ?? o.startCapital ?? d.startCapital ?? 0))}</em>`,
+      f.netProfit != null ? `<em class="fx ${cls(f.netProfit)}">רווח ב־3 חודשים ${iso(sgn(f.netProfit))}</em>` : '',
+      f.cashChange != null ? `<em class="fx ${cls(f.cashChange)}">קופה ב־3 חודשים ${iso(sgn(f.cashChange))}</em>` : '',
+      o.loanAmount ? `<em class="fx neg">הלוואה ${iso(fmtM(o.loanAmount))}${o.loanMonthly ? ` · ${iso(fmtM(o.loanMonthly))} בחודש` : ''}</em>` : ''].join('');
+    return `<div class="opt"><button class="choice setup ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="swhy${i}"`}><b>${escI(su.label || shortLabel(o))}</b>${o.primary ? '<small class="tagc rec">הבחירה של המנטור</small>' : ''}<span class="fxs">${chips}</span>${su.note ? `<small class="pn">${escI(su.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="swhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
+  };
+  const kind = `<div class="bizkind"><p><b>אתה עובד בו</b> = הכנסה <b>אקטיבית</b> (משרה נוספת) · 🔋 ${nrg(-(d.ownerEnergy || 0))} בחודש.</p><p><b>עם מנהל</b> = הכנסה <b>פסיבית</b> שנספרת ליעד · 🔋 ${nrg(-(d.managerEnergy || 0))} — אבל משלמים לו משכורת.</p></div>`;
+  return `<h3 class="ph">איך פותחים?</h3><div class="choices">${starts.map(tile).join('')}</div>` +
+    `<p class="note">"קופה" = כמה מזומן נשאר בעסק אחרי מלאי, לקוחות שעוד לא שילמו ומס. תחזית בלבד — לא הבטחה.</p>` +
+    seasonStrip(d.seasonProfile, null, null) + (d.eventsText ? `<p class="note">🎲 ${escI(d.eventsText)}</p>` : '') +
+    (d.breakEven && d.breakEven.text ? `<p class="note">⚖️ ${escI(d.breakEven.text)}</p>` : '') +
+    `<details class="more bizmore"><summary>איך עובד עסק במשחק</summary>${kind}</details>` + optButtons({ ...ev, options: rest });
+}
+/** T3 UI-5: this business's open decisions first (q:<item>:<choice> → resolveStory; the card stays open). */
+function bizItemsHtml(ev) {
+  const items = (ev.data && ev.data.inbox) || []; if (!items.length) return '';
+  return items.map((it) => {
+    const dflt = it.options.find((c) => c.default);
+    const btn = (c, i) => {
+      const id = `q:${it.itemId}:${c.id}`; const o = ev.options.find((x) => x.id === id) || c;
+      const od = c.odds && c.odds.text ? oddsText(c.odds.text) : ''; const pv = c.preview && c.preview.delta3;
+      const isD = dflt && dflt.id === c.id; const wid = `qwhy${it.itemId}_${i}`;
+      return `<div class="opt"><button class="choice stc biz ${isD ? 'dflt' : ''} ${o.primary ? 'primary' : ''}" data-o="${esc(id)}" ${o.enabled ? '' : 'disabled'} aria-describedby="${[!o.enabled ? wid : '', isD ? `qd${it.itemId}` : ''].filter(Boolean).join(' ')}"><b>${escI(c.label)}</b>${isD ? '<small class="tagc dflt">אם לא תחליט — זה מה שיקרה</small>' : ''}<span class="fxs">${pv ? `<em class="fx ${cls(pv)}">ברווח ב־3 חודשים ${iso(sgn(pv))}</em>` : '<em class="fx">בלי שינוי ברווח הצפוי</em>'}${c.effects && c.effects.cash ? `<em class="fx ${cls(c.effects.cash)}">${iso(sgn(c.effects.cash))} עכשיו</em>` : ''}</span>${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${c.effects && c.effects.note ? `<small class="pn">${escI(c.effects.note)}</small>` : ''}</button>${!o.enabled && (o.reason || c.reason) ? `<small class="why" id="${wid}">${escI(o.reason || c.reason)}</small>` : ''}</div>`;
+    };
+    return `<section class="bizq" aria-label="${esc(it.title)}"><p class="mh">📬 ${escI(it.title)} ${it.data && it.data.dueText ? `<em class="b due urg">${esc(it.data.dueText)}</em>` : ''}</p>${it.text ? `<p class="d">${escI(it.text)}</p>` : ''}<div class="choices">${it.options.map(btn).join('')}</div>${dflt ? `<p class="note dfl" id="qd${it.itemId}">${escI(`אם לא תחליט עד המשכורת הבאה: ${dflt.label}`)}</p>` : ''}</section>`;
+  }).join('');
+}
 /** Business decisions: each one with its 3-month effect on net profit, 🔋 cost and cash you must inject. Stays open until "המשך". */
 function bizActions(ev) {
   const biz = ev.options.filter((o) => o.kind === 'biz');
   const sell = ev.options.find((o) => o.id === 'biz:sell');
-  const rest = ev.options.filter((o) => o.kind !== 'biz' && o.id !== 'biz:sell');
+  const rest = ev.options.filter((o) => o.kind !== 'biz' && o.id !== 'biz:sell' && !/^q:/.test(o.id));
   const tile = (o, i) => {
     const e = o.effects || {}; const dl = e.delta3 || 0;
     const chips = [o.enabled ? `<em class="fx ${cls(dl)}">${dl ? `${iso(sgn(dl))} ב־3 חודשים` : 'בלי שינוי ברווח'}</em>` : '',
@@ -1268,7 +1456,8 @@ function bizActions(ev) {
   const sl = sell && sell.sale ? `<div class="sellrow biz"><div><b>למכור את העסק</b><p class="note">נכנס לך <b class="num pos">${fmtM(sell.sale.net)}</b>${sell.sale.tax ? ` <small>(אחרי מס ${num(fmtM(sell.sale.tax))})</small>` : ''}${sell.sale.text ? `<br>${escI(sell.sale.text)}` : ''}</p></div><button data-o="biz:sell" class="sell" ${sell.enabled ? '' : 'disabled'}>למכור</button></div>` : '';
   const lr = ev.data && ev.data.lastResult;
   const done = lr ? `<p class="okmsg">✔ ${escI(BIZ_DONE[lr.action] || 'ההחלטה נקלטה')} — נכנס לתוקף מהחודש הבא.</p>` : '';
-  return `${done}${vlineHtml(evState && evState.verdict)}<h3 class="ph">מה עושים החודש?</h3><div class="choices bizgrid">${biz.map(tile).join('')}</div>${sl}` + optButtons({ ...ev, options: rest });
+  const items = !!((ev.data && ev.data.inbox) || []).length && !!(ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1)));   // the open items are in the body (T3 UI-5)
+  return `${done}${vlineHtml(evState && evState.verdict)}<h3 class="ph">${items ? 'ועוד החלטות לחודש הזה' : 'מה עושים החודש?'}</h3><div class="choices bizgrid">${biz.map(tile).join('')}</div>${sl}` + optButtons({ ...ev, options: rest });
 }
 
 /* ============================================================ v3.2: decision verdict (choose().decision) */
@@ -1516,6 +1705,8 @@ export async function mentorPicker(M, { locked = false, levels = null } = {}) {
 }
 
 /* ============================================================ T2: economy gauge — HUD chip → modal, and a sheet box */
+/** T2 verify D2: the official figure's age is the engine's `officialLag` (1 month with the research focus, else 3) — no UI-side number. */
+const lagTxt = (n) => { const k = Number.isFinite(+n) ? Math.max(0, Math.round(+n)) : 3; return k === 0 ? 'מהחודש הזה' : k === 1 ? 'מלפני חודש' : k === 2 ? 'מלפני חודשיים' : `מלפני ${k} חודשים`; };
 function econBlockHtml(X, big = false) {
   const off = X.official && X.official.length ? X.official[X.official.length - 1] : null;
   const hist = (X.hist || []).map((h) => h.s);
@@ -1524,7 +1715,8 @@ function econBlockHtml(X, big = false) {
   const tr = X.trend > 0 ? '↗' : X.trend < 0 ? '↘' : '→';
   return `<div class="econ ${big ? 'big' : ''}" role="img" aria-label="מד הכלכלה: ${esc(X.label)}, ${X.signal} מתוך 100">${gaugeSvg(X.signal, big ? 120 : 64)}<div><b>${esc(X.label)} <span aria-hidden="true">${tr}</span></b><small class="num">${X.signal}/100</small></div></div>
     ${X.sharp ? `<p class="chipline"><em class="b ok">🔬 מדויק יותר עד חודש ${X.sharpUntil}</em></p>` : ''}
-    ${line}<p class="note">נתון רשמי (לפני 3 חודשים): <b>${off ? esc(off.label) : 'עוד לא פורסם'}</b></p><p class="note">${escI(X.text || '')}</p>`;
+    ${line}<p class="note">נתון רשמי (${lagTxt(X.officialLag)}): <b>${off ? esc(off.label) : 'עוד לא פורסם'}</b>${off && off.m ? ` <small>· על חודש ${num(String(off.m))}</small>` : ''}</p>
+    ${X.report && X.report.text ? `<p class="note erep"><span aria-hidden="true">🔬</span> ${escI(X.report.text)}</p>` : ''}<p class="note">${escI(X.text || '')}</p>`;
 }
 export function econModal(X) {
   if (!X) return Promise.resolve();
@@ -1591,7 +1783,8 @@ export function practiceChip(q, onAnswer) {
         try { r = await onAnswer(idx); } catch (x) { console.error(x); }
         const card = $('#gmCard'); card.querySelectorAll('[data-pa]').forEach((x) => { x.disabled = true; });
         if (r && r.ok) {
-          const right = card.querySelector(`[data-pa="${r.correct}"]`); if (right) right.insertAdjacentHTML('afterbegin', '✓ ');
+          const right = card.querySelector(`[data-pa="${r.correct}"]`); if (right) { right.insertAdjacentHTML('afterbegin', '✓ '); right.classList.add('right'); }
+          if (!r.right) { a.insertAdjacentHTML('afterbegin', '✗ '); a.classList.add('wrong'); }   // the picked answer stays readable (icon + word, not colour only)
           card.querySelector('.pres').innerHTML = `<p class="${r.right ? 'pos' : 'neg'}"><b>${r.right ? '✓ נכון!' : '✗ לא בדיוק.'}</b> ${escI(r.why || '')}</p>${r.sim ? `<p class="note">🎲 מספרים של משחק: ${escI(r.sim)}</p>` : ''}`;
           announce(r.right ? 'נכון!' : 'לא בדיוק');
         }
@@ -1602,8 +1795,15 @@ export function practiceChip(q, onAnswer) {
 export function hidePractice() { if (practiceEl) { practiceEl.remove(); practiceEl = null; } const o = $('#practiceChip'); if (o) o.remove(); }
 
 /* ============================================================ T4: dream (E-7, feature-detected: game.js calls these when the engine sends dreams) */
-export function dreamToast(list) {
-  for (const d of list || []) overlay('dream', (done) => { toast(`${d.icon || '🎯'} משימה הושלמה: ${d.title || ''}`, { kind: 'gold' }); setTimeout(done, 2600); });
+/** list = choose().dream [{id, title}]; dream = metrics().dream (icon + name for S-D16 / S-D17). */
+export function dreamToast(list, dream = null) {
+  const icon = (dream && dream.icon) || '🎯';
+  for (const d of list || []) overlay('dream', (done) => {
+    toast(`${d.icon || icon} משימה הושלמה: ${d.title || ''}`, { kind: 'gold' });
+    if (dream && dream.name) mentor(`${d.title || ''} — צעד אמיתי לכיוון ${dream.name}.`);
+    announce(`משימה הושלמה: ${d.title || ''}`);
+    setTimeout(done, 2600);
+  });
 }
 export function renderDream(dream) {
   let el = $('#hDream'); const g = $('#hGoal');
@@ -1619,7 +1819,8 @@ export function dreamModal(dream) {
   const ms = dream.missions || []; const done = ms.filter((x) => x && x.done).length;
   return modal({ tag: 'החלום שלך', color: '#be185d', title: `${dream.icon || ''} ${dream.name || ''}`,
     html: `<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="${ms.length}" aria-valuenow="${done}" aria-label="משימות"><i style="width:${ms.length ? Math.round((done / ms.length) * 100) : 0}%"></i></div>
-      <ul class="dms">${ms.map((x) => `<li class="${x.done ? 'ok' : ''}">${x.done ? '✓' : '○'} ${escI(x.title || '')}${x.done && x.m ? ` <small>חודש ${x.m}</small>` : ''}</li>`).join('')}</ul>
+      ${dream.line ? `<p class="d">${escI(dream.line)}</p>` : ''}
+      <ul class="dms">${ms.map((x) => { const p = Math.round((x.progress || 0) * 100); const dm = x.doneMonth ?? x.m; return `<li class="${x.done ? 'ok' : ''}"><span aria-hidden="true">${x.done ? '✓' : '○'}</span> ${escI(x.title || '')}${x.done ? `<small>${dm ? ` · הושלם בחודש ${num(String(dm))}` : ' · הושלם'}</small>` : p > 0 ? `<small> · ${num(p + '%')}</small><i class="dbar" aria-hidden="true"><i style="width:${p}%"></i></i>` : ''}</li>`; }).join('')}</ul>
       <p class="note">החלום לא משנה את הכוכבים ואת הניצחון. הוא מראה לך את הדרך שלך.</p>`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true });
 }
@@ -1744,7 +1945,7 @@ export function rivalsPanelHtml(d) {
     const esc2 = g.escaped && g.escaped.status === 'won' ? ` · ${esc(T6S.escapedVerb(p))} מהמירוץ בחודש ${num(String(g.escaped.m))}` : '';
     rows.push(rowHtml(who, r[1] * 100, r[4], Math.floor(r[6] / 10), esc2, det));
   }
-  const lost = Array.isArray(d.lost) && d.lost.length ? `<h3 class="t6rp-lh">${esc(RP.lost)}</h3><ul class="t6rp-lost">${d.lost.map((x) => `<li>${escI(x.text || x.name || '')}${x.revealed ? '' : x.revealAt ? ` <small>${esc(fillT(RP.revealIn, { n: Math.max(0, x.revealAt - (d.month || 0)) }))}</small>` : ''}</li>`).join('')}</ul>` : '';
+  const lost = Array.isArray(d.lost) && d.lost.length ? `<h3 class="t6rp-lh">${esc(RP.lost)}</h3><ul class="t6rp-lost">${d.lost.map((x) => `<li>${escI(x.text || `${x.by && x.by.name ? `${x.by.icon || ''} ${x.by.name} · ` : ''}${x.name || ''}${x.m ? ` · חודש ${x.m}` : ''}`)}${x.revealed ? '' : x.revealAt ? ` <small>${esc(fillT(RP.revealIn, { n: Math.max(0, x.revealAt - (d.month || 0)) }))}</small>` : ''}</li>`).join('')}</ul>` : '';
   return `<p class="d">${esc(RP.sub)}</p>${state ? `<p class="note" role="status">${esc(state)}</p>` : ''}<div class="t6rp">${rows.join('')}</div>${lost}<p class="note">${esc(RP.foot)}</p>`;
 }
 /** the 👥 bottom sheet (dialog: focus trap + Escape). Live: game.js calls rivalsPanelUpdate while it is open. */
@@ -1757,7 +1958,7 @@ export function rivalsPanelUpdate(d) { const b = document.getElementById('t6rpBo
 /** §12.1 lost to a rival: an outcome panel (no timed dismissal). r = choose().rival {lost, by:{icon,name}, how, text, sub} */
 export function rivalLost(r) {
   if (!r) return Promise.resolve();
-  return modal({ tag: '👥 תחרות על עסקה', color: '#6b4fd8', title: r.text || '', html: `<div role="status" aria-live="polite">${r.sub ? `<p class="d">${escI(r.sub)}</p>` : ''}${r.dd ? `<p class="note">${escI(r.dd)}</p>` : ''}</div>`, actions: [{ label: 'הבנתי', cls: 'primary' }] });
+  return modal({ tag: '👥 תחרות על עסקה', color: '#6b4fd8', title: r.text || '', html: `<div role="status" aria-live="polite">${r.sub ? `<p class="d">${escI(r.sub)}</p>` : ''}${r.dd ? `<p class="note">🔎 ${escI(r.dd)}</p>` : ''}</div>`, actions: [{ label: r.button || 'הבנתי', cls: 'primary' }] });
 }
 /** a reveal line ("שמעת מעומר: …"): stays until tapped or until the next roll (clearStickyNews), never timed */
 export function stickyNews(text) {
@@ -1805,4 +2006,59 @@ export function compareSheet({ branchTl, originTl, month }) {
   return modal({ tag: '🧪 ענף תרגול', color: '#0f766e', title: 'המקור מול הענף', wide: true, cls: 't6-sheet',
     html: `${b && T6S.tlRows(b).length ? T6S.graphBlock(b, opts) : ''}${facts}${T6S.limitsHtml(true)}`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     onOpen: (c) => T6S.wireSummary(c, (gid) => (gid === id ? { tl: b, opts } : null)) });
+}
+
+/* ============================================================ T3: business monthly toast (UI-4), the inbox list (UI-3), calendar (UI-7) */
+/** n = engine business news (T3 fields: revenue, profit, cashDelta, why, decide, stage). The toast's "פרטים" opens the month (L2). */
+export function bizNews(n, { decide } = {}) {
+  if (!n) return;
+  const head = `🏪 ${n.name || 'העסק'}: מחזור ${fmtC(n.revenue || 0)} · רווח ${sgn(n.profit ?? n.netProfit ?? 0)} · קופה ${sgn(n.cashDelta || 0)}`;
+  const open = () => { if (evState || shown('#gm')) { toast('אפשר לראות את פרטי החודש בין תורות, או בכרטיס העסק'); return; } bizMonth(n); };   // phones: one layer at a time
+  toast(head, { kind: (n.profit ?? 0) < 0 ? 'bad' : '', sub: (n.why && n.why.sentence) || '', action: { label: 'פרטים', fn: open } });
+  const ev = (n.events || []).find((x) => x && x.title);
+  if (ev && n.decide == null) toast(`🏪 ${ev.title}${ev.text ? ': ' + ev.text : ''}`);
+  if (n.decide != null) { toast(`🏪 יש החלטה בעסק${ev ? `: ${ev.title}` : ''}`, { kind: 'gold', action: decide ? { label: 'לפתוח', fn: decide } : null }); announce('יש החלטה בעסק'); }
+}
+/** L2 of one simulated month, from the news itself (why.profit = what moved the profit, why.cash = from profit to cash). */
+export function bizMonth(n) {
+  const W = n.why || {};
+  const list = (arr, title) => { const a = (arr || []).filter((x) => x && x.amount); return a.length ? `<p class="mh">${title}</p><ul class="bridge">${a.map((x) => `<li><span>${escI(x.text)}</span>${num(sgn(x.amount), cls(x.amount))}</li>`).join('')}</ul>` : ''; };
+  const evs = (n.events || []).filter((x) => x && x.title).map((x) => `<p class="note">🎲 <b>${escI(x.title)}</b>${x.text ? ` — ${escI(x.text)}` : ''}</p>`).join('');
+  return modal({ tag: `🏪 ${n.name || 'העסק'}`, color: '#b45309', title: `החודש בעסק${n.cal ? ` · ${MON_LONG[(n.cal - 1) % 12] || ''}` : ''}`, dismissable: true,
+    html: l1Html({ revenue: n.revenue || 0, profit: n.profit ?? n.netProfit ?? 0, cashDelta: n.cashDelta || 0, toOwner: n.toOwner || 0, sentence: W.sentence || '' }) +
+      `<details class="more"><summary>פרטים</summary>${list(W.profit, 'מה הזיז את הרווח')}${list(W.cash, 'מהרווח לקופה')}${n.revenueGross ? `<p class="note">כולל מע״מ: ${num(fmtM(n.revenueGross))}</p>` : ''}</details>${evs}`,
+    actions: [{ label: 'סגירה', cls: 'primary' }] });
+}
+/** The 📬 list → Promise<card | null>. cards = E.inbox(S). Due-this-payday items first; no timers, no countdown. */
+export function inboxList(cards, { month = 0 } = {}) {
+  const C = (cards || []).slice().sort((a, b) => ((a.data && a.data.due) || 99) - ((b.data && b.data.due) || 99));
+  let pick = null;
+  const row = (c) => {
+    const d = c.data || {}; const dflt = c.options.find((o) => o.default) || null; const urg = d.due != null && d.due <= month + 1;
+    return `<li><button type="button" class="ibrow ${urg ? 'urg' : ''}" data-item="${esc(String(c.itemId))}"><span class="ibt" style="--c:${esc(c.color || '#4b6584')}">${esc(c.tag || '')}</span><b>${escI(c.title)}</b>
+      <small>${d.dueText ? `📬 ${esc(d.dueText)}` : ''}${dflt ? ` · אם לא תחליט: ${escI(dflt.label)}` : ''}</small></button></li>`;
+  };
+  return modal({ tag: '📬 החלטות פתוחות', color: '#4b6584', title: C.length ? (C.length === 1 ? 'החלטה אחת מחכה לך' : `${C.length} החלטות מחכות לך`) : 'אין החלטות פתוחות', dismissable: true, cls: 'inbox',
+    html: C.length ? `<ul class="iblist">${C.map(row).join('')}</ul><p class="note">אין שעון. מה שלא תחליט — ייסגר לבד לפי ברירת המחדל, ביום המשכורת שכתוב.</p>` : '<p class="d">כל ההחלטות סגורות.</p>',
+    actions: [{ label: 'סגירה', cls: 'primary' }],
+    onExtra: (e) => { const b = e.target.closest('[data-item]'); if (!b) return; pick = C.find((c) => String(c.itemId) === b.dataset.item) || null; document.querySelector('#gm .acts button')?.click(); } }).then(() => pick);
+}
+/** UI-7 calendar chip tap */
+export function calendarModal(cal, { biz = false } = {}) {
+  if (!cal) return Promise.resolve();
+  return modal({ tag: '🗓️ לוח השנה', color: '#0e7490', title: `${cal.label}${cal.season ? ` · ${cal.season}` : ''}`, dismissable: true,
+    html: `<p class="d">${biz ? 'בעסק יש חודשים חזקים וחלשים, ואפשר לדעת אותם מראש. העונות של העסק מופיעות בכרטיס שלו.' : 'כל חודש במשחק הוא חודש בשנה. בעסקים יש עונות — חגים, קיץ, חזרה ללימודים.'}</p>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }] });
+}
+/** T4 §4.3 `next`: the tutorial goal chain (metrics().nextGoal) as a HUD card after #hGoal; the dream card takes over when it is done. */
+export function renderNext(g, { show = true } = {}) {
+  let el = $('#hNext'); const anchor = $('#hGoal');
+  if (!g || g.done || !anchor || !show) { if (el) el.hidden = true; return; }
+  if (!el) { el = document.createElement('div'); el.id = 'hNext'; el.className = 'hcard hnext'; el.setAttribute('role', 'status'); anchor.insertAdjacentElement('afterend', el); }
+  const pct = g.target ? Math.max(2, Math.min(100, Math.round(((g.value || 0) / g.target) * 100))) : 0;
+  const val = g.target ? (g.unit === '₪' ? `${money(g.value || 0)} / ${money(g.target)}` : `${N(g.value || 0)} / ${N(g.target)}`) : '';
+  const sig = `${g.id}|${g.title}|${val}`; if (el.dataset.sig === sig && !el.hidden) return; el.dataset.sig = sig;
+  el.hidden = false;
+  el.innerHTML = `<span aria-hidden="true">🎯</span><span class="nt"><b>${esc(g.title || '')}</b>${val ? `<small class="num">${esc(val)}</small>` : ''}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
+  el.setAttribute('aria-label', `המטרה הבאה: ${g.title || ''}${val ? `, ${val}` : ''}`);
 }

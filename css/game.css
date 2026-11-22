@@ -968,3 +968,96 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
   #t6branch{bottom:auto;top:calc(128px + env(safe-area-inset-top,0px));font-size:13px}
   .t6-sheet .t6rp-h{font-size:13px}
 }
+/* ===================================================== T3 stories & business (in-game UI lane) */
+/* the business toast: two lines (numbers + the "why" sentence) */
+#toast.two{border-radius:18px;text-align:start;padding:7px 16px}
+#toast .tw{display:flex;flex-direction:column;gap:2px;min-width:0}
+#toast .tmain{font-weight:800;line-height:1.3}
+#toast .tsub{font-weight:600;font-size:13px;line-height:1.35;opacity:.92}
+#toast.two.act{padding:6px 6px 6px 14px}
+/* "זוכר?" — the world remembers: a quiet, distinct line under the title */
+.remember{margin:2px 0 8px;padding:6px 10px;border-inline-start:4px solid light-dark(#8b6fd6,#b9a3ff);border-radius:4px 10px 10px 4px;background:light-dark(#f2eefc,#2a2440);color:light-dark(#3d2f72,#ddd2ff);font-size:14px;font-weight:600;line-height:1.4}
+/* story / life choice cards: chips, the 12/24-month total, the odds, the default */
+.choice .tot{display:block;font-size:13px;font-weight:700;color:var(--ink)}
+.choice .godds,.godds.hintl{display:block;font-size:13px;font-weight:600;color:light-dark(#5b3b00,#f2c97a)}
+.godds.hintl{margin:0 0 6px;padding:4px 10px;border-radius:10px;background:light-dark(#fff6df,#3a2f17)}
+.choice.dflt{outline:2px dashed light-dark(#8b6fd6,#b9a3ff);outline-offset:-4px}
+.tagc.dflt{color:light-dark(#4b35a8,#c4b5ff)}
+.choice.primary .tot,.choice.primary .godds{color:inherit}
+.chipline .b.step{background:light-dark(#e7eefc,#1d2c4a);color:var(--blue)}
+.chipline .b.due{background:light-dark(#eef1f6,#2a3040);color:var(--ink)}
+.chipline .b.due.urg,.bizq .b.due.urg{background:light-dark(#fff1c2,#3d3114);color:light-dark(#6b4a00,#f2c14e)}
+.note.cush{margin-top:8px}
+.note.dfl{margin-top:6px;font-weight:700;color:light-dark(#4b35a8,#c4b5ff)}
+.linkbtn.later{color:var(--mut)}
+/* business L1 — three numbers + one sentence */
+.l1{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0 4px}
+.l1n{display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 4px;border-radius:12px;background:var(--paper2,#f5efe2);min-width:0}
+.l1n small{font-size:12px;color:var(--mut);font-weight:700}
+.l1n b{font-size:18px;font-weight:800;white-space:nowrap}
+.l1.sm .l1n b{font-size:15px}
+.l1n b.pos{color:var(--green)}.l1n b.neg{color:var(--red)}
+.why1{margin:4px 0 6px;font-size:15px;font-weight:700;line-height:1.45}
+.note.sig{margin-top:2px}
+.bizstage{margin:4px 0}
+.bizstage b{font-size:14px}
+/* the seasons strip: 12 mini bars (game month 1 = January) */
+.seasons{margin:8px 0;padding:8px 10px;border-radius:14px;background:var(--paper2,#f5efe2)}
+.seasons .mh{margin:0 0 4px}
+.sbars{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;align-items:end;height:58px}
+.sbars i{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;font-style:normal;border-radius:4px}
+.sbars i s{display:block;width:100%;height:calc(var(--h) * .7);min-height:4px;border-radius:4px 4px 2px 2px;background:light-dark(#c9b98f,#6f6347)}
+.sbars i.hi s{background:var(--gold,#f2b632)}
+.sbars i.lo s{background:light-dark(#a9b4c6,#4b5568)}
+.sbars i small{font-size:10px;line-height:1.4;color:var(--mut);white-space:nowrap}
+.sbars i.cur{outline:2px solid var(--ink);outline-offset:1px}
+.sbars i.cur small{color:var(--ink);font-weight:800}
+.bridge{list-style:none;margin:4px 0 8px;padding:0;display:grid;gap:4px;font-size:14px}
+.bridge li{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.bnotes{margin:4px 0;padding-inline-start:18px;font-size:13px}
+/* open business decisions on the manage card */
+.bizq{margin:8px 0 10px;padding:10px 12px;border-radius:16px;border:2px solid light-dark(#0f766e,#3cb8a8);background:light-dark(#effaf7,#123330)}
+.bizq .mh{margin:0;font-size:15px;font-weight:800}
+.bizq .d{margin:4px 0 0}
+.bizq .choices{margin-top:8px}
+/* offer setups */
+.choice.setup{min-height:64px}
+.bizmore summary{color:var(--mut)}
+/* HUD: 📬 inbox and the calendar */
+.hlife .lc.inbox::before{background:light-dark(#e8eefc,#1f2a44)}
+.hlife .lc.inbox.urg::before{background:light-dark(#fff1c2,#3d3114);box-shadow:0 0 0 2px var(--gold),var(--shadow-s)}
+.hlife .lc.cal b{font-weight:700;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:600px){ .hlife .lc.cal:not(.biz){display:none} .hlife .lc.cal b{max-width:70px} }
+@media (max-width:430px){ .hlife .lc.cal{display:none} }
+/* the inbox list */
+.iblist{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+.ibrow{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:start;padding:10px 12px;min-height:56px;border-radius:14px}
+.ibrow.urg{box-shadow:inset 0 0 0 2px var(--gold,#f2b632)}
+.ibrow small{font-size:13px;color:var(--mut);font-weight:600}
+.ibt{font-size:12px;font-weight:800;padding:0 8px;border-radius:999px;background:var(--c);color:#fff;line-height:1.6}
+/* T4 #hNext (tutorial goal chain) + dream progress */
+.hnext{display:flex;align-items:center;gap:8px;padding:5px 12px;min-height:var(--tap);flex:0 1 230px;min-width:0}
+.hnext[hidden]{display:none}
+.hnext .nt{display:flex;flex-direction:column;min-width:0;line-height:1.2}
+.hnext .nt b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hnext .nt small{font-size:12px;color:var(--mut)}
+.hnext .nbar{flex:1;min-width:40px;height:7px;border-radius:5px;background:light-dark(#e6dcc6,#463a26);overflow:hidden}
+.hnext .nbar i{display:block;height:100%;background:var(--gold,#f2b632);border-radius:5px}
+@media (max-width:600px){ .hnext{grid-column:1/-1;flex-basis:auto;padding:3px 10px;border-radius:12px} }
+.dms .dbar{display:block;height:5px;margin-top:3px;border-radius:3px;background:light-dark(#eadfca,#3b3222);overflow:hidden}
+.dms .dbar i{display:block;height:100%;background:var(--pink,#be185d)}
+.dms small{color:var(--mut);font-weight:600}
+/* desktop: the side sheet waits for its reveal in a tutorial game */
+@media (min-width:821px){ body.t4-nosheet #sheet{display:none} }
+@media (prefers-reduced-motion:reduce){ .choice.dflt{outline-style:dashed} }
+.pans button.right,.pans button.wrong{opacity:1}
+.pans button.right{box-shadow:inset 0 0 0 2px var(--green);color:var(--green);font-weight:800}
+.pans button.wrong{box-shadow:inset 0 0 0 2px var(--red);color:var(--red)}
+/* T4 §4.3: a part the gradual reveal hides is really gone (out of layout, tab order and the a11y tree) — the HUD rules set display */
+.hud [hidden],#bar [hidden],.hgoal[hidden],.stat[hidden]{display:none!important}
+/* T1 verify D-2: a long message is a rounded box, not a pill (360 px: no clipping at the curve) */
+#toast.long{border-radius:16px;text-align:start;line-height:1.4;padding:8px 14px}
+#toast.long.act{padding:6px 6px 6px 14px}
+/* T2 verify D1: the guide's pick can be an inspection */
+.ddins .insp.primary .tagc.rec{display:block}
+.grid .row .big.rng{font-size:17px;white-space:normal;text-align:end;min-width:0}
