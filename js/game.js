@@ -813,19 +813,29 @@ function showNoEnergy(en, info = false) {
   const fmtMs = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, '0')}`; };
   const left = () => safeCall(en, 'msUntilNext', 0);
   const g = safeCall(en, 'get', null) || { value: 0, max: 25 };
+  // director decision 6 (playtest B3, the ⚡ wall): the game is saved FIRST and the card says so — a beginner's game is never lost.
+  // Two clear ways on: continue later (back to the lobby; "להמשיך" resumes this exact turn) or free practice in learning mode
+  // (its own slot rr2-save-learn-<w>; this game's slot is not touched).
+  persist();
+  const sv = safe0(() => saves.peek(saveKeyFor(CFG)));
+  const saved = !!(sv && (sv.status === 'current' || sv.status === 'old'));
+  const who = S ? `${ui.esc(S.charName || '')} · חודש ${S.month}` : '';
   const p = ui.modal({
     tag: '⚡ זריקות', color: '#f2b632', title: 'נגמרו הזריקות ⚡',
     html: `<div class="noen"><div class="noen-ring"><b id="noenT" class="num">${fmtMs(left())}</b><small>עד הזריקה הבאה</small></div>
-      <p class="d">כל הטלה עולה זריקה אחת ⚡. הזריקות מתמלאות לבד — ${g.max ? `עד ${g.max}` : ''}, אחת כל כמה דקות. המשחק שלך שמור ומחכה.</p>
-      <p class="note">בינתיים אפשר:</p>
-      <div class="noen-acts"><button data-go="learn">🎓 לתרגל בלי הגבלה</button><button data-go="library">📚 ספריית השיעורים</button><button data-go="daily">📅 האתגר היומי (בלי ⚡)</button><button data-go="groups">🎁 לשלוח זריקות לחברים</button><button data-go="sheet">📄 לעבור על הדוח שלי</button></div></div>`,
-    actions: [{ label: 'סגירה', cls: 'primary', v: 'close' }],
+      <p class="d noen-saved">${saved ? `💾 <b>המשחק שלך שמור</b>${who ? ` (${who})` : ''}. כשתחזור זריקה ממשיכים בדיוק מכאן — שום דבר לא הולך לאיבוד.` : ui.esc(SS.S7)}</p>
+      <p class="note">כל הטלה במשחק רגיל עולה זריקה אחת ⚡. הן מתמלאות לבד${g.max ? ` עד ${g.max}` : ''}, אחת כל כמה דקות.</p>
+      <div class="noen-acts main"><button class="primary" data-go="later">⏸️ להמשיך אחר כך — המשחק נשמר</button><button data-go="learn">🎓 לתרגל בינתיים בחינם (מצב תרגול, בלי ⚡) — המשחק הזה נשאר שמור</button></div>
+      <p class="note">ועוד:</p>
+      <div class="noen-acts"><button data-go="library">📚 ספריית השיעורים</button><button data-go="daily">📅 האתגר היומי (בלי ⚡)</button><button data-go="groups">🎁 לשלוח זריקות לחברים</button><button data-go="sheet">📊 להציץ בדוח</button></div></div>`,
+    actions: [{ label: 'סגירה', cls: '', v: 'close' }],
     dismissable: true,
     onExtra: (e) => {
       const b = e.target.closest('[data-go]'); if (!b) return;
       const go = b.dataset.go;
       document.querySelector('#gm .acts button')?.click();
       if (go === 'sheet') setTimeout(() => ui.toggleSheet(true), 50);
+      else if (go === 'later') { persist(); bus.emit('lobby:open', { view: 'world', id: W.id }); }   // the world view shows "להמשיך" for this game
       else if (go === 'learn') { persist(); bus.emit('lobby:open', { view: 'world', id: W.id, learn: true }); } // T4 IR-T4-6
       else { persist(); bus.emit('lobby:open', { view: go }); }
     },

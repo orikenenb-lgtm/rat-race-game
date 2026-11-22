@@ -27,6 +27,9 @@ async def page(b, vp=PHONE, init=(), scheme='light', onboarded=True):
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: (ERRS.append(str(e)), print('PAGEERR', e, flush=True)))
     return ctx, pg
+async def shot_ok(pg, name):
+    try: await pg.screenshot(path=SHOT + name + '.png')
+    except Exception: pass  # noqa: BLE001
 ls = lambda pg, k: pg.evaluate(f"JSON.parse(localStorage.getItem('{k}')||'null')")
 async def goto_lobby(pg, sel='.lb-home', url=None):
     await pg.goto(url or LOBBY); await pg.wait_for_selector(sel, timeout=40000); await pg.wait_for_timeout(500)
@@ -605,6 +608,56 @@ async def t_fund(b):
     check(isinstance(fw, list) and bool(fw[0]), f'the notice is recorded in the save (once per game) ({fw})')
     await ctx.close()
 
+FREE_SIG = "(()=>{try{const s=JSON.parse(localStorage.getItem('rr2-save-free-w1')).state;return [s.turn,(s.actions||[]).length,s.month,!!s.over]}catch(e){return null}})()"
+async def roll_to_wall(pg, limit=40):
+    """roll until the in-game "נגמרו הזריקות" card is open (answering cards / coaches on the way) → True"""
+    for _ in range(limit * 6):
+        if await pg.locator('#gm:not([hidden]) .noen').count(): return True
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]'); continue
+        if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); continue
+        if await pg.locator('#evm:not([hidden])').count():
+            await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()"); await pg.wait_for_timeout(400); continue
+        if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()"): await pg.click('#roll'); await pg.wait_for_timeout(900); continue
+        await pg.wait_for_timeout(300)
+    return False
+async def t_wall(b):
+    """Director decision 6 (playtest B3): ⚡ runs out mid-game for a beginner → the card says the game is saved and offers "continue
+    later" (time to the next roll) and free practice in learning mode; neither loses the game."""
+    ctx, pg = await page(b, vp=PHONE, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:1,tutorialDone:true}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))", "localStorage.setItem('rr2-reveal', JSON.stringify({v:1,all:true,coached:[]}))", "localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))",
+                                            "if(!sessionStorage.getItem('t4w')){sessionStorage.setItem('t4w','1');localStorage.setItem('rr2-energy', JSON.stringify({e:2, at:Date.now(), granted:{}}))}"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.evaluate("document.querySelector('input[name=t4mode][value=normal]')?.click()")
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    hit = await roll_to_wall(pg)
+    card = await pg.evaluate("(()=>{const g=document.getElementById('gm');return {t:g.innerText, go:[...g.querySelectorAll('[data-go]')].map(x=>x.dataset.go), timer:(document.getElementById('noenT')||{}).textContent||''}})()") if hit else {}
+    sig0 = await pg.evaluate(FREE_SIG)
+    check(hit and 'המשחק שלך שמור' in card['t'] and card['go'][:2] == ['later', 'learn'] and re.match(r'^\d+:\d\d$', card['timer'] or '') and sig0 and not sig0[3],
+          f'the empty-⚡ card: "המשחק שלך שמור", continue later + learning mode first, the time to the next roll ({card.get("go")}, {card.get("timer")!r}, save {sig0})')
+    await shot_ok(pg, 't4_wall_card_phone')
+    await pg.evaluate("document.querySelector('#gm [data-go=later]').click()")
+    await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
+    check(await pg.evaluate(FREE_SIG) == sig0, f'"להמשיך אחר כך": the world view offers "להמשיך" and the save is the same turn ({sig0})')
+    await pg.evaluate("document.querySelector('[data-act=home]')?.click()"); await pg.wait_for_selector('.lb-home', timeout=20000); await pg.wait_for_timeout(500)
+    note = await pg.evaluate("(document.querySelector('.lb-en-saved')||{}).textContent||''")
+    check('המשחק שלך שמור' in note, f'lobby home with ⚡ 0 names the kept game ({note!r})')
+    # the learning-mode way: resume, hit the wall, practise — the free game is untouched
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
+    await pg.evaluate("document.querySelector('[data-act=continue-free]:not([data-learn])').click()"); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    hit2 = await roll_to_wall(pg, 6)
+    if hit2: await pg.evaluate("document.querySelector('#gm [data-go=learn]').click()")
+    await pg.wait_for_selector('.wv-char', timeout=30000)
+    lm = await pg.evaluate("!!document.querySelector('input[name=t4mode][value=learn]:checked')")
+    await pg.click('.wv-char >> nth=0 >> .wv-go')
+    for _ in range(20):   # a confirm (another learning game exists) is answered "yes": only the LEARNING slot may be replaced
+        if await pg.evaluate("document.getElementById('start').hidden"): break
+        if await pg.locator('#gm:not([hidden]) .acts button.primary').count(): await pg.click('#gm .acts button.primary')
+        await pg.wait_for_timeout(500)
+    cfg = await pg.evaluate("import('./js/game.js').then(g=>g.activeConfig())")
+    await pg.wait_for_timeout(800)
+    check(hit2 and lm and cfg and cfg.get('learn') is True and await pg.evaluate(FREE_SIG) == sig0, f'"לתרגל בינתיים": a learning game starts (learn preselected={lm}, cfg.learn={cfg and cfg.get("learn")}) and the free game is kept ({await pg.evaluate(FREE_SIG)} == {sig0})')
+    await ctx.close()
+
 async def t_nearmiss(b):
     """Playtest B1: the end-screen near miss never shows negative months — when the months already met the star line, it names what
     stopped ★★★ (fund / happiness). Same text in ui.js (built-in end screen) and the lobby end screen."""
@@ -787,7 +840,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('outcome', t_outcome), ('nearmiss', t_nearmiss), ('fund', t_fund), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('outcome', t_outcome), ('nearmiss', t_nearmiss), ('fund', t_fund), ('wall', t_wall), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

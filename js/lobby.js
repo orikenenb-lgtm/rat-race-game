@@ -668,12 +668,20 @@ function startEnergyTicker() {
 }
 function stopEnergyTicker() { clearInterval(enTimer); enTimer = null; }
 EN.onChange((p) => { if (p.delta > 0 && p.reason && !['sync', 'roll'].includes(p.reason) && lobbyVisible()) { /* bonus toasts are shown by the caller */ } });
+/** director decision 6: with ⚡ at 0, say that the unfinished game is kept (it continues from the same turn once a roll is back) */
+function savedNote() {
+  if (!G || !G.savedGame) return '';
+  const sv = WORLDS.filter((w) => P.isUnlocked(w.id)).map((w) => [w, safe(() => G.savedGame(slotKey(w.id)), null)]).find(([, x]) => x && !x.future);
+  if (!sv) return '';
+  const [w, x] = sv;
+  return `<p class="lb-en-saved">💾 המשחק שלך שמור: ${esc(x.charName || '')} ${esc(P.inW(w.name))}, חודש ${num(String(x.month))}. ממשיכים ממנו בדיוק מאותו מקום.</p>`;
+}
 /** "Out of energy" card: what you CAN do while waiting (DESIGN-v3 §3). */
 function emptyEnergyHtml() {
   if (EN.get() > 0) return '';
   const d = cache.daily; const dailyOpen = net.hasMe() && d && !d.error && !d.my_status;
   return `<section class="lb-empty-en" id="lbEmpty"><div class="lb-en-big" aria-hidden="true">🪫</div>
-    <div><h2>נגמרו הזריקות ⚡</h2><p>בעוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל זריקה חדשה. בינתיים:</p>
+    <div><h2>נגמרו הזריקות ⚡</h2><p>בעוד <b data-energy="full-wait">${EN.fmtWait(EN.msUntilNext())}</b> תקבל זריקה חדשה. בינתיים:</p>${savedNote()}
     <div class="lb-acts start"><button class="primary" data-act="learn-now">${T4.M8}</button>${dailyOpen ? '<button data-act="daily">🎲 האתגר היומי (בלי זריקות)</button>' : ''}
       <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח זריקות לחברים</button>' : ''}</div></div></section>`;
 }
