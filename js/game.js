@@ -1455,11 +1455,13 @@ function t6End(end) {
     out.tl = tlOf(S);
     out.dims = dimsOf(end, { m, tl: out.tl, worldId: S.worldId, charId: S.charId });
     const branch = !!(S.ui && S.ui.branch);
-    out.rewindAllowed = rewind.allowed(CFG);
+    // T6 review nit: the END gate is RW.endAllowed (free and learning games; the lobby uses the same rule), not the live gate
+    // RW.allowed (learning games only); a branch's end never offers a rewind (its log is not the last game)
+    out.rewindAllowed = !branch && rewind.endAllowed(CFG);
     out.afterwinAllowed = end.status === 'won' && !S.afterWin && !end.afterWin && typeof E.continueAfterWin === 'function' && flagFor('afterwin', CFG) && CFG.mode === 'free';
     if (ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
     if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; }
-    else if (out.rewindAllowed || flag('rewind')) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: endLite(end, out), ghostsKey: out.ghostsKey || null });
+    else if (out.rewindAllowed) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: endLite(end, out), ghostsKey: out.ghostsKey || null });
     persist();
   } catch (e) { console.warn('t6 end', e); }
   return out;

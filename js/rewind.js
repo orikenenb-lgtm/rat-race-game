@@ -179,6 +179,12 @@ export function deleteBranch(w) {
   try { writeKey(META_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ }
   return true;
 }
+/** T6 review nit: a finished branch's slot is cleared by the lobby — drop its meta entry with it (→ the entry it removed, or null) */
+export function forgetBranch(w) {
+  const list = branches(); const meta = list.find((b) => b.w === w) || null;
+  if (meta) { try { writeKey(META_KEY, JSON.stringify(list.filter((b) => b.w !== w))); } catch (e) { /* ignore */ } }
+  return meta;
+}
 /** the comparison data for an open branch: the original's timeline, cut to the months both have played (§7.5) */
 export function compareData(branchState) {
   const b = branchState && branchState.ui && branchState.ui.branch; if (!b) return null;

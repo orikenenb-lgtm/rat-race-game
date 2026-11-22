@@ -1579,6 +1579,8 @@ function onGameEnd(e, delay) {
     // T6: a practice branch clears its OWN slot (rr2-save-branch-<w>), never the original's learn / free slot
     const key = e.branch && e.saveKey && RW.isBranchKey(e.saveKey) ? e.saveKey : hist ? { mode: 'history', worldId: 'h', scenarioId: e.scenarioId, seed } : slotKey(e.worldId, learnMode);
     game().then((g) => g && g.clearSave && safe(() => g.clearSave(key)));
+    // T6 review nit: the rr2-branches entry goes with its slot; the end screen keeps it (endCtx.t6meta) for "↩ חזרה למשחק המקורי"
+    if (e.branch && RW.isBranchKey(key)) endCtx.t6meta = safe(() => RW.forgetBranch(e.worldId), null);
   }
   setTimeout(() => {
     ensureCss(); install();
@@ -1667,7 +1669,7 @@ const T6END = { awLines: (A) => [`${A.months} חודשים אחרי היציאה
 const fmtSgn = (n) => (Math.round(+n || 0) > 0 ? '+' : '') + fmtM(+n || 0);
 /** the original of a finished branch (live learning slot) — only while it is still the same game (T6 M2) */
 function t6Origin(e) {
-  const meta = safe(() => RW.branchFor(e.worldId), null); if (!meta || meta.origin !== 'live') return null;
+  const meta = (endCtx && endCtx.e === e && endCtx.t6meta) || safe(() => RW.branchFor(e.worldId), null); if (!meta || meta.origin !== 'live') return null;
   const o = safe(() => RW.originOf(meta), null); return o && o.cfg && !(o.state && o.state.over) ? o : null;
 }
 function t6Ctx() {

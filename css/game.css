@@ -901,7 +901,7 @@ table.t4-legend td:last-child{color:var(--mut);font-size:13px}
 .t6-graphbox{margin:10px 0 0;text-align:start}
 .t6-tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .t6-tabs button{min-height:44px;padding:4px 12px;border-radius:999px;font-size:14px;font-weight:700;background:var(--paper2,#f5efe2);border:1.5px solid var(--line);color:var(--ink)}
-.t6-tabs button[aria-selected=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.t6-tabs button[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}   /* T6 review m11: toggle buttons (aria-pressed), not tabs */
 .t6-tabs .t6-tog{margin-inline-start:auto;background:transparent}
 .t6-graph{display:block;width:100%;height:auto;max-height:200px;margin-top:6px;overflow:visible}
 .t6-graph .g-grid{stroke:color-mix(in srgb,var(--mut) 30%,transparent);stroke-width:1}
