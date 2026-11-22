@@ -95,7 +95,7 @@ function nextToast() {
 /* ============================================================ phone overlay queue (T5 / T4 §4.7, UX§4 fix 2)
    On phones (≤ 600 px) at most ONE of coach / achievement / lesson / rumour (newspaper) / verdict floats above the board.
    A coach bubble holds everything; the rest is released one by one by priority. Desktop shows them as before. */
-const OVP = { achievement: 3, dream: 4, lesson: 5, rumour: 5, verdict: 6 };
+const OVP = { achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };
 const ovq = []; let ovBusy = null, ovT = 0;
 const phoneQ = () => innerWidth <= 600;
 const coachOpen = () => { const c = $('#coach'); return !!c && !c.hidden; };
@@ -103,7 +103,7 @@ const coachOpen = () => { const c = $('#coach'); return !!c && !c.hidden; };
 function overlay(kind, show) {
   if (!phoneQ()) { show(() => {}); return; }
   if (kind === 'verdict') { const i = ovq.findIndex((x) => x.kind === 'verdict'); if (i >= 0) ovq.splice(i, 1); }
-  ovq.push({ kind, show, p: OVP[kind] || 9, t: performance.now() });
+  ovq.push({ kind, show, p: OVP[kind] || 9, t: performance.now(), behindRival: ovBusy === 'rival' });
   ovq.sort((a, b) => a.p - b.p || a.t - b.t);
   if (ovq.length > 6) { const i = ovq.map((x) => x.kind).lastIndexOf('verdict'); ovq.splice(i >= 0 ? i : ovq.length - 1, 1); }
   pumpOv();
@@ -111,6 +111,8 @@ function overlay(kind, show) {
 function pumpOv() {
   clearTimeout(ovT);
   if (ovBusy || !ovq.length) return;
+  // T7: a verdict that waited behind a T6 reveal line (it holds the slot until tapped or the next roll) is about a decision long gone
+  if (ovq[0].kind === 'verdict' && ovq[0].behindRival && performance.now() - ovq[0].t > 9000) { ovq.shift(); ovT = setTimeout(pumpOv, 50); return; }
   if (coachOpen() || (ovq[0].kind === 'verdict' && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
   // T6 (UI fix): on phones a verdict pill never floats over an open card / dialog / life story (it covered the options):
   // it waits for the board; a verdict that waited > 9 s is about a decision long gone and is dropped
@@ -192,7 +194,7 @@ export function modal({ tag = '', color = '#2f6fdb', title = '', html = '', acti
   else { c.removeAttribute('aria-labelledby'); c.setAttribute('aria-label', tag || (c.querySelector('.d') || {}).textContent?.slice(0, 80) || 'הודעה'); }
   const prevFocus = document.activeElement;
   const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); // a dialog on top: the pill steps aside
-  if (phoneQ()) toastAside();   // T2 verify D7: and so does a toast on phones
+  if (phoneQ()) { toastAside(); stickyAside(); }   // T2 verify D7: and so does a toast on phones (T7: and a T6 reveal line)
   m.hidden = false; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
   if (onOpen) try { onOpen(c); } catch (e) { console.error(e); }
   setTimeout(() => (c.querySelector('.acts button.primary:not(:disabled)') || c.querySelector('.acts button:not(:disabled)'))?.focus(), 40);
@@ -786,7 +788,7 @@ const ddLevel = (ev) => (ev && ev.data && ev.data.dd ? ev.data.dd.level : -1);
 export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
   evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() } };
-  if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); } // phones: the new card wins
+  if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); stickyAside(); } // phones: the new card wins
   renderEvent(true);
   m.hidden = false;
   c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
@@ -2022,16 +2024,31 @@ export function rivalLost(r) {
   if (!r) return Promise.resolve();
   return modal({ tag: '👥 תחרות על עסקה', color: '#6b4fd8', title: r.text || '', html: `<div role="status" aria-live="polite">${r.sub ? `<p class="d">${escI(r.sub)}</p>` : ''}${r.dd ? `<p class="note">🔎 ${escI(r.dd)}</p>` : ''}</div>`, actions: [{ label: r.button || 'הבנתי', cls: 'primary' }] });
 }
-/** a reveal line ("שמעת מעומר: …"): stays until tapped or until the next roll (clearStickyNews), never timed */
+/** a reveal line ("שמעת מעומר: …"): stays until tapped or until the next roll (clearStickyNews), never timed.
+ *  T7 polish: on phones it goes through the single overlay queue — it never shows over (or under) an open card / dialog / life
+ *  story; when a card opens while it is on screen it steps aside and comes back once the board is clear (never dropped). */
+let stickyCur = null;   // {text, done} of the line on screen
 export function stickyNews(text) {
   if (!text) return;
-  let el = document.getElementById('t6news');
-  if (!el) { el = document.createElement('div'); el.id = 't6news'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
-  el.innerHTML = `<span>${escI(text)}</span><button type="button" class="ibtn sm" aria-label="סגירה">✕</button>`;
-  el.querySelector('button').onclick = () => clearStickyNews();
-  el.hidden = false; el.className = 'on';
+  overlay('rival', (done) => {
+    let el = document.getElementById('t6news');
+    if (!el) { el = document.createElement('div'); el.id = 't6news'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+    el.innerHTML = `<span>${escI(text)}</span><button type="button" class="ibtn sm" aria-label="סגירה">✕</button>`;
+    el.querySelector('button').onclick = () => clearStickyNews();
+    el.hidden = false; el.className = 'on';
+    stickyCur = { text, done };
+  });
 }
-export function clearStickyNews() { const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; } }
+export function clearStickyNews() {
+  const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; }
+  const c = stickyCur; stickyCur = null; if (c) c.done();
+}
+/** phones: a card / dialog that opens over a reveal line wins; the line waits in the queue and returns when the board is clear */
+function stickyAside() {
+  const c = stickyCur; if (!c || !phoneQ()) return;
+  stickyCur = null; const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; }
+  c.done(); setTimeout(() => stickyNews(c.text), 0);   // re-queued once the card / dialog is on screen (the queue then waits for it)
+}
 
 /** §7.5 banner in a practice branch. info = {back(), compare()} | null */
 export function branchBanner(info) {
