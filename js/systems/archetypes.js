@@ -8,7 +8,7 @@
 // The persona rule cards (js/systems/rivals.js ARCH[id].rule) must stay literally true — tests/t6_engine.test.mjs checks them (AC-30).
 
 export const ARCH_API = 2;
-export const ARCH_V = 1;            // bump on any behaviour change (ghost cache key)
+export const ARCH_V = 2;            // bump on any behaviour change (ghost cache key) — 2: balance pass (gambler overtime guard + offer:5, founder's rent bar, diversified's bars + offer:5)
 export const ARCH_IDS = ['saver', 'founder', 'diversified', 'gambler'];
 
 const en = (ev) => ev.options.filter((o) => o.enabled);
@@ -56,7 +56,7 @@ function focusAct(pv, id) {
 /* ---------------------------------------------------------------- shared card handling (non-deal) */
 function planWant(pv, arch) {
   const L = pv.metrics.life;
-  if (arch === 'gambler') return L.energy > 35 ? 'overtime' : 'work';
+  if (arch === 'gambler') return L.energy >= 70 || (L.plan === 'overtime' && L.energy >= 45) ? 'overtime' : L.energy < 30 ? 'rest' : 'work'; // balance pass: overtime while there is energy for it (was > 35 🔋: 8–29 burnouts a game)
   if (L.energy < (arch === 'saver' ? 40 : 35) || (L.plan === 'rest' && L.energy < 70)) return 'rest';
   if (arch === 'founder') return L.energy >= 60 ? 'side' : 'work';
   if (arch === 'diversified' && !L.studyDone && pv.month <= 20 && L.energy >= 45) return 'study';
@@ -189,7 +189,7 @@ const founder = {
       const ownsNonRent = m.assets.some((a) => !RENT_KINDS.has(a.kind)) || (m.businesses || []).length > 0;
       const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0];
       if (!b || b.net <= 0) return pick('pass');
-      if (rent && !(ownsNonRent && b.net >= 0.1 * m.expenses)) return pick('pass'); // prefers businesses: a rent asset only after a first non-rent one
+      if (rent && !(ownsNonRent && b.net >= 0.2 * m.expenses)) return pick('pass'); // prefers businesses: a rent asset only after a first non-rent one, and only a strong one (balance pass: 20% of E; was 10%)
       if (b.loanAmount && m.cashflow + b.net < 0) return pick('pass');
       const ins = ddFlagged(ev, b, 2); if (ins && ctxN(ctx) < 3) return pick(ins);
       if (ctxN(ctx) === 0 && !rivalsOf(ev).n && has(ev, 'offer:5') && !d.negotiated) return pick('offer:5');
@@ -216,13 +216,13 @@ const diversified = {
       const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => y.net - x.net)[0];
       if (!b || b.net <= 0) return pick('pass');
       const haveKind = m.assets.some((a) => a.kind === d.kind);
-      if (haveKind && b.net < 0.1 * m.expenses) return pick('pass');                 // one asset of each kind first
-      if (b.loanAmount && b.net < 0.15 * m.expenses) return pick('pass');             // a loan only for a clearly good deal
+      if (haveKind && b.net < 0.05 * m.expenses) return pick('pass');                // one asset of each kind first (balance pass: a second one only if it adds ≥ 5% of E; was 10%)
+      if (b.loanAmount && b.net < 0.08 * m.expenses) return pick('pass');             // a loan only for a clearly good deal (balance pass: 8% of E; was 15%)
       if (m.cash + m.savings - d.down < 3 * m.expenses && !b.loanAmount) return pick('pass');
       const insO = ev.options.find((o) => o.id === 'inspect:1');
       if (d.dd && d.dd.level === 0 && warnOf(ev) >= 1 && insO && insO.enabled && (insO.rivalRisk || 0) < 0.3 && claimedNet(ev, b) > 0 && ctxN(ctx) < 3) return pick('inspect:1');
       const ins = ddFlagged(ev, b, 99); if (ins && ctxN(ctx) < 3) return pick(ins);
-      if (ctxN(ctx) === 0 && !rivalsOf(ev).n && has(ev, 'offer:10') && b.net > 0.3 * m.expenses && !d.negotiated) return pick('offer:10');
+      if (ctxN(ctx) === 0 && !rivalsOf(ev).n && has(ev, 'offer:5') && b.net > 0.3 * m.expenses && !d.negotiated) return pick('offer:5'); // balance pass: the step a seller usually takes (offer:10 lost 45% of these deals)
       return pick(b.id);
     }
     return common(pv, ev, ctx, 'diversified');
@@ -243,8 +243,9 @@ const gambler = {
   decide(pv, ctx) {
     const ev = pv.event; if (!ev) return null; const m = pv.metrics; const d = ev.data || {};
     if (ev.type === 'deal') {
-      // never inspects; always tries a 15% lower offer first; believes the seller; the most leveraged buy
-      if (ctxN(ctx) === 0 && has(ev, 'offer:15') && !d.negotiated) return pick('offer:15');
+      // never inspects; always tries a lower offer first; believes the seller; the most leveraged buy
+      // balance pass (G2): the lower offer is the smallest step — an offer the seller usually takes (offer:15 closed 70% of his deals)
+      if (ctxN(ctx) === 0 && has(ev, 'offer:5') && !d.negotiated) return pick('offer:5');
       const b = ev.options.filter((o) => o.kind === 'buy' && o.enabled).sort((x, y) => (y.loanAmount || 0) - (x.loanAmount || 0) || claimedNet(ev, y) - claimedNet(ev, x))[0];
       return pick(b && claimedNet(ev, b) > -0.05 * m.expenses ? b.id : 'pass');
     }

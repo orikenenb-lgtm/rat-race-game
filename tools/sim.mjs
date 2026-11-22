@@ -9,6 +9,7 @@ import * as E from '../js/engine.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { facade, claimedNet, adaptiveFocus, runFocus, ddRule, medianDown, archPolicy } from './policies.mjs';
 import { collect, bundleText, sha256 } from './build-edge.mjs';
+import * as RVM from '../js/systems/rivals.js';
 /** T7 CR-21: every sim JSON names the exact engine it measured. */
 export const ENGINE_SHA = sha256(bundleText(collect()));
 
@@ -295,8 +296,11 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
       }
       if (!has(ev, pick)) return ['pass'];
       if (smart && ABL.has('onlyImporters') && !(d.sens < 0)) return ['pass'];
-      if (smart && o2.dd && ctx.n < 3) { const ins = ddRule(o2.dd, st._pv, ev, pick); if (ins) return [ins]; }
-      if (smart && !ABL.has('noNeg') && ctx.n === 0) { const off = ev.options.find((x) => x.id === 'offer:5' && x.enabled && x.chance >= 0.85); if (off && (ev.options.find((x) => x.id === pick).net || 0) > 0) return [off.id]; }
+      // T6: smart reads the public 👥 chip — it checks a flagged deal unless others may close first (≥ 30 %, the guide's own rule) and makes
+      // a lower offer only while the risk of losing the deal is small (< 15 %); dd:always keeps inspecting whatever the risk (balance pass, G7)
+      const hz = d.rivals && d.rivals.n ? d.rivals.hazardNext || 0 : 0;
+      if (smart && o2.dd && ctx.n < 3) { const ins = ddRule(o2.dd, st._pv, ev, pick); if (ins && !(o2.dd !== 'always' && hz >= 0.3)) return [ins]; }
+      if (smart && !ABL.has('noNeg') && ctx.n === 0 && hz < 0.15) { const off = ev.options.find((x) => x.id === 'offer:5' && x.enabled && x.chance >= 0.85); if (off && (ev.options.find((x) => x.id === pick).net || 0) > 0) return [off.id]; }
       const o = ev.options.find((x) => x.id === pick);
       const loanCost = o.loanMonthly || 0; const net = smart ? o.net : claimedNet(ev, o);
       if (d.dd) cf = smart ? o.net + loanCost : claimedNet(ev, o) + loanCost; // T2: smart values the basis, greedy believes the seller
@@ -308,6 +312,8 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
         if (smart && o.loanAmount && m.cashflow + net < 0) return ['pass'];
         return [pick];
       }
+      // net-worth worlds: smart values the deal at the public basis (value × expected value factor − expected repair), not the seller's claim
+      if (smart && o.basis) { const bs = o.basis; const v0 = d.value ?? d.cost; const s2 = (v0 * (bs.vf ?? 1) - d.cost - (bs.rep || 0)) * 1.5 + (o.net + loanCost) * 24 + (d.grow || 0) * v0 * 24 + (d.impact || 0) * 20000; if (s2 <= 0) return ['pass']; }
       if (score <= 0 || (cf < 0 && smart)) return ['pass'];
       if (smart && (d.discount || 0) < 0 && cf * 24 < -d.discount * 2) return ['pass'];
       if (o.loanAmount && smart && o.loanAmount > (d.discount > d.cost * 0.15 ? 8 : 4) * Math.max(m.cashflow, 0)) return ['pass'];
@@ -403,7 +409,7 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
 /* ---------- play one game */
 const QUIZ_SKILL = { random: 0.33, cautious: 0.8, greedy: 0.7, smart: 0.95, reckless: 0.4, tapper: 0.5 };
 export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
-  const { log, onRoll, ...gameOpts } = opts;
+  const { log, onRoll, onLanding, ...gameOpts } = opts;
   const P = POLICIES[pol];
   const st = E.createGame({ worldId, charId, seed, mode: 'free', mentor: P.mentor || 'hint', ...gameOpts });
   const r = prng(seed * 7919 + pol.length);
@@ -436,7 +442,7 @@ export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
     if (st.pending) { resolve(E.currentEvent(st)); if (end || st.over) { end = end || st.result; break; } } // e.g. the ops focus opened the business panel
     E.rollDice(st);
     if (onRoll) onRoll(st);
-    resolve(E.landing(st));
+    { const ev0 = E.landing(st); if (onLanding) onLanding(st, ev0); resolve(ev0); }
   }
   return { st, end };
 }
@@ -558,7 +564,7 @@ function storiesSummary(wid, games) {
 const T2_CORE = ['guideTapper', 'blindTapper', 'naive', 'smart', 'adaptive', 'cautious', 'greedy', 'saver', 'founder', 'diversified', 'gambler'];
 const T2_FOCUS = ['f:none', 'f:scout', 'f:debt', 'f:ops', 'f:frugal', 'f:network', 'f:research'];
 const T2_DD = ['dd:never', 'dd:always', 'dd:borderline'];
-const T2_ABL = { 'abl:noCycle': { _dev: { noCycle: true } }, 'abl:noDD': { _dev: { noDD: true } } };
+const T2_ABL = { 'abl:noCycle': { _dev: { noCycle: true } }, 'abl:noDD': { _dev: { noDD: true } }, 'abl:noRival': { _dev: { noRival: true } } }; // T6 §16 G7: noRival
 export const seedOf = (wid, i) => 1000 + i * 7 + wid.charCodeAt(1) * 100003;
 /** One world: every policy × character × N seeds, tagged with the seed's cycle bucket. Compact records. */
 export function matrixWorld(wid, n, pols = [...T2_CORE, ...T2_FOCUS, ...T2_DD, ...Object.keys(T2_ABL), 'life:cheap', 'life:dear'], onRow) {
@@ -571,7 +577,7 @@ export function matrixWorld(wid, n, pols = [...T2_CORE, ...T2_FOCUS, ...T2_DD, .
       for (let i = 0; i < n; i++) {
         const { st, end } = play(wid, ch.id, seedOf(wid, i), base, cap, opts);
         const won = !!(end && end.status === 'won');
-        recs.push([pol, ch.id, i, buckets[i], won ? 1 : 0, won && end.months <= lim ? 1 : 0, won ? end.months : null, end ? end.stars || 0 : 0, st.stats.inspections || 0, st.dq.hints || 0]);
+        recs.push([pol, ch.id, i, buckets[i], won ? 1 : 0, won && end.months <= lim ? 1 : 0, won ? end.months : null, end ? end.stars || 0 : 0, st.stats.inspections || 0, st.dq.hints || 0, st.stats.rivalLost || 0, st.month]);
       }
       if (onRow) onRow(pol, ch.id, ((Date.now() - t0) / 1000).toFixed(0));
     }
@@ -623,7 +629,13 @@ export function dominance(wid, n) {
       E.rollDice(st); let ev = E.landing(st); let k = 0;
       while (ev && !st.over) {
         const sc = E.scoreOptions(st, ev);
-        if (sc.length >= 2) { const s2 = sc.slice().sort((a, b) => b.U - a.U); const topId = s2[0].U > s2[1].U + 0.01 ? s2[0].id : null; for (const x of sc) { const key = ev.type + ':' + x.id.replace(/:\d+$/, ':n'); const t = tally[key] || (tally[key] = { n: 0, top: 0, allow: ALLOW(ev.type, x.id, ev) }); t.n++; if (x.id === topId) t.top++; } }
+        if (sc.length >= 2) { const s2 = sc.slice().sort((a, b) => b.U - a.U); const topId = s2[0].U > s2[1].U + 0.01 ? s2[0].id : null; for (const x of sc) { const key = ev.type + ':' + x.id.replace(/:\d+$/, ':n'); const t = tally[key] || (tally[key] = { n: 0, top: 0, allow: ALLOW(ev.type, x.id, ev) }); t.n++; if (x.id === topId) t.top++; }
+          if (ev.type === 'deal' && ev.data.dd && ev.data.rivals && ev.data.rivals.n >= 1) { // T6 §16 G5: competed cards, by warning signs
+            const g5 = (k, top) => { const t = tally[k] || (tally[k] = { n: 0, top: 0, allow: true, g5: true }); t.n++; if (top) t.top++; };
+            const wb = ev.data.dd.flags.some((f) => f.kind === 'warn') ? 'warn1' : 'warn0'; const on = (id) => ev.options.find((o) => o.id === id && o.enabled);
+            if (sc.find((x) => x.id === 'inspect:1') && on('inspect:1')) g5('G5|inspect:1|' + wb, topId === 'inspect:1');
+            const bb = sc.filter((x) => /^buy/.test(x.id) && on(x.id)).sort((a, b) => b.U - a.U)[0]; if (bb) g5('G5|bestBuy|' + wb, topId === bb.id);
+          } }
         let c; if (ev.auto) c = [ev.options[0].id]; else if (ev.type === 'mystery' && ev.data.kind === 'quiz') c = ['a0']; else c = k >= 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k });
         let res = E.choose(st, ev, c[0], c[1]); if (!res.ok) res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['done', 'pass', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled)).id);
         ev = res.event; k++;
@@ -631,6 +643,17 @@ export function dominance(wid, n) {
     }
   }
   return tally;
+}
+/** T6 §16 G9: empirical P(close at step k | not before) of the sealed draws on real competed landings vs the public hazard table. */
+export function rivalsCalib(wid, n) {
+  const w = E.getWorld(wid); const cnt = {}; let cards = 0;
+  for (const ch of w.characters) for (let i = 0; i < n; i++) {
+    const lim = Math.round(E.starThresholds(w, ch.id).maxMonths * 1.6);
+    play(wid, ch.id, seedOf(wid, i) + 31, 'smart', lim, { onLanding: (st) => { const p = st.pending; if (!p || !p.rv || !(p.rv.n >= 1)) return; cards++;
+      const a = cnt[p.rv.n] || (cnt[p.rv.n] = [[0, 0], [0, 0], [0, 0]]); for (let k = 1; k <= 3; k++) { if (p.rv.close && p.rv.close < k) break; a[k - 1][0]++; if (p.rv.close === k) { a[k - 1][1]++; break; } } } });
+  }
+  const rows = []; for (const [nn, a] of Object.entries(cnt)) for (let k = 1; k <= 3; k++) { const [reach, hit] = a[k - 1]; if (reach) rows.push({ n: +nn, step: k, reach, emp: +(hit / reach).toFixed(3), table: +RVM.hazard(wid, +nn, k).toFixed(3) }); }
+  return { cards, rows };
 }
 /** A10: describe / impactFor timings on mid-game states (min of 3 runs per call, so a busy box's preemption is not counted) + games/sec. */
 export function perf(wid = null, n = 6) {
@@ -646,7 +669,7 @@ export function perf(wid = null, n = 6) {
   return { states: sts.length, describe: { p50: p(dsc, 0.5), p95: p(dsc, 0.95) }, impactFor: { n: imp.length, p50: p(imp, 0.5), p95: p(imp, 0.95) }, sim: { games, secs: (Date.now() - t0) / 1000, gamesPerSec: +(games / ((Date.now() - t0) / 1000)).toFixed(2) } };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories'))) {
+if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories') || args.includes('--rivals'))) {
   const nArg = +(args.find((a) => /^\d+$/.test(a)) || 0);
   mkdirSync('tools/balance-data', { recursive: true });
   if (args.includes('--stories')) {
@@ -659,7 +682,7 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix'
     const wid = ONLY || 'w1'; const n = nArg || 100; const t0 = Date.now();
     const recs = matrixWorld(wid, n, undefined, (pol, ch, secs) => { if (!QUIET) console.log(`${wid} ${ch} ${pol} done (${secs}s)`); });
     const file = `tools/balance-data/matrix-${wid}.json`;
-    writeFileSync(file, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints'], recs }) + '\n');
+    writeFileSync(file, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints', 'rivalLost', 'played'], recs }) + '\n');
     console.log(`wrote ${file}: ${recs.length} games in ${Math.round((Date.now() - t0) / 1000)}s`);
   }
   if (args.includes('--dominance')) {
@@ -668,9 +691,48 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix'
     writeFileSync(`tools/balance-data/dominance${ONLY ? '-' + ONLY : ''}.json`, JSON.stringify({ engineSha: ENGINE_SHA, ...out }) + '\n');
     for (const [wid, t] of Object.entries(out)) { const flagged = Object.entries(t).filter(([, x]) => !x.allow && x.n >= 20 && x.top / x.n > 0.85); console.log(wid, 'flagged:', flagged.map(([k, x]) => `${k} ${x.top}/${x.n}`).join(', ') || 'none'); }
   }
+  if (args.includes('--rivals')) { const out = { engineSha: ENGINE_SHA }; for (const wid of ONLY ? [ONLY] : E.WORLDS.map((w) => w.id)) out[wid] = rivalsCalib(wid, nArg || 20); writeFileSync(`tools/balance-data/rivals${ONLY ? '-' + ONLY : ''}.json`, JSON.stringify(out) + '\n'); console.log(JSON.stringify(out).slice(0, 400)); }
   if (args.includes('--perf')) { const pf = { engineSha: ENGINE_SHA, ...perf(ONLY, nArg || 6) }; writeFileSync('tools/balance-data/perf.json', JSON.stringify(pf) + '\n'); console.log(JSON.stringify(pf)); }
   if (args.includes('--report')) t2Report();
   process.exit(0);
+}
+/** T6 §16 sim gates G1–G9 from the matrix records (rivalLost / played columns, the abl:noRival ablation), the --dominance G5 tallies and
+ *  the --rivals calibration. Cells = world × character × cycle bucket with ≥ 15 games (as A4). */
+function t6Gates(byWorld, dom, P, ok) {
+  const L = []; const worlds = Object.keys(byWorld).sort(); const ARCH = ['saver', 'founder', 'diversified', 'gambler'];
+  const of = (wid, pol, f = () => true) => byWorld[wid].recs.filter((r) => r[0] === pol && f(r));
+  if (!worlds.every((w) => ARCH.every((a) => of(w, a).length))) return L;
+  const cells = []; for (const wid of worlds) { const keys = new Set(of(wid, 'smart').map((r) => r[1] + '|' + r[3])); for (const k of keys) { const [c, b] = k.split('|'); if (of(wid, 'smart', (r) => r[1] === c && r[3] === b).length >= 15) cells.push({ wid, c, b }); } }
+  const share = Object.fromEntries(ARCH.map((a) => [a, 0]));
+  for (const cell of cells) { const st = ARCH.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) share[t.p] += 1 / top.length; }
+  for (const a of ARCH) share[a] = cells.length ? share[a] / cells.length : 0;
+  const g2 = Object.fromEntries(ARCH.map((a) => [a, []]));
+  for (const wid of worlds) for (const b of [...new Set(byWorld[wid].recs.map((r) => r[3]))].sort()) { const st = ARCH.map((p) => ({ p, s: cellStats(of(wid, p, (r) => r[3] === b)) })); if (st[0].s.n < 15) continue; const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) g2[t.p].push(`${wid}/${b}`); }
+  const A4SET = ['guideTapper', 'naive', 'cautious', 'greedy', 'smart', 'adaptive', ...ARCH]; const s3 = Object.fromEntries(A4SET.map((p) => [p, 0]));
+  for (const cell of cells) { const st = A4SET.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) s3[t.p] += 1 / top.length; }
+  const beats = (a, b) => a.inTime >= b.inTime - 1e-9 && a.med <= b.med && (a.inTime > b.inTime + 1e-9 || a.med < b.med);
+  const pool = (pol) => cellStats(worlds.flatMap((w) => of(w, pol)));
+  const ddW = worlds.map((w) => { const f = cellStats(of(w, 'smart')), nv = cellStats(of(w, 'dd:never')), al = cellStats(of(w, 'dd:always')); return { w, f, nv, al, ok: beats(f, nv) && beats(f, al) }; });
+  const g4 = beats(pool('smart'), pool('dd:never')) && beats(pool('smart'), pool('dd:always')) && ddW.filter((x) => x.ok).length >= Math.min(3, worlds.length);
+  const per60 = (pol) => worlds.flatMap((w) => of(w, pol)).filter((r) => r.length > 11).map((r) => r[10] * 60 / Math.max(1, r[11]));
+  const qq = (xs, p) => (xs.length ? q(xs, p) : NaN); const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+  const g6s = qq(per60('smart'), 0.5), g6a = mean(per60('dd:always')), g6m = mean(per60('smart')); const naiveLost = worlds.flatMap((w) => of(w, 'naive')).filter((r) => r[10] > 0).length;
+  const g7 = worlds.map((w) => ({ w, d: of(w, 'abl:noRival').length ? (cellStats(of(w, 'smart')).inTime - cellStats(of(w, 'abl:noRival')).inTime) * 100 : NaN }));
+  const g8 = worlds.map((w) => { const g = cellStats(of(w, 'guideTapper')); const chars = [...new Set(byWorld[w].recs.map((r) => r[1]))].map((c) => cellStats(of(w, 'guideTapper', (r) => r[1] === c)).inTime); return { w, g: g.inTime, worst: Math.min(...chars), s: cellStats(of(w, 'smart')).inTime, a: cellStats(of(w, 'adaptive')).inTime }; });
+  const g5 = ['inspect:1', 'bestBuy'].flatMap((o) => ['warn0', 'warn1'].map((wb) => { let n = 0, top = 0; for (const t of Object.values(dom)) { const x = t['G5|' + o + '|' + wb]; if (x) { n += x.n; top += x.top; } } return { o, wb, n, r: n ? top / n : NaN }; }));
+  const cal = existsSync('tools/balance-data/rivals.json') ? JSON.parse(readFileSync('tools/balance-data/rivals.json', 'utf8')) : null;
+  const F1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : '—'); const F2 = (x) => (Number.isFinite(x) ? x.toFixed(2) : '—');
+  L.push('', '## T6 rivals gates (spec §16; matrix records + `--dominance` + `--rivals`)', '', '| gate | result | numbers |', '|---|---|---|');
+  L.push(`| G1 no archetype best of the four in > 60% of cells | ${ok(Object.values(share).every((x) => x <= 0.6))} | ${cells.length} cells: ${ARCH.map((a) => `${a} ${P(share[a])}`).join(' · ')} |`);
+  L.push(`| G2 each archetype best in ≥ 1 cycle bucket (pooled over characters) | ${ok(ARCH.every((a) => g2[a].length))} | ${ARCH.map((a) => `${a}: ${g2[a].join(', ') || 'none'}`).join(' · ')} |`);
+  L.push(`| G3 A4 with competition (≤ 60% each) | ${ok(Object.values(s3).every((x) => x / Math.max(1, cells.length) <= 0.6))} | ${Object.entries(s3).sort((a, b) => b[1] - a[1]).map(([p, x]) => `${p} ${P(x / Math.max(1, cells.length))}`).join(' · ')} |`);
+  L.push(`| G4 dd:flagged beats dd:never and dd:always (pooled and ≥ 3 worlds) | ${ok(g4)} | pooled flagged ${P(pool('smart').inTime)}/${pool('smart').med} · never ${P(pool('dd:never').inTime)}/${pool('dd:never').med} · always ${P(pool('dd:always').inTime)}/${pool('dd:always').med}; ${ddW.map((x) => `${x.w} ${P(x.f.inTime)}/${x.f.med} vs ${P(x.nv.inTime)}/${x.nv.med} vs ${P(x.al.inTime)}/${x.al.med}${x.ok ? ' ✓' : ' ✗'}`).join(' · ')} |`);
+  L.push(`| G5 competed cards: inspect:1 and the best buy top-U in 10–85% (0 / ≥ 1 warn) | ${g5.every((x) => x.n) ? ok(g5.every((x) => x.r >= 0.10 && x.r <= 0.85)) : 'not run'} | ${g5.map((x) => `${x.o} ${x.wb} ${P(x.r)} of ${x.n}`).join(' · ')} |`);
+  L.push(`| G6 lost deals / 60 months: smart median in [0.3, 2.5]; dd:always ≥ 1.5× smart; naive 0 | ${ok(g6s >= 0.3 && g6s <= 2.5 && g6a >= 1.5 * g6m && naiveLost === 0)} | smart median ${F2(g6s)} (mean ${F2(g6m)}) · dd:always mean ${F2(g6a)} · naive games with a loss ${naiveLost} |`);
+  L.push(`| G7 \`_dev.noRival\` changes smart in time by ≤ 5 pp | ${ok(g7.every((x) => Math.abs(x.d) <= 5 + 1e-9))} | ${g7.map((x) => `${x.w} ${F1(x.d)} pp`).join(' · ')} |`);
+  L.push(`| G8 A1 (guideTapper ≥ 65%, every character ≥ 50%) and A3 (smart, adaptive 55–75%) | ${ok(g8.every((x) => x.g >= 0.65 && x.worst >= 0.5 && x.s >= 0.55 && x.s <= 0.75 && x.a >= 0.55 && x.a <= 0.75))} | ${g8.map((x) => `${x.w} guide ${P(x.g)} (worst ${P(x.worst)}) · smart ${P(x.s)} · adaptive ${P(x.a)}`).join(' | ')} |`);
+  L.push(`| G9 calibration (empirical hazard of the sealed draws vs the table, cells ≥ 500) | ${cal ? 'report' : 'not run'} | ${cal ? worlds.map((w) => { const rs = (cal[w] || { rows: [] }).rows.filter((x) => x.reach >= 500); return `${w}: ${rs.length ? `max |Δ| ${(Math.max(...rs.map((x) => Math.abs(x.emp - x.table))) * 100).toFixed(1)} pp over ${rs.length} cells (${cal[w].cards} cards)` : 'no cell ≥ 500'}`; }).join(' · ') : ''} |`);
+  return L;
 }
 function t2Report() {
   const byWorld = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = [`tools/balance-data/matrix-${w}.json`, `tools/balance-t2-${w}.json`].find(existsSync); if (f) byWorld[w] = JSON.parse(readFileSync(f, 'utf8')); }
@@ -707,6 +769,7 @@ function t2Report() {
     L.push(`| smart ≥ naive + 5 pp in every world | ${ok(ws.every((w) => pool(w, 'smart').inTime >= pool(w, 'naive').inTime + 0.05))} | ${ws.map((w) => `${w} smart ${P(pool(w, 'smart').inTime)} vs naive ${P(pool(w, 'naive').inTime)}`).join(' · ')} |`);
     if (has('life:cheap')) L.push(`| w1: cheapest vs most expensive habit on personal / values cards ≤ 10 pp | ${byWorld.w1 ? ok(Math.abs(pool('w1', 'life:cheap').inTime - pool('w1', 'life:dear').inTime) <= 0.10) : '—'} | ${ws.map((w) => `${w} ${P(pool(w, 'life:cheap').inTime)} vs ${P(pool(w, 'life:dear').inTime)}`).join(' · ')} |`);
   }
+  L.push(...t6Gates(byWorld, dom, P, ok));
   { const st = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = `tools/balance-data/stories-${w}.json`; if (existsSync(f)) st[w] = JSON.parse(readFileSync(f, 'utf8')).summary; }
     if (Object.keys(st).length) {
       L.push('', '## T3 stories & business (`node tools/sim.mjs --stories N wX`: blindTapper, guideTapper, smart, sideHustler, owner × N each)', '', '| world | car / move / friend / career / crisis start | side (side-plan ≥ 15 mo) | completion | steps / run | chain items / 12 mo (med · p90) | business items / business-year (med · p90) | defaults share | standalone repeats < 12 mo | max open items / chains | stage distribution (0/1/2/3) |', '|---|---|---|---|---|---|---|---|---|---|---|');

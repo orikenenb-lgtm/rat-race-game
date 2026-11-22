@@ -23,14 +23,15 @@ const CFG = { w1: GENTLE, w2: NORMAL, w3: NORMAL, w4: { ...NORMAL, amp: 1.1 }, h
 export const MULT = Object.freeze({
   dealCost: { exp: 1.08, slow: 1.00, rec: 0.86, recov: 0.94 },
   cfRent: { exp: 1.02, slow: 1.00, rec: 0.97, recov: 0.99 },
-  cfOther: { exp: 1.05, slow: 0.98, rec: 0.90, recov: 0.97 },
+  cfOther: { exp: 1.05, slow: 0.96, rec: 0.84, recov: 0.96 },      // balance pass: businesses and industries feel a recession more than rent does (was .98/.90/.97)
   loanAdd: { exp: -0.10, slow: 0.10, rec: 0.30, recov: 0 },         // pp/month (base 0; not w2, whose rate cards drive it)
   loanCap: { exp: 1.10, slow: 1.00, rec: 0.70, recov: 0.90 },
   idxAnnual: { exp: 0.09, slow: 0.00, rec: -0.14, recov: 0.16 },   // base 0.04 (LIFE_CFG.idx.annual)
   idxCrash: { exp: 1, slow: 2, rec: 1.5, recov: 1 },
-  bizShock: { rec: 0.12, exp: 0.06 },
+  bizShock: { rec: 0.20, exp: 0.06, recMonths: 6, expMonths: 6 },   // balance pass: a recession empties an owner-run business for longer (was 12% for 4 months)
+  grow: { exp: 1.5, slow: 0.8, rec: -0.5, recov: 1.0 },               // balance pass: asset prices follow the cycle (× an asset's monthly value change)
 });
-const BASE = { dealCost: 1, cfRent: 1, cfOther: 1, loanAdd: 0, loanCap: 1, idxAnnual: 0.04, idxCrash: 1 };
+const BASE = { dealCost: 1, cfRent: 1, cfOther: 1, loanAdd: 0, loanCap: 1, idxAnnual: 0.04, idxCrash: 1, grow: 1 };
 
 export function cycleCfg(worldId) { return CFG[worldId] || NORMAL; }
 

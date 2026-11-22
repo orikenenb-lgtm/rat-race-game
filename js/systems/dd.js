@@ -9,26 +9,28 @@ const RISKS = [0, 1, 2, 3];
 
 const LIKE = [[0.75, 0.22, 0.03], [0.45, 0.45, 0.10], [0.15, 0.50, 0.35], [0.05, 0.30, 0.65]]; // P(k flags | r), shared
 const CF_GENTLE = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [0.10, 0.80]];
-const CF_W1 = [[0.95, 1.05], [0.82, 1.04], [0.40, 1.00], [-0.30, 0.65]]; // review M4: believing the seller must not beat smart in w1
+const CF_W1 = [[0.95, 1.05], [0.80, 1.04], [0.30, 0.95], [-0.60, 0.50]]; // review M4: believing the seller must not beat smart in w1 (balance pass: was [.82,1.04] [.40,1] [−.30,.65])
 const CF_HARD = [[0.95, 1.05], [0.82, 1.04], [0.50, 1.00], [-0.40, 0.80]];
 const CF_W4 = [[0.95, 1.05], [0.80, 1.03], [0.40, 0.95], [-0.60, 0.70]]; // review M4: harder w4 (owner)
-const NOI_W2 = [[0.97, 1.03], [0.90, 1.03], [0.75, 1.00], [0.55, 0.95]];
+const CF_W2 = [[0.95, 1.05], [0.80, 1.04], [0.40, 0.95], [-0.60, 0.70]]; // balance pass: w2 traps cost enough that checking a flagged deal pays (G4)
+const NOI_W2 = [[0.97, 1.03], [0.88, 1.03], [0.62, 0.98], [0.30, 0.85]]; // balance pass: was [.90,1.03] [.75,1] [.55,.95]
 const VF = [[0.97, 1.03], [0.92, 1.02], [0.82, 1.00], [0.65, 0.95]];
+const VF_HARD = [[0.97, 1.03], [0.90, 1.02], [0.72, 0.97], [0.45, 0.85]]; // balance pass: in the net-worth worlds a hidden problem costs real value (DD must be able to flip a buy)
 const REPAIR = [0.05, 0.20, 0.45, 0.75];
 // repair = down × (REP_MIN + REP_SPAN·u) when it happens (tuned, T2 §13.5 knob 1: spec 0.1 + 0.4u made big-down worlds punitive)
 const REP_MIN = 0.05, REP_SPAN = 0.25, REP_MEAN = REP_MIN + REP_SPAN / 2;
 const CFG = {
   w1: { prior: [0.40, 0.30, 0.18, 0.12], cf: CF_W1, minFee: 400 }, // tuned (T2 §13.5 knob 1): believing the seller must cost something even in w1
-  w2: { prior: [0.30, 0.33, 0.24, 0.13], cf: CF_HARD, noi: NOI_W2, minFee: 1500 },
-  w3: { prior: [0.30, 0.32, 0.24, 0.14], cf: CF_HARD, minFee: 3000 },
-  w4: { prior: [0.20, 0.28, 0.30, 0.22], cf: CF_W4, minFee: 3000 },
+  w2: { prior: [0.27, 0.31, 0.26, 0.16], cf: CF_W2, noi: NOI_W2, minFee: 1500 }, // balance pass: a few more problem deals (was .30 .33 .24 .13)
+  w3: { prior: [0.30, 0.32, 0.24, 0.14], cf: CF_HARD, vf: VF_HARD, minFee: 3000 },
+  w4: { prior: [0.20, 0.28, 0.30, 0.22], cf: CF_W4, vf: VF_HARD, minFee: 3000 },
   h: { prior: [0.50, 0.33, 0.13, 0.04], cf: CF_GENTLE, minFee: 400 },
 };
 
 /** Public per-world config (priors, likelihoods, factor ranges, repair chances, inspect:2 minimum fee). */
 export function ddCfg(worldId) {
   const c = CFG[worldId] || CFG.w1;
-  return { prior: c.prior, like: LIKE, cf: c.cf, noi: c.noi || null, vf: VF, repair: REPAIR, minFee: c.minFee, inspect1Energy: 4, inspect1Min: 10, inspect2Pct: 0.01 };
+  return { prior: c.prior, like: LIKE, cf: c.cf, noi: c.noi || null, vf: c.vf || VF, repair: REPAIR, minFee: c.minFee, inspect1Energy: 4, inspect1Min: 10, inspect2Pct: 0.01 };
 }
 
 /** Flag pools (spec §17). `rush` cuts both ways: +0.10 negotiation chance. */
@@ -70,7 +72,7 @@ export function drawDD(rs, card, worldId, opts = {}) {
   }
   const rng = opts.noi && C.noi ? C.noi[risk] : C.cf[risk];
   const f = round2(rng[0] + (rng[1] - rng[0]) * cfR);
-  const vf = round2(VF[risk][0] + (VF[risk][1] - VF[risk][0]) * valueR);
+  const V = C.vf; const vf = round2(V[risk][0] + (V[risk][1] - V[risk][0]) * valueR);
   const ch = REPAIR[risk]; const down = Math.max(0, opts.down ?? (card ? card.down : 0) ?? 0);
   const repair = repairR < ch ? r100(down * (REP_MIN + REP_SPAN * repairR / ch)) : 0;
   const dd = { risk, flags, f, vf, repair, jitter: jitterR, level: 0 };
@@ -96,8 +98,8 @@ for (const wid of Object.keys(CFG)) for (let k = 0; k <= 2; k++) {
   const C = CFG[wid]; const p = post(wid, k); const key = wid + ':' + k;
   POST[key] = p;
   const mean = (tab) => p.reduce((a, pr, r) => a + pr * (tab[r][0] + tab[r][1]) / 2, 0);
-  EXP[key] = { f: mean(C.cf), fNoi: C.noi ? mean(C.noi) : mean(C.cf), vf: mean(VF), rep: p.reduce((a, pr, r) => a + pr * REPAIR[r] * REP_MEAN, 0),
-    byRisk: RISKS.map((r) => ({ r, p: p[r], f: (C.cf[r][0] + C.cf[r][1]) / 2, fNoi: C.noi ? (C.noi[r][0] + C.noi[r][1]) / 2 : (C.cf[r][0] + C.cf[r][1]) / 2, vf: (VF[r][0] + VF[r][1]) / 2, rep: REPAIR[r] * REP_MEAN })) };
+  EXP[key] = { f: mean(C.cf), fNoi: C.noi ? mean(C.noi) : mean(C.cf), vf: mean(C.vf || VF), rep: p.reduce((a, pr, r) => a + pr * REPAIR[r] * REP_MEAN, 0),
+    byRisk: RISKS.map((r) => ({ r, p: p[r], f: (C.cf[r][0] + C.cf[r][1]) / 2, fNoi: C.noi ? (C.noi[r][0] + C.noi[r][1]) / 2 : (C.cf[r][0] + C.cf[r][1]) / 2, vf: ((C.vf || VF)[r][0] + (C.vf || VF)[r][1]) / 2, rep: REPAIR[r] * REP_MEAN })) };
   P10[key] = { f: p10Of(p, C.cf), fNoi: p10Of(p, C.noi || C.cf) };
 }
 

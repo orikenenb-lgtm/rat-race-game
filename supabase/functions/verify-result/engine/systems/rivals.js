@@ -34,13 +34,17 @@ const GENTLE = {
 };
 const HARD = {
   pN: { weak: [0.70, 0.25, 0.05, 0], mid: [0.35, 0.40, 0.20, 0.05], strong: [0.15, 0.35, 0.35, 0.15], golden: [0.05, 0.25, 0.40, 0.30] },
-  close: { 1: [0.20, 0.20, 0.15, 0.45], 2: [0.35, 0.25, 0.15, 0.25], 3: [0.50, 0.25, 0.15, 0.10] },
+  // balance pass (T6 verify D2, G7): the first delay step is a quick look — others rarely close that fast; a second step gives them time
+  // (was 1: .20 .20 .15 .45 · 2: .35 .25 .15 .25 · 3: .50 .25 .15 .10)
+  close: { 1: [0.08, 0.22, 0.15, 0.55], 2: [0.15, 0.30, 0.15, 0.40], 3: [0.25, 0.30, 0.15, 0.30] },
 };
+/** w4: most deals carry hidden problems (prior risk 2–3 ≈ 52%), so checking is needed more often — interest closes a bit slower there. */
+const HARD_W4 = { pN: HARD.pN, close: { 1: [0.06, 0.18, 0.14, 0.62], 2: [0.12, 0.25, 0.15, 0.48], 3: [0.20, 0.28, 0.15, 0.37] } };
 const CFG = {
   w1: { enabled: true, roiCuts: [8, 16], ...GENTLE },
   w2: { enabled: true, roiCuts: [5, 9], ...HARD },
   w3: { enabled: true, roiCuts: [10, 20], ...HARD },
-  w4: { enabled: true, roiCuts: [10, 20], ...HARD },
+  w4: { enabled: true, roiCuts: [10, 20], ...HARD_W4 },
   h: { enabled: true, roiCuts: [8, 16], ...GENTLE },
 };
 /** → {enabled, roiCuts:[lo, hi], pN:{weak, mid, strong, golden}, close:{1:[p1,p2,p3,pNever], 2:…, 3:…}} */

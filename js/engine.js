@@ -996,7 +996,7 @@ function econStep(st, out) {
   const r = CY.stepEcon(e, rT, rN, st.worldId, st.month);
   if (r.changed && (r.to === 'rec' || r.to === 'exp')) {
     const amp = CY.cycleCfg(st.worldId).amp;
-    for (const a of managedOf(st)) a.biz = BIZ.applyShock(a.biz, r.to === 'rec' ? { id: 'cycle_rec', demand: 1 - CY.MULT.bizShock.rec * amp, months: 4 } : { id: 'cycle_exp', demand: 1 + CY.MULT.bizShock.exp * amp, months: 6 });
+    for (const a of managedOf(st)) a.biz = BIZ.applyShock(a.biz, r.to === 'rec' ? { id: 'cycle_rec', demand: 1 - CY.MULT.bizShock.rec * amp, months: CY.MULT.bizShock.recMonths } : { id: 'cycle_exp', demand: 1 + CY.MULT.bizShock.exp * amp, months: CY.MULT.bizShock.expMonths });
   }
   if (r.labelChanged || st.stats.paydays % 3 === 0) out.news.push({ kind: 'econ', text: CY.headline(e.label, st.month), label: e.label, signal: e.signal });
   if (r.labelChanged && e.label === 'מיתון') mark(st, 'recession', 0, -1, ''); // T6 §4.2: the PUBLIC label, never the sealed phase
@@ -1310,7 +1310,8 @@ export function summaryForServer(st) {
 function monthlyWorld(st, out) {
   const w = W(st);
   if (st.history) historyMonth(st, out);
-  for (const a of st.assets) { const g = a.grow ?? (w.appreciation ? w.appreciation[a.k] || 0 : 0); if (g) a.value = Math.round(a.value * (1 + g)); }
+  const gm = st.econ && R4(st) ? CY.mult(st.econ, st.worldId, 'grow') : 1; // balance pass (rules 4): values rise faster in a boom and fall in a recession
+  for (const a of st.assets) { const g0 = a.grow ?? (w.appreciation ? w.appreciation[a.k] || 0 : 0); const g = gm === 1 ? g0 : g0 >= 0 ? g0 * gm : g0 * (2 - gm); if (g) a.value = Math.round(a.value * (1 + g)); }
   if (w.mechanic === 'fx') {
     // small monthly drift, slightly mean-reverting toward the reference rate
     const r = next(st.rng, 'drift');
@@ -1421,7 +1422,7 @@ export function landing(st) {
       if (T3(st) && p.card.car && st.story.flags.noCar) p.card = { ...CH.NO_CAR_DOODAD, a: Math.max(300, r100(CH.NO_CAR_DOODAD.a * lifeS(st) / 9000)), swapped: p.card.n }; // C1: no car, no car repair
       break;
     case 'market': p = w.mechanic === 'history' ? historyMarket(st) : createMarket(st); break;
-    case 'crisis': p = { type: 'crisis', card: clone(drawCard(st, 'crisis', w.crises, 'crisis')) }; if (st.tutorial && st.turn <= 3) p.skipped = true;
+    case 'crisis': p = { type: 'crisis', card: clone(drawCard(st, 'crisis', w.crises, 'crisis')) }; if ((st.tutorial && st.turn <= 3) || (R4(st) && !st.history && st.month < CRISIS_GRACE)) p.skipped = true; // playtest B6: no month-without-pay before there was a month to build a cushion
       if (!st.history && !p.skipped) { const X = LIFE_CFG.idx; st.prices.IDX = Math.max(1, round2(st.prices.IDX * (1 + X.crisisHit))); st.life.lastCrash = st.month; p.indexHit = X.crisisHit; } break;
     case 'mystery': p = createMystery(st); break;
     case 'bank': p = createBank(st); break;
@@ -2587,7 +2588,10 @@ function optionU(ctx, ev, o, params) {
       if (o.id === 'inspect:1' || o.id === 'inspect:2') {
         const base = Math.max(0, best ? best.U : 0); const evi2 = best ? best.evi2 : 0;
         let U = o.id === 'inspect:1' ? (1 - h) * (base + 0.7 * evi2) - (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : (1 - h) * (base + evi2) - (o.cost ? o.cost.cash || 0 : 0) / E;
-        if (flaggedInspect(ev) === o.id) U = Math.max(U, base + 0.05); // T3 review M7: with warning signs, checking first is the careful choice
+        if (flaggedInspect(ev) === o.id) { // T3 review M7: with warning signs, checking first is the careful choice — also before haggling
+          const offU = ev.options.filter((x) => x.kind === 'offer' && x.enabled).reduce((a, x) => Math.max(a, optionU(ctx, ev, x).U), 0);
+          U = Math.max(U, base + 0.05, offU + 0.05);
+        }
         const k = d.dd ? d.dd.flags.filter((f) => f.kind === 'warn').length : 0;
         reasons.push(R('evi', evi2 > 0.3 ? 'העסקה גבולית: בדיקה שווה יותר ממה שהיא עולה' : 'הבדיקה כנראה לא תשנה את ההחלטה', evi2 - 0.1));
         if (k) reasons.push(R('flags', `יש ${warnSigns(k)} — בדיקה יכולה לשנות את ההחלטה`, 0.2 + evi2));
@@ -2718,6 +2722,24 @@ function guidePlan(st) {
   return 'work';
 }
 function cashflowOf(st) { return salaryNow(st) + payslipOf(st).sideIncome + activeBizOf(st) + passiveOf(st) + extraIncomeOf(st) - expensesOf(st); }
+/** Rules 4: a crisis landing in the first months passes by (the card still draws; nothing is paid). Playtest B6. */
+const CRISIS_GRACE = 6;
+/** Playtest S6 (careful play scored 42/100): an inspection the information justified is a good decision — warning signs at level 0,
+ *  a checked range that straddles zero, or a value of information (evaluator, ×(1 − h)) at least worth its cost. */
+function inspectJustified(ctx, ev, o, us) {
+  const d = ev.data || {}; const dd = d.dd; if (!dd || !/^inspect:/.test(o.id)) return false;
+  const warn = dd.flags.filter((f) => f.kind === 'warn').length;
+  if (dd.level === 0 && warn >= 1) return true;
+  const buys = ev.options.filter((x) => x.kind === 'buy' && x.enabled);
+  if (dd.level === 1 && buys.some((b) => b.basis && b.basis.lo != null && b.basis.lo - (b.loanMonthly || 0) < 0 && b.basis.hi - (b.loanMonthly || 0) > 0)) return true;
+  const best = buys.map((b) => dealBuy(ctx, ev, b)).sort((a, b) => b.U - a.U)[0]; if (!best) return false;
+  const h = d.rivals && d.rivals.n ? d.rivals.hazardNext || 0 : 0;
+  const cost = o.id === 'inspect:1' ? (o.cost && o.cost.energy ? enCost(ctx, o.cost.energy) : 0) : (o.cost ? o.cost.cash || 0 : 0) / ctx.E;
+  return (1 - h) * (o.id === 'inspect:1' ? 0.7 : 1) * best.evi2 >= cost + h * Math.max(0, best.U) && best.evi2 >= 0.1;
+}
+/** A standing plan choice repeated on payday ("keep going") is one decision, not a new one every month (playtest S6: the same
+ *  "keep going — study was better" filled the review 5 times and pulled a careful player's score to 42). */
+const PLAN_DEDUPE_MONTHS = 6;
 function decisionRecord(st, ev, o, params) {
   if (!st.life || ev.type === 'intro') return null; // T4 E-3: the intro card has no verdict, no dq entry, no mastery change
   const k0 = st.pending && st.pending.k0 != null ? st.pending.k0 : -1; // T6 §4.4 card start (-1: unknown → decisionPoints scans the log)
@@ -2734,6 +2756,13 @@ function decisionRecord(st, ev, o, params) {
   let score = personal || best.U - worst.U < 0.5 || best.U - mine.U < 0.5 ? 100 : Math.round(100 * clamp((mine.U - worst.U) / (best.U - worst.U), 0, 1));
   if (values) score = best.U - mine.U <= 1.5 ? 100 : mine.flags.length ? score : Math.max(60, score);
   if (personal && mine.flags.length) score = 50;
+  if (R4(st) && ev.type === 'deal' && inspectJustified(ctx, ev, o, us)) score = Math.max(score, 85); // the information was worth it
+  const planCard = R4(st) && (ev.type === 'payday' || ev.type === 'edu') && (o.id === 'ok' || o.kind === 'plan');
+  if (planCard) {
+    if (!mine.flags.length) score = best.U - mine.U <= 1.5 ? Math.max(score, 85) : Math.max(60, score); // a plan is a trade-off of time, energy and money: a wide band
+    const prev = (dqOf(st).decisions || []).slice().reverse().find((r) => r.type === ev.type);
+    if (prev && prev.o === o.id && prev.b === String((ev.options.find((x) => x.id === best.id) || {}).label || best.id).replace(/\s*\(.*\)$/, '').slice(0, 24) && st.month - prev.m < PLAN_DEDUPE_MONTHS) return null;
+  }
   const verdict = mine.flags.some((f) => f !== 'debt') ? 'risky' : score >= 85 ? 'strong' : score >= 60 ? 'ok' : score < 40 ? 'costly' : 'mixed';
   const bestOpt = ev.options.find((x) => x.id === best.id) || {};
   const why = mine.flags.find((f) => f !== 'debt') ? DQ_WHY[mine.flags.find((f) => f !== 'debt')] : values ? DQ_WHY.values : best.U - worst.U < 0.5 ? DQ_WHY.near : mine === best || best.U - mine.U < 0.5 ? DQ_WHY.best
@@ -3708,9 +3737,9 @@ const STORY_HOOKS = {
     apply(st, x) { if (x.hit) { setGross(st, 1.08); st.life.lastRaise = st.month; st.life.raises++; x.out.news.push({ kind: 'story', chain: 'career', text: 'הבוס הסכים: +8% ברוטו על התואר.' }); } else { st.life.happiness = clamp(st.life.happiness - 3, 0, 100); x.out.news.push({ kind: 'story', chain: 'career', text: 'הבוס אמר "אחר כך". לפחות שאלת.' }); } } },
   sideLater: { preview(st, e) { e.cash -= r100(sideExpected(st) * marginalRate(grossBase(st)) * 12 * 0.1); e.flow -= sideReportFee(st); e.months = 0; } }, // the +10% penalty at year end; the accountant's annual return is due either way (T3 review M3) — the tax itself too
   bigOrder: { preview(st, e, x) { e.cash -= r100(0.3 * x.S); e.flow += r100(0.55 * x.S); e.months = 1; e.note = e.note || 'החומרים עכשיו, התשלום בחודש הבא'; }, // T3 review M5: the real cash now (a loan warning when it needs one), the payment next month
-    apply(st, x) { st.cash -= r100(0.3 * x.S); addIncome(st, 'תשלום על הזמנת העוגות', r100(0.55 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; if (x.hit) { it.from = st.month + 2; it.until = st.month + 2; x.out.news.push({ kind: 'story', chain: 'side', text: 'הלקוח מאחר — התשלום יגיע רק בעוד חודשיים.' }); } else { it.from = st.month + 1; it.until = st.month + 1; } } },
+    apply(st, x) { st.cash -= r100(0.3 * x.S); addIncome(st, 'תשלום על הזמנת העוגות', r100(0.55 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; if (x.hit) { it.from = st.month + 2; it.until = st.month + 2; x.out.news.push({ kind: 'story', chain: 'side', text: 'הלקוח מאחר — התשלום יגיע רק בעוד חודשיים.' }); } else { it.from = st.month + 1; it.until = st.month + 1; x.out.news.push({ kind: 'story', chain: 'side', text: `הלקוח אישר: ${fmtM(r100(0.55 * x.S))} יגיעו בחודש הבא, בזמן.` }); } } },
   bigOrderAdvance: { preview(st, e, x) { e.oddsMoney = { p: 0.6, hit: r100(0.55 * x.S) - r100(0.3 * x.S), miss: 0 }; },
-    apply(st, x) { if (!x.hit) { x.out.news.push({ kind: 'story', chain: 'side', text: 'בית הקפה לא הסכים למקדמה והזמין ממישהו אחר.' }); return; } st.cash += r100(0.275 * x.S) - r100(0.3 * x.S); addIncome(st, 'יתרת התשלום על העוגות', r100(0.275 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; it.from = st.month + 1; it.until = st.month + 1; } },
+    apply(st, x) { if (!x.hit) { x.out.news.push({ kind: 'story', chain: 'side', text: 'בית הקפה לא הסכים למקדמה והזמין ממישהו אחר.' }); return; } x.out.news.push({ kind: 'story', chain: 'side', text: `בית הקפה הסכים: ${fmtM(r100(0.275 * x.S))} מקדמה עכשיו, והשאר בחודש הבא.` }); st.cash += r100(0.275 * x.S) - r100(0.3 * x.S); addIncome(st, 'יתרת התשלום על העוגות', r100(0.275 * x.S), 1); const it = st.incomeExtra[st.incomeExtra.length - 1]; it.from = st.month + 1; it.until = st.month + 1; } },
   sidePartTime: { preview(st, e) { e.salary = tempCutDelta(st, 0.6); e.salaryMonths = 5; e.flow += sideExpected(st); e.months = 5; },
     apply(st, x) { addPayCut(st, { src: 'partTime', mult: 0.6, until: st.month + 4, label: 'חצי משרה' }); x.c.data.partTime = true; x.c.data.gradAt = 12; st.life.sideBoost = st.month + 4; } },
   sideSmall: { apply(st, x) { x.c.data.small = true; } },
@@ -3795,7 +3824,9 @@ function applyStoryOption(st, chainId, stepId, o, ctx, out) {
   const eff = storyEffects(st, chainId, stepId, o, ctx.item);
   const x = { chainId, stepId, o, c, item: ctx.item, hit, S, out };
   if (o.fx) applyStoryFx(st, o.fx, x);
+  const n0 = out.news.length;
   const hook = o.hook && STORY_HOOKS[o.hook]; if (hook && hook.apply) hook.apply(st, x);
+  if (pHit != null) for (const nw of out.news.slice(n0)) if (nw.kind === 'story') Object.assign(nw, { outcome: true, hit }); // playtest B4: the result of a chance choice is a news item the UI can show as a result card
   // review m8: the odds are decided now, so the luck links to this choice (CUR_K: the 'c' / 'Q' action); an expired default (payday,
   // no decision recorded) has no decision to link to → k −1 by design, never another decision's index
   if (eff.oddsMoney) { const real = hit ? eff.oddsMoney.hit : eff.oddsMoney.miss; addLuck(st, 'story', real - (eff.oddsMoney.p * eff.oddsMoney.hit + (1 - eff.oddsMoney.p) * eff.oddsMoney.miss), ctx.expired ? -1 : CUR_K); }

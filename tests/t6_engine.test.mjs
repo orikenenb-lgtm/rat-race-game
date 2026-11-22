@@ -194,6 +194,7 @@ test('AC-9 reveal: first payday with month ≥ m + 6, numbers = the sealed truth
     const st = E.deserialize(json); const ev = E.currentEvent(st); const o = ev.options.find((x) => x.kind === 'inspect' && x.enabled) || ev.options.find((x) => x.kind === 'offer' && x.enabled); if (!o) continue;
     st.pending.rv.close = st.pending.rv.steps + 1; E.choose(st, ev, o.id);
     const d = st.rivalDeals[st.rivalDeals.length - 1]; const pub = () => E.metrics(st).rivals.deals.find((x) => x.m === d.m && x.name === d.name);
+    if (st.rivalDeals.some((x) => x !== d && x.name === d.name && !x.revealed)) continue; // an earlier lost card of the same name would reveal first (the news is matched by name)
     assert.ok(pub() && !('cf' in pub()) && !('truth' in pub()) && pub().revealed === false);
     let revealedAt = null;
     for (let i = 0; i < 80 && !st.over && revealedAt == null; i++) {
@@ -365,7 +366,7 @@ function drive(arch, cfg, { frozen = false, trapped = false, rolls = 700 } = {})
       const o = ev.options.find((x) => x.id === id);
       if (ev.type === 'deal' && n === 0) {
         const warn = ev.data.dd ? ev.data.dd.flags.filter((f) => f.kind === 'warn').length : 0;
-        if (has15(ev)) { rec.offerOpp++; if (id === 'offer:15') rec.offer15++; }
+        if (hasOffer(ev)) { rec.offerOpp++; if (/^offer:/.test(id)) rec.offer15++; }
         if (warn >= 1 && ev.data.dd && ev.data.dd.level === 0) { rec.flaggedSeen++; if (/^inspect:/.test(id)) rec.flaggedInspected++; else if (o && o.kind === 'buy') rec.flaggedBoughtUninspected = (rec.flaggedBoughtUninspected || 0) + 1; }
         if (rec.firstBuyRent == null && ev.options.some((x) => x.kind === 'buy' && x.enabled && x.net > 0) && !AR.RENT_KINDS.has(ev.data.kind)) rec.firstNonRentOffered = true;
       }
@@ -378,7 +379,7 @@ function drive(arch, cfg, { frozen = false, trapped = false, rolls = 700 } = {})
   }
   return { st, rec };
 }
-const has15 = (ev) => ev.options.some((o) => o.id === 'offer:15' && o.enabled);
+const hasOffer = (ev) => ev.options.some((o) => /^offer:/.test(o.id) && o.enabled); // rule card: "תמיד מנסה להוריד מחיר" (balance pass: the step is offer:5)
 
 test('AC-16 policies see only public data: no engine import (static scan), deep-frozen and trapped views, games complete', () => {
   const src = readFileSync(new URL('../js/systems/archetypes.js', import.meta.url), 'utf8');
@@ -398,7 +399,7 @@ test(`AC-30 rule cards are true (${N(25)} games per archetype per world)`, () =>
     const f = drive('founder', cfg).rec; tot.founder.games++; if (f.firstBuyRent === true && f.firstNonRentOffered) tot.founder.firstRentWhenNonRent++;
   }
   assert.equal(tot.saver.loanBuys, 0, 'saver never takes a loan to buy'); assert.equal(tot.saver.unins, 0, 'saver never buys a flagged deal uninspected');
-  assert.equal(tot.gambler.inspects, 0, 'gambler never inspects'); assert.equal(tot.gambler.offer15, tot.gambler.offerOpp, 'gambler always offers 15%');
+  assert.equal(tot.gambler.inspects, 0, 'gambler never inspects'); assert.equal(tot.gambler.offer15, tot.gambler.offerOpp, 'gambler always tries a lower price');
   assert.ok(tot.diversified.checks > 0 && tot.diversified.ok === tot.diversified.checks, `diversified auto-invest ≥ 40% of the surplus it saw (${tot.diversified.ok}/${tot.diversified.checks})`);
   assert.equal(tot.founder.firstRentWhenNonRent, 0, "founder's first purchase is never a rent asset while a business-kind deal is offered");
   console.log('   ' + JSON.stringify(tot));
