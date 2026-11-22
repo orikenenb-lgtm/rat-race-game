@@ -905,6 +905,23 @@ async def test_intro(b, phone=True):
     log(tag, 'after the intro', json.dumps(r4, ensure_ascii=False))
     assert r4['next'] and 'cf' in r4['keys'] and 'next' in r4['keys'], f'#hNext + reveal keys ({r4})'
     await shot(pg, 't4_intro4_next', sfx)
+    # §4.4 core coach 1/2 (T4 verify D2): S-C0 "הדרכה 1/2" · S-C1 · S-C2; then a few rolls — never "i/3", tips are labelled "טיפ"
+    await pg.wait_for_selector('#coach:not([hidden]) .bubble', timeout=8000)
+    c1 = await pg.evaluate("() => [document.querySelector('#coach .bubble small').textContent.trim(), document.querySelector('#coach .bubble b').textContent]")
+    assert c1 == ['הדרכה 1/2', 'מטילים קובייה'], f'C-roll chrome ({c1})'
+    labels = [c1[0]]; rnd = random.Random(3)
+    await pg.click('#coach [data-c="next"]')
+    for k in range(10):
+        s = await wait_idle(pg)
+        if s['coach']:
+            labels.append(await pg.inner_text('#coach .bubble small')); await pg.click('#coach [data-c="next"]'); await pg.wait_for_timeout(200); continue
+        if s['card']:
+            await pg.wait_for_timeout(900)
+            if (await st(pg))['coach']: continue
+            await handle_card(pg, rnd, tag, await st(pg)); await pg.wait_for_timeout(300); continue
+        await pg.click('#roll'); await pg.wait_for_timeout(300)
+    log(tag, 'coach labels', labels)
+    assert all('/3' not in x for x in labels) and all(x.strip() in ('הדרכה 1/2', 'הדרכה 2/2', 'הדרכה', 'טיפ') for x in labels), f'coach chrome ({labels})'
     log(tag, 'first-minute checks passed'); STATS['intro' + sfx] = 1
     await ctx.close()
 

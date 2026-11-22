@@ -364,7 +364,7 @@ function wireUI() {
   $('#turboBtn').innerHTML = ui.ICON.bolt;
   $('#voiceBtn').innerHTML = ui.ICON.voice;
   $('#sheetBtn').innerHTML = ui.ICON.doc + '<span>הדוח שלי</span>';
-  $('#roll').onclick = () => { unlock(); ui.hideCoach(); turn(); };
+  $('#roll').onclick = () => { unlock(); ui.hideCoach('roll'); turn(); };   // T4: a coach closed by the roll resolves 'roll' (a tip that just opened is not "seen")
   wireHold();
   $('#hLife').onclick = (e) => { const b = e.target.closest('[data-life]'); if (!b || !S) return; sfx('click'); lifeChip(b.dataset.life); };
   $('#hEnergy').onclick = async () => { const en = await energyMod(); if (en) showNoEnergy(en, true); };
@@ -398,7 +398,7 @@ function wireUI() {
       const free = !a || a === document.body || a.id === 'c' || a.id === 'roll';
       if (!free || !$('#evm').hidden || !$('#gm').hidden || !$('#start').hidden) return;
       if (a && a.id === 'roll') return; // native button activation handles it
-      e.preventDefault(); unlock(); ui.hideCoach(); turn();
+      e.preventDefault(); unlock(); ui.hideCoach('roll'); turn();
     }
   });
   let rt = 0;

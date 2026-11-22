@@ -378,7 +378,84 @@ async def t_skip(b):
         check(not seen, f'AC-T1 run {run}: 3 rolls + a reload of the skipped game show no coach ({seen})')
         await ctx.close()
 
-TOAST_OBS = "window.__toasts=[]; new MutationObserver(()=>{const e=document.querySelector('#toast'); if(e&&/\\bon\\b/.test(e.className)&&e.innerText) window.__toasts.push(e.innerText.replace(/\\n/g,' '))}).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})"
+TIP_ID = {'🔋 כוח': 'C-power', 'הדוח שלי': 'C-sheet', '🛟 קרן חירום': 'C-fund', '😊 אושר': 'C-happy', '🏦 דירוג אשראי': 'C-credit', '🛒 אינפלציה': 'C-cpi',
+          'התוכנית החודשית': 'C-plan', 'מוקד החודש': 'C-focus', 'מה הבחירה עושה': 'C-impact'}
+COACH_FULL = "(()=>{const c=document.getElementById('coach');if(!c||c.hidden)return null;const q=(s)=>(c.querySelector(s)||{}).textContent||'';const t=document.getElementById('toast');return {small:q('.bubble small').trim(),title:q('.bubble b'),text:q('.bubble p'),skip:!!c.querySelector('[data-c=skip]'),toast:!!t&&/\\bon\\b/.test(t.className)}})()"
+async def play_coached(pg, rolls, on_coach):
+    """Roll `rolls` times; every coach goes to on_coach(info, n) → 'next' | 'skip'. Cards: the primary / first option. → [(n, info)]"""
+    log = []; n = 0; last = None; stall = time.time()
+    while n < rolls and time.time() - stall < 240:
+        c = await pg.evaluate(COACH_FULL)
+        if c:
+            key = (c['small'], c['title'])
+            if key != last: log.append((n, c)); last = key; stall = time.time()
+            await pg.wait_for_timeout(300)
+            await pg.evaluate(f"document.querySelector('#coach [data-c={await on_coach(c, n)}]')?.click()"); continue
+        last = None
+        if await pg.locator('#gm:not([hidden])').count(): await pg.evaluate("document.querySelector('#gm .acts button')?.click()"); await pg.wait_for_timeout(300); continue
+        if await pg.locator('#evm:not([hidden])').count():
+            await pg.wait_for_timeout(900)   # an in-card coach opens ~0.5 s after the card
+            if await pg.evaluate(COACH_FULL): continue
+            await pg.evaluate("(()=>{const b=[...document.querySelectorAll('#evCard button[data-o]:not([disabled])')];(b.find(x=>x.classList.contains('primary'))||b[0])?.click()})()"); await pg.wait_for_timeout(400); continue
+        if await pg.evaluate("(()=>{const r=document.getElementById('roll');return !!r && !r.disabled})()"):
+            await pg.wait_for_timeout(2500)   # a player reads the board: a tip between turns opens in this pause
+            if await pg.evaluate(COACH_FULL): continue
+            await pg.click('#roll'); n += 1; stall = time.time(); await pg.wait_for_timeout(800); continue
+        await pg.wait_for_timeout(300)
+    return log, n
+async def t_hints(b):
+    """§4.4 (T4 verify D2): core coaches use the spec texts ("הדרכה 1/2", "2/2", C-roi unnumbered); the "טיפ" one-liners appear once each
+    when their system first shows, one coach per turn, never together with a toast on a phone, recorded in rr2-reveal.coached;
+    "בלי טיפים" stops them; an existing player (rr2-reveal.all) never sees one."""
+    init = ["localStorage.setItem('rr2-settings', JSON.stringify({turbo:true}))"]
+    ctx, pg = await page(b, vp=PHONE, onboarded=False, init=init)
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-welcome', timeout=60000)
+    await pg.click('[data-act=welcome-go]')
+    for sel in ('[data-intro-opt="next"]', '[data-intro-opt="fix:diy"]', '[data-intro-opt="go"]'):   # diy: 🔋 is revealed at once → C-power on the first turn
+        await pg.wait_for_selector(sel + ':not([disabled])', timeout=90000); await pg.click(sel)
+    async def nxt(c, n): return 'next'
+    log, n = await play_coached(pg, 14, nxt)
+    for k, c in log: print('   coach', k, c['small'], '·', c['title'], '·', c['text'][:90], flush=True)
+    core = [c for _, c in log if c['small'].startswith('הדרכה')]; tips = [c for _, c in log if c['small'] == 'טיפ']
+    roll = next((c for c in core if c['title'] == 'מטילים קובייה'), None); meter = next((c for c in core if c['title'] == 'מד החופש'), None)
+    check(roll and roll['small'] == 'הדרכה 1/2' and 'הטל קוביות' in roll['text'] and roll['skip'], f'S-C0/S-C1/S-C2 core 1/2 roll coach ({roll})')
+    check(meter and meter['small'] == 'הדרכה 2/2' and re.search(r'הכנסה פסיבית .+ מתוך .+ הוצאות: \d+%', meter['text']), f'S-C5/S-C6 core 2/2 meter coach with live values ({meter})')
+    check(all('/3' not in c['small'] for c in core) and all(c['small'] in ('הדרכה 1/2', 'הדרכה 2/2', 'הדרכה') for c in core), f'no "הדרכה i/3": {[c["small"] for c in core]}')
+    roi = [c for c in core if c['title'] == 'כמה הכסף מרוויח?']
+    check(all(c['small'] == 'הדרכה' and not c['skip'] and re.search(r'שמכניסים .+ בחודש = \d+% בשנה', c['text']) for c in roi), f'S-C3/S-C4 in-card ROI coach: unnumbered, only "הבנתי" ({roi or "not reached"})')
+    titles = [c['title'] for c in tips]
+    check(len(set(titles)) >= 3 and len(titles) == len(set(titles)) and all(t in TIP_ID for t in titles), f'≥ 3 different "טיפ" coaches in {n} rolls, each once ({titles})')
+    check(all(c['skip'] for c in tips) and all('₪' in c['text'] or re.search(r'\d', c['text']) or c['title'] in ('מוקד החודש', 'מה הבחירה עושה') for c in tips), 'every tip carries live values (or is a T2 explainer) and a "בלי טיפים" link')
+    per_turn = {}
+    for k, c in log: per_turn[k] = per_turn.get(k, 0) + 1
+    check(all(v == 1 for v in per_turn.values()), f'§4.1 at most one coach per turn ({per_turn})')
+    check(not any(c['toast'] for _, c in log), f'§4.7 phone: no toast on screen while a coach is open ({[(k, c["title"]) for k, c in log if c["toast"]]})')
+    r = await ls(pg, 'rr2-reveal') or {}
+    want = {TIP_ID[t] for t in titles}
+    check(want <= set(r.get('coached') or []) and r.get('all') is False, f'rr2-reveal.coached records the tips shown ({sorted(want)} ⊆ {r.get("coached")})')
+    await ctx.close()
+    # "בלי טיפים" on the first tip: no more tips (player level)
+    ctx, pg = await page(b, vp=PHONE, onboarded=False, init=init)
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-welcome', timeout=60000)
+    await pg.click('[data-act=welcome-go]')
+    for sel in ('[data-intro-opt="next"]', '[data-intro-opt="fix:diy"]', '[data-intro-opt="go"]'):
+        await pg.wait_for_selector(sel + ':not([disabled])', timeout=90000); await pg.click(sel)
+    async def off(c, n): return 'skip' if c['small'] == 'טיפ' else 'next'
+    log, n = await play_coached(pg, 10, off)
+    tips = [(k, c['title']) for k, c in log if c['small'] == 'טיפ']
+    r = await ls(pg, 'rr2-reveal') or {}
+    check(len(tips) == 1 and r.get('hintsOff') is True, f'"בלי טיפים" → hintsOff, no tip after it in {n} rolls ({tips}, hintsOff={r.get("hintsOff")})')
+    await ctx.close()
+    # an existing player: no tip at all
+    ctx, pg = await page(b, vp=PHONE, init=init + ["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:3,tutorialDone:true,stars:{w1:1}}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('.wv-char')
+    await pg.click('.wv-char >> nth=0 >> .wv-go'); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    log, n = await play_coached(pg, 8, nxt)
+    check(not log and (await ls(pg, 'rr2-reveal') or {}).get('all') is True, f'AC-T8 existing player: no coach / tip in {n} rolls ({[(k, c["small"], c["title"]) for k, c in log]})')
+    await ctx.close()
+
+TOAST_OBS ="window.__toasts=[]; new MutationObserver(()=>{const e=document.querySelector('#toast'); if(e&&/\\bon\\b/.test(e.className)&&e.innerText) window.__toasts.push(e.innerText.replace(/\\n/g,' '))}).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true})"
 async def t_dreamtut(b):
     """AC-D3 (T4 verify D3): in the tutorial game (F2 + dream 🗽 + developer) buying the tutorial coffee cart completes the dream's
     first mission — its "משימה הושלמה" toast is shown even though the buy emits a burst of other feedback (it is never dropped)."""
@@ -536,7 +613,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('dreamtut', t_dreamtut), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

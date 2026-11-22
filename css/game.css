@@ -333,6 +333,7 @@ input[type=range]{width:100%;margin-top:12px;accent-color:var(--gold);min-height
 @keyframes ring{50%{box-shadow:0 0 0 8px var(--gold),0 0 0 9999px rgba(10,6,0,.38)}}
 #coach .bubble{position:fixed;pointer-events:auto;background:var(--paper);border-radius:18px;padding:14px 16px;box-shadow:0 18px 50px rgba(0,0,0,.4);border:2px solid var(--gold);animation:pop .4s cubic-bezier(.2,1.4,.4,1)}
 #coach .bubble small{color:var(--gold-text);font-weight:800}
+#coach.tip .ring{box-shadow:0 0 0 4px var(--gold),0 0 0 9999px rgba(10,6,0,.16)}   /* T4 §4.4: a "טיפ" one-liner dims the board less than a tutorial step */
 #coach .bubble b{display:block;font:20px/1.2 var(--title);margin:2px 0}
 #coach .bubble p{margin:0 0 4px;font-size:15px}
 #coach .bubble .acts{margin-top:10px}

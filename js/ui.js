@@ -67,7 +67,7 @@ export const ICON = {
 };
 
 /* ============================================================ toasts */
-const tq = []; let tBusy = false, tWait = 0;
+const tq = []; let tBusy = false, tWait = 0, tCur = null;
 /** Short message pill under the HUD (queued). kind: ''|'gold'|'bad' */
 export function toast(text, opts = {}) {
   if (!text) return;
@@ -84,9 +84,11 @@ function nextToast() {
   if (!tq.length) { tBusy = false; return; }
   // T2 verify D7 / T1 D-2: on phones a toast never floats over an open card, dialog or the life story (same rule as the verdict pill):
   // it waits (no timer races, nothing dropped but the queue cap) and shows once the board is clear
-  if (fbHold || (phoneQ() && (evState || shown('#gm') || shown('#story')))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); return; }
+  // §4.7: a waiting coach / tip (priority 1) takes the slot before the next info pill
+  if (phoneQ() && !ovBusy && ovq.length && ovq[0].kind === 'coach' && !fbHold && !(evState || shown('#gm') || shown('#story'))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); pumpOv(); return; }
+  if (fbHold || (phoneQ() && (evState || shown('#gm') || shown('#story') || coachOpen()))) { tBusy = true; clearTimeout(tWait); tWait = setTimeout(nextToast, 400); return; }
   const t = tq.shift();
-  tBusy = true;
+  tBusy = true; tCur = t;
   el.className = 'on ' + t.kind + (t.action ? ' act' : '') + (t.sub ? ' two' : '') + (t.text.length > 64 ? ' long' : '');
   if (t.sub) {   // T3 UI-4: a second, smaller line (the business "why" sentence)
     el.textContent = ''; const w = document.createElement('span'); w.className = 'tw';
@@ -106,17 +108,18 @@ function nextToast() {
 /* ============================================================ phone overlay queue (T5 / T4 §4.7, UX§4 fix 2)
    On phones (≤ 600 px) at most ONE of coach / achievement / lesson / rumour (newspaper) / verdict floats above the board.
    A coach bubble holds everything; the rest is released one by one by priority. Desktop shows them as before. */
-const OVP = { levelUp: 1, worldEntry: 1, achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };   // T5 §4.2 rule 3
+const OVP = { coach: 0, levelUp: 1, worldEntry: 1, achievement: 3, dream: 4, lesson: 5, rumour: 5, rival: 5, verdict: 6 };   // T5 §4.2 rule 3
 const OV_KEEP = new Set(['coach', 'levelUp', 'worldEntry', 'achievement', 'dream', 'lesson']);   // T4 §4.7: never dropped by the cap
 let fbHold = false;   // T5 §4.2 holdFeedback(true): B / C / D wait (e.g. while the T4 coach or the T1 recover bar is up)
 const ovq = []; let ovBusy = null, ovT = 0;
 const phoneQ = () => innerWidth <= 600;
 const coachOpen = () => { const c = $('#coach'); return !!c && !c.hidden; };
 /** show(done): paint the overlay and call done() once it is gone. Verdicts replace a queued verdict (only the newest matters). */
-function overlay(kind, show) {
+function overlay(kind, show, cancel = null) {
   if (!phoneQ()) { show(() => {}); return; }
   if (kind === 'verdict') { const i = ovq.findIndex((x) => x.kind === 'verdict'); if (i >= 0) ovq.splice(i, 1); }
-  ovq.push({ kind, show, p: OVP[kind] || 9, t: performance.now(), behindRival: ovBusy === 'rival' });
+  if (kind === 'coach') { const i = ovq.findIndex((x) => x.kind === 'coach'); if (i >= 0) ovq.splice(i, 1)[0].cancel?.(); }   // one tip waits at a time: the newest
+  ovq.push({ kind, show, cancel, p: OVP[kind] || 9, t: performance.now(), behindRival: ovBusy === 'rival' });
   ovq.sort((a, b) => a.p - b.p || a.t - b.t);
   // §4.7 cap 6: the newest verdict goes first, then the lowest-priority info line; a coach, achievement / level-up / world entry,
   // dream mission or lesson is never dropped (T4 verify D3) — the queue may then hold more than 6
@@ -129,7 +132,9 @@ function pumpOv() {
   if (fbHold) { ovT = setTimeout(pumpOv, 400); return; }
   // T7: a verdict that waited behind a T6 reveal line (it holds the slot until tapped or the next roll) is about a decision long gone
   if (ovq[0].kind === 'verdict' && ovq[0].behindRival && performance.now() - ovq[0].t > 9000) { ovq.shift(); ovT = setTimeout(pumpOv, 50); return; }
-  if (coachOpen() || (ovq[0].kind === 'verdict' && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
+  // §4.7: one floating thing at a time — a tip (priority 1) moves an ordinary info pill aside; it waits for an important one (keep)
+  if (ovq[0].kind === 'coach' && toastOn() && !coachOpen() && !(tCur && tCur.keep) && !(evState || shown('#gm') || shown('#story'))) toastAside();
+  if (coachOpen() || ((ovq[0].kind === 'verdict' || ovq[0].kind === 'coach') && toastOn())) { ovT = setTimeout(pumpOv, 400); return; }
   // T6 (UI fix): on phones a verdict pill never floats over an open card / dialog / life story (it covered the options):
   // it waits for the board; a verdict that waited > 9 s is about a decision long gone and is dropped
   // T2 verify D7: on phones nothing else floats over an open card / dialog / life story either — it waits for the board (never dropped)
@@ -769,12 +774,14 @@ export function flyCoins(from, n = 7) {
 
 /* ============================================================ coach marks */
 let coachRes = null, coachRelease = null, coachPrev = null;
-/** Spotlight a target and explain it. Resolves 'next' | 'skip'. The target stays clickable. */
-export function coach({ target, title, text, step, total, label = 'הדרכה', skipLabel = 'דלג על ההדרכה' }) {
+/** Spotlight a target and explain it. Resolves 'next' | 'skip' — or 'none' when the target is not on screen (nothing was shown).
+ *  The target stays clickable. T4 §4.4 chrome: `label i/n` for a numbered step; `label` alone when step is null (in-card core
+ *  coach, "טיפ" one-liners); skipLabel null = only "הבנתי". tip:true = the lighter one-line hint style. */
+export function coach({ target, title, text, step = null, total = null, label = 'הדרכה', skipLabel = 'דלג על ההדרכה', tip = false }) {
   hideCoach(); text = gz(text); title = gz(title);   // D4
   return new Promise((res) => {
     const el = $('#coach'); const t = typeof target === 'string' ? $(target) : target;
-    if (!el || !t || !t.getClientRects().length) { res('next'); return; }
+    if (!el || !t || !t.getClientRects().length) { res('none'); return; }
     coachRes = res;
     const card = t.closest('#evCard');
     try { t.scrollIntoView({ block: card ? 'center' : 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
@@ -794,15 +801,30 @@ export function coach({ target, title, text, step, total, label = 'הדרכה', 
       }
       el.innerHTML = `<div class="ring" style="left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px"></div>
         <div class="bubble" role="dialog" aria-label="${esc(title)}" style="${pos};width:${bw}px">
-        <small>${esc(label)} ${step}/${total}</small><b>${esc(title)}</b><p>${escI(text)}</p>
-        <div class="acts"><button class="primary" data-c="next">הבנתי</button><button class="chip" data-c="skip">${esc(skipLabel)}</button></div></div>`;
+        <small>${esc(label)}${step != null && total ? ` ${step}/${total}` : ''}</small><b>${esc(title)}</b><p>${escI(text)}</p>
+        <div class="acts"><button class="primary" data-c="next">הבנתי</button>${skipLabel ? `<button class="chip" data-c="skip">${esc(skipLabel)}</button>` : ''}</div></div>`;
     };
-    place(); el.hidden = false; el._place = place;
+    place(); el.hidden = false; el._place = place; el.classList.toggle('tip', !!tip);
     // the bubble is the topmost thing: Tab stays in it (also over an open phone sheet); closing it gives focus back
     coachPrev = document.activeElement; coachRelease = trapFocus(el);
     if (phoneQ()) { const vd = $('#verdict'); if (vd && vd.className.includes('on')) vd.className = vd.className.replace(/\bon\b/, '').trim(); } // one overlay at a time on phones
     el.onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; const v = b.dataset.c; hideCoach(v); };
     setTimeout(() => el.querySelector('[data-c="next"]')?.focus({ preventScroll: true }), 60);
+  });
+}
+/** T4 §4.4 / §4.7: a one-line "טיפ" through the single overlay queue — on phones it is priority 1 and waits for whatever floats
+ *  now (achievement, toast-backed lesson, verdict…) and for an open card / dialog to close; while it is open nothing else floats.
+ *  ready() is asked again when its turn comes (false → nothing shown, 'later'). → 'next' | 'skip' | 'none' | 'later' */
+export function hint(o, ready = () => true) {
+  return new Promise((res) => {
+    let fin = false; const end = (v) => { if (!fin) { fin = true; res(v); } };
+    overlay('coach', (done) => {
+      if (fin || coachOpen() || !ready()) { done(); end('later'); return; }
+      const { onShow, ...c } = o;
+      const pr = coach({ ...c, target: typeof c.target === 'function' ? c.target() : c.target, label: 'טיפ', step: null, total: null, tip: true });
+      if (coachOpen()) { try { onShow && onShow(); } catch (e) { console.warn(e); } }
+      pr.then((v) => { done(); end(v); });
+    }, () => end('later'));
   });
 }
 export function hideCoach(v = 'next') {
@@ -2068,7 +2090,7 @@ export function holdFeedback(on) { fbHold = !!on; if (!fbHold) { pumpOv(); if (t
  *  {toasts:false} keeps the C pills (shell notices such as the T1 save / renderer messages are queued around a game start). */
 export function flushFeedback({ toasts = true } = {}) {
   if (toasts) tq.length = 0;
-  aq.length = 0; ovq.length = 0; clearTimeout(ovT); fbHold = false;
+  aq.length = 0; for (const x of ovq.splice(0)) x.cancel?.(); clearTimeout(ovT); fbHold = false;
   const c = stickyCur; stickyCur = null; const el = document.getElementById('t6news'); if (el) { el.hidden = true; el.className = ''; } if (c) c.done();
 }
 /* T5 §4.1 progress milestones: 25 / 50 / 75 % of the freedom meter, once per game each (a resumed game starts from where it is) */

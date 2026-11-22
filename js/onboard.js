@@ -36,24 +36,37 @@ export function isRevealed(key) {
    Created for a brand-new tutorial game (w1, the engine's intro card at its first beat, the player has no rr2-reveal.all), then fed by
    what the game actually did: cards opened / closed, roll results, months. It never hides a part again; skip = everything. */
 const TFR = () => (typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORIAL_FREE_ROLLS : 10);
+/** §4.4 hint triggers are collected in every free / learning game (never ranked, daily, history): S.ui.seen = keys whose system has
+ *  appeared in this game (same game-state rules as the §4.3 reveal schedule). In a tutorial game the reveal keys feed it too. */
+const freeCfg = (CFG) => !!CFG && (CFG.mode || 'free') === 'free' && !CFG.resultId && CFG.worldId !== 'h';
+let hintable = false;
 export function prepare(S, CFG, W) {
-  curS = S;
+  curS = S; hintable = freeCfg(CFG) && !!(S && S.ui) && !(S && S.history);
   if (!S || !S.ui || S.ui.reveal || S.over) return;
   if (!CFG || !CFG.tutorial || !W || W.id !== 'w1' || !S.intro || S.intro.step !== 'salary') return;
   const R0 = readReveal(); if (R0 && R0.all) return;
   S.ui.reveal = { keys: [], skipped: false, coached: [], pd: 0 };
 }
+function seenAdd(S, keys) {
+  if (!hintable || !S || !S.ui) return;
+  const L = Array.isArray(S.ui.seen) ? S.ui.seen : (S.ui.seen = []);
+  for (const k of keys) if (k && !L.includes(k)) L.push(k);
+}
+const seen = (S, k) => !!(S && S.ui && ((Array.isArray(S.ui.seen) && S.ui.seen.includes(k)) || (S.ui.reveal && Array.isArray(S.ui.reveal.keys) && S.ui.reveal.keys.includes(k))));
+/** → true when a HUD part became visible (gradual reveal); hint triggers are recorded either way */
 function revealAdd(S, ...keys) {
+  seenAdd(S, keys);
   const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false;
   let ch = false; for (const k of keys) if (k && !R.keys.includes(k)) { R.keys.push(k); ch = true; }
   return ch;
 }
 function revealSkip(S) { const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false; R.skipped = true; return true; }
+const revealing = (S) => { const R = S && S.ui && S.ui.reveal; return !!(R && !R.skipped); };
 /** info = {m (metrics), out (a roll / choose / resolveStory result), cfg}. Pure state edit; the caller renders. */
 export function revealTick(S, info = {}) {
   if (S) curS = S;
-  const R = S && S.ui && S.ui.reveal; if (!R || R.skipped) return false;
-  if (S.intro && S.intro.step === 'skipped') return revealSkip(S);
+  if (!revealing(S) && !(hintable && S && S.ui)) return false;
+  if (revealing(S) && S.intro && S.intro.step === 'skipped') return revealSkip(S);
   const { m, out, cfg } = info; let ch = false;
   if (m) {
     const mo = m.month || 0;
@@ -85,8 +98,8 @@ function emitDone(h, reason) {
 }
 const engineIntro = (S) => !!(S && S.intro);
 
-/* ------------------------------------------------------------ legacy tutorial coaches (roll → meter → ROI), unchanged texts */
-const COACH_TOTAL = 3;
+/* ------------------------------------------------------------ §4.4 core tutorial coaches: C-roll (1/2) → C-meter (2/2), C-roi in the deal card */
+const CORE_STEP = { roll: 1, meter: 2 }, CORE_TOTAL = 2;
 /** §4.1 / AC-T1 (T4 verify D1): "דלג על ההדרכה" — on intro beat 1 or on a core coach — ends every tutorial coach of this game for
  *  good. The intro skip is recorded by the engine (S.intro.step 'skipped') and by the reveal state; both are folded into
  *  S.ui.coach.skip (saved with the game), so a resumed / re-rendered game never brings a coach back. */
@@ -98,11 +111,106 @@ function wantCoach(h, k) {
   return !!(U.coach && !U.coach[k]);
 }
 async function showCoach(h, k, o) {
-  const U = h.S.ui; U.coach[k] = true; h.persist();
-  const step = ['roll', 'meter', 'roi'].filter((x) => U.coach[x]).length;
-  const v = await ui.coach({ ...o, step, total: COACH_TOTAL });
+  const U = h.S.ui; U.coach[k] = true; h.persist(); turnUsed(h);
+  const step = CORE_STEP[k] ?? null;   // C-roi (in card) has no number and no skip link (§4.4)
+  const v = await ui.coach({ ...o, step, total: step ? CORE_TOTAL : null, skipLabel: step ? 'דלג על ההדרכה' : null });
   if (v === 'skip') { U.coach.skip = true; emitDone(h, 'skip'); }
   h.persist();
+}
+
+/* ------------------------------------------------------------ §4.4 hint coaches ("טיפ"): one line, once per player, free / learn only */
+// trigger = the system's key appeared in this game (S.ui.seen / the reveal keys). Never in ranked / daily / history, never for a player
+// with rr2-reveal.all (existing players) or rr2-reveal.hintsOff ("בלי טיפים"), never in a game whose tutorial was skipped. At most one
+// coach per turn; a hint between turns goes through ui.hint (the single overlay queue), an in-card hint opens in the card (§4.7).
+const fm = (n) => (typeof E.fmtM === 'function' ? E.fmtM(n) : String(Math.round(n)));
+const monthsTxt = (x) => { const v = Math.round((+x || 0) * 10) / 10; return v === 1 ? 'חודש אחד' : v === 2 ? 'חודשיים' : `${v} חודשים`; };
+const visEl = (sel) => { const e = typeof sel === 'string' ? document.querySelector(sel) : sel; return e && !e.hidden && e.getClientRects().length ? e : null; };
+/** a life-row chip, or the "⋯" chip that holds it on a narrow phone */
+const lifeChip = (cls, alt = null) => () => visEl(`#hLife .lc.${cls}:not(.in-more)`) || visEl('#hLife .lc.more') || (alt && visEl(alt)) || `#hLife .lc.${cls}`;
+const sheetTarget = () => visEl('#sheetBtn') || visEl('#sheet .total') || '#sheetBtn';
+const OUT_HINTS = [   // between turns, in this order
+  { id: 'C-power', key: 'energy', target: lifeChip('en'), title: '🔋 כוח',
+    text: (m, S) => `הכוח של ${S.charName || ''} בסיפור: ${Math.round((m.life || {}).energy ?? 0)} מתוך 100. מתחת ל־25 יש סכנת שחיקה — חודש בלי משכורת.` },
+  { id: 'C-sheet', key: 'sheet', target: sheetTarget, title: 'הדוח שלי',
+    text: (m) => `כאן כל השורות: נטו ${fm((m.payslip || {}).net ?? m.salary ?? 0)}, הוצאות ${fm(m.expenses || 0)}, נשאר ${fm(m.cashflow || 0)}. לפני החלטה גדולה — ${ui.gw('תציץ', 'תציצי')}.` },
+  { id: 'C-fund', key: 'fund', target: lifeChip('fund', '#sheetBtn'), title: '🛟 קרן חירום',
+    text: (m) => `יש לך ${monthsTxt((m.emergency || {}).months)} בצד. כשנגמר המזומן, הקרן משלמת לפני שהבנק נותן הלוואה כפויה.` },
+  { id: 'C-happy', key: 'happy', target: lifeChip('hp'), title: '😊 אושר',
+    text: (m) => `אושר ${Math.round((m.life || {}).happiness ?? 0)} מתוך 100. ל־★★★ צריך לפחות 60. פיתויים משמחים לרגע, ואז דועכים.` },
+  { id: 'C-credit', key: 'credit', target: lifeChip('cr'), title: '🏦 דירוג אשראי',
+    text: (m) => `הדירוג שלך ${(m.life || {}).creditScore ?? ''}. הלוואה כפויה מורידה אותו, ואז כל הלוואה עולה יותר.` },
+  { id: 'C-cpi', key: 'cpi', target: lifeChip('cpi'), title: '🛒 אינפלציה',
+    text: (m) => `המחירים עולים השנה ב־${(m.life || {}).inflationYear ?? 0}%. מזומן שלא עובד שווה פחות כל שנה.` },
+];
+export const HINT_IDS = ['C-plan', ...OUT_HINTS.map((x) => x.id), 'C-focus', 'C-impact'];
+function hintsOn(h) {
+  const S = h && h.S; if (!S || !S.ui || S.over || !freeCfg(h.CFG) || S.history) return false;
+  if (tutorialSkipped(S)) return false;
+  const R = readReveal();
+  if (R) return !R.all && !R.hintsOff;
+  return revealing(S);   // no player record (a game-only build): only a tutorial game teaches
+}
+const hinted = (id) => { const R = readReveal(); return !!(R && Array.isArray(R.coached) && R.coached.includes(id)); };
+function markHint(id, S) {
+  const R = readReveal() || {}; const c = Array.isArray(R.coached) ? R.coached : [];
+  if (!c.includes(id)) writeReveal({ coached: [...c, id] });
+  shownAt = { id, at: Date.now() };
+  const G = S && S.ui && S.ui.reveal; if (G && Array.isArray(G.coached) && !G.coached.includes(id)) G.coached.push(id);   // per game (§4.3)
+}
+/** a tip that a roll closed within 1.5 s of opening was not read: it may come back on a later turn */
+let shownAt = null;
+function unreadHint(id, v) {
+  if (v !== 'roll' || !shownAt || shownAt.id !== id || Date.now() - shownAt.at > 1500) return;
+  const R = readReveal(); if (R && Array.isArray(R.coached)) writeReveal({ coached: R.coached.filter((x) => x !== id) });
+}
+/* at most one coach per turn (core or hint) */
+let usedAt = null;
+const turnUsed = (h) => { usedAt = { S: h.S, t: h.S && h.S.turn }; };
+const turnFree = (h) => !(usedAt && usedAt.S === h.S && usedAt.t === (h.S && h.S.turn));
+/** between turns: the first due hint whose target is on screen (fire-and-forget; true when one was queued) */
+function hintBetween(h) {
+  if (!hintsOn(h) || !turnFree(h) || !alive(h) || !$('#coach').hidden) return false;
+  const due = OUT_HINTS.filter((x) => seen(h.S, x.key) && !hinted(x.id));
+  if (!due.length) return false;
+  turnUsed(h);
+  const my = h.my, t0 = h.S.turn;
+  (async () => {
+    for (const x of due) {
+      let m; try { m = E.metrics(h.S); } catch (e) { return; }
+      const v = await ui.hint({ target: x.target, title: x.title, text: x.text(m, h.S), skipLabel: 'בלי טיפים', onShow: () => markHint(x.id, h.S) },
+        () => h.my === my && my === h.gen() && h.S.turn === t0 && alive(h) && hintsOn(h) && !hinted(x.id));   // still this turn's quiet moment
+      if (v === 'skip') { writeReveal({ hintsOff: true }); return; }
+      unreadHint(x.id, v);
+      if (v !== 'none') return;   // shown (or no longer the moment): one per turn; 'none' = its chip is not on screen — try the next
+    }
+  })().catch((e) => console.warn(e));
+  return true;
+}
+/** in an open card (§4.7: the one overlay that may sit on a card): C-plan on a payday card with plan tiles, C-focus, C-impact */
+function hintInCard(ev, h) {
+  if (!ev || !hintsOn(h) || !turnFree(h)) return;
+  const S = h.S; let x = null;
+  const plans = ev.type === 'payday' && (ev.options || []).some((o) => String(o.id).startsWith('plan:'));
+  if (plans && seen(S, 'plan') && !hinted('C-plan')) {
+    const ot = (ev.options || []).find((o) => o.id === 'plan:overtime'); const e = (ot && ot.effects) || null;
+    const text = e && e.netDelta != null && e.energy != null
+      ? `איך ${ui.gw('תעביר', 'תעבירי')} את החודש? "שעות נוספות" מוסיפות ${fm(Math.abs(e.netDelta))} בחודש ולוקחות 🔋 ${Math.abs(Math.round(e.energy))}. מנוחה מחזירה כוח.`
+      : `איך ${ui.gw('תעביר', 'תעבירי')} את החודש? כל תוכנית משנה את ההכנסה ואת 🔋 הכוח. מנוחה מחזירה כוח.`;
+    x = { id: 'C-plan', target: '#evCard .plans', title: 'התוכנית החודשית', text };
+  } else if (ev.data && ev.data.focus && seen(S, 'focus') && !hinted('C-focus')) {
+    x = { id: 'C-focus', target: '#evCard .fsec', title: 'מוקד החודש', text: `על מה ${ui.gw('תשים', 'תשימי')} לב החודש, חוץ מהעבודה? כל מוקד עולה קצת 🔋 כוח.` };
+  } else if (ev.type === 'deal' && seen(S, 'impact') && !hinted('C-impact')) {
+    x = { id: 'C-impact', target: '#evCard #impP', title: 'מה הבחירה עושה', text: 'לכל אפשרות: מה קורה לקופה, לתזרים ולסיכון — לפני שבוחרים.' };
+  }
+  if (!x) return;
+  const my = h.my;
+  setTimeout(async () => {
+    if (h.my !== my || my !== h.gen() || !ui.isEventOpen() || !$('#coach').hidden || !turnFree(h) || hinted(x.id) || !visEl(x.target)) return;
+    turnUsed(h);
+    const p = ui.coach({ target: x.target, title: x.title, text: x.text, label: 'טיפ', tip: true, skipLabel: 'בלי טיפים' });
+    if (!$('#coach').hidden) markHint(x.id, S);
+    const v = await p; if (v === 'skip') writeReveal({ hintsOff: true }); else unreadHint(x.id, v);
+  }, 500);
 }
 
 /* ------------------------------------------------------------ first visit to a world: 2 coach marks about its mechanic (moved from game.js) */
@@ -158,7 +266,7 @@ export async function afterStart(h) {
   if (wantCoach(h, 'roll')) {
     await sleep(700);
     if (!alive(h)) return;
-    await showCoach(h, 'roll', { target: '#roll', title: 'מטילים קובייה', text: ROLL_TEXT() });
+    await showCoach(h, 'roll', { target: '#roll', title: 'מטילים קובייה', text: ROLL_TEXT() });   // S-C1 / S-C2 (core 1/2)
   } else if (!worldCoached(h.W.id)) {
     await sleep(900);
     await worldCoach(h);
@@ -167,39 +275,50 @@ export async function afterStart(h) {
 /** Between turns (roll enabled again). */
 export async function afterTurn(h) {
   curS = h.S;
-  if (wantCoach(h, 'meter') && isRevealed('goal')) {   // §4.4 C-meter runs once the meter is on screen
+  if (wantCoach(h, 'meter') && isRevealed('goal') && turnFree(h)) {   // §4.4 C-meter (core 2/2) runs once the meter is on screen (one coach per turn)
     const pass = h.W.goal.type === 'passive';
-    await showCoach(h, 'meter', { target: '#hGoal', title: pass ? 'מד החופש' : 'היעד של העולם', text: pass ? 'כשההכנסה הפסיבית (כסף מנכסים) מכסה את כל ההוצאות — הפס מתמלא ויצאת מהמירוץ. זו המטרה.' : 'כשהפס מתמלא — ניצחת. כל החלטה מזיזה אותו.' });
+    let text = 'כשהפס מתמלא — ניצחת. כל החלטה מזיזה אותו.';
+    if (pass) { const m = E.metrics(h.S); const ex = m.expenses || 0; text = `הכנסה פסיבית ${fm(m.passive || 0)} מתוך ${fm(ex)} הוצאות: ${ex ? Math.round(((m.passive || 0) / ex) * 100) : 0}%. כשהפס מלא — יצאת מהמירוץ.`; }   // S-C6
+    await showCoach(h, 'meter', { target: '#hGoal', title: pass ? 'מד החופש' : 'היעד של העולם', text });
     return;
   }
+  if (hintBetween(h)) return;   // §4.4 "טיפ" — the practice chip waits for another turn
   practice.offer(h);
 }
 /** A card was opened (in-card coaches). */
 export function onCard(ev, ctl, h) {
   curS = h.S; practice.hide();
-  if (ev && h.S && h.S.ui && h.S.ui.reveal && !h.S.ui.reveal.skipped) {   // §4.3 card triggers
-    const S = h.S; let ch = false;
+  if (ev && h.S && h.S.ui && (revealing(h.S) || hintable)) {   // §4.3 card triggers (gradual reveal and / or §4.4 hint triggers)
+    const S = h.S; const U = S.ui; const R = revealing(S) ? U.reveal : null; let ch = false;
     if (ev.type === 'intro') ch = revealAdd(S, 'cf');
-    if (ev.type === 'payday' && (ev.options || []).some((o) => String(o.id).startsWith('plan:'))) { S.ui.reveal.pd = (S.ui.reveal.pd || 0) + 1; ch = revealAdd(S, 'energy', 'plan', S.ui.reveal.pd >= 3 ? 'focus' : null); }
+    if (ev.type === 'payday' && (ev.options || []).some((o) => String(o.id).startsWith('plan:'))) {
+      if (R) R.pd = (R.pd || 0) + 1;
+      if (U.hpdT !== S.turn) { U.hpdT = S.turn; U.hpd = (U.hpd || 0) + 1; }   // landed payday cards (a re-opened card counts once)
+      ch = revealAdd(S, 'energy', 'plan', (R ? R.pd : U.hpd) >= 3 ? 'focus' : null) || ch;
+    }
+    if (ev.type === 'deal') { if (U.hdlT !== S.turn) { U.hdlT = S.turn; U.hdl = (U.hdl || 0) + 1; } if (U.hdl >= 2) ch = revealAdd(S, 'impact') || ch; }   // 2nd deal card
     if (ev.type === 'life') ch = revealAdd(S, 'happy', 'age') || ch;
     if (ev.type === 'doodad' && (ev.options || []).some((o) => o.id === 'skip')) ch = revealAdd(S, 'happy') || ch;
     if (ch) { h.persist(); h.render(false); }
   }
-  if (wantCoach(h, 'roi') && ev.type === 'deal' && ev.data && ev.data.down) {
+  if (wantCoach(h, 'roi') && ev.type === 'deal' && ev.data && ev.data.down && (ev.data.cf || 0) > 0) {   // §4.4 C-roi (core, in card): a deal that earns (the tutorial deal), so S-C4 reads true
+    const d = ev.data;
     setTimeout(async () => {
       if (h.my !== h.gen() || !ui.isEventOpen()) return;
-      await showCoach(h, 'roi', { target: '#evCard [data-roi]', title: 'הסוד של המשקיעים', text: 'לפני שקונים: כמה אחוז בשנה הכסף שלך מרוויח? ' + ui.gw('לחץ כאן ותראה', 'לחצי כאן ותראי') + ' את החישוב. אם התשואה גבוהה ממה שעולה ההלוואה — העסקה עובדת בשבילך. אם נמוכה — היא עובדת נגדך.' });
+      await showCoach(h, 'roi', { target: '#evCard [data-roi]', title: 'כמה הכסף מרוויח?', text: `${fm(d.down)} שמכניסים ${fm(d.cf || 0)} בחודש = ${d.roi ?? 0}% בשנה. ${ui.gw('לחץ', 'לחצי')} כאן כדי לראות את החישוב.` });   // S-C3 / S-C4
     }, 450);
+    return;
   }
+  hintInCard(ev, h);
 }
 /** A card closed. The engine intro card (E-3) ends the tutorial core: bus 'onboard:done' {reason:'done'|'skip'}. */
 export function onCardClosed(ev, res, h) {
   if (ev && ev.type === 'intro') emitDone(h, h.S && h.S.intro && h.S.intro.step === 'skipped' ? 'skip' : 'done');
   if (ev && ev.type === 'intro' && h && h.S && h.S.intro && h.S.intro.step === 'skipped' && markSkipped(h.S)) h.persist();   // AC-T1: no coach after the skip
-  const S = h && h.S; const R = S && S.ui && S.ui.reveal;
-  if (!ev || !R || R.skipped) return;
+  const S = h && h.S;
+  if (!ev || !S || !S.ui || !(revealing(S) || hintable)) return;   // §4.3 reveal and / or §4.4 hint triggers
   let ch = false;
-  if (ev.type === 'intro') {
+  if (ev.type === 'intro' && revealing(S)) {
     if (S.intro && S.intro.step === 'skipped') ch = revealSkip(S);
     else {
       if (S.intro && S.intro.choice === 'fix:diy') ch = revealAdd(S, 'energy') || ch;
