@@ -833,6 +833,16 @@ async def test_t3(b, phone=False):
     tl = await toasts(pg); log(tag, 'toasts', json.dumps(tl[-6:], ensure_ascii=False))
     assert not any('undefined' in t or 'null' in t or 'NaN' in t for t in tl), f'a toast renders undefined / null / NaN: {tl}'
     STATS['t3_biz_toast' + sfx] = 1
+    # T3 verify D6: on a phone the 🗓️ chip (CSS-hidden) is always one tap away in the "⋯" list, whether or not the row overflows
+    cal = await pg.evaluate("""() => { const c = document.querySelector('#hLife > .lc.cal'); return { chip: !!c, shown: !!(c && c.getClientRects().length),
+      more: !!document.querySelector('#hLife > .lc.more:not([hidden])'), inMore: !!document.querySelector('#hLifeMore [data-life="cal"]') }; }""")
+    log(tag, 'calendar chip', cal)
+    assert cal['chip'] and (cal['shown'] or (cal['more'] and cal['inMore'])), f'D6: the calendar is reachable: {cal}'
+    if phone:
+        await pg.click('#hLife > .lc.more'); await pg.wait_for_selector('#hLifeMore:not([hidden]) [data-life="cal"]', timeout=5000)
+        await pg.click('#hLifeMore [data-life="cal"]'); await pg.wait_for_selector('#gm:not([hidden])', timeout=10000)
+        assert 'לוח השנה' in await pg.inner_text('#gm'), 'the calendar opens from "⋯"'
+        await pg.keyboard.press('Escape'); await pg.wait_for_timeout(400)
     # 5) offer setups (a fresh w1 game: no business yet)
     await pg.goto(BASE); await start_world(pg, 'w1', 1); await clear_cards(pg, rnd, tag)
     for i in range(3):

@@ -437,12 +437,14 @@ function fitLife(box, focusKey) {
   box.appendChild(more);
   const over = () => box.scrollWidth > box.clientWidth + 1;
   const moved = [];
-  if (over()) {
+  // T3 verify D6: a phone hides the 🗓️ chip by CSS — then "⋯" is offered even when the row fits, so the calendar stays one tap away
+  const calHidden = chips.some((c) => !c.hidden && c.classList.contains('cal') && !c.getClientRects().length);
+  if (over() || calHidden) {
     more.hidden = false;
     const cand = chips.filter((c) => !c.hidden && c.getClientRects().length).sort((a, b) => lifePri(b) - lifePri(a));
     for (const c of cand) { if (!over()) break; c.hidden = true; c.dataset.ovf = '1'; moved.push(c); }
   }
-  if (!moved.length) { more.remove(); lifeMoreOpen = false; document.body.classList.remove('hlife-more-open'); } else {
+  if (!moved.length && !calHidden) { more.remove(); lifeMoreOpen = false; document.body.classList.remove('hlife-more-open'); } else {
     // the list: the chips moved here + the chips this width hides by CSS (never the not-yet-revealed ones)
     const cssHidden = chips.filter((c) => !c.hidden && !c.getClientRects().length);
     const items = [...moved, ...cssHidden].sort((a, b) => lifePri(a) - lifePri(b));
