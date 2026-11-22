@@ -122,7 +122,7 @@ All return `{ok, error?, effects, mentor, event (current pending event or null),
 | function | returns |
 |---|---|
 | `intro(st, resumed?)` | `{mentor, goalText, goalLabel, world, tagline}` — opening mentor line (or "חזרת לחודש X") |
-| `cityModels(st)` | every 3D object the city should show now: `[{key, assetId, model, label, kind:'re'…/'holding'/'angel'/'foundation', golden}]` — rebuild the board from this on resume |
+| `cityModels(st)` | every 3D object the city should show now: `[{key, assetId, model, label, kind:'re'…/'holding'/'angel'/'foundation', golden, stage?, activity?}]` (`stage` 0–3 and last month's `activity` on T3 businesses) — rebuild the board from this on resume |
 | `boardInfo(worldId)` | `[{index, ch, type, name, color, ink, icon}] × 24` for building the ring |
 | `worldList()` | lobby data: `[{id, order, name, tagline, goal, goalLabel, maxMonths, stars, theme, mechanic, characters:[characterCard]}]` |
 | `characterCard(world, c)` | `{id, name, desc, salary, salaryUsd, cash, expenses, surplus, perk, icon}` |

@@ -767,7 +767,8 @@ function modelFor(st, k) { return W(st).models[k] || null; }
 /** All 3D objects the board city should show right now: [{key, model, label, kind}] — use on resume. */
 export function cityModels(st) {
   const w = W(st); const out = [];
-  for (const a of st.assets) out.push({ key: 'a' + a.id, assetId: 'a' + a.id, model: modelFor(st, a.k), label: a.n, kind: a.k, golden: !!a.golden });
+  for (const a of st.assets) out.push({ key: 'a' + a.id, assetId: 'a' + a.id, model: modelFor(st, a.k), label: a.n, kind: a.k, golden: !!a.golden,
+    ...(a.biz && a.biz.t3 ? { stage: a.biz.stage || 0, activity: (a.bizRep && a.bizRep.activity) || null } : {}) });   // T3 §10.2 / verify D8: growth stage + last month's activity
   const groupsSeen = new Set();
   for (const tk of Object.keys(st.holdings)) {
     const t = w.tickers[tk];

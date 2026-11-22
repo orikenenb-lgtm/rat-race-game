@@ -812,5 +812,13 @@ test('T3 verify D7: a permanent raise chip (promo accept) equals the applied cha
     assert.equal(chip, E.metrics(st).payslip.net - n0, `${w} cut ${cut}: chip ${chip}`);
   }
 });
+test('T3 verify D8: cityModels() business entries carry the growth stage and last month\'s activity (and survive a save round trip)', () => {
+  const st = E.createGame({ worldId: 'w1', seed: 300, mode: 'free' }); st.cash = 1e6;
+  st.pending = { id: 5, type: 'business', tile: 'K', pos: 3, mode: 'offer', typeId: E.getWorld('w1').bizOffers[0], seed: 99 }; st.phase = 'event'; E.choose(st, null, 'start');
+  for (let t = 0; t < 30 && !st.over; t++) { E.rollDice(st); let ev = E.landing(st); while (ev) ev = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['ok', 'pass', 'done', 'skip'].includes(o.id)) || ev.options.find((o) => o.enabled)).id).event; }
+  const biz = E.cityModels(st).filter((m) => m.kind === 'biz'); assert.ok(biz.length >= 1);
+  for (const m of biz) { const a = st.assets.find((x) => 'a' + x.id === m.key); assert.equal(m.stage, a.biz.stage); assert.ok(m.activity && 'utilization' in m.activity && 'busy' in m.activity, JSON.stringify(m)); }
+  assert.deepEqual(E.cityModels(E.deserialize(JSON.parse(E.serialize(st)))), E.cityModels(st));
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

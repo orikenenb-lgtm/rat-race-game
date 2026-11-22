@@ -789,7 +789,7 @@ export function reportCard(r) {
     cash: { change: r.cash.change }, toOwner: { net: r.toOwner.net, drawNet: r.toOwner.drawNet },
     cogs: { total: r.cogs.total }, opex: { total: r.opex.total },
     why: r.why ? { sentence: r.why.sentence, cash: r.why.cash.map((x) => ({ ...x })), profit: r.why.profit.map((x) => ({ ...x })) } : null,
-    lines: r.lines.map((x) => ({ ...x })), notes: r.notes.map((x) => ({ ...x })), allNotes: (r.allNotes || r.notes).slice(0, 8).map((x) => ({ ...x })), headline: r.headline };
+    lines: r.lines.map((x) => ({ ...x })), notes: r.notes.map((x) => ({ ...x })), allNotes: (r.allNotes || r.notes).slice(0, 8).map((x) => ({ ...x })), headline: r.headline, activity: r.activity ? { ...r.activity } : null };
 }
 
 /** Compact card data for the UI ("דוח עסקי"). `report` = the last simulate() report, or its reportCard() (optional). */
