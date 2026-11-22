@@ -131,6 +131,12 @@ function persist() {
   // full (quota) or blocked storage (SecurityError, review m-2): tell the player once per game; a refused future-save
   // overwrite is not a storage failure (the future save is kept on purpose)
   if (!r.ok && !r.future && !quotaWarned) { quotaWarned = true; toastWhenIdle(r.quota ? SS.S7 : SS.S7b, { kind: 'bad', ms: 8000 }); }
+  branchNotice();
+}
+/** T6 verify D4: a practice branch that saves.js removed to make room (this write, a backup, a new branch) is never silent */
+function branchNotice() {
+  const gone = typeof saves.takeRemovedBranches === 'function' ? saves.takeRemovedBranches() : [];
+  for (const w of gone) { let name = w; try { name = E.getWorld(w).name || w; } catch (e) { /* unknown world id */ } toastWhenIdle(SS.S13.replace('{w}', name), { kind: 'bad', ms: 8000 }); }
 }
 /** ui.js keeps only the newest 4 queued toasts: hand an important one over when the toast pill has been idle twice in a row */
 function toastWhenIdle(text, opts, tries = 0) {

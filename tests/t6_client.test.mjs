@@ -290,12 +290,29 @@ lap('M3 storage priority');
   const limit = used() + 1500; const q2 = quotaStore(limit); for (const [k, v] of qs._m) q2._m.set(k, v); RW._setStorage(q2); cur = q2;
   const r = saves.write('rr2-save-free-w4', cfg, st);
   ok(r.ok && q2.getItem('rr2-ghosts') === null && q2.getItem('rr2-save-branch-w3') !== null && q2.getItem('rr2-bak:rr2-save-free-w2') !== null, 'M3: a real save under quota evicts the ghost cache first; the older branch and the T1 backup survive');
+  q2._m.set('rr2-branches', JSON.stringify([{ w: 'w3', origin: 'last', k0: 4, month: 3, at: 1 }]));
+  saves.takeRemovedBranches();
   const r2 = saves.write('rr2-save-branch-w1', { ...cfg, learn: true, slot: 'branch' }, st);
   ok(r2.ok && q2.getItem('rr2-save-branch-w3') === null && q2.getItem('rr2-bak:rr2-save-free-w2') !== null, 'M3: then an older practice branch (another world) goes; the T1 backup stays');
+  eq([r2.removedBranches, saves.takeRemovedBranches(), saves.takeRemovedBranches(), JSON.parse(q2.getItem('rr2-branches'))], [['rr2-save-branch-w3'], ['w3'], [], []],
+    'T6 verify D4: a removed branch is reported (write result + takeRemovedBranches once, for the player notice) and its rr2-branches entry is dropped');
   q2.removeItem('rr2-save-branch-w1');
+  q2._m.set('rr2-save-branch-w4', JSON.stringify({ v: 3, cfg: { worldId: 'w4', learn: true, slot: 'branch' }, state: { v: 1, month: 2 }, savedAt: 5 }));   // another world's (small) branch: removing it cannot make room
+  q2._m.set('rr2-branches', JSON.stringify([{ w: 'w4', origin: 'last', k0: 4, month: 3, at: 5 }]));
+  q2._m.set('rr2-ghosts', JSON.stringify(['g'.repeat(500)]));
+  const w4raw = q2.getItem('rr2-save-branch-w4'), ghRaw = q2.getItem('rr2-ghosts');
   q2._m.set('rr2-x-filler', 'y'.repeat(Math.max(0, limit - used() - 300)));
   const r3 = saves.write('rr2-save-branch-w2', { ...cfg, learn: true, slot: 'branch' }, st);
   ok(!r3.ok && r3.quota && q2.getItem('rr2-bak:rr2-save-free-w2') !== null, 'M3: a branch write that still does not fit fails with quota (toast) and never evicts a T1 backup');
+  ok(q2.getItem('rr2-save-branch-w4') === w4raw && q2.getItem('rr2-ghosts') === ghRaw && JSON.parse(q2.getItem('rr2-branches')).length === 1 && !saves.takeRemovedBranches().length,
+    'T6 verify D4 (§7.2): a write that fails anyway leaves the other world\'s branch, its rr2-branches entry and the ghost cache exactly as they were');
+  q2.removeItem('rr2-bak:rr2-save-free-w2'); q2.removeItem('rr2-x-filler');   // no T1 backup left to evict either; full again
+  q2._m.set('rr2-x-filler', 'y'.repeat(Math.max(0, limit - used() - 300)));
+  const r4 = saves.write('rr2-save-free-w3', cfg, st);   // a real save that does not fit even after the soft data
+  ok(!r4.ok && r4.quota && q2.getItem('rr2-save-branch-w4') === w4raw && q2.getItem('rr2-ghosts') === ghRaw, 'T6 verify D4: a failing real save puts the soft data back too', JSON.stringify([r4, q2.getItem('rr2-save-branch-w4') === w4raw, q2.getItem('rr2-ghosts') === ghRaw, [...q2._m.keys()]]));
+  q2.removeItem('rr2-x-filler');
+  const r5 = saves.backup('rr2-save-free-w9', JSON.stringify({ v: 3, cfg, state: { v: 1 } }), 'clear');
+  ok(r5 && q2.getItem('rr2-save-branch-w4') === w4raw && !saves.takeRemovedBranches().length, 'a backup that fits without soft eviction removes nothing');
   RW._setStorage(globalThis.localStorage);
 }
 

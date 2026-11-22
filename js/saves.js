@@ -34,6 +34,8 @@ export const STR = {
   S9: 'פרטי הכינוי במכשיר נפגמו. שמרנו עותק שלהם. אפשר לשחזר את החשבון עם קוד השחזור.',
   S10: 'תוצאה של אתגר שעוד לא נשלחה לשרת נפגמה. שמרנו עותק שלה במכשיר.',
   S11: 'המשחק השמור שלך חזר, ואפשר להמשיך ממנו.',
+  // T6 verify D4: {w} = the world's name
+  S13: 'כדי לשמור את המשחק פינינו מקום במכשיר: ענף התרגול של {w} נמחק. המשחק המקורי שלו לא נפגע.',
   S12: 'לא הצלחנו לטעון את המשחק. בדוק את החיבור ורענן את הדף.',
 };
 
@@ -140,6 +142,26 @@ function softList(except) {
   out.push(...keys().filter((k) => k.startsWith(BRANCH) && k !== except).map((k) => ({ kind: 'key', key: k, at: savedAt(k) })).sort((a, b) => a.at - b.at));
   return out;
 }
+/** T6 verify D4 (spec §7.2): soft data is removed only when that makes the write succeed. tryPut() takes soft items one by one
+ *  (ghosts, then other branches) and retries; when the write still fails every taken item is PUT BACK (the space it used is free
+ *  again, because nothing was written). A branch that did go is recorded (takeRemovedBranches) and its rr2-branches entry dropped. */
+function softTake(except) {
+  const taken = [];
+  return {
+    taken,
+    *steps() { for (const c of softList(except)) { const raw = get(c.key); if (raw == null || !del(c.key)) continue; taken.push([c.key, raw]); yield c; } },
+    rollback() { for (let i = taken.length - 1; i >= 0; i--) { try { put(taken[i][0], taken[i][1]); } catch (e) { /* cannot happen: its own space is free */ } } taken.length = 0; },
+    commit() { const gone = taken.map(([k]) => k).filter((k) => k.startsWith(BRANCH)); if (gone.length) branchesGone(gone); taken.length = 0; return gone; },
+  };
+}
+const removedLog = [];
+function branchesGone(keys0) {
+  const ws = keys0.map((k) => k.slice(BRANCH.length));
+  for (const w of ws) if (!removedLog.includes(w)) removedLog.push(w);
+  try { const v = JSON.parse(get('rr2-branches') || '[]'); if (Array.isArray(v)) put('rr2-branches', JSON.stringify(v.filter((b) => !(b && ws.includes(b.w))))); } catch (e) { /* the meta is best effort */ }
+}
+/** worlds whose practice branch was removed to make room since the last call (the shell tells the player once) */
+export function takeRemovedBranches() { return removedLog.splice(0); }
 /** Enforce the voluntary caps (items and bytes); never evicts `keep`. These are soft limits: they only drop ordinary
  *  backups, never 'future' backups or quarantined data — those go only under real quota pressure (write/backup paths). */
 function enforceCaps(keep) {
@@ -171,11 +193,13 @@ export function backup(key, raw, reason) {
   try { put(bk, val); }
   catch (e) {
     if (!isQuotaError(e)) return false;
-    // make room: the ghost cache / other practice branches first (T6 M3), then OTHER slots' backups (never this slot's future item)
-    for (const c of softList(key)) { evictOne(c); try { put(bk, val); enforceCaps(item); return true; } catch (e3) { if (!isQuotaError(e3)) return false; } }
+    // make room: the ghost cache / other practice branches first (T6 M3), then OTHER slots' backups (never this slot's future item);
+    // soft data comes back when the backup still does not fit (T6 verify D4)
+    const soft = softTake(key);
+    for (const c of soft.steps()) { void c; try { put(bk, val); soft.commit(); enforceCaps(item); return true; } catch (e3) { if (!isQuotaError(e3)) { soft.rollback(); return false; } } }
     const list = evictionList({ keep: item, protectSlotFuture: key, withQuarantine: false }).filter((c) => c.bk !== bk);
     for (const c of list) evictOne(c);
-    try { put(bk, val); } catch (e2) { return false; }
+    try { put(bk, val); soft.commit(); } catch (e2) { soft.rollback(); return false; }
   }
   enforceCaps(item);
   return true;
@@ -249,16 +273,19 @@ export function write(key, cfg, state) {
   try { put(key, val); return { ok: true }; }
   catch (e) {
     if (!isQuotaError(e)) return { ok: false, quota: false };
-    // T6 review M3: first the ghost cache, then other practice branches; a practice branch itself never evicts T1 backups
-    for (const c of softList(key)) {
-      evictOne(c);
-      try { put(key, val); return { ok: true, evicted: true }; } catch (e2) { if (!isQuotaError(e2)) return { ok: false, quota: false }; }
+    // T6 review M3: first the ghost cache, then other practice branches; a practice branch itself never evicts T1 backups.
+    // T6 verify D4: soft data is gone only when the write succeeds — otherwise it is put back; removed branches are reported
+    const soft = softTake(key);
+    for (const c of soft.steps()) {
+      void c;
+      try { put(key, val); return { ok: true, evicted: true, removedBranches: soft.commit() }; } catch (e2) { if (!isQuotaError(e2)) { soft.rollback(); return { ok: false, quota: false }; } }
     }
-    if (key.startsWith(BRANCH)) return { ok: false, quota: true };
+    if (key.startsWith(BRANCH)) { soft.rollback(); return { ok: false, quota: true }; }
     for (const c of evictionList({ withFuture: false })) {
       evictOne(c);
-      try { put(key, val); return { ok: true, evicted: true }; } catch (e2) { if (!isQuotaError(e2)) return { ok: false, quota: false }; }
+      try { put(key, val); return { ok: true, evicted: true, removedBranches: soft.commit() }; } catch (e2) { if (!isQuotaError(e2)) { soft.rollback(); return { ok: false, quota: false }; } }
     }
+    soft.rollback();
     return { ok: false, quota: true };
   }
 }
