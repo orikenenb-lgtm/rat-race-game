@@ -3611,6 +3611,8 @@ function storyVars(st, chainId, item) {
 /* ---------------------------------------------------------------- effects preview (signed flow, salary, odds) and money */
 /** Monthly net change from a gross multiplier (salary chip). */
 const salaryDelta = (st, mult) => slip(r10(grossBase(st) * mult), taxPoints(st)).net - baseNet(st);
+/** T3 verify D7: a permanent raise as it lands on THIS month's pay — a running temporary cut shrinks it (= the applied change). */
+function salaryDeltaNow(st, mult) { const c = payCutOf(st); if (!c) return salaryDelta(st, mult); const g0 = grossBase(st), tp = taxPoints(st); return slip(r10(r10(g0 * mult) * c.mult), tp).net - slip(r10(g0 * c.mult), tp).net; }
 /** T3 review M1: the active temporary pay cuts (st.story.flags.payCut: a legacy single object or a list of {src, mult, until, label}). */
 function payCutsOf(st) { const p = st.story && st.story.flags.payCut; return (!p ? [] : Array.isArray(p) ? p : [p]).filter((c) => c && c.until >= st.month); }
 /** The combined cut this month → {mult, label} | null (every active cut multiplies; one label per source). */
@@ -3645,7 +3647,7 @@ function storyEffects(st, chainId, stepId, o, item) {
   if (fx.rentPct) e.flow -= h.kind === 'rent' ? r10(h.line.amount * fx.rentPct / 100) : 0;
   if (fx.carCut) e.flow += carLines(st).reduce((x, l) => x + r10(l.amount * fx.carCut), 0);
   if (fx.carLinePct) e.flow -= carLines(st).reduce((x, l) => x + r10(l.amount * fx.carLinePct / 100), 0);
-  if (fx.grossMult) { e.salary = salaryDelta(st, fx.grossMult); e.salaryMonths = 0; }
+  if (fx.grossMult) { e.salary = salaryDeltaNow(st, fx.grossMult); e.salaryMonths = 0; }
   if (fx.grossTemp) { e.salary = tempCutDelta(st, fx.grossTemp.mult); e.salaryMonths = fx.grossTemp.months; }
   if (fx.jobless) { e.salary = -r10(baseNet(st) * 0.4); e.salaryMonths = fx.jobless; }
   if (fx.planLock) { const ps = payslipOf(st, fx.planLock.plan); e.salary = ps.net - payslipOf(st).net; e.salaryMonths = fx.planLock.months; e.energy += PLANS[fx.planLock.plan].energy * fx.planLock.months; e.happiness += PLANS[fx.planLock.plan].happiness * fx.planLock.months; }

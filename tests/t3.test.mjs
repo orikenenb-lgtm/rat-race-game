@@ -803,5 +803,14 @@ test('T3 verify D4 / D5: the player\'s gender reaches the texts (f1 "שתחתמ�
   for (const f of ['js/ui.js', 'js/onboard.js', 'js/game.js']) readFileSync(new URL('../' + f, import.meta.url), 'utf8').split('\n').forEach((l, i) => { const code = l.replace(/\/\/ .*$/, '').replace(/\/\*.*?\*\//g, ''); if (W.test(code) && !/\bg[zw]\(/.test(l)) bad.push(`${f}:${i + 1}`); });
   assert.deepEqual(bad, [], 'masculine UI strings outside gz() / gw()');
 });
+test('T3 verify D7: a permanent raise chip (promo accept) equals the applied change, also while a temporary pay cut runs', () => {
+  for (const w of WORLDS4) for (const cut of [null, 0.9, 0.54]) {
+    const st = forced(w, 'career', 'promo', { item: true });
+    if (cut) st.story.flags.payCut = [{ src: 'crisis', mult: cut, until: st.month + 4, label: 'קיצוץ זמני בשכר' }];
+    const chip = E.inbox(st)[0].options.find((o) => o.id === 'accept').effects.salary;
+    const n0 = E.metrics(st).payslip.net; resolveForced(st, 'career', 'promo', 'accept');
+    assert.equal(chip, E.metrics(st).payslip.net - n0, `${w} cut ${cut}: chip ${chip}`);
+  }
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
