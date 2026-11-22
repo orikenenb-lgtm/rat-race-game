@@ -22,7 +22,7 @@ addEventListener('keydown', unlock);
 // theme: <html data-theme> wins, else prefers-color-scheme (handled by CSS light-dark())
 try { const t = JSON.parse(localStorage.getItem('rr2-settings') || '{}').theme; if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) { /* ignore */ }
 
-let openLobby = null;
+let openLobby = null, lobbyResume = null;
 // three.js + the 3D world load in the background while the lobby is already on screen; startGame() waits for them.
 const gameMod = import('./game.js');
 let G = null;
@@ -36,6 +36,7 @@ async function boot() {
     const mod = await import('./lobby.js');
     if (typeof mod.openLobby !== 'function') throw new Error('lobby.js has no openLobby()');
     openLobby = mod.openLobby;
+    if (typeof mod.resumeGame === 'function') lobbyResume = mod.resumeGame;
   } catch (e) {
     console.warn('lobby.js not available — using the built-in picker.', e);
     await gameP.catch(() => null);
@@ -59,7 +60,10 @@ function afterBoot() {
   try { const raw = sessionStorage.getItem('rr2-resume-once'); if (raw != null) { sessionStorage.removeItem('rr2-resume-once'); cfg = JSON.parse(raw); } } catch (e) { cfg = null; }
   // ranked games are not auto-resumed: the lobby re-runs rr_begin (anti-replay path unchanged)
   if (cfg && typeof cfg === 'object' && !cfg.resultId && cfg.worldId) {
-    gameP.then((g) => g && g.startGame({ ...cfg, resume: true })).catch((e) => console.warn(e));
+    // T1 review m-5: through the lobby's own launch (closes the lobby: body.lb-lobby-open, group polling, ⚡ ticker, session
+    // bookkeeping); the built-in picker (no lobby.js) starts the game directly
+    if (lobbyResume) Promise.resolve(lobbyResume({ ...cfg, resume: true })).catch((e) => console.warn(e));
+    else gameP.then((g) => g && g.startGame({ ...cfg, resume: true })).catch((e) => console.warn(e));
   }
 }
 function safeOpen(p) {
@@ -71,7 +75,7 @@ function safeOpen(p) {
 let fbOn = false;
 function useFallback() {
   if (fbOn) return; fbOn = true;
-  openLobby = fallbackLobby;
+  openLobby = fallbackLobby; lobbyResume = null;
   bus.on('game:end', fallbackEnd);
   bus.on('achievement', ({ ids = [] } = {}) => ids.forEach((id) => { const a = achievementById(id); if (a) achievementToast({ name: a.name, desc: a.desc }); }));
 }

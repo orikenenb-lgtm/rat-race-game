@@ -1436,6 +1436,8 @@ function learnProfileHtml() {
 
 /* ============================================================ END SCREEN */
 export function showEndScreen(e) { onGameEnd(e, 0); }
+/** T1 review m-5: main.js resumes a game after the 2D → 3D reload through the lobby's own launch (closeLobby + session bookkeeping) */
+export function resumeGame(cfg) { return cfg && cfg.worldId ? launch({ ...cfg, resume: true }) : Promise.resolve(false); }
 const LEAK_LABEL = {
   interest: 'ריבית על הלוואות ואשראי', interestPaid: 'ריבית על הלוואות ואשראי', credit: 'ריבית על חוב אשראי', loans: 'ריבית על הלוואות',
   toys: 'פיתויים שבחרת לקנות', wants: 'פיתויים שבחרת לקנות', doodad: 'הוצאות פתאומיות ופיתויים', subs: 'מנויים שהוספת',
