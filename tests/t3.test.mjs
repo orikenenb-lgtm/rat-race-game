@@ -820,5 +820,25 @@ test('T3 verify D8: cityModels() business entries carry the growth stage and las
   for (const m of biz) { const a = st.assets.find((x) => 'a' + x.id === m.key); assert.equal(m.stage, a.biz.stage); assert.ok(m.activity && 'utilization' in m.activity && 'busy' in m.activity, JSON.stringify(m)); }
   assert.deepEqual(E.cityModels(E.deserialize(JSON.parse(E.serialize(st)))), E.cityModels(st));
 });
+test('T3 verify D9: crisis c1 is never a one-real-option question — "start" a standing order when there is room, else an informational card; the headline follows the trigger, never "0%"', () => {
+  for (const w of WORLDS4) {
+    // no fund, no standing order, a fat cushion → keep + start; start opens the trade screen's amount
+    const charId = E.getWorld(w).characters.map((c) => c.id).find((id) => E.metrics(E.createGame({ worldId: w, charId: id, seed: 21 })).cashflow > 0);
+    let st = forced(w, 'crisis', 'c1', { charId, cash: 300000, prep: (x) => { x.life.autoInvest = 0; x.holdings.IDX.qty = 0; } });
+    let ev = E.inbox(st)[0]; const en = ev.options.filter((o) => o.enabled).map((o) => o.id);
+    assert.ok(en.length >= 2 && en.includes('start') && en.includes('keep'), `${w}: ${en}`); assert.match(ev.text, /מה עושים עם ההשקעות/);
+    resolveForced(st, 'crisis', 'c1', 'start'); assert.ok(st.life.autoInvest > 0, `${w}: start sets a standing order`);
+    // nothing to decide (no fund, no order, no cushion) → one "הבנתי" option, no decision scored, no question asked
+    st = forced(w, 'crisis', 'c1', { cash: 0, prep: (x) => { x.life.autoInvest = 0; x.holdings.IDX.qty = 0; } });
+    ev = E.inbox(st)[0]; assert.equal(ev.options.length, 1); assert.equal(ev.options[0].id, 'keep'); assert.match(ev.options[0].label, /הבנתי/);
+    assert.ok(!/מה עושים/.test(ev.text) && /לא פוגעת בך/.test(ev.text), ev.text);
+    const r = resolveForced(st, 'crisis', 'c1', 'keep'); assert.notEqual(r.ok, false); assert.ok(!r.decision, 'an informational card records no decision');
+    // the headline: a recession only when the gauge / signal says so; the drop is quoted only when there is one
+    for (const [trig, dd, re] of [['signal', 0.2, /מיתון/], ['index', 0.2, /המדד צונח/], ['tile', 0, /משבר בשווקים/]]) {
+      st = forced(w, 'crisis', 'c1', { data: { trig }, prep: (x) => { x.econ = null; x.life.idxPeak = 100; x.prices.IDX = 100 * (1 - dd); } });
+      ev = E.inbox(st)[0]; assert.match(ev.title, re, `${w} ${trig}: ${ev.title}`); assert.ok(!/ירד 0%/.test(ev.text), ev.text);
+    }
+  }
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -1087,7 +1087,7 @@ function storyTagsHtml(ev) {
 function effectChoices(ev) {
   const d = ev.data || {};
   const story = ev.type === 'story' || !!d.chain;
-  const dflt = d.defaultId ? ev.options.find((o) => o.id === d.defaultId) : null;
+  const dflt = d.defaultId && ev.options.length > 1 ? ev.options.find((o) => o.id === d.defaultId) : null;   // a one-option (informational) card has no default to announce
   const choice = (o, i) => {
     const e = o.effects || {}; const od = o.odds && o.odds.text ? oddsText(o.odds.text) : '';
     const isD = dflt && o.id === dflt.id;

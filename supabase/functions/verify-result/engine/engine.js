@@ -3605,7 +3605,13 @@ function storyVars(st, chainId, item) {
   v.rememberF2 = d.path === 'guarantee' || c.path === 'guarantee' ? `חתמת לו ערבות של ${fmtM(d.risk || 0)}.` : `כבר נתת לו ${fmtM(d.amount || 0)}.`;
   v.f2line = c.path === 'guarantee' ? 'הבנק רוצה ממנו עוד ערבות.' : '';
   v.pathLine = !d.choice ? '' : d.choice === 'keep' ? 'המשכת — והיחידות שקנית בירידה שוות היום יותר.' : d.choice === 'pause' ? 'עצרת — ובצדק אם לא הייתה כרית; היחידות שלא נקנו עלו בינתיים.'
-    : d.choice === 'sell' ? `מכרת ב־${fmtP(d.sellPrice || 0)}; היום המדד ב־${fmtP(st.prices.IDX)}.` : `הגדלת — ויש לך היום ${idxQty} יחידות.`;
+    : d.choice === 'sell' ? `מכרת ב־${fmtP(d.sellPrice || 0)}; היום המדד ב־${fmtP(st.prices.IDX)}.` : d.choice === 'start' ? `התחלת לקנות בירידה — ויש לך היום ${idxQty} יחידות.` : `הגדלת — ויש לך היום ${idxQty} יחידות.`;
+  // T3 verify D9: the c1 headline follows what started the crisis (the gauge, an index drop or a crisis tile), the drop is never "0%"
+  if (chainId !== 'crisis') { v.crisisTitle = v.ddLine = v.c1Ask = ''; return v; }
+  const ddN = Math.max(0, Math.round((1 - st.prices.IDX / Math.max(1, peak)) * 100)); const lbl = econLabel(st);
+  v.crisisTitle = lbl === 'מיתון' || d.trig === 'signal' ? 'כותרות: מיתון' : d.trig === 'index' || ddN >= 8 ? 'כותרות: המדד צונח' : 'כותרות: משבר בשווקים';
+  v.ddLine = ddN > 0 ? `המדד ירד ${ddN}% מהשיא.` : 'המדד עוד מחזיק, אבל הכותרות מפחידות.';
+  v.c1Ask = idxQty > 0 || L.autoInvest > 0 || !optionWhen(st, 'crisis', 'start') ? 'מה עושים עם ההשקעות?' : 'אין לך השקעות בקרן המדד — הירידה לא פוגעת בך ישירות.';
   return v;
 }
 
@@ -3728,6 +3734,7 @@ const STORY_HOOKS = {
   crisisSell: { preview(st, e) { const h = st.holdings.IDX; if (h && h.qty) { const pr = Math.round(h.qty * st.prices.IDX); e.cash += pr - Math.max(0, Math.round((pr - h.basis) * 0.25)); } },
     apply(st, x) { const h = st.holdings.IDX; if (!h || !h.qty) return; x.c.data.sellPrice = st.prices.IDX; idxSellAll(st, x.out); } },
   crisisMore: { preview(st, e) { void st; void e; }, apply(st) { st.life.autoInvest = r100(st.life.autoInvest * 1.5); } },
+  crisisStart: { preview(st, e) { void st; void e; }, apply(st) { st.life.autoInvest = autoAmount(st); } }, // D9: the trade screen's suggested amount (index buys at payday)
   crisisRefuse: { preview(st, e) { e.oddsMoney = { p: 0.3, hit: -r10(baseNet(st) * 0.4) * 2, miss: 0 }; },
     apply(st, x) { if (x.hit) { st.life.jobless = { until: st.month + 1 }; st.story.jobChangeM = st.month; lesson(st, x.out, 'unemployment'); x.out.news.push({ kind: 'story', chain: 'crisis', text: 'סירבת — והחברה פיטרה אותך. חודשיים על דמי אבטלה.' }); } else x.out.news.push({ kind: 'story', chain: 'crisis', text: 'סירבת — והפעם זה עבר בשלום.' }); } },
   crisisLook: { preview(st, e) { e.oddsMoney = { p: 0.5, hit: salaryDelta(st, 1.05) * 22, miss: 0 }; },
@@ -3965,6 +3972,7 @@ function optionWhen(st, chainId, w) {
     case 'auto': return L.autoInvest > 0 ? null : 'אין לך הוראת קבע';
     case 'idx': return st.holdings.IDX && st.holdings.IDX.qty > 0 ? null : 'אין לך יחידות בקרן המדד';
     case 'more': return L.autoInvest > 0 && (st.cash + (st.savings || 0)) / Math.max(1, expensesOf(st)) >= 3 ? null : 'רק עם הוראת קבע וכרית של 3 חודשים לפחות';
+    case 'start': return L.autoInvest > 0 ? 'כבר יש לך הוראת קבע' : autoAmount(st) > 0 && (st.cash + (st.savings || 0)) / Math.max(1, expensesOf(st)) >= 3 ? null : 'רק עם תזרים פנוי וכרית של 3 חודשים לפחות';
     case 'staff': { const a = managedOf(st)[0]; return a && a.biz.staff > 0 ? null : 'אין עובדים בעסק'; }
     default: return null;
   }
@@ -4007,7 +4015,10 @@ function storyCard(st, chainId, stepId, item) {
   const lastForced = st.life.forcedM; if (lastForced != null && st.month - lastForced <= 3) crossBits.push(tpl(CH.CROSS.forced, { n: String(Math.max(1, st.month - lastForced)) }));
   const rem = [step.remember ? tpl(step.remember, vars) : '', ...crossBits].filter(Boolean)[0] || null;
   const guideStep = st.mentor === 'guide';
-  const options = storyOptionsOut(st, chainId, stepId, item, guideStep);
+  let options = storyOptionsOut(st, chainId, stepId, item, guideStep);
+  // T3 verify D9: crisis c1 with nothing to decide (no fund units, no standing order, no room to start one) is an informational card
+  const info = chainId === 'crisis' && stepId === 'c1' && options.filter((o) => o.enabled).length < 2;
+  if (info) options = options.filter((o) => o.enabled).map((o) => ({ ...o, label: 'הבנתי — ממשיכים כרגיל', dq: 'none' }));   // nothing to score
   const n = (c.steps || []).length || 1; const of = n - 1 + ((remainingSteps[chainId] || {})[stepId] || 1);
   const personal = options.every((o) => o.dq === 'personal');
   const ev = { id: item ? 'q' + item.id : null, itemId: item ? item.id : null, type: 'story', kind: 'chain', chain: chainId, step: stepId,
@@ -4089,7 +4100,7 @@ function storyDecision(st, ev, o) {
     if (o.dq === 'mixed' && !mine.flags.length) s = Math.max(60, s);
   }
   const cushion = (st.cash + (st.savings || 0)) / Math.max(1, expensesOf(st));
-  if (ev.chain === 'crisis' && ev.step === 'c1') { if (o.id === 'pause' && cushion < 2) s = Math.max(60, s); if ((o.id === 'keep' || o.id === 'more') && cushion >= 2 && !mine.flags.length) s = Math.max(85, s); }
+  if (ev.chain === 'crisis' && ev.step === 'c1') { if (o.id === 'pause' && cushion < 2) s = Math.max(60, s); if ((o.id === 'keep' || o.id === 'more' || o.id === 'start') && cushion >= 2 && !mine.flags.length) s = Math.max(85, s); }
   const verdict = mine.flags.length ? 'risky' : s >= 85 ? 'strong' : s >= 60 ? 'ok' : s < 40 ? 'costly' : 'mixed';
   const bestOpt = ev.options.find((x) => x.id === best.id) || {};
   const why = mine.flags.length ? DQ_WHY[mine.flags[0]] || 'סיכון גבוה' : o.dq === 'personal' ? 'החלטה אישית — אין כאן תשובה נכונה אחת' : best.U - worst.U < 0.5 ? DQ_WHY.near : s >= 85 ? DQ_WHY.best : `היה עדיף: ${bestOpt.label || ''}`.slice(0, 60);

@@ -226,14 +226,15 @@ export const CHAINS = {
     id: 'crisis', title: 'משבר כלכלי', worlds: ['w1', 'w2', 'w3', 'w4'], cooldown: 36, maxRuns: 1, entry: { trigger: true }, exempt: true,
     lessons: ['emergency_fund', 'drawdown', 'panic_selling', 'time_in_market', 'unemployment'],
     steps: {
-      c1: { title: 'כותרות: מיתון',
-        text: 'המדד ירד {dd}% מהשיא. יש לך כרית ל־{cushion} חודשים{debtLine}. מה עושים עם ההשקעות?',
+      c1: { title: '{crisisTitle}',
+        text: '{ddLine} יש לך כרית ל־{cushion} חודשים{debtLine}. {c1Ask}',
         hint: 'בקרן המדד: {idxValue} ({units} יחידות). הוראת קבע: {auto} בחודש.',
         options: [
           { id: 'keep', label: 'ממשיכים כרגיל', dq: 'financial', default: true, path: 'keep', next: [{ step: 'job', in: 1 }], lesson: ['time_in_market'] },
           { id: 'pause', label: 'לעצור את הוראת הקבע', dq: 'financial', when: 'auto', hook: 'crisisPause', path: 'pause', next: [{ step: 'job', in: 1 }], lesson: ['emergency_fund'] },
           { id: 'sell', label: 'למכור הכול', dq: 'financial', when: 'idx', hook: 'crisisSell', path: 'sell', next: [{ step: 'job', in: 1 }], lesson: ['panic_selling'] },
           { id: 'more', label: 'להגדיל את הוראת הקבע', dq: 'financial', when: 'more', hook: 'crisisMore', path: 'more', next: [{ step: 'job', in: 1 }], lesson: ['time_in_market'] },
+          { id: 'start', label: 'להתחיל הוראת קבע לקרן המדד', dq: 'financial', when: 'start', hook: 'crisisStart', path: 'start', next: [{ step: 'job', in: 1 }], lesson: ['time_in_market'] }, // T3 verify D9: a real choice for someone with no fund yet
         ] },
       job: { title: 'במשרד מדברים על קיצוצים',
         text: 'ההנהלה מציעה: 10% פחות שכר לחצי שנה — במקום פיטורים.',
@@ -311,4 +312,5 @@ export const PATH_TEXT = {
 /** Template keys a chain text may use — all derived from public state (U12). */
 export const VAR_ALLOW = ['S', 'fix', 'fix2', 'paid', 'paidNow', 'spent', 'ago', 'saved', 'lease', 'leaseNew', 'extra', 'rent', 'raise', 'raisePct', 'share', 'inflLast',
   'energy', 'months', 'pBurn', 'pBurn2', 'cushion', 'due12', 'first', 'avg', 'cost', 'amount', 'risk', 'dd', 'idxValue', 'units', 'auto', 'unitsDuring', 'diff', 'back', 'pathLine',
-  'name', 'rememberMove', 'rememberFriend', 'rememberF2', 'f2line', 'repair', 'repair2', 'debtLine', 'bizName', 'bizCash', 'raiseP', 'cf', 'netUp', 'energyAvg', 'label', 'n'];
+  'name', 'rememberMove', 'rememberFriend', 'rememberF2', 'f2line', 'repair', 'repair2', 'debtLine', 'bizName', 'bizCash', 'raiseP', 'cf', 'netUp', 'energyAvg', 'label', 'n',
+  'crisisTitle', 'ddLine', 'c1Ask'];
