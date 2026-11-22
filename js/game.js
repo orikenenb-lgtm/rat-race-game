@@ -403,8 +403,19 @@ function wireUI() {
   });
   let rt = 0;
   addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { frame(); if (S) render(false); }, 120); });
+  // T1 verify D-1: the HUD's second row (life chips) and the mentor bar settle after the first paint and change height without a
+  // window resize — re-frame the board whenever their size changes (2D needs it; 3D only re-fits). Only a changed free rect counts.
+  if (typeof ResizeObserver === 'function') {
+    let raf = 0; const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (S) frame(false); }); });
+    for (const id of ['hud', 'bar']) { const el = document.getElementById(id); if (el) ro.observe(el); }
+  }
 }
-function frame() { scene.frame(ui.freeRect()); }
+let lastRect = '';
+function frame(force = true) {
+  const r = ui.freeRect(); const k = [r.x0, r.y0, r.x1, r.y1].map(Math.round).join(',');
+  if (!force && k === lastRect) return;
+  lastRect = k; scene.frame(r);
+}
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
 const prevLevels = new Map();
@@ -640,6 +651,7 @@ async function startInner(cfg, my) {
     if (!resumed && !S.over && !onboard.worldCoached(W.id)) { try { scene.introWorld?.(); } catch (e) { console.warn(e); } } // first game in this world
     onboard.prepare?.(S, CFG, W);   // T4 §4.3: the gradual-reveal state of a new tutorial game (before the first HUD paint)
     render(false);
+    frame(false);   // T1 verify D-1: the first render added the HUD's life row — frame the board to the settled free rect
     ui.showDice(S.lastRoll ? (S.lastRoll.dice || [S.lastRoll.die]) : [1, 1]);
     const intro = E.intro(S, resumed);
     ui.mentor(intro.mentor);
