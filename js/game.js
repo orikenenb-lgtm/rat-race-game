@@ -589,6 +589,7 @@ async function startInner(cfg, my) {
     // T4 IR-T4-2: learn / dream / mentor (free games only; an engine without them simply ignores the keys)
     st = E.createGame({ worldId: cfg.worldId, charId: cfg.charId, seed: cfg.seed, mode: cfg.mode, maxMonths: cfg.maxMonths, tutorial: !!cfg.tutorial && cfg.mode === 'free', bailout: !!cfg.bailout, scenarioId: cfg.scenarioId,
       learn: !!cfg.learn && cfg.mode === 'free', dream: cfg.mode === 'free' ? cfg.dream : undefined, mentor: cfg.mentor,
+      tutorialFree: !!cfg.tutorialFree && cfg.mode === 'free',   // T4 CR-E1 / review M-2: the engine's rollCost owns the 10 free rolls now (st.tutorialFree)
       // T2 review B1 (CR-29): a ranked game takes its rule set from the day key the server stores (the lobby passes it);
       // free / history games and a missing key keep the engine default (rules 4). mentor undefined → engine default (w1 guide, else hint).
       dateKey: RANKED.has(cfg.mode) && cfg.dateKey ? cfg.dateKey : undefined });
