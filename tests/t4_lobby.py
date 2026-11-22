@@ -560,6 +560,51 @@ OUTCOME_FIX = """async (level) => {
   }
   return null;
 }"""
+FUND_FIX = """async () => {
+  const E = await import('./js/engine.js');
+  // the mentor's highlighted option every time (the "tapper" that won ★★ without the fund in the playtest): stop at ≥ 75% freedom, fund < 3
+  for (let s = 1; s < 30; s++) {
+    const st = E.createGame({ worldId: 'w1', charId: 'teacher', seed: s, mode: 'free' });
+    const pick = (ev) => { const en = ev.options.filter((o) => o.enabled); return en.find((o) => o.primary) || en.find((o) => ['ok', 'done', 'pass', 'skip'].includes(o.id)) || en[0]; };
+    const resolve = (ev) => { let k = 0; while (ev && k++ < 10 && !st.over) { const o = pick(ev); if (!o || o.id === 'save') { const alt = ev.options.find((x) => x.enabled && x.id !== 'save'); if (!alt) break; ev = E.choose(st, ev, alt.id, alt.needsQty ? { qty: 1 } : {}).event; continue; } ev = E.choose(st, ev, o.id, o.needsQty ? { qty: 1 } : {}).event; } };
+    for (let g = 0; g < 160 && !st.over; g++) {
+      for (const it of E.inbox(st)) { const o = it.options.find((o) => o.enabled && o.default) || it.options.find((o) => o.enabled); if (o) E.resolveStory(st, it.itemId, o.id); }
+      if (st.pending) resolve(E.currentEvent(st)); if (st.over) break;
+      const m = E.metrics(st);
+      if (!st.pending && st.phase === 'roll' && m.goalProgress >= 0.75 && m.goalProgress < 1 && m.emergency.months < 3) {
+        const state = JSON.parse(E.serialize(st)); state.ui = { seq: 0, coach: {}, firstPayday: true };
+        localStorage.setItem('rr2-save-free-w1', JSON.stringify({ v: 3, app: 'nl1', sv: E.SAVE_VERSION, cfg: { worldId: 'w1', charId: 'teacher', seed: st.seed, mode: 'free' }, state, savedAt: Date.now() }));
+        return { seed: s, month: st.month, pct: m.goalProgress, fund: m.emergency.months };
+      }
+      E.rollDice(st); resolve(E.landing(st));
+    }
+  }
+  return null;
+}"""
+async def t_fund(b):
+    """Playtest (director decision 3): ★★★ needs the 🛟 emergency fund, not the cash cushion — the fund chip shows its progress toward
+    3 months on a phone too, and the first time the freedom meter is near the goal without it, a "★★★ דורש קרן חירום" notice."""
+    ctx, pg = await page(b, vp=PHONE, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,tutorialDone:true}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
+    await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
+    fx = await pg.evaluate(FUND_FIX)
+    if not fx: check(False, 'fund fixture: no ≥ 75% game without the fund found'); await ctx.close(); return
+    await pg.reload(); await pg.wait_for_selector('.lb-home', timeout=60000)
+    await pg.evaluate(TOAST_OBS.replace('window.__toasts=[];', 'window.__toasts=window.__toasts||[];'))
+    await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
+    await pg.evaluate("window.__toasts=[]"); await pg.evaluate("document.querySelector('[data-act=continue-free]').click()"); await pg.wait_for_function("document.getElementById('start').hidden", timeout=90000)
+    got = False
+    for _ in range(80):
+        if any('★★★ דורש קרן חירום' in t for t in await pg.evaluate('window.__toasts')): got = True; break
+        if await pg.locator('#coach:not([hidden]) [data-c=next]').count(): await pg.click('#coach [data-c=next]')
+        await pg.wait_for_timeout(250)
+    chip = await pg.evaluate("(()=>{const c=document.querySelector('#hLife .lc.fund');const p=document.querySelector('#hLifeMore .lc.fund');return {vis:!!c&&!c.hidden&&c.getClientRects().length>0, txt:c?c.textContent:null, more:!!p, aria:c?c.getAttribute('aria-label'):null}})()")
+    check(got, f'"★★★ דורש קרן חירום" shown once near the goal without the fund ({fx}; toasts {(await pg.evaluate("[...new Set(window.__toasts)]"))[:3]})')
+    check((chip['vis'] or chip['more']) and chip['txt'] and '/3' in chip['txt'] and 'שלושה כוכבים' in (chip['aria'] or ''), f'phone: the 🛟 chip shows months / 3 (in the row or behind "⋯") ({chip})')
+    await pg.wait_for_timeout(1500)
+    fw = await pg.evaluate("(()=>{try{const s=JSON.parse(localStorage.getItem('rr2-save-free-w1')).state;return [s.ui&&s.ui.fundWarn, Object.keys(s.ui||{})]}catch(e){return String(e)}})()")
+    check(isinstance(fw, list) and bool(fw[0]), f'the notice is recorded in the save (once per game) ({fw})')
+    await ctx.close()
+
 async def t_nearmiss(b):
     """Playtest B1: the end-screen near miss never shows negative months — when the months already met the star line, it names what
     stopped ★★★ (fund / happiness). Same text in ui.js (built-in end screen) and the lobby end screen."""
@@ -742,7 +787,7 @@ async def t_replayreal(b):
 
 SCEN = [('welcome', t_welcome), ('f1stub', t_f1stub), ('world', t_world), ('learn', t_learn), ('dream', t_dream), ('empty', t_empty), ('library', t_library),
         ('settings', t_settings), ('migrate', t_migrate), ('naming', t_naming),
-        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('outcome', t_outcome), ('nearmiss', t_nearmiss), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
+        ('f1', lambda b: t_first_minute(b, 'f1')), ('f2', lambda b: t_first_minute(b, 'f2')), ('skip', t_skip), ('hints', t_hints), ('dreamtut', t_dreamtut), ('practice', t_practice), ('outcome', t_outcome), ('nearmiss', t_nearmiss), ('fund', t_fund), ('learnreal', t_learnreal), ('help', t_help), ('review', t_review), ('replayreal', t_replayreal)]
 async def main():
     os.makedirs(SHOT, exist_ok=True); FB.banner(MODE)
     async with async_playwright() as p:

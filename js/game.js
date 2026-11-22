@@ -708,6 +708,17 @@ function offerTurbo() {
   setTimeout(() => ui.toast('רוצה פי 2 מהירות?', { action: { label: 'טורבו!', fn: () => { if (!settings.turbo) $('#turboBtn').click(); } } }), 2600);
 }
 
+/* ============================================================ playtest: ★★★ needs the 🛟 fund, not cash */
+/** Once per game, the first time the freedom meter is ≥ 75% while the emergency fund is under its 3 months: say that ★★★ needs the
+ *  fund (cash in the till does not count). Never in learning mode (no stars) and never after the game ended. */
+function fundWarn(m) {
+  if (!S || S.over || !S.ui || S.ui.fundWarn || !CFG || CFG.learn || !m || !m.emergency) return;
+  if (!((m.goalProgress || 0) >= 0.75 && (m.emergency.months || 0) < (m.emergency.target || 3))) return;
+  S.ui.fundWarn = S.month;
+  const t = `⭐ ★★★ דורש קרן חירום: ${m.emergency.target || 3} חודשי הוצאות ב־🛟 (יש לך ${m.emergency.months}). מזומן בקופה לא נחשב — מעבירים לקרן במשכורת.`;
+  ui.toast(t, { kind: 'gold', keep: true, ms: 6500 }); ui.announce?.(t);
+}
+
 /* ============================================================ render */
 function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed, t6: t6Hud() }; }
 let opsSeen = false;
@@ -715,6 +726,7 @@ function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
   track(m);
+  fundWarn(m);
   onboard.revealTick?.(S, { m, cfg: CFG });   // T4 §4.3: month thresholds (fund 4, happy / tools 6, credit 10, age 12) and ⚡ after the free rolls
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());

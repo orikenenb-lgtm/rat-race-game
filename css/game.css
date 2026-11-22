@@ -710,7 +710,9 @@ body[data-world=h] .hworld b{font-family:"Frank Ruhl Libre",var(--title)}
 .wbox .loans{margin-top:6px}
 .row.nwt{display:flex;justify-content:space-between;gap:8px;padding:4px 12px;font-size:12.5px;color:var(--mut)}
 .hlife .lc.fund.pos b{color:var(--green)}
-@media (max-width:600px){ .hlife .lc.fund{display:none} .bizgrid{grid-template-columns:1fr} #verdict{max-width:calc(100vw - 16px)} #verdict span{font-size:12.5px} }
+.hlife .lc.fund .fbar{display:inline-block;width:22px;height:5px;border-radius:3px;background:rgba(0,0,0,.14);overflow:hidden;vertical-align:middle;margin-inline-start:3px}   /* playtest: progress toward the 3 months ★★★ needs */
+.hlife .lc.fund .fbar>i{display:block;height:100%;background:var(--gold)}.hlife .lc.fund.pos .fbar>i{background:var(--green)}
+@media (max-width:600px){ .bizgrid{grid-template-columns:1fr} #verdict{max-width:calc(100vw - 16px)} #verdict span{font-size:12.5px} }
 .wbox .loans button{background:var(--paper);border:1px solid var(--line);font-weight:700}.wbox .loans button:hover:not(:disabled){background:var(--paper3)}
 #verdict{width:max-content}
 

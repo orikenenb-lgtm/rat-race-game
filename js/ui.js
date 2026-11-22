@@ -415,6 +415,7 @@ function renderLife(m, ctx) {
   // a re-render keeps keyboard focus on the same chip (the row is rebuilt every render)
   const fa = document.activeElement; const fIn = fa && box.contains(fa) ? fa : null;
   const focusKey = fIn ? (fIn.dataset.more ? '.lc.more' : fIn.dataset.life ? `${fIn.closest('.hlmore') ? '.hlmore ' : ':scope > '}[data-life="${fIn.dataset.life}"]` : null) : null;
+  fundMonthsNow = m.emergency ? m.emergency.months : null;
   const en = Math.round(L.energy ?? 0), hp = Math.round(L.happiness ?? 0);
   const enc = en < 25 ? 'neg' : en < 50 ? 'warn' : 'pos';
   const hpe = hp >= 75 ? '😄' : hp >= 60 ? '🙂' : hp >= 40 ? '😐' : hp >= 25 ? '🙁' : '😣';
@@ -431,7 +432,7 @@ function renderLife(m, ctx) {
     <button class="lc hp" data-life="happy" title="אושר (${hp}/100)"><span>${hpe}</span><b class="num">${hp}</b></button>
     <button class="lc cr ${BAND_CLS[L.creditBand] ?? ''}" data-life="credit" title="דירוג אשראי: ${esc(L.creditBand || '')}"><span>🏦</span><b class="num">${L.creditScore ?? '—'}</b></button>
     ${infl != null ? `<button class="lc cpi" data-life="cpi" title="${L.inflationLastYear != null ? 'אינפלציה בשנה שעברה' : 'אינפלציה צפויה'}"><span>🛒</span><b class="num">${infl}%</b></button>` : ''}
-    ${m.emergency ? `<button class="lc fund ${m.emergency.covered ? 'pos' : ''}" data-life="fund" title="קרן חירום: ${m.emergency.months} חודשי הוצאות"><span>🛟</span><b class="num">${m.emergency.months}</b></button>` : ''}
+    ${m.emergency ? `<button class="lc fund ${m.emergency.covered ? 'pos' : ''}" data-life="fund" title="קרן חירום: ${m.emergency.months} מתוך ${m.emergency.target || 3} חודשי הוצאות (נדרש ל־★★★)" aria-label="קרן חירום: ${m.emergency.months} מתוך ${m.emergency.target || 3} חודשי הוצאות, נדרש לשלושה כוכבים"><span aria-hidden="true">🛟</span><b class="num">${m.emergency.months}/${m.emergency.target || 3}</b><i class="fbar" aria-hidden="true"><i style="width:${Math.round(Math.min(1, (m.emergency.months || 0) / (m.emergency.target || 3)) * 100)}%"></i></i></button>` : ''}
     <button class="lc plan" data-life="plan" title="התוכנית החודשית — לשנות"><span>${PLAN_ICON[L.plan] || '📅'}</span><b>${esc(L.planLabel || '')}</b></button>
     ${calChip}${F ? `<button class="lc focus ${F.opsOpen ? 'ops' : ''} ${F.current.id !== 'none' ? 'on' : ''}" data-life="focus" aria-label="${F.opsOpen ? 'לפתוח את לוח העסק' : `מוקד החודש: ${esc(F.current.label)}`}" title="מוקד החודש"><span aria-hidden="true">${fIcon}</span><b>${esc(F.opsOpen ? 'לוח העסק' : F.current.id === 'none' ? 'מוקד' : F.current.label)}</b></button>` : ''}
     ${X ? `<button class="lc econ t${X.trend > 0 ? 'u' : X.trend < 0 ? 'd' : 'f'}" data-life="econ" aria-label="מד הכלכלה: ${esc(X.label)}, ${X.signal} מתוך 100" title="${esc(X.text || 'מד הכלכלה')}">${gaugeSvg(X.signal, 26)}<b>${esc(X.label)}</b><i class="tr" aria-hidden="true">${X.trend > 0 ? '↗' : X.trend < 0 ? '↘' : '→'}</i>${X.sharp ? '<i class="sh" aria-hidden="true">🔬</i>' : ''}</button>` : ''}${t6Chips(ctx && ctx.t6)}`;
@@ -444,7 +445,7 @@ function renderLife(m, ctx) {
 /* T7 polish: the life row never overflows. When the chips do not fit on one line (390 px with 📬, the calendar and the T6 chips),
    the lowest-priority chips move behind a "⋯" chip (44 px) that opens them as a list — together with the chips this width hides
    by CSS (age, inflation, fund, calendar), so nothing is out of reach. Gradual-reveal chips (hidden attribute) stay hidden. */
-const LIFE_PRI = ['inbox urg', 'en', 't6aw', 'inbox', 'hp', 'focus', 'plan', 'cr', 'econ', 't6rv', 't6mo', 'cal', 'fund', 'cpi', 'age'];   // 🌴 (retire after the win) is an action: it stays
+const LIFE_PRI = ['inbox urg', 'en', 't6aw', 'inbox', 'hp', 'fund', 'focus', 'plan', 'cr', 'econ', 't6rv', 't6mo', 'cal', 'cpi', 'age'];   // 🛟 right after 😊: ★★★ needs it (playtest)   // 🌴 (retire after the win) is an action: it stays
 const lifePri = (el) => { const c = el.classList; const i = LIFE_PRI.findIndex((k) => k.split(' ').every((x) => c.contains(x))); return i < 0 ? LIFE_PRI.length : i; };
 let lifeMoreOpen = false, lifeWired = false;
 function fitLife(box, focusKey) {
@@ -1002,6 +1003,7 @@ function paintImpact() {
   const body = d.querySelector('.imp-body'); if (body && d.open) body.innerHTML = impactBodyFor(evState.imp.ref);
 }
 const mo1 = (x) => (x == null || !Number.isFinite(+x) ? '—' : String(Math.round(+x * 10) / 10));
+let fundMonthsNow = null;   // the HUD's metrics().emergency.months (the impact's "before" for the fund row)
 const BASIS = { expected: 'לפי הצפי — לא בטוח', branches: 'שתי אפשרויות' };
 /** The impact layout (T2 §15.7): before → after summary, the main risk, then "פרטים" (fund, assumptions, two scenarios). Always the disclaimer. */
 export function impactHtml(I) {
@@ -1009,8 +1011,10 @@ export function impactHtml(I) {
   const tr = (label, a, b, c = '') => `<tr><th scope="row">${label}</th><td>${num(a)}</td><td>${num(b, c)}</td></tr>`;
   const rows = [tr('מזומן', fmtM(I.cashBefore), fmtM(I.cashAfter), cls(I.cashAfter - I.cashBefore)),
     tr('תזרים חודשי', sgn(I.cfBefore), sgn(I.cfAfter), cls(I.cfAfter - I.cfBefore)),
-    tr('כרית (חודשים)', mo1(I.cushionMonthsBefore), mo1(I.cushionMonthsAfter), cls(I.cushionMonthsAfter - I.cushionMonthsBefore))];
-  if (I.fundBefore !== I.fundAfter) rows.push(tr('קרן חירום', fmtM(I.fundBefore), fmtM(I.fundAfter), cls(I.fundAfter - I.fundBefore)));
+    tr('כרית: מזומן + קרן (חודשים)', mo1(I.cushionMonthsBefore), mo1(I.cushionMonthsAfter), cls(I.cushionMonthsAfter - I.cushionMonthsBefore))];
+  // playtest: the cushion counts cash, but ★★★ needs the separate 🛟 fund — its own row, in months toward 3, always shown
+  if (I.fundMonthsAfter != null) rows.push(tr('🛟 קרן חירום (ל־★★★: 3 חודשים)', fundMonthsNow != null ? `${mo1(fundMonthsNow)}/3` : '—', `${mo1(I.fundMonthsAfter)}/3`, cls(I.fundAfter - I.fundBefore)));
+  else if (I.fundBefore !== I.fundAfter) rows.push(tr('🛟 קרן חירום', fmtM(I.fundBefore), fmtM(I.fundAfter), cls(I.fundAfter - I.fundBefore)));
   const P = I.power || {}, Hh = I.happiness || {};
   if (P.delta || P.perMonth) rows.push(tr('🔋 כוח', String(P.before), String(P.after) + (P.perMonth ? ` (${P.perMonth > 0 ? '+' : '−'}${Math.abs(P.perMonth)} בחודש)` : ''), cls(P.delta || P.perMonth)));
   if (Hh.delta) rows.push(tr('😊 אושר', String(Hh.before), String(Hh.after), cls(Hh.delta)));
