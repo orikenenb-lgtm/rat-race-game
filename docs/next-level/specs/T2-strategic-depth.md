@@ -1186,3 +1186,13 @@ New file `tests/t2.test.mjs` plus updates to the existing files. Fixtures for T6
 9. `replayConfig` also carries `gender` (a gender override previously made replay non-byte-identical).
 
 **Gates not met** (numbers and diagnostics in `tools/balance-report.md`): A1 in w1/w4, A3 in w1/w2/w4, A8 (follows from A1/A3), A5 (only `f:ops`, a sim-policy gap), A7 (study plan, w2 trims, w3 business start). A2b reported (not blocking). Met: A2, A4, A6, A6b, A9, A10.
+
+
+## Director decision after the persona playtests (UI lane, 2026-11-22): no precomputed totals at מתקדם / מומחה
+
+- **Why:** in the playtests the per-option totals ("סה״כ ב־24 חודשים: ±₪X", business levers "+₪X ב־3 חודשים") turned decisions into "pick the biggest number".
+- **מתחיל (guide):** unchanged — every option keeps its total line and its 3-month business chip.
+- **מתקדם / מומחה (hint / pro):** life, chain and inbox story cards, the business levers board and business inbox items show only raw amounts: one-time cash, per-month flow with its duration, salary changes, 🔋 / 😊, and the "במשחק" odds. The engine data (`effects.total12/total24`, `preview.delta3`, `effects.delta3`) is unchanged.
+- **On demand:** the totals stay one tap away in a collapsed "📊 החשבון המלא · סה״כ לכל אפשרות" under the options (`js/ui.js totalsOnDemand`). The T2 impact panel ("מה זה עושה לי?") is already collapsed at hint / pro. Opening either is not counted as used help: the engine has no API for that (`requestHint` only counts hints) — an engine-lane follow-up if wanted.
+- **Not changed:** the business offer card (opening setups and its 3-month forecast) — a business plan, not a choice between levers.
+- **Tests:** `tests/t4_lobby.py outcome` (guide keeps totals; hint and pro: none on the buttons, odds kept, collapsed on-demand block).

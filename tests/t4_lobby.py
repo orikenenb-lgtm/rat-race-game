@@ -538,7 +538,7 @@ async def t_dreamtut(b):
     check(got2, f'T4 §4.7: a dream mission toast queued before 8 info toasts is never dropped by the cap of 6 ({(await pg.evaluate("window.__toasts"))[:4]})')
     await ctx.close()
 
-OUTCOME_FIX = """async () => {
+OUTCOME_FIX = """async (level) => {
   const E = await import('./js/engine.js');
   // a teacher game played until a story card offers "לחפש עבודה חדשה" (interview) or "להתמקח" (negotiate) in the inbox
   for (let s = 1; s < 60; s++) {
@@ -548,6 +548,7 @@ OUTCOME_FIX = """async () => {
     for (let g = 0; g < 200 && !st.over; g++) {
       const hit = E.inbox(st).find((it) => it.options.some((o) => o.enabled && (o.id === 'interview' || o.id === 'negotiate')));
       if (hit && !st.pending && st.phase === 'roll') {
+        if (level && level !== st.mentor) E.setMentorLevel(st, level);
         const cfg = { worldId: 'w1', charId: 'teacher', seed: st.seed, mode: 'free' };
         const state = JSON.parse(E.serialize(st)); state.ui = { seq: 0, coach: {}, firstPayday: true, ibSeen: E.inbox(st).map((c) => c.itemId) };
         localStorage.setItem('rr2-save-free-w1', JSON.stringify({ v: 3, app: 'nl1', sv: E.SAVE_VERSION, cfg, state, savedAt: Date.now() }));
@@ -577,11 +578,11 @@ async def t_nearmiss(b):
 async def t_outcome(b):
     """Playtest B4: the result of an odds choice on a story card ("לחפש עבודה חדשה" / "להתמקח") is shown — a 📖 toast that the queue
     never drops."""
-    for vp in (DESK, PHONE): await t_outcome1(b, vp)
-async def t_outcome1(b, vp):
+    for vp, lv in ((DESK, 'guide'), (PHONE, 'hint'), (DESK, 'pro')): await t_outcome1(b, vp, lv)
+async def t_outcome1(b, vp, lv):
     ctx, pg = await page(b, vp=vp, init=["localStorage.setItem('rr2-progress', JSON.stringify({gamesPlayed:2,tutorialDone:true}))", "localStorage.setItem('rr2-coach', JSON.stringify({w1:true}))"])
     await pg.goto(REAL); await pg.wait_for_selector('.lb-home', timeout=60000)
-    fx = await pg.evaluate(OUTCOME_FIX)
+    fx = await pg.evaluate(OUTCOME_FIX, lv)
     if not fx: check(False, 'B4 fixture: no interview / negotiate story card found'); await ctx.close(); return
     await pg.reload(); await pg.wait_for_selector('.lb-home', timeout=60000)
     await pg.evaluate("document.querySelector('[data-act=world][data-id=w1]').click()"); await pg.wait_for_selector('[data-act=continue-free]', timeout=30000)
@@ -596,13 +597,16 @@ async def t_outcome1(b, vp):
         if await pg.locator(f"#evCard button[data-o={fx['opt']}]:not([disabled])").count(): break
         if await pg.locator('#gm:not([hidden]) [data-item], #gm:not([hidden]) .ib-row button').count(): await pg.evaluate("document.querySelector('#gm [data-item], #gm .ib-row button')?.click()")
         await pg.wait_for_timeout(400)
+    card = await pg.evaluate("(()=>{const c=document.getElementById('evCard');return {tot:[...c.querySelectorAll('.choices button .tot')].map(e=>e.textContent), od:c.querySelectorAll('.choices button .godds').length, dem:!!c.querySelector('details.tots'), demTxt:(c.querySelector('details.tots')||{}).textContent||'', open:!!c.querySelector('details.tots[open]')}})()")
+    if lv == 'guide': check(card['tot'] and any('24 חודשים' in t for t in card['tot']) and not card['dem'], f'director decision: at מתחיל every option keeps its total ({card})')
+    else: check(not any('סה״כ' in t or 'חודשים' in t for t in card['tot']) and card['dem'] and not card['open'] and '24 חודשים' in card['demTxt'] and card['od'] >= 1, f'director decision: at {lv} no per-option total on the buttons; odds stay; the totals are one tap away, collapsed ({card})')
     await pg.evaluate(f"document.querySelector('#evCard button[data-o={fx['opt']}]')?.click()")
     want = 'מצאת' if fx['opt'] == 'interview' else 'בעל הבית'
     got = False
     for _ in range(60):
         if any(want in t for t in await pg.evaluate('window.__toasts')): got = True; break
         await pg.wait_for_timeout(250)
-    check(got, f'B4 {vp["width"]}px: the outcome of "{fx["opt"]}" ({fx["title"]}, month {fx["month"]}) is shown as a toast ({[t for t in await pg.evaluate("[...new Set(window.__toasts)]")][:4]})')
+    check(got, f'B4 {vp["width"]}px {lv}: the outcome of "{fx["opt"]}" ({fx["title"]}, month {fx["month"]}) is shown as a toast ({[t for t in await pg.evaluate("[...new Set(window.__toasts)]")][:4]})')
     await ctx.close()
 
 SAVE_TURN = "(k)=>{try{const s=JSON.parse(localStorage.getItem(k)).state;return [s.turn|0,(s.actions||[]).length,!!s.over]}catch(e){return [0,0,false]}}"

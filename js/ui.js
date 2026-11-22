@@ -1097,7 +1097,24 @@ function planPicker(ev) {
  *  announced through aria-describedby (UI-2, UI-10). */
 const ODDS_RE = /^\s*במשחק/;
 function oddsText(t) { const x = String(t || '').trim(); return !x ? '' : ODDS_RE.test(x) ? x : `במשחק: ${x}`; }
+/** Director decision (after the playtests): at מתקדם / מומחה (hint / pro) the cards show only raw amounts — per month, one-time,
+ *  durations, odds — never a precomputed "סה״כ ב־24 חודשים" or "+₪X ב־3 חודשים" per option ("pick the biggest number"). The totals
+ *  stay one tap away in a collapsed "📊 החשבון המלא" under the options. At מתחיל (guide) they stay on every option. */
+const totalsShown = () => { const M = mentorOf(); return !M || !M.level || M.level === 'guide'; };
+function totalsRaw(o) {
+  const e = o.effects || {};
+  if (o.preview) return o.preview.delta3 ? `ברווח העסק ב־3 חודשים: ${num(sgn(o.preview.delta3), cls(o.preview.delta3))}` : '';
+  const t12 = e.total12, t24 = e.total24;
+  if (t24 == null || (!t24 && !t12)) return '';
+  return Math.round(t12) !== Math.round(t24) && t12 != null ? `ב־12 חודשים ${num(sgn(t12), cls(t12))} · ב־24 חודשים ${num(sgn(t24), cls(t24))}` : `ב־24 חודשים: ${num(sgn(t24), cls(t24))}`;
+}
+/** hint / pro: the per-option totals on demand (rows = [label, html]) */
+function totalsOnDemand(rows) {
+  const r = rows.filter((x) => x && x[1]); if (!r.length) return '';
+  return `<details class="more tots"><summary>📊 החשבון המלא <small>סה״כ לכל אפשרות</small></summary><div class="grid">${r.map(([l, h]) => `<div class="row"><span>${escI(l)}</span><b>${h}</b></div>`).join('')}</div></details>`;
+}
 function totalsLine(o) {
+  if (!totalsShown()) return o.preview && !o.preview.delta3 && o.preview.why ? `<small class="tot why0">${escI(o.preview.why)}</small>` : '';
   const e = o.effects || {}; const biz = !!o.preview;
   // a ₪0 preview says why (engine preview.why: "no stock to reprice", …) instead of a bare zero
   if (biz) return o.preview.delta3 ? `<small class="tot">ברווח העסק ב־3 חודשים: ${num(sgn(o.preview.delta3), cls(o.preview.delta3))}</small>` : o.preview.why ? `<small class="tot why0">${escI(o.preview.why)}</small>` : '';
@@ -1132,6 +1149,7 @@ function effectChoices(ev) {
     <b>${escI(o.label)}</b>${o.primary && ev.options.length > 1 ? '<small class="tagc rec">הבחירה של המנטור</small>' : ''}${isD ? `<small class="tagc dflt">${gz('אם לא תחליט — זה מה שיקרה')}</small>` : ''}<span class="fxs">${effectChips(e, { odds: !!od })}</span>${totalsLine(o)}${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`;
   };
   return `<div class="choices">${ev.options.map(choice).join('')}</div>` +
+    (totalsShown() ? '' : totalsOnDemand(ev.options.filter((o) => o.enabled).map((o) => [shortLabel(o), totalsRaw(o)]))) +
     (d.cushion && d.cushion.text && story ? `<p class="note cush">🛟 ${escI(d.cushion.text)}</p>` : '') +
     (dflt ? `<p class="note dfl" id="evDflt">${escI(gz(`אם לא תחליט ${d.dueText || 'עד המשכורת הבאה'}: ${dflt.label}`))}</p>` : '');
 }
@@ -1589,9 +1607,9 @@ function bizItemsHtml(ev) {
       const id = `q:${it.itemId}:${c.id}`; const o = ev.options.find((x) => x.id === id) || c;
       const od = c.odds && c.odds.text ? oddsText(c.odds.text) : ''; const pv = c.preview && c.preview.delta3;
       const isD = dflt && dflt.id === c.id; const wid = `qwhy${it.itemId}_${i}`;
-      return `<div class="opt"><button class="choice stc biz ${isD ? 'dflt' : ''} ${o.primary ? 'primary' : ''}" data-o="${esc(id)}" ${o.enabled ? '' : 'disabled'} aria-describedby="${[!o.enabled ? wid : '', isD ? `qd${it.itemId}` : ''].filter(Boolean).join(' ')}"><b>${escI(c.label)}</b>${isD ? `<small class="tagc dflt">${gz('אם לא תחליט — זה מה שיקרה')}</small>` : ''}<span class="fxs">${pv ? `<em class="fx ${cls(pv)}">ברווח ב־3 חודשים ${iso(sgn(pv))}</em>` : '<em class="fx">בלי שינוי ברווח הצפוי</em>'}${!pv && c.preview && c.preview.why ? `<small class="pn why0">${escI(c.preview.why)}</small>` : ''}${c.effects && c.effects.cash ? `<em class="fx ${cls(c.effects.cash)}">${iso(sgn(c.effects.cash))} עכשיו</em>` : ''}</span>${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${c.effects && c.effects.note ? `<small class="pn">${escI(c.effects.note)}</small>` : ''}</button>${!o.enabled && (o.reason || c.reason) ? `<small class="why" id="${wid}">${escI(o.reason || c.reason)}</small>` : ''}</div>`;
+      return `<div class="opt"><button class="choice stc biz ${isD ? 'dflt' : ''} ${o.primary ? 'primary' : ''}" data-o="${esc(id)}" ${o.enabled ? '' : 'disabled'} aria-describedby="${[!o.enabled ? wid : '', isD ? `qd${it.itemId}` : ''].filter(Boolean).join(' ')}"><b>${escI(c.label)}</b>${isD ? `<small class="tagc dflt">${gz('אם לא תחליט — זה מה שיקרה')}</small>` : ''}<span class="fxs">${!totalsShown() ? '' : pv ? `<em class="fx ${cls(pv)}">ברווח ב־3 חודשים ${iso(sgn(pv))}</em>` : '<em class="fx">בלי שינוי ברווח הצפוי</em>'}${!pv && c.preview && c.preview.why ? `<small class="pn why0">${escI(c.preview.why)}</small>` : ''}${c.effects && c.effects.cash ? `<em class="fx ${cls(c.effects.cash)}">${iso(sgn(c.effects.cash))} עכשיו</em>` : ''}</span>${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${c.effects && c.effects.note ? `<small class="pn">${escI(c.effects.note)}</small>` : ''}</button>${!o.enabled && (o.reason || c.reason) ? `<small class="why" id="${wid}">${escI(o.reason || c.reason)}</small>` : ''}</div>`;
     };
-    return `<section class="bizq" aria-label="${esc(it.title)}"><p class="mh">📬 ${escI(it.title)} ${it.data && it.data.dueText ? `<em class="b due urg">${esc(it.data.dueText)}</em>` : ''}</p>${it.text ? `<p class="d">${escI(it.text)}</p>` : ''}<div class="choices">${it.options.map(btn).join('')}</div>${dflt ? `<p class="note dfl" id="qd${it.itemId}">${escI(gz(`אם לא תחליט עד המשכורת הבאה: ${dflt.label}`))}</p>` : ''}</section>`;
+    return `<section class="bizq" aria-label="${esc(it.title)}"><p class="mh">📬 ${escI(it.title)} ${it.data && it.data.dueText ? `<em class="b due urg">${esc(it.data.dueText)}</em>` : ''}</p>${it.text ? `<p class="d">${escI(it.text)}</p>` : ''}<div class="choices">${it.options.map(btn).join('')}</div>${totalsShown() ? '' : totalsOnDemand(it.options.filter((c) => c.enabled !== false).map((c) => [c.label, c.preview && c.preview.delta3 ? `${num(sgn(c.preview.delta3), cls(c.preview.delta3))} ב־3 חודשים` : 'בלי שינוי ברווח הצפוי']))}${dflt ? `<p class="note dfl" id="qd${it.itemId}">${escI(gz(`אם לא תחליט עד המשכורת הבאה: ${dflt.label}`))}</p>` : ''}</section>`;
   }).join('');
 }
 /** Business decisions: each one with its 3-month effect on net profit, 🔋 cost and cash you must inject. Stays open until "המשך". */
@@ -1601,7 +1619,7 @@ function bizActions(ev) {
   const rest = ev.options.filter((o) => o.kind !== 'biz' && o.id !== 'biz:sell' && !/^q:/.test(o.id));
   const tile = (o, i) => {
     const e = o.effects || {}; const dl = e.delta3 || 0;
-    const chips = [o.enabled ? `<em class="fx ${cls(dl)}">${dl ? `${iso(sgn(dl))} ב־3 חודשים` : 'בלי שינוי ברווח'}</em>` : '',
+    const chips = [o.enabled && totalsShown() ? `<em class="fx ${cls(dl)}">${dl ? `${iso(sgn(dl))} ב־3 חודשים` : 'בלי שינוי ברווח'}</em>` : '',
       o.enabled && e.energy ? `<em class="fx">🔋 ${nrg(-Math.abs(e.energy))} בחודש</em>` : '',
       o.cashNeeded > 0 ? `<em class="fx neg">הזרמה מכיסך ${iso(fmtM(o.cashNeeded))}</em>` : ''].join('');
     return `<div class="opt"><button class="choice biz ${o.primary ? 'primary' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : `disabled aria-describedby="bwhy${i}"`}><b>${escI(o.label)}</b><span class="fxs">${chips}</span></button>${!o.enabled && o.reason ? `<small class="why" id="bwhy${i}">${escI(o.reason)}</small>` : ''}</div>`;
@@ -1610,7 +1628,7 @@ function bizActions(ev) {
   const lr = ev.data && ev.data.lastResult;
   const done = lr ? `<p class="okmsg">✔ ${escI(BIZ_DONE[lr.action] || 'ההחלטה נקלטה')} — נכנס לתוקף מהחודש הבא.</p>` : '';
   const items = !!((ev.data && ev.data.inbox) || []).length && !!(ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1)));   // the open items are in the body (T3 UI-5)
-  return `${done}${vlineHtml(evState && evState.verdict)}<h3 class="ph">${items ? 'ועוד החלטות לחודש הזה' : 'מה עושים החודש?'}</h3><div class="choices bizgrid">${biz.map(tile).join('')}</div>${sl}` + optButtons({ ...ev, options: rest });
+  return `${done}${vlineHtml(evState && evState.verdict)}<h3 class="ph">${items ? 'ועוד החלטות לחודש הזה' : 'מה עושים החודש?'}</h3><div class="choices bizgrid">${biz.map(tile).join('')}</div>${totalsShown() ? '' : totalsOnDemand(biz.filter((o) => o.enabled).map((o) => { const dl = (o.effects || {}).delta3 || 0; return [o.label, dl ? `${num(sgn(dl), cls(dl))} ב־3 חודשים` : 'בלי שינוי ברווח']; }))}${sl}` + optButtons({ ...ev, options: rest });
 }
 
 /* ============================================================ v3.2: decision verdict (choose().decision) */
