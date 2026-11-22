@@ -1050,7 +1050,8 @@ const ODDS_RE = /^\s*במשחק/;
 function oddsText(t) { const x = String(t || '').trim(); return !x ? '' : ODDS_RE.test(x) ? x : `במשחק: ${x}`; }
 function totalsLine(o) {
   const e = o.effects || {}; const biz = !!o.preview;
-  if (biz) return o.preview.delta3 ? `<small class="tot">ברווח העסק ב־3 חודשים: ${num(sgn(o.preview.delta3), cls(o.preview.delta3))}</small>` : '';
+  // a ₪0 preview says why (engine preview.why: "no stock to reprice", …) instead of a bare zero
+  if (biz) return o.preview.delta3 ? `<small class="tot">ברווח העסק ב־3 חודשים: ${num(sgn(o.preview.delta3), cls(o.preview.delta3))}</small>` : o.preview.why ? `<small class="tot why0">${escI(o.preview.why)}</small>` : '';
   const t12 = e.total12, t24 = e.total24;
   if (t24 == null || (!t24 && !t12)) return '';
   if (Math.round(t12) !== Math.round(t24) && t12 != null) return `<small class="tot">סה״כ ב־12 חודשים ${num(sgn(t12), cls(t12))} · ב־24 חודשים ${num(sgn(t24), cls(t24))}</small>`;
@@ -1112,7 +1113,7 @@ function say(text) {
 function head(ev, M = null) {
   const hb = M ? hintBtnHtml(ev, M) : '';
   const rem = ev.remember || (ev.data && ev.data.remember);   // T3 UI-2: "זוכר?" — the world remembers (distinct style, under the title)
-  return `${say(ev.mentor)}<div class="taghead"><span class="tag" style="--c:${esc(ev.color || '#2f6fdb')};--ink:${esc(ev.ink || '#fff')}">${esc(ev.tag || '')}</span>${hb}</div><h2 id="evTitle" tabindex="-1">${escI(ev.title)}</h2>${rem ? `<p class="remember"><span aria-hidden="true">💭</span> ${escI(rem)}</p>` : ''}${ev.text ? `<p class="d">${escI(ev.text)}</p>` : ''}${flagsHtml(ev)}`;
+  return `${say(ev.mentor)}<div class="taghead"><span class="tag" style="--c:${esc(ev.color || '#2f6fdb')};--ink:${esc(ev.ink || '#fff')}">${esc(ev.tag || '')}</span>${hb}</div><h2 id="evTitle" tabindex="-1">${escI(ev.title)}</h2>${rem ? `<p class="remember"><span aria-hidden="true">💭</span> ${escI(rem)}</p>` : ''}${ev.text && !(ev.data && ev.data.summaryOnly) ? `<p class="d">${escI(ev.text)}</p>` : ''}${flagsHtml(ev)}`;   // summaryOnly: the numbers are in data.l1 / l2
 }
 /** T2 due diligence: the deal's public flags under the title — icon + text, never colour alone */
 function flagsHtml(ev) {
@@ -1263,7 +1264,7 @@ const BODY = {
   /* T3 inbox item (E.inbox card; resolved through E.resolveStory by game.js). A business item shows its last month first. */
   story(ev) {
     const B = ev.data && ev.data.biz; if (!B || !B.l1) return '';
-    return l1Html(B.l1, { compact: true }) + (B.signature && B.signature.text ? `<p class="note sig">${escI(`${B.signature.label}: ${B.signature.text}`)}</p>` : '');
+    return l1Html(B.l1, { compact: true }) + (B.signature && B.signature.text ? `<p class="note sig">${escI(`${B.signature.label}: ${B.signature.text}`)}</p>` : '') + l2Details(B.l2);
   },
   deal(ev, ctx) {
     const d = ev.data; const w = ctx.world;
@@ -1419,7 +1420,7 @@ const BODY = {
     const kindChip = `<em class="b ${passive ? 'ok' : 'warn'}">${passive ? 'עם מנהל — הכנסה פסיבית (נספרת ליעד)' : 'אתה עובד בו — הכנסה אקטיבית (לא נספרת ליעד)'}</em><em class="b">🔋 ${nrg(-(s.ownerEnergy || 0))} בחודש</em>`;
     const L1 = d.l1 || s.l1;
     if (L1) {   // T3 layered card
-      const L2 = s.l2 || {}, L3 = s.l3 || {};
+      const L2 = d.l2 || s.l2 || {}, L3 = s.l3 || {};   // the engine puts last month's report on ev.data.l2 (and the summary)
       const stage = d.stage ?? s.stage; const sig = d.signature || s.signature; const cal = d.calendar;
       const groups = (L2.groups || []).filter((g) => g.amount || g.k === 'profit');
       const gHtml = groups.length ? `<p class="mh">החודש האחרון בקבוצות</p>${grid(groups.map((g) => g.k === 'profit' ? `<div class="row"><b>${esc(g.label)}</b>${big(g.amount)}</div>` : row(esc(g.label), sgn(g.amount), cls(g.amount))))}` : '';
@@ -1523,6 +1524,13 @@ function bizOfferActions(ev) {
     (d.breakEven && d.breakEven.text ? `<p class="note">⚖️ ${escI(d.breakEven.text)}</p>` : '') +
     `<details class="more bizmore"><summary>איך עובד עסק במשחק</summary>${kind}</details>` + optButtons({ ...ev, options: rest });
 }
+/** data.biz.l2 of an inbox business card: last month in groups + from profit to cash, one tap away ("פרטים") */
+function l2Details(L2) {
+  if (!L2) return '';
+  const groups = (L2.groups || []).filter((g) => g.amount || g.k === 'profit'); const bridge = (L2.cashBridge || []).filter((x) => x.amount);
+  if (!groups.length && !bridge.length) return '';
+  return `<details class="more bizl2"><summary>פרטים</summary>${groups.length ? `<p class="mh">החודש האחרון בקבוצות</p>${grid(groups.map((g) => g.k === 'profit' ? `<div class="row"><b>${esc(g.label)}</b>${big(g.amount)}</div>` : row(esc(g.label), sgn(g.amount), cls(g.amount))))}` : ''}${bridge.length ? `<p class="mh">מהרווח לקופה</p><ul class="bridge">${bridge.map((x) => `<li><span>${escI(x.text)}</span>${num(sgn(x.amount), cls(x.amount))}</li>`).join('')}</ul>` : ''}</details>`;
+}
 /** T3 UI-5: this business's open decisions first (q:<item>:<choice> → resolveStory; the card stays open). */
 function bizItemsHtml(ev) {
   const items = (ev.data && ev.data.inbox) || []; if (!items.length) return '';
@@ -1532,7 +1540,7 @@ function bizItemsHtml(ev) {
       const id = `q:${it.itemId}:${c.id}`; const o = ev.options.find((x) => x.id === id) || c;
       const od = c.odds && c.odds.text ? oddsText(c.odds.text) : ''; const pv = c.preview && c.preview.delta3;
       const isD = dflt && dflt.id === c.id; const wid = `qwhy${it.itemId}_${i}`;
-      return `<div class="opt"><button class="choice stc biz ${isD ? 'dflt' : ''} ${o.primary ? 'primary' : ''}" data-o="${esc(id)}" ${o.enabled ? '' : 'disabled'} aria-describedby="${[!o.enabled ? wid : '', isD ? `qd${it.itemId}` : ''].filter(Boolean).join(' ')}"><b>${escI(c.label)}</b>${isD ? '<small class="tagc dflt">אם לא תחליט — זה מה שיקרה</small>' : ''}<span class="fxs">${pv ? `<em class="fx ${cls(pv)}">ברווח ב־3 חודשים ${iso(sgn(pv))}</em>` : '<em class="fx">בלי שינוי ברווח הצפוי</em>'}${c.effects && c.effects.cash ? `<em class="fx ${cls(c.effects.cash)}">${iso(sgn(c.effects.cash))} עכשיו</em>` : ''}</span>${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${c.effects && c.effects.note ? `<small class="pn">${escI(c.effects.note)}</small>` : ''}</button>${!o.enabled && (o.reason || c.reason) ? `<small class="why" id="${wid}">${escI(o.reason || c.reason)}</small>` : ''}</div>`;
+      return `<div class="opt"><button class="choice stc biz ${isD ? 'dflt' : ''} ${o.primary ? 'primary' : ''}" data-o="${esc(id)}" ${o.enabled ? '' : 'disabled'} aria-describedby="${[!o.enabled ? wid : '', isD ? `qd${it.itemId}` : ''].filter(Boolean).join(' ')}"><b>${escI(c.label)}</b>${isD ? '<small class="tagc dflt">אם לא תחליט — זה מה שיקרה</small>' : ''}<span class="fxs">${pv ? `<em class="fx ${cls(pv)}">ברווח ב־3 חודשים ${iso(sgn(pv))}</em>` : '<em class="fx">בלי שינוי ברווח הצפוי</em>'}${!pv && c.preview && c.preview.why ? `<small class="pn why0">${escI(c.preview.why)}</small>` : ''}${c.effects && c.effects.cash ? `<em class="fx ${cls(c.effects.cash)}">${iso(sgn(c.effects.cash))} עכשיו</em>` : ''}</span>${od ? `<small class="godds"><span aria-hidden="true">🎲</span> ${escI(od)}</small>` : ''}${c.effects && c.effects.note ? `<small class="pn">${escI(c.effects.note)}</small>` : ''}</button>${!o.enabled && (o.reason || c.reason) ? `<small class="why" id="${wid}">${escI(o.reason || c.reason)}</small>` : ''}</div>`;
     };
     return `<section class="bizq" aria-label="${esc(it.title)}"><p class="mh">📬 ${escI(it.title)} ${it.data && it.data.dueText ? `<em class="b due urg">${esc(it.data.dueText)}</em>` : ''}</p>${it.text ? `<p class="d">${escI(it.text)}</p>` : ''}<div class="choices">${it.options.map(btn).join('')}</div>${dflt ? `<p class="note dfl" id="qd${it.itemId}">${escI(`אם לא תחליט עד המשכורת הבאה: ${dflt.label}`)}</p>` : ''}</section>`;
   }).join('');

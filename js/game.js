@@ -1105,21 +1105,8 @@ async function landingBody(my) {
   }
 }
 
-/** T3: the manage card's summary carries no month report (no cash change, no "why", no bridges — engine CR): fill L1 / the cash
- *  bridge from this session's last business news of the same month. Presentation only; the event object is not sent back. */
-const lastBizNews = new Map();
-function withBizNews(ev) {
-  const d = ev && ev.type === 'business' && ev.data && ev.data.mode === 'manage' ? ev.data : null;
-  if (!d || !d.l1 || d.l1.sentence) return ev;
-  const n = lastBizNews.get(d.assetId); const s0 = d.summary || {};
-  if (!n || !n.why || (s0.month != null && n.month !== s0.month)) return ev;
-  const l1 = { revenue: n.revenue || 0, profit: n.profit ?? n.netProfit ?? 0, cashDelta: n.cashDelta || 0, toOwner: n.toOwner || 0, sentence: n.why.sentence || '' };
-  const l2 = { ...(s0.l2 || {}), cashBridge: (s0.l2 && s0.l2.cashBridge && s0.l2.cashBridge.length) ? s0.l2.cashBridge : n.why.cash || [] };
-  return { ...ev, data: { ...d, l1, summary: { ...s0, l1, l2 } } };
-}
 /** Open a card for an event; resolves with the closing ChooseResult (or null when aborted). */
 function resolveCard(ev, my) {
-  ev = withBizNews(ev);
   return new Promise((resolve) => {
     if (ev.mentor) ui.mentor(ev.mentor);
     const jackpot = ev.type === 'mystery' && ev.data && ev.data.kind === 'cash' && ev.data.amount > 0;
@@ -1164,7 +1151,7 @@ function resolveCard(ev, my) {
       render(); persist();
       if (res.done && res.rival && res.rival.lost) await ui.rivalLost({ ...res.rival, dd: res.rival.dd != null ? res.rival.dd : res.rival.how === 'inspect' && res.mentor ? res.mentor : null });   // T6 §12.1: no timed dismissal; a lost inspection still shows its result
       if (res.done) resolve(res);
-      else { cur = withBizNews(res.event); ctl.update(cur); }
+      else { cur = res.event; ctl.update(cur); }   // the engine fills the manage card's report (data.l1 / l2) itself
       working = false; ctl.busy(false);
     }
     card = { ctl, resolve };
@@ -1229,7 +1216,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
-      if (n.why && typeof ui.bizNews === 'function') { lastBizNews.set(n.assetId, n); ui.bizNews(n, { decide: () => openInbox({ assetId: n.assetId }) }); continue; }   // T3 UI-4
+      if (n.why && typeof ui.bizNews === 'function') { ui.bizNews(n, { decide: () => openInbox({ assetId: n.assetId }) }); continue; }   // T3 UI-4
       ui.toast(`🏪 ${n.name}: ${n.headline || ''}${n.net ? ` · לכיס שלך ${E.sgn(n.net)}` : ''}`, { kind: n.netProfit < 0 ? 'bad' : '' });
       for (const ev2 of (n.events || []).slice(0, 1)) if (ev2.title) ui.toast(`🏪 ${ev2.title}${ev2.text ? ': ' + ev2.text : ''}`);
       continue;
