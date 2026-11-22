@@ -118,7 +118,7 @@ ghostCfg(playerSt, arch) = { ...E.replayConfig(playerSt), mentor: 'hint', learn:
 Contract (shared with the T2 sim, T2§13.2; `tools/policies.mjs` re-exports this file, and T2's archetype policies are **moved here**, not duplicated):
 
 ```js
-export const ARCH_V = 1;                          // bump on any behaviour change (cache key, §2.6)
+export const ARCH_V = 2;                          // bump on any behaviour change (cache key, §2.6) — 2: balance-pass amendment below
 export const ARCHETYPES = { saver, founder, diversified, gambler };
 // each archetype:
 { id, mentor: 'hint',
@@ -137,14 +137,20 @@ Behaviour (parameters are [TUNE] for §16; the rule card must stay true):
 | | saver | founder | diversified | gambler |
 |---|---|---|---|---|
 | cushion target (cash + savings) | 6 × E | 1.5 × E | 3 × E | 0.5 × E |
-| deal buy rule (expected net from `expectedNet(pv, ev)`) | net > 0, **no loan**, cash after buy ≥ cushion | prefers non-rent kinds; net after loan cost > 0 | one asset per kind not yet owned, net > 0, loan only if net ≥ 0.15 E | any claimed net > 0, maximum loan |
+| deal buy rule (expected net from `expectedNet(pv, ev)`) | net > 0, **no loan**, cash after buy ≥ cushion | prefers non-rent kinds (a rent asset only after a non-rent one **and when it adds ≥ 0.2 E**); net after loan cost > 0 | one asset per kind not yet owned (a second of a kind only if **net ≥ 0.05 E**), net > 0, loan only if **net ≥ 0.08 E** | any claimed net > 0, maximum loan |
 | DD (inspect) | `inspect:1` when ≥ 1 warn flag; `inspect:2` when the range straddles 0 | `inspect:1` when ≥ 2 warn flags | `inspect:1` when ≥ 1 warn flag **and** the shown rival risk < 30% | never |
-| lower offer (`offer:k`) | never | `offer:5` when no rival is interested | `offer:10` when no rival is interested and net > 0.3 E | `offer:15` whenever offered |
+| lower offer (`offer:k`) | never | `offer:5` when no rival is interested | **`offer:5`** when no rival is interested and net > 0.3 E | **`offer:5`** whenever offered |
 | index fund | 20% of the monthly surplus (auto-invest) | none | 40% of the monthly surplus | none |
-| plan / focus | `work`; focus `adaptiveFocus` (T2§13.3) | `side` when 🔋 ≥ 60; focus `ops` when a business can decide | `work`; focus `adaptiveFocus` | `overtime`; focus `scout` |
+| plan / focus | `work`; focus `adaptiveFocus` (T2§13.3) | `side` when 🔋 ≥ 60; focus `ops` when a business can decide | `work`; focus `adaptiveFocus` | `overtime` **while 🔋 ≥ 70 (kept while ≥ 45), `rest` below 30**; focus `scout` |
 | crypto / angels | never | angels ≤ 10% of net worth | ≤ 5% | maximum allowed |
 | business manage panel | — | `BIZ.suggest` option | `BIZ.suggest` option | the highest-revenue option |
 | life events | cheapest option | cheapest option | cheapest option | the option with the highest cash now |
+
+**Balance-pass amendment (2026-11-22, engine lane, T6 verify D1; `ARCH_V` 2).** The bold cells above replace the first-wave values: gambler
+`offer:15` → `offer:5` (sellers refused 70 % of his 15 % offers, which closed the card) and overtime only while there is energy for it
+(at > 35 🔋 he burned out 8–29 times a game); founder's rent bar 0.1 E → 0.2 E; diversified's second-of-a-kind bar 0.1 E → 0.05 E, loan bar
+0.15 E → 0.08 E, `offer:10` → `offer:5`. The rule cards (§1, `js/systems/rivals.js`) are unchanged and still literally true (AC-30: the gambler
+"always tries to lower the price" — any lower offer, not 15 %). Results: `tools/balance-report.md` (G1–G9).
 
 ### 2.4 Running ghosts: Web Worker (`js/rivals/worker.js`) and client (`js/rivals/ghosts.js`)
 - **Worker:** a module worker, `new Worker(new URL('./rivals/worker.js', import.meta.url), { type: 'module' })`. It imports `../engine.js` (no DOM, RS§2.4) and `./policies.js`. It holds the four ghost states in memory and advances them one ghost-month at a time, yielding to its message loop between months (so `drop` and newer `advance` messages are handled promptly).
@@ -978,6 +984,10 @@ See §1 (name, label, rule, strong, weak). Extra fields: `verbClose` רותם `�
 | G7 | Ablation `_dev.noRival`: `smart` in-time % changes by ≤ 5 points in every world | holds (if broken, tune `pN` / `close` before anything else) |
 | G8 | T2 A1 (guideTapper ≥ 65%) and A3 (smart, adaptive 55–75%) still hold with competition on | holds |
 | G9 | Calibration report: empirical hazard vs table (AC-8) per world | report |
+
+**Director decisions after the balance pass (2026-11-22).** G5 is accepted as a known limit of the evaluator (no `optionU` change in T6);
+follow-up: score `inspect:1` against `inspect:2` using the level-1 range. G6 is measured as "felt competition" on `dd:always`: mean deals
+lost per 60 months in [0.3, 2.5] (a player who reads the 👥 chip — `smart` — rarely delays a contested deal; both numbers are reported).
 
 **Tuning knobs, in this order:** `close` tables → `pN` tables → `roiCuts` → archetype parameters (§2.3; rule cards must stay true) → never `optionU` weights for T6's sake. Record final numbers in `tools/balance-t6.md` and in ENGINE.md "Changes v4".
 

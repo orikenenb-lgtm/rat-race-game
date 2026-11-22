@@ -4,31 +4,33 @@
 //   PASS / FAIL / REPORT / STALE / MISSING(<lane>: <CR>)
 //   node tests/balance_gates.mjs [--dir=tools] [--json=FILE]     check only (Tier 1)
 //   node tests/balance_gates.mjs --run                           run the producing sims first (Tier 2; refuses while a browser runs)
-// Inputs (any that exist): tools/balance-t2.json | tools/balance-t2-w{1..4}.json, tools/balance-t3.json, tools/balance-t7.json[-wN].
-// Row formats accepted: {games:[{world, char, policy, …}]} or columnar {world, cols:[…], recs:[[…]]} (today's T2 output).
-// Freshness: every file must carry engineSha = sha256(bundleText(collect())) (tools/build-edge.mjs). A different or missing hash
-// prints STALE and exits 3 — stale data never passes. Exit 1 on any blocking FAIL. Sim gates are run later (engine still changing).
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+// Inputs (T7-final F-8): the regenerated tools/balance-data — matrix-w1..w4.json (columnar {world, cols, recs, engineSha}),
+// dominance-w1..w4.json, perf.json, rivals.json, stories-w1..w4.json. A required input that is missing prints MISSING and exits 4
+// (missing data never passes). Freshness: every file must carry engineSha = sha256(bundleText(collect())) (tools/build-edge.mjs);
+// a different or missing hash prints STALE and exits 3. Exit 1 on any blocking FAIL. A1–A3 are evaluated per world.
+// Aggregations that the report also prints come from tools/sim.mjs (gates, t6GateResults) — one implementation, no engine logic here.
+import { readFileSync, existsSync } from 'node:fs';
 import { execSync, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collect, bundleText, sha256 } from '../tools/build-edge.mjs';
+import { gates as t2Gates, t6GateResults } from '../tools/sim.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const DIR = join(ROOT, arg('dir', 'tools'));
+const DIR = join(ROOT, arg('dir', 'tools/balance-data'));
 const ENGINE = sha256(bundleText(collect()));
+const WORLDS = ['w1', 'w2', 'w3', 'w4'];
 
-// ---------------------------------------------------------------- --run (producing commands, CR-21 data contract)
+// ---------------------------------------------------------------- --run (the producing commands, tools/balance-report.md header)
 const RUN = [
-  ...['w1', 'w2', 'w3', 'w4'].map((w) => `node tools/sim.mjs --matrix 100 ${w} --json tools/balance-t2-${w}.json`),
-  'node tools/sim.mjs --dominance 40 --json tools/balance-t2-dominance.json', 'node tools/sim.mjs --ablate --json tools/balance-t2-ablate.json',
-  ...['w1', 'w2', 'w3', 'w4'].map((w) => `node tools/sim.mjs --t7 100 ${w} --json tools/balance-t7-${w}.json`),
+  ...WORLDS.map((w) => `node tools/sim.mjs --matrix 100 ${w} --quiet`), ...WORLDS.map((w) => `node tools/sim.mjs --dominance 40 ${w}`),
+  ...WORLDS.map((w) => `node tools/sim.mjs --stories 60 ${w}`), 'node tools/sim.mjs --perf', 'node tools/sim.mjs --rivals 80', 'node tools/sim.mjs --report',
 ];
 if (process.argv.includes('--run')) {
   const busy = spawnSync('sh', ['-c', "ps aux | grep -E 'chrome.*(swiftshader|headless)|perf_probe|_e2e\\.py|lobby_' | grep -v grep | wc -l"]).stdout.toString().trim();
   if (+busy > 0) { console.error(`REFUSED --run: ${busy} browser/perf processes are running (T7 §5.1: sims never run beside browser suites).`); process.exit(2); }
-  for (const c of RUN) { console.log('$ ' + c); try { execSync(c, { cwd: ROOT, stdio: 'inherit', timeout: 3 * 3600e3 }); } catch (e) { console.log(`MISSING(engine: CR-21) command failed: ${c}`); } }
+  for (const c of RUN) { console.log('$ ' + c); try { execSync(c, { cwd: ROOT, stdio: 'inherit', timeout: 3 * 3600e3 }); } catch (e) { console.log(`command failed: ${c}`); } }
 }
 
 // ---------------------------------------------------------------- load
@@ -37,16 +39,21 @@ function rowsOf(d) {
   if (Array.isArray(d.cols) && Array.isArray(d.recs)) return d.recs.map((r) => Object.fromEntries(d.cols.map((c, i) => [c, r[i]]).concat(d.world && !d.cols.includes('world') ? [['world', d.world]] : [])));
   return [];
 }
-const files = existsSync(DIR) ? readdirSync(DIR).filter((f) => /^balance-t[237](-[a-z0-9]+)?\.json$/.test(f)) : [];
-if (arg('json')) files.push(arg('json'));
-const data = { t2: [], t3: [], t7: [] }; const stale = []; const meta = {};
-for (const f of files) {
-  const p = f.includes('/') ? f : join(DIR, f); let d;
-  try { d = JSON.parse(readFileSync(p, 'utf8')); } catch (e) { stale.push(`${f}: unreadable (${e.message})`); continue; }
-  const lane = (/balance-(t[237])/.exec(f) || [])[1] || 't7';
+const REQUIRED = [...WORLDS.map((w) => `matrix-${w}.json`), ...WORLDS.map((w) => `dominance-${w}.json`), 'perf.json'];
+const OPTIONAL = ['rivals.json', ...WORLDS.map((w) => `stories-${w}.json`)];
+const files = []; const missing = []; const stale = []; const raw = {};
+for (const f of [...REQUIRED, ...OPTIONAL]) {
+  const p = join(DIR, f);
+  if (!existsSync(p)) { if (REQUIRED.includes(f)) missing.push(f); continue; }
+  let d; try { d = JSON.parse(readFileSync(p, 'utf8')); } catch (e) { stale.push(`${f}: unreadable (${e.message})`); continue; }
+  files.push(f); raw[f] = d;
   if (d.engineSha !== ENGINE) stale.push(`${f}: engineSha ${d.engineSha ? d.engineSha.slice(0, 12) : '(none — CR-21)'} ≠ engine ${ENGINE.slice(0, 12)}`);
-  data[lane].push(...rowsOf(d)); meta[f] = { n: rowsOf(d).length, gates: d.gates || null };
 }
+const byWorld = Object.fromEntries(WORLDS.filter((w) => raw[`matrix-${w}.json`]).map((w) => [w, raw[`matrix-${w}.json`]]));
+const T2 = Object.values(byWorld).flatMap((d) => rowsOf(d)); const T7 = T2;
+const dom = {}; for (const w of WORLDS) { const d = raw[`dominance-${w}.json`]; if (d) { const { engineSha, ...rest } = d; Object.assign(dom, rest); } }
+const perf = raw['perf.json'] || null; const cal = raw['rivals.json'] || null;
+const meta = {};
 
 // ---------------------------------------------------------------- helpers
 const pct = (xs, f) => (xs.length ? +(100 * xs.filter(f).length / xs.length).toFixed(1) : null);
@@ -58,21 +65,32 @@ const precomputed = (lane, id) => { for (const m of Object.values(meta)) if (m.g
 const M = (lane, cr) => ({ status: `MISSING(${lane}: ${cr})` });
 
 // ---------------------------------------------------------------- gates (T7 §5.1 + §5.2)
-const T2 = data.t2, T7 = data.t7.length ? data.t7 : data.t2;
+const G2 = Object.keys(byWorld).length === WORLDS.length ? t2Gates(byWorld) : null; const G6 = G2 ? t6GateResults(byWorld, dom, cal) : [];
+const perWorld = (pol, f) => WORLDS.map((w) => [w, pct(T2.filter((r) => r.world === w && r.policy === pol), f)]);
 const G = [
-  ['G-A1', true, 'guideTapper in time ≥ 65 %, no character < 50 %', () => {
-    const g = T2.filter((r) => r.policy === 'guideTapper'); if (!has(g, 'inTime', 'char')) return M('engine', 'CR-21');
-    const all = pct(g, inT); const chars = Object.entries(by(g, 'char')).map(([c, xs]) => [c, pct(xs, inT)]);
-    return { status: all >= 65 && chars.every(([, v]) => v >= 50) ? 'PASS' : 'FAIL', value: { all, chars } }; }],
-  ['G-A2', true, 'blindTapper in time ≤ 30 %', () => { const g = T2.filter((r) => r.policy === 'blindTapper'); if (!has(g, 'inTime')) return M('engine', 'CR-21'); const v = pct(g, inT); return { status: v <= 30 ? 'PASS' : 'FAIL', value: v }; }],
-  ['G-A2b', false, 'naive in time ≤ 40 % (report, director decision)', () => { const g = T2.filter((r) => r.policy === 'naive'); if (!has(g, 'inTime')) return M('engine', 'CR-21'); return { status: 'REPORT', value: pct(g, inT) }; }],
-  ['G-A3', true, 'smart and adaptive in time 55–75 %', () => {
-    const v = ['smart', 'adaptive'].map((p) => [p, pct(T2.filter((r) => r.policy === p), inT)]); if (v.some(([, x]) => x == null)) return M('engine', 'CR-21');
+  ['G-A1', true, 'guideTapper in time ≥ 65 %, no character < 50 % (per world)', () => {
+    const g = T2.filter((r) => r.policy === 'guideTapper'); if (!has(g, 'inTime', 'char', 'world')) return M('engine', 'matrix');
+    const out = WORLDS.map((w) => { const xs = g.filter((r) => r.world === w); const chars = Object.entries(by(xs, 'char')).map(([c, ys]) => [c, pct(ys, inT)]); return { w, all: pct(xs, inT), worst: Math.min(...chars.map(([, v]) => v)), ok: pct(xs, inT) >= 65 && chars.every(([, v]) => v >= 50) }; });
+    return { status: out.every((x) => x.ok) ? 'PASS' : 'FAIL', value: out.map((x) => `${x.w} ${x.all}% (worst ${x.worst}%)${x.ok ? '' : ' ✗'}`) }; }],
+  ['G-A2', true, 'blindTapper in time ≤ 30 % (per world)', () => { const v = perWorld('blindTapper', inT); if (v.some(([, x]) => x == null)) return M('engine', 'matrix'); return { status: v.every(([, x]) => x <= 30) ? 'PASS' : 'FAIL', value: v }; }],
+  ['G-A2b', false, 'naive in time ≤ 40 % (report, director decision)', () => { const v = perWorld('naive', inT); if (v.some(([, x]) => x == null)) return M('engine', 'matrix'); return { status: 'REPORT', value: v }; }],
+  ['G-A3', true, 'smart and adaptive in time 55–75 % (per world)', () => {
+    const v = WORLDS.flatMap((w) => ['smart', 'adaptive'].map((p) => [w + ' ' + p, pct(T2.filter((r) => r.world === w && r.policy === p), inT)])); if (v.some(([, x]) => x == null)) return M('engine', 'matrix');
     return { status: v.every(([, x]) => x >= 55 && x <= 75) ? 'PASS' : 'FAIL', value: v }; }],
-  ...['A4', 'A5', 'A6', 'A6b', 'A7', 'A8', 'A9', 'A10'].map((a) => [`G-${a}`, !['A6b'].includes(a), `T2 §13.5 ${a}`, () => { const p = precomputed('t2', a); return p ? { status: p.ok ? 'PASS' : (a === 'A6b' ? 'REPORT' : 'FAIL'), value: p.value } : M('engine', 'CR-21 (cell aggregates / dominance / ablation JSON)'); }]),
-  ...['S8', 'S9', 'S10', 'S11', 'S15', 'S16', 'S17', 'S21', 'S24', 'S25', 'S28'].map((s) => [`G-${s}`, s !== 'S15', `T3 #${s.slice(1)}`, () => { const p = precomputed('t3', s); return p ? { status: p.ok ? 'PASS' : (s === 'S15' ? 'REPORT' : 'FAIL'), value: p.value } : M('stories (T3)', 'tools/balance-t3.json'); }]),
+  ['G-A4', true, 'T2 §13.5 A4 no policy best in > 60 % of cells', () => G2 ? { status: G2.A4.pass ? 'PASS' : 'FAIL', value: Object.entries(G2.A4.share).map(([p, x]) => `${p} ${(x * 100).toFixed(0)}%`) } : M('engine', 'matrix')],
+  ['G-A5', true, 'T2 §13.5 A5 every focus best in ≥ 1 cell and worse than f:none in ≥ 1', () => G2 ? { status: G2.A5.every((x) => x.pass) ? 'PASS' : 'FAIL', value: G2.A5.map((x) => `${x.focus} ${x.bestCells}/${x.worseThanNoneCells}`) } : M('engine', 'matrix')],
+  ['G-A6', true, 'T2 §13.5 A6 dd:flagged beats never & always (pooled, ≥ 3 worlds)', () => G2 ? { status: G2.A6.pass ? 'PASS' : 'FAIL', value: G2.A6.worlds.map((x) => `${x.wid} ${x.beats ? '✓' : '✗'}`) } : M('engine', 'matrix')],
+  ['G-A6b', false, 'T2 §13.5 A6b dd:always worse than dd:never in ≥ 1 world', () => G2 ? { status: G2.A6b.pass ? 'PASS' : 'REPORT', value: G2.A6b.worlds.map((x) => `${x.wid} ${x.alwaysWorse}`) } : M('engine', 'matrix')],
+  ['G-A7', true, 'T2 §13.5 A7 no option top in > 85 % (allowlist; life / quiz cards listed apart)', () => {
+    if (!Object.keys(dom).length) return M('engine', 'dominance');
+    const flagged = Object.entries(dom).flatMap(([w, t]) => Object.entries(t).filter(([k, x]) => !x.allow && x.n >= 20 && x.top / x.n > 0.85 && !/^(life|mystery):/.test(k)).map(([k, x]) => `${w} ${k} ${x.top}/${x.n}`));
+    return { status: flagged.length ? 'FAIL' : 'PASS', value: flagged }; }],
+  ['G-A8', true, 'T2 §13.5 A8 ramp', () => G2 ? { status: G2.A8.pass ? 'PASS' : 'FAIL', value: { smart: G2.A8.smart, guide: G2.A8.guideTapper } } : M('engine', 'matrix')],
+  ['G-A9', true, 'T2 §13.5 A9 each ablation changes smart in time by ≥ 3 pp in ≥ 1 world', () => G2 ? { status: G2.A9.every((x) => x.pass) ? 'PASS' : 'FAIL', value: G2.A9.map((x) => `${x.system}: ${x.deltas.map((d) => (d.delta * 100).toFixed(0)).join('/')}`) } : M('engine', 'matrix')],
+  ['G-A10', true, 'T2 §13.5 A10 describe p95 < 2 ms, impactFor p95 < 8 ms', () => perf ? { status: perf.describe.p95 < 2 && perf.impactFor.p95 < 8 ? 'PASS' : 'FAIL', value: { describe: perf.describe.p95, impactFor: perf.impactFor.p95 } } : M('engine', 'perf')],
+  ...['S8', 'S9', 'S10', 'S11', 'S15', 'S16', 'S17', 'S21', 'S24', 'S25', 'S28'].map((x) => [`G-${x}`, false, `T3 #${x.slice(1)} (stories table in tools/balance-report.md)`, () => (raw[`stories-w1.json`] ? { status: 'REPORT', value: 'see the T3 table' } : M('stories (T3)', 'tools/balance-data/stories-wN.json'))]),
   ['G-T4', false, 'T4 tutorial sim check (if T4 ships it)', () => M('onboarding (T4)', 'AC-R5')],
-  ...[1, 2, 3, 4].map((i) => [`G-T6-${i}`, true, 'reserved for the T6 spec', () => M('T6', 'spec rows G-T6-1…4')]),
+  ...['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9'].map((id) => [`T6-${id}`, !['G5', 'G9'].includes(id), `T6 §16 ${id}`, () => { const x = G6.find((y) => y.id === id); if (!x) return M('engine', 'matrix / dominance'); return { status: x.status === 'met' ? 'PASS' : x.status === 'not met' ? 'FAIL' : x.status === 'accepted' ? 'ACCEPTED' : x.status === 'report' ? 'REPORT' : 'MISSING(engine: --rivals)', value: x.text }; }]),
   ['B-1', true, 'cautious in time ≥ 30 % per world and ≥ 0.5× smart; no character < 15 %', () => {
     if (!has(T7.filter((r) => r.policy === 'cautious'), 'inTime', 'world')) return M('engine', 'CR-21 (cautious policy)');
     const out = Object.entries(by(T7, 'world')).map(([w, xs]) => { const c = pct(xs.filter((r) => r.policy === 'cautious'), inT), s = pct(xs.filter((r) => r.policy === 'smart'), inT);
@@ -107,7 +125,8 @@ const G = [
   ['B-9', true, 'replay byte-identical on a 5 % sample', () => has(T7, 'replayOk') ? (() => { const s = T7.filter((r) => r.replayOk !== undefined); const bad = s.filter((r) => r.replayOk === false).length; return { status: bad === 0 && s.length ? 'PASS' : 'FAIL', value: { sample: s.length, bad } }; })() : M('engine', 'CR-21 (replayOk)')],
 ];
 
-console.log(`balance gates · engine ${ENGINE.slice(0, 16)} · files ${files.length ? files.map((f) => `${f}(${meta[f]?.n ?? 0})`).join(', ') : 'none'}`);
+console.log(`balance gates · engine ${ENGINE.slice(0, 16)} · ${DIR.replace(ROOT + '/', '')} · files ${files.length ? files.join(', ') : 'none'}`);
+if (missing.length) { for (const f of missing) console.log(`MISSING  required input ${f} (run: node tests/balance_gates.mjs --run)`); process.exit(4); }
 if (stale.length) {
   for (const s of stale) console.log(`STALE (engine changed since the sim ran, or no engineSha) ${s}`);
   for (const [id] of G) console.log(`${id.padEnd(8)} STALE`);

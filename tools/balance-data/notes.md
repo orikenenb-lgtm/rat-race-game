@@ -34,15 +34,27 @@ founder w1–w3, diversified w1–w4), G3, G4 / A6 (flagged 79 % / 52 mo beats n
 +0.3 / −2.3 pp, was up to −12), A2, A4, A6b, A10. Keep list: guide 71 / 63 / 79 / 64 % (worst character 55 %), blind ≤ 8 %, smart ≥ naive +
 7 pp everywhere, smart w2–w4 74 / 76 / 73 %, w1 90 %.
 
-**Not met — needs a decision (numbers in the tables above).**
-* G5: on flag-free competed cards `inspect:1` is almost never the top option (0 %): such cards are strong deals, where the value of
-  information is 0, and on the borderline ones the professional check (inspect:2, full information) outranks it. On flagged competed cards it
-  is top 91 % (limit 85 %) because of M7. Meeting both bounds needs an evaluator change (spec: "never optionU weights for T6's sake"), e.g.
-  scoring inspect:1 against inspect:2 with the level-1 range instead of 0.7 × the full-information value.
-* G6: smart's median lost deals per 60 months is 0 (mean 0.43; dd:always 2.37, naive 0). A player who reads the chip rarely delays a contested
-  deal, which is what G7 needed; G6 and G7 pull against each other for this policy. Recommendation: measure "felt" on dd:always /
-  the guide-tapper, or accept a mean in [0.3, 2.5].
-* G9 (report): the sim sample (2–2.7k competed cards per world) is within ±5 pp of the table; the 300,000-card AC-8 check is the binding one.
-* A5 / A9 (T2, regressed from met): with asset prices following the cycle, the cycle's gains and losses roughly cancel for smart (abl:noCycle
-  within ±2 pp, medians 2–3 months faster without it) and the research focus is never the best focus. A1 (guide ≥ 65 %: w2 63 %, w4 64 %),
-  A3 / A8 (w1 smart 90 %) and A7 (`plan:study`, review m13) were already open.
+**Director decisions (2026-11-22).** G5 is *accepted* as a known limit of the evaluator (no `optionU` change in T6). On flag-free competed cards
+`inspect:1` is almost never the top option (0 %): such cards are strong deals, where the value of information is 0, and on the borderline
+ones the professional check (inspect:2, full information) outranks it. On flagged competed cards it is top 91 % (limit 85 %) because of M7.
+Follow-up: score inspect:1 vs inspect:2 using the level-1 range. G6 is measured on `dd:always` (mean lost deals per 60 months in [0.3, 2.5]):
+2.37 — met; smart's median is 0 (mean 0.43), since a player who reads the 👥 chip rarely delays a contested deal (what G7 needed).
+
+**A5 / A9 — the boom-growth variants (director request; full N = 100 matrices of w3 and w4, w1/w2 are unaffected by `grow`).**
+
+| grow multipliers (exp / slow / rec / recov) | A5 (f:research best cells) | A9 abl:noCycle w3 / w4 | G1 | G2 | G4 | G7 | keep list (guide / smart w3, w4) |
+|---|---|---|---|---|---|---|---|
+| **1.5 / .8 / −.5 / 1 (kept)** | 0 ✗ | −1 / +2 pp ✗ | met | **met** (saver w3 B1_early) | met | met | 79 / 76 %, 64 / 73 % |
+| 1.2 / .8 / −.5 / 1 | 0 ✗ | +8 / +8 ✓ | met | ✗ saver none | met | met | 66 / 66 %, 61 / 67 % |
+| 1.3 / .8 / −.5 / 1 | 0 ✗ (and f:scout 0) | +5 / +7 ✓ | met | ✗ saver none | ✗ (w3 tie) | met | 69 / 70 %, 62 / 68 % |
+| 1.3 / .8 / −.8 / 1 | 1 ✓ | +7 / +8 ✓ | met | ✗ saver none | met | met | 67 / 68 %, 61 / 67 % |
+
+A weaker boom makes the cycle matter (A9) but lowers every archetype in w3/w4 together, and saver loses her one bucket (w3 B1_early was a
+tie on in-time, won on median months; in every variant founder takes it by 2 games of 48). An early-study saver did not recover it. G2 is a
+must-keep, so the multipliers stay at 1.5 / .8 / −.5 / 1 and A5 / A9 stay open. Research is never the best focus for structural reasons too:
+`f:research` is smart with the research focus, and smart ignores the cycle signal — the information has no user in that policy.
+Recommendation: give saver a recession edge first (e.g. a "buy when prices are down" rule that fits her card), then take the 1.3 / −.8 variant,
+which meets A5 and A9 with every other gate.
+
+**Still open.** A1 (guide ≥ 65 %: w2 63 %, w4 64 %), A3 / A8 (w1 smart 90 %), A7 (`plan:study`, review m13) were open before this pass; A5 / A9 above.
+G9 (report): the sim sample (2–2.7k competed cards per world) is within ±5 pp of the table; the 300,000-card AC-8 check is the binding one.

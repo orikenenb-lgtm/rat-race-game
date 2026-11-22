@@ -39,11 +39,11 @@ Policies: **guideTapper** (mentor מתחיל, taps the highlighted option and th
 | G2 each archetype best in ≥ 1 cycle bucket (pooled over characters) | met | saver: w3/B1_early · founder: w1/B0_calm, w1/B1_early, w2/B0_calm, w2/B1_early, w3/B3_long · diversified: w1/B2_late, w1/B3_long, w2/B2_late, w2/B3_long, w3/B2_late, w4/B0_calm, w4/B2_late, w4/B3_long · gambler: w3/B0_calm |
 | G3 A4 with competition (≤ 60% each) | met | smart 44% · adaptive 24% · guideTapper 19% · naive 6% · saver 3% · diversified 3% · cautious 0% · greedy 0% · founder 0% · gambler 0% |
 | G4 dd:flagged beats dd:never and dd:always (pooled and ≥ 3 worlds) | met | pooled flagged 79%/52 · never 76%/53 · always 64%/60; w1 90%/46 vs 86%/48 vs 80%/51 ✓ · w2 74%/49 vs 72%/48 vs 64%/59 ✗ · w3 76%/52 vs 76%/52 vs 45%/61 ✓ · w4 73%/61 vs 67%/63 vs 60%/65 ✓ |
-| G5 competed cards: inspect:1 and the best buy top-U in 10–85% (0 / ≥ 1 warn) | **NOT met** | inspect:1 warn0 0% of 2707 · inspect:1 warn1 91% of 1302 · bestBuy warn0 55% of 3000 · bestBuy warn1 20% of 2371 |
-| G6 lost deals / 60 months: smart median in [0.3, 2.5]; dd:always ≥ 1.5× smart; naive 0 | **NOT met** | smart median 0.00 (mean 0.43) · dd:always mean 2.37 · naive games with a loss 0 |
+| G5 competed cards: inspect:1 and the best buy top-U in 10–85% (0 / ≥ 1 warn) | accepted | inspect:1 warn0 0% of 2707 · inspect:1 warn1 91% of 1302 · bestBuy warn0 55% of 3000 · bestBuy warn1 20% of 2371 — director: accepted known limit (no evaluator change in T6); follow-up: score inspect:1 vs inspect:2 using the level-1 range |
+| G6 competition felt, not punishing: dd:always mean lost deals / 60 months in [0.3, 2.5] (director, replaces the smart median); naive 0 | met | dd:always mean 2.37 · smart median 0.00 (mean 0.43) · naive games with a loss 0 |
 | G7 `_dev.noRival` changes smart in time by ≤ 5 pp | met | w1 -0.5 pp · w2 -1.3 pp · w3 0.3 pp · w4 -2.3 pp |
 | G8 A1 (guideTapper ≥ 65%, every character ≥ 50%) and A3 (smart, adaptive 55–75%) | **NOT met** | w1 guide 71% (worst 59%) · smart 90% · adaptive 88% | w2 guide 63% (worst 55%) · smart 74% · adaptive 73% | w3 guide 79% (worst 71%) · smart 76% · adaptive 76% | w4 guide 64% (worst 57%) · smart 73% · adaptive 71% |
-| G9 calibration (empirical hazard of the sealed draws vs the table, cells ≥ 500) | report | w1: max |Δ| 3.3 pp over 5 cells (2687 cards) · w2: max |Δ| 2.1 pp over 5 cells (2147 cards) · w3: max |Δ| 2.4 pp over 5 cells (2530 cards) · w4: max |Δ| 5.2 pp over 6 cells (2076 cards) |
+| G9 calibration (empirical hazard of the sealed draws vs the table, cells ≥ 500) | report | w1: max |Δ| 3.3 pp over 5 cells (2687 cards) · w2: max |Δ| 2.1 pp over 5 cells (2147 cards) · w3: max |Δ| 2.4 pp over 5 cells (2530 cards) · w4: max |Δ| 5.2 pp over 6 cells (2076 cards) (the binding check is AC-8, 300,000 cards per world) |
 
 ## T3 stories & business (`node tools/sim.mjs --stories N wX`: blindTapper, guideTapper, smart, sideHustler, owner × N each)
 
@@ -142,17 +142,29 @@ founder w1–w3, diversified w1–w4), G3, G4 / A6 (flagged 79 % / 52 mo beats n
 +0.3 / −2.3 pp, was up to −12), A2, A4, A6b, A10. Keep list: guide 71 / 63 / 79 / 64 % (worst character 55 %), blind ≤ 8 %, smart ≥ naive +
 7 pp everywhere, smart w2–w4 74 / 76 / 73 %, w1 90 %.
 
-**Not met — needs a decision (numbers in the tables above).**
-* G5: on flag-free competed cards `inspect:1` is almost never the top option (0 %): such cards are strong deals, where the value of
-  information is 0, and on the borderline ones the professional check (inspect:2, full information) outranks it. On flagged competed cards it
-  is top 91 % (limit 85 %) because of M7. Meeting both bounds needs an evaluator change (spec: "never optionU weights for T6's sake"), e.g.
-  scoring inspect:1 against inspect:2 with the level-1 range instead of 0.7 × the full-information value.
-* G6: smart's median lost deals per 60 months is 0 (mean 0.43; dd:always 2.37, naive 0). A player who reads the chip rarely delays a contested
-  deal, which is what G7 needed; G6 and G7 pull against each other for this policy. Recommendation: measure "felt" on dd:always /
-  the guide-tapper, or accept a mean in [0.3, 2.5].
-* G9 (report): the sim sample (2–2.7k competed cards per world) is within ±5 pp of the table; the 300,000-card AC-8 check is the binding one.
-* A5 / A9 (T2, regressed from met): with asset prices following the cycle, the cycle's gains and losses roughly cancel for smart (abl:noCycle
-  within ±2 pp, medians 2–3 months faster without it) and the research focus is never the best focus. A1 (guide ≥ 65 %: w2 63 %, w4 64 %),
-  A3 / A8 (w1 smart 90 %) and A7 (`plan:study`, review m13) were already open.
+**Director decisions (2026-11-22).** G5 is *accepted* as a known limit of the evaluator (no `optionU` change in T6). On flag-free competed cards
+`inspect:1` is almost never the top option (0 %): such cards are strong deals, where the value of information is 0, and on the borderline
+ones the professional check (inspect:2, full information) outranks it. On flagged competed cards it is top 91 % (limit 85 %) because of M7.
+Follow-up: score inspect:1 vs inspect:2 using the level-1 range. G6 is measured on `dd:always` (mean lost deals per 60 months in [0.3, 2.5]):
+2.37 — met; smart's median is 0 (mean 0.43), since a player who reads the 👥 chip rarely delays a contested deal (what G7 needed).
+
+**A5 / A9 — the boom-growth variants (director request; full N = 100 matrices of w3 and w4, w1/w2 are unaffected by `grow`).**
+
+| grow multipliers (exp / slow / rec / recov) | A5 (f:research best cells) | A9 abl:noCycle w3 / w4 | G1 | G2 | G4 | G7 | keep list (guide / smart w3, w4) |
+|---|---|---|---|---|---|---|---|
+| **1.5 / .8 / −.5 / 1 (kept)** | 0 ✗ | −1 / +2 pp ✗ | met | **met** (saver w3 B1_early) | met | met | 79 / 76 %, 64 / 73 % |
+| 1.2 / .8 / −.5 / 1 | 0 ✗ | +8 / +8 ✓ | met | ✗ saver none | met | met | 66 / 66 %, 61 / 67 % |
+| 1.3 / .8 / −.5 / 1 | 0 ✗ (and f:scout 0) | +5 / +7 ✓ | met | ✗ saver none | ✗ (w3 tie) | met | 69 / 70 %, 62 / 68 % |
+| 1.3 / .8 / −.8 / 1 | 1 ✓ | +7 / +8 ✓ | met | ✗ saver none | met | met | 67 / 68 %, 61 / 67 % |
+
+A weaker boom makes the cycle matter (A9) but lowers every archetype in w3/w4 together, and saver loses her one bucket (w3 B1_early was a
+tie on in-time, won on median months; in every variant founder takes it by 2 games of 48). An early-study saver did not recover it. G2 is a
+must-keep, so the multipliers stay at 1.5 / .8 / −.5 / 1 and A5 / A9 stay open. Research is never the best focus for structural reasons too:
+`f:research` is smart with the research focus, and smart ignores the cycle signal — the information has no user in that policy.
+Recommendation: give saver a recession edge first (e.g. a "buy when prices are down" rule that fits her card), then take the 1.3 / −.8 variant,
+which meets A5 and A9 with every other gate.
+
+**Still open.** A1 (guide ≥ 65 %: w2 63 %, w4 64 %), A3 / A8 (w1 smart 90 %), A7 (`plan:study`, review m13) were open before this pass; A5 / A9 above.
+G9 (report): the sim sample (2–2.7k competed cards per world) is within ±5 pp of the table; the 300,000-card AC-8 check is the binding one.
 
 Engine measured: d1d75867c5b6 (sha256 of the canonical bundle, tools/build-edge.mjs).

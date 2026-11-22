@@ -697,42 +697,51 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix'
   process.exit(0);
 }
 /** T6 §16 sim gates G1–G9 from the matrix records (rivalLost / played columns, the abl:noRival ablation), the --dominance G5 tallies and
- *  the --rivals calibration. Cells = world × character × cycle bucket with ≥ 15 games (as A4). */
-function t6Gates(byWorld, dom, P, ok) {
-  const L = []; const worlds = Object.keys(byWorld).sort(); const ARCH = ['saver', 'founder', 'diversified', 'gambler'];
+ *  the --rivals calibration. Cells = world × character × cycle bucket with ≥ 15 games (as A4). → [{id, what, status, text}] where status is
+ *  'met' | 'not met' | 'accepted' (a director-accepted known limit, non-blocking) | 'report' | 'not run'. Shared by the report and tests/balance_gates.mjs. */
+export function t6GateResults(byWorld, dom = {}, cal = null) {
+  const worlds = Object.keys(byWorld).sort(); const ARCH = ['saver', 'founder', 'diversified', 'gambler'];
+  const P = (x) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).toFixed(0) + '%');
   const of = (wid, pol, f = () => true) => byWorld[wid].recs.filter((r) => r[0] === pol && f(r));
-  if (!worlds.every((w) => ARCH.every((a) => of(w, a).length))) return L;
+  if (!worlds.length || !worlds.every((w) => ARCH.every((a) => of(w, a).length))) return [];
+  const st = (b) => (b ? 'met' : 'not met');
   const cells = []; for (const wid of worlds) { const keys = new Set(of(wid, 'smart').map((r) => r[1] + '|' + r[3])); for (const k of keys) { const [c, b] = k.split('|'); if (of(wid, 'smart', (r) => r[1] === c && r[3] === b).length >= 15) cells.push({ wid, c, b }); } }
   const share = Object.fromEntries(ARCH.map((a) => [a, 0]));
-  for (const cell of cells) { const st = ARCH.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) share[t.p] += 1 / top.length; }
+  for (const cell of cells) { const sx = ARCH.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = sx.filter((x) => !sx.some((y) => better(y.s, x.s))); for (const t of top) share[t.p] += 1 / top.length; }
   for (const a of ARCH) share[a] = cells.length ? share[a] / cells.length : 0;
   const g2 = Object.fromEntries(ARCH.map((a) => [a, []]));
-  for (const wid of worlds) for (const b of [...new Set(byWorld[wid].recs.map((r) => r[3]))].sort()) { const st = ARCH.map((p) => ({ p, s: cellStats(of(wid, p, (r) => r[3] === b)) })); if (st[0].s.n < 15) continue; const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) g2[t.p].push(`${wid}/${b}`); }
+  for (const wid of worlds) for (const b of [...new Set(byWorld[wid].recs.map((r) => r[3]))].sort()) { const sx = ARCH.map((p) => ({ p, s: cellStats(of(wid, p, (r) => r[3] === b)) })); if (sx[0].s.n < 15) continue; const top = sx.filter((x) => !sx.some((y) => better(y.s, x.s))); for (const t of top) g2[t.p].push(`${wid}/${b}`); }
   const A4SET = ['guideTapper', 'naive', 'cautious', 'greedy', 'smart', 'adaptive', ...ARCH]; const s3 = Object.fromEntries(A4SET.map((p) => [p, 0]));
-  for (const cell of cells) { const st = A4SET.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = st.filter((x) => !st.some((y) => better(y.s, x.s))); for (const t of top) s3[t.p] += 1 / top.length; }
+  for (const cell of cells) { const sx = A4SET.map((p) => ({ p, s: cellStats(of(cell.wid, p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = sx.filter((x) => !sx.some((y) => better(y.s, x.s))); for (const t of top) s3[t.p] += 1 / top.length; }
   const beats = (a, b) => a.inTime >= b.inTime - 1e-9 && a.med <= b.med && (a.inTime > b.inTime + 1e-9 || a.med < b.med);
   const pool = (pol) => cellStats(worlds.flatMap((w) => of(w, pol)));
   const ddW = worlds.map((w) => { const f = cellStats(of(w, 'smart')), nv = cellStats(of(w, 'dd:never')), al = cellStats(of(w, 'dd:always')); return { w, f, nv, al, ok: beats(f, nv) && beats(f, al) }; });
   const g4 = beats(pool('smart'), pool('dd:never')) && beats(pool('smart'), pool('dd:always')) && ddW.filter((x) => x.ok).length >= Math.min(3, worlds.length);
   const per60 = (pol) => worlds.flatMap((w) => of(w, pol)).filter((r) => r.length > 11).map((r) => r[10] * 60 / Math.max(1, r[11]));
-  const qq = (xs, p) => (xs.length ? q(xs, p) : NaN); const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+  const qq = (xs, p) => (xs.length ? q(xs, p) : NaN); const mean = (xs) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : NaN);
   const g6s = qq(per60('smart'), 0.5), g6a = mean(per60('dd:always')), g6m = mean(per60('smart')); const naiveLost = worlds.flatMap((w) => of(w, 'naive')).filter((r) => r[10] > 0).length;
   const g7 = worlds.map((w) => ({ w, d: of(w, 'abl:noRival').length ? (cellStats(of(w, 'smart')).inTime - cellStats(of(w, 'abl:noRival')).inTime) * 100 : NaN }));
   const g8 = worlds.map((w) => { const g = cellStats(of(w, 'guideTapper')); const chars = [...new Set(byWorld[w].recs.map((r) => r[1]))].map((c) => cellStats(of(w, 'guideTapper', (r) => r[1] === c)).inTime); return { w, g: g.inTime, worst: Math.min(...chars), s: cellStats(of(w, 'smart')).inTime, a: cellStats(of(w, 'adaptive')).inTime }; });
-  const g5 = ['inspect:1', 'bestBuy'].flatMap((o) => ['warn0', 'warn1'].map((wb) => { let n = 0, top = 0; for (const t of Object.values(dom)) { const x = t['G5|' + o + '|' + wb]; if (x) { n += x.n; top += x.top; } } return { o, wb, n, r: n ? top / n : NaN }; }));
-  const cal = existsSync('tools/balance-data/rivals.json') ? JSON.parse(readFileSync('tools/balance-data/rivals.json', 'utf8')) : null;
+  const g5 = ['inspect:1', 'bestBuy'].flatMap((o) => ['warn0', 'warn1'].map((wb) => { let n = 0, top = 0; for (const t of Object.values(dom)) { const x = t && t['G5|' + o + '|' + wb]; if (x) { n += x.n; top += x.top; } } return { o, wb, n, r: n ? top / n : NaN }; }));
   const F1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : '—'); const F2 = (x) => (Number.isFinite(x) ? x.toFixed(2) : '—');
-  L.push('', '## T6 rivals gates (spec §16; matrix records + `--dominance` + `--rivals`)', '', '| gate | result | numbers |', '|---|---|---|');
-  L.push(`| G1 no archetype best of the four in > 60% of cells | ${ok(Object.values(share).every((x) => x <= 0.6))} | ${cells.length} cells: ${ARCH.map((a) => `${a} ${P(share[a])}`).join(' · ')} |`);
-  L.push(`| G2 each archetype best in ≥ 1 cycle bucket (pooled over characters) | ${ok(ARCH.every((a) => g2[a].length))} | ${ARCH.map((a) => `${a}: ${g2[a].join(', ') || 'none'}`).join(' · ')} |`);
-  L.push(`| G3 A4 with competition (≤ 60% each) | ${ok(Object.values(s3).every((x) => x / Math.max(1, cells.length) <= 0.6))} | ${Object.entries(s3).sort((a, b) => b[1] - a[1]).map(([p, x]) => `${p} ${P(x / Math.max(1, cells.length))}`).join(' · ')} |`);
-  L.push(`| G4 dd:flagged beats dd:never and dd:always (pooled and ≥ 3 worlds) | ${ok(g4)} | pooled flagged ${P(pool('smart').inTime)}/${pool('smart').med} · never ${P(pool('dd:never').inTime)}/${pool('dd:never').med} · always ${P(pool('dd:always').inTime)}/${pool('dd:always').med}; ${ddW.map((x) => `${x.w} ${P(x.f.inTime)}/${x.f.med} vs ${P(x.nv.inTime)}/${x.nv.med} vs ${P(x.al.inTime)}/${x.al.med}${x.ok ? ' ✓' : ' ✗'}`).join(' · ')} |`);
-  L.push(`| G5 competed cards: inspect:1 and the best buy top-U in 10–85% (0 / ≥ 1 warn) | ${g5.every((x) => x.n) ? ok(g5.every((x) => x.r >= 0.10 && x.r <= 0.85)) : 'not run'} | ${g5.map((x) => `${x.o} ${x.wb} ${P(x.r)} of ${x.n}`).join(' · ')} |`);
-  L.push(`| G6 lost deals / 60 months: smart median in [0.3, 2.5]; dd:always ≥ 1.5× smart; naive 0 | ${ok(g6s >= 0.3 && g6s <= 2.5 && g6a >= 1.5 * g6m && naiveLost === 0)} | smart median ${F2(g6s)} (mean ${F2(g6m)}) · dd:always mean ${F2(g6a)} · naive games with a loss ${naiveLost} |`);
-  L.push(`| G7 \`_dev.noRival\` changes smart in time by ≤ 5 pp | ${ok(g7.every((x) => Math.abs(x.d) <= 5 + 1e-9))} | ${g7.map((x) => `${x.w} ${F1(x.d)} pp`).join(' · ')} |`);
-  L.push(`| G8 A1 (guideTapper ≥ 65%, every character ≥ 50%) and A3 (smart, adaptive 55–75%) | ${ok(g8.every((x) => x.g >= 0.65 && x.worst >= 0.5 && x.s >= 0.55 && x.s <= 0.75 && x.a >= 0.55 && x.a <= 0.75))} | ${g8.map((x) => `${x.w} guide ${P(x.g)} (worst ${P(x.worst)}) · smart ${P(x.s)} · adaptive ${P(x.a)}`).join(' | ')} |`);
-  L.push(`| G9 calibration (empirical hazard of the sealed draws vs the table, cells ≥ 500) | ${cal ? 'report' : 'not run'} | ${cal ? worlds.map((w) => { const rs = (cal[w] || { rows: [] }).rows.filter((x) => x.reach >= 500); return `${w}: ${rs.length ? `max |Δ| ${(Math.max(...rs.map((x) => Math.abs(x.emp - x.table))) * 100).toFixed(1)} pp over ${rs.length} cells (${cal[w].cards} cards)` : 'no cell ≥ 500'}`; }).join(' · ') : ''} |`);
-  return L;
+  const R = [];
+  R.push({ id: 'G1', what: 'no archetype best of the four in > 60% of cells', status: st(Object.values(share).every((x) => x <= 0.6)), text: `${cells.length} cells: ${ARCH.map((a) => `${a} ${P(share[a])}`).join(' · ')}` });
+  R.push({ id: 'G2', what: 'each archetype best in ≥ 1 cycle bucket (pooled over characters)', status: st(ARCH.every((a) => g2[a].length)), text: ARCH.map((a) => `${a}: ${g2[a].join(', ') || 'none'}`).join(' · ') });
+  R.push({ id: 'G3', what: 'A4 with competition (≤ 60% each)', status: st(Object.values(s3).every((x) => x / Math.max(1, cells.length) <= 0.6)), text: Object.entries(s3).sort((x, y) => y[1] - x[1]).map(([p, x]) => `${p} ${P(x / Math.max(1, cells.length))}`).join(' · ') });
+  R.push({ id: 'G4', what: 'dd:flagged beats dd:never and dd:always (pooled and ≥ 3 worlds)', status: st(g4), text: `pooled flagged ${P(pool('smart').inTime)}/${pool('smart').med} · never ${P(pool('dd:never').inTime)}/${pool('dd:never').med} · always ${P(pool('dd:always').inTime)}/${pool('dd:always').med}; ${ddW.map((x) => `${x.w} ${P(x.f.inTime)}/${x.f.med} vs ${P(x.nv.inTime)}/${x.nv.med} vs ${P(x.al.inTime)}/${x.al.med}${x.ok ? ' ✓' : ' ✗'}`).join(' · ')}` });
+  const g5in = g5.every((x) => x.n) && g5.every((x) => x.r >= 0.10 && x.r <= 0.85);
+  R.push({ id: 'G5', what: 'competed cards: inspect:1 and the best buy top-U in 10–85% (0 / ≥ 1 warn)', status: !g5.every((x) => x.n) ? 'not run' : g5in ? 'met' : 'accepted', text: `${g5.map((x) => `${x.o} ${x.wb} ${P(x.r)} of ${x.n}`).join(' · ')}${g5in ? '' : ' — director: accepted known limit (no evaluator change in T6); follow-up: score inspect:1 vs inspect:2 using the level-1 range'}` });
+  R.push({ id: 'G6', what: 'competition felt, not punishing: dd:always mean lost deals / 60 months in [0.3, 2.5] (director, replaces the smart median); naive 0', status: st(g6a >= 0.3 && g6a <= 2.5 && naiveLost === 0), text: `dd:always mean ${F2(g6a)} · smart median ${F2(g6s)} (mean ${F2(g6m)}) · naive games with a loss ${naiveLost}` });
+  R.push({ id: 'G7', what: '`_dev.noRival` changes smart in time by ≤ 5 pp', status: st(g7.every((x) => Math.abs(x.d) <= 5 + 1e-9)), text: g7.map((x) => `${x.w} ${F1(x.d)} pp`).join(' · ') });
+  R.push({ id: 'G8', what: 'A1 (guideTapper ≥ 65%, every character ≥ 50%) and A3 (smart, adaptive 55–75%)', status: st(g8.every((x) => x.g >= 0.65 && x.worst >= 0.5 && x.s >= 0.55 && x.s <= 0.75 && x.a >= 0.55 && x.a <= 0.75)), text: g8.map((x) => `${x.w} guide ${P(x.g)} (worst ${P(x.worst)}) · smart ${P(x.s)} · adaptive ${P(x.a)}`).join(' | ') });
+  R.push({ id: 'G9', what: 'calibration (empirical hazard of the sealed draws vs the table, cells ≥ 500)', status: cal ? 'report' : 'not run', text: cal ? worlds.map((w) => { const rs = (cal[w] || { rows: [] }).rows.filter((x) => x.reach >= 500); return `${w}: ${rs.length ? `max |Δ| ${(Math.max(...rs.map((x) => Math.abs(x.emp - x.table))) * 100).toFixed(1)} pp over ${rs.length} cells (${cal[w].cards} cards)` : 'no cell ≥ 500'}`; }).join(' · ') + ' (the binding check is AC-8, 300,000 cards per world)' : '' });
+  return R;
+}
+function t6Gates(byWorld, dom, P, ok) {
+  const cal = existsSync('tools/balance-data/rivals.json') ? JSON.parse(readFileSync('tools/balance-data/rivals.json', 'utf8')) : null;
+  const R = t6GateResults(byWorld, dom, cal); if (!R.length) return [];
+  const lab = (s) => (s === 'met' ? 'met' : s === 'not met' ? '**NOT met**' : s);
+  return ['', '## T6 rivals gates (spec §16; matrix records + `--dominance` + `--rivals`)', '', '| gate | result | numbers |', '|---|---|---|', ...R.map((x) => `| ${x.id} ${x.what} | ${lab(x.status)} | ${x.text} |`)];
 }
 function t2Report() {
   const byWorld = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = [`tools/balance-data/matrix-${w}.json`, `tools/balance-t2-${w}.json`].find(existsSync); if (f) byWorld[w] = JSON.parse(readFileSync(f, 'utf8')); }
