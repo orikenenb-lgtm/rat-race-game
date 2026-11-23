@@ -914,8 +914,8 @@ body.hlife-more-open .hud{z-index:45}
 #boardTools[hidden],#boardTools [hidden]{display:none}
 #boardTools .ibtn{pointer-events:auto;font-size:20px;line-height:1;width:44px;height:44px}
 body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boardTools{display:none}
-/* the turn state chip: top centre of the free board rect */
-#turnChip{position:fixed;z-index:3;margin:0;top:calc(var(--fr-y0, 0px) + 8px);left:calc((var(--fr-x0, 0px) + var(--fr-x1, 100vw)) / 2);transform:translate(-50%,-6px);
+/* the turn state chip: bottom centre of the free board rect (the toasts live at the top) */
+#turnChip{position:fixed;z-index:3;margin:0;top:calc(var(--fr-y1, 100vh) - 46px);left:calc((var(--fr-x0, 0px) + var(--fr-x1, 100vw)) / 2);transform:translate(-50%,6px);
   padding:6px 14px;border-radius:999px;background:var(--paper,#fffaf0);color:var(--ink,#1d1a2b);font:700 15px/1.2 var(--font,Rubik,sans-serif);
   box-shadow:var(--shadow-s);pointer-events:none;white-space:nowrap;opacity:0;transition:opacity var(--dur-2,200ms),transform var(--dur-2,200ms)}
 #turnChip.on{opacity:1;transform:translate(-50%,0)}
