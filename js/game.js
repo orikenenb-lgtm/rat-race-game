@@ -458,9 +458,10 @@ function landed(pos) {
 /** A2 G-03: the city always equals E.cityModels(S) (+ the life markers syncLifeCity keeps). Idempotent; engine spawns keep their
  *  animation (they are already in the scene, so this changes nothing then). Dev fixtures (?fx=, perf) are ignored. */
 const DEV_KEY = /^(fx|perf)/;
+let cityGen = -1;   // the gen whose world + city the scene shows (startGame); reconcile only then
 function cityWant() { return [...E.cityModels(S)]; }
 function reconcileCity() {
-  if (!S || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
+  if (!S || cityGen !== gen || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
   try {
     const want = cityWant(); const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k));
     const life = have.filter((k) => k.startsWith('L:'));
@@ -520,7 +521,7 @@ let rolling = false;   // T5 CR-B3: dice / hops are animating — a tap or Space
  *        pawn, pawnColor, tutorial, resume}
  */
 export async function startGame(cfg = {}) {
-  const my = ++gen;
+  const my = ++gen; cityGen = -1;   // no city reconcile until this start has built its world (G-03)
   stuck = false; OV.hideRecover();
   const orig = { ...cfg };
   try { return await startInner(cfg, my); }
@@ -711,6 +712,7 @@ async function startInner(cfg, my) {
     try { scene.markTile?.('dest', null); scene.markTile?.('current', S.pos); } catch (e) { console.warn(e); }   // wave 1 (G6)
     ui.turnChip?.(null);
     scene.syncCity(E.cityModels(S), { silent: true });
+    cityGen = my;
     syncLevels(false);
     OV.hideLoading();
     ui.flushFeedback?.({ toasts: false });   // T5 §4.2: the last game's queued cards / verdicts / reveal lines are not this game's
