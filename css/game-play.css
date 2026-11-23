@@ -1084,3 +1084,4 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 #hubBtn{flex:0 0 auto;min-width:44px;min-height:44px;justify-content:center}
 /* phones: the bar keeps the roll wide — the hub is the 💼 icon (its name stays "ניהול כסף" for assistive tech) */
 @media (max-width:600px){ #hubBtn{padding:0 10px;font-size:20px} #hubBtn .hb-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} }
+@media (max-width:420px){ #hMonth .mstar .ml1{display:none} }

@@ -319,7 +319,7 @@ export function resetHud() { shownCash = null; shownMonth = null; ind.key = null
 export function setMonth(month, max, star = 0) {
   const el = $('#hMonth'); if (!el) return;
   // wave 3a (J1 P0-1): a free game shows its ★ limit ("★ עד חודש N"; after it: "★ עבר") — the month itself never ends a free game
-  const st = star ? `<small class="mstar${month > star ? ' past' : ''}">${month > star ? `★ עבר (${star})` : `★ עד <span class="ml">חודש </span>${star}`}</small>` : '';
+  const st = star ? `<small class="mstar${month > star ? ' past' : ''}">${month > star ? `★ עבר (${star})` : `★ <span class="ml1">עד </span><span class="ml">חודש </span>${star}`}</small>` : '';
   el.innerHTML = max ? `${month}<small>/${max}</small>` : `${month}${st}`;
   el.closest('.stat')?.setAttribute('aria-label', star ? `חודש ${month}. ${month > star ? `עבר מועד הכוכבים (חודש ${star})` : `כוכבים: לצאת מהמירוץ עד חודש ${star}`}` : `חודש ${month}${max ? ` מתוך ${max}` : ''}`);
   if (shownMonth != null && month !== shownMonth) { const st = el.closest('.stat'); st.classList.remove('tick'); void st.offsetWidth; st.classList.add('tick'); }
