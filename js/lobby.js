@@ -17,6 +17,7 @@ import { reducedMotion, motionPref, setMotionPref, initMotion } from './motion.j
 import { catName } from './data/lessons-meta.js';
 import { PRACTICE } from './practice.js';
 import { flag } from './flags.js';
+import { metaOf } from './worlds/meta.js';            // worlds wave 0: the 12-world map is meta only (P.worldMap()); rules load on demand
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -37,7 +38,47 @@ const freeKey = (wid) => 'rr2-save-free-' + wid;
 const slotKey = (wid, learn = false) => (learn ? ((G && G.saveKeyFor && safe(() => G.saveKeyFor({ mode: 'free', worldId: wid, learn: true }))) || 'rr2-save-learn-' + wid) : freeKey(wid));
 const rankedKey = (rid) => 'rr2-save-' + rid;
 const randSeed = () => Math.floor(Math.random() * 2147483646) + 1;
-const worldOf = (id) => { try { return getWorld(id || 'w1'); } catch (e) { return WORLDS[0]; } };
+/** The full world config, or — for a known world whose rules are not loaded yet (lazy) — a meta-shaped stand-in with the fields the
+ *  lobby reads for names and lines (never used for a character picker or a game: those await ensureRules first). */
+const worldOf = (id) => {
+  try { return getWorld(id || 'w1'); } catch (e) { /* not loaded / unknown */ }
+  const m = metaOf(id); if (!m) return WORLDS[0];
+  return { ...m, stub: true, goal: {}, lesson: '', characters: (m.characters || []).map((c) => ({ ...c, expenses: [], assets: [] })) };
+};
+/** worlds wave 0 + w5: the map (P.worldMap(): every world, playable and planned) — w1–w4 from the engine if progress is older */
+const mapList = () => safe(() => P.worldMap(), null) || WORLDS.map((w) => ({ id: w.id, order: w.order, tier: w.order, name: w.name, tagline: w.tagline, playable: true, status: 'core', unlocked: P.isUnlocked(w.id), unlock: [], lockText: '', characters: w.characters }));
+const playableMap = () => mapList().filter((m) => m.playable);
+/** Are the full rules of a world in memory (w1–w4 always; a lazy world after ensureRules)? */
+const rulesReady = (id) => safe(() => !!getWorld(id), false);
+const lazyLoads = new Map();   // id → 'loading' | 'error'
+/** Load a lazy world's rules (no-op for w1–w4) → true, or false after telling the player (toast). */
+async function ensureRules(id, { quiet = false } = {}) {
+  if (!id || id === 'h' || rulesReady(id)) return true;
+  const m = metaOf(id); if (!m || !m.playable) return false;
+  lazyLoads.set(id, 'loading');
+  try { await P.ensureWorldRules(id); lazyLoads.delete(id); return true; }
+  catch (e) { console.warn('lobby: world rules failed', id, e); lazyLoads.set(id, 'error'); if (!quiet) toast(LAZY_ERR); return false; }
+}
+const LAZY_ERR = 'לא הצלחנו לטעון את העולם. בדוק את החיבור ונסה שוב.';
+/** Card art: w1–w4 have painted cards; later worlds get a generated card (sky gradient + motif) — never a missing image. */
+const PAINTED = new Set(['w1', 'w2', 'w3', 'w4']);
+const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛒', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑' };
+const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ffe0ec', '#ef6c8f'], w8: ['#e3e8f4', '#5c6f9e'], w9: ['#ffe9a8', '#e07a2f'],
+  w10: ['#dfe7ff', '#2b3f8c'], w11: ['#d8f3ea', '#2a8c6f'], w12: ['#f5e1b0', '#8a5a14'] };
+function artHtml(id, alt = '', extra = '') {
+  if (PAINTED.has(id)) return `<img src="${cardArt(id)}" alt="${esc(alt)}" ${extra}>`;
+  const [a, b] = GEN_SKY[id] || ['#e8e0d0', '#8c7b62'];
+  return `<span class="gen-art" style="--g1:${a};--g2:${b}"${alt ? ` role="img" aria-label="${esc(alt)}"` : ' aria-hidden="true"'}><span class="gen-motif" aria-hidden="true">${MOTIF[id] || '🗺️'}</span></span>`;
+}
+/** "לפתוח: לצאת מהשכונה" for a one-world rule (w2–w5, unchanged wording); the meta rule text for forks ("★ באחד מ: …"). */
+function unlockLine(m) {
+  const u = (m && m.unlock) || [];
+  if (u.length === 1 && u[0].any.length === 1 && (u[0].count || 1) === 1) { const pm = metaOf(u[0].any[0]); return `לצאת ${P.fromW(pm ? pm.name : u[0].any[0])}`; }
+  return (m && m.lockText) || '';
+}
+const DIFF5 = ['', 'קל', 'קל־בינוני', 'בינוני', 'קשה', 'קשה מאוד'];
+function diff5Html(d) { if (!d) return ''; return `<span class="map-diff" aria-label="קושי ${d} מתוך 5: ${DIFF5[d] || ''}"><span aria-hidden="true">${'●'.repeat(d)}${'○'.repeat(5 - d)}</span><em>${DIFF5[d] || ''}</em></span>`; }
+const estHtml = (m) => (m && m.estMin ? `<span class="map-est">⏱️ כ־${num(String(m.estMin))} דק׳</span>` : '');
 const charOf = (w, id) => w.characters.find((c) => c.id === id) || null;
 /** Daily/weekly character: the server sends char_index into the world's daily list (fallback: all characters). */
 function dailyChar(w, i) {
@@ -50,7 +91,7 @@ const baseUrl = () => location.origin + location.pathname;
 const waHref = (text) => 'https://wa.me/?text=' + encodeURIComponent(text);
 const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
-const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '🩺', scale: '⚖️', chef: '🧑‍🍳', chip: '📱', box: '📦', avocado: '🥑', anchor: '⚓', rocket: '🚀', gear: '⚙️', heart: '💗' };
+const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '🩺', scale: '⚖️', chef: '🧑‍🍳', chip: '📱', box: '📦', avocado: '🥑', anchor: '⚓', rocket: '🚀', gear: '⚙️', heart: '💗', hotel: '🏨', music: '🎪', factory: '🏭' };
 const ACH_ICON = {
   seed: '🌱', shield: '🛡️', gold: '🪙', pillow: '🛟', card: '💳', arrows: '🔁', chart: '📈', cap: '🎓', crown: '👑', feather: '🪶', piggy: '🐷',
   phoenix: '🔥', scissors: '✂️', house: '🏠', fox: '🦊', moon: '🌙', lock: '🔒', hammer: '🔨', tower: '🏙️', umbrella: '☂️', scale: '⚖️',
@@ -323,6 +364,8 @@ function launchCfg(extra) { const p = P.getProgress(); return { pawn: p.pawn, pa
 async function launch(cfg) {
   const g = await game();
   if (!g || !g.startGame) { toast('לא הצלחנו לטעון את המשחק. בדוק את החיבור ורענן את הדף.'); return false; }
+  // worlds wave 0: a lazy world's rules load BEFORE createGame / resume / deserialize (game.js checks again for starts that skip the lobby)
+  if (cfg && cfg.worldId && !rulesReady(cfg.worldId)) { miniToast('טוען את העולם…'); if (!(await ensureRules(cfg.worldId))) return false; }
   lastEndSig = null;
   P.beginSession(); sessLessons = [];
   closeLobby();
@@ -338,6 +381,7 @@ async function confirmAsk(text, yes, no = 'ביטול') {
  *  T4: learn → learning mode (own slot, no ⚡/stars/achievements); dream + mentor from progress; tutorial per §4.6. */
 async function startFree(worldId, charId, opts = {}) {
   if (!P.isUnlocked(worldId) && !opts.duel) return go({ k: 'world', id: worldId });
+  if (!(await ensureRules(worldId))) return false;
   const learn = !!opts.learn && !opts.duel;
   const g = await game();
   const key = slotKey(worldId, learn);
@@ -461,6 +505,7 @@ const verifyRetryable = (e) => !!e && (VERIFY_RETRY.includes(e.code) || +e.statu
 const verifyOutcome = new Map();          // resultId → last sendResult answer (submitResult may find flushPending got there first)
 async function sendResult(a) { const r = await sendResult0(a); verifyOutcome.set(a.resultId, r); return r; }
 async function sendResult0(a) {
+  if ((metaOf((a.stats && a.stats.world) || a.worldId) || {}).ranked === false) return { drop: true, verified: null, error: 'unranked_world' };   // never sent (net.finish refuses too)
   if (!a.finished) {
     try { await net.finish(a); }
     catch (e) {
@@ -731,7 +776,7 @@ EN.onChange((p) => { if (p.delta > 0 && p.reason && !['sync', 'roll'].includes(p
 /** director decision 6: with ⚡ at 0, say that the unfinished game is kept (it continues from the same turn once a roll is back) */
 function savedNote() {
   if (!G || !G.savedGame) return '';
-  const sv = WORLDS.filter((w) => P.isUnlocked(w.id)).map((w) => [w, safe(() => G.savedGame(slotKey(w.id)), null)]).find(([, x]) => x && !x.future);
+  const sv = playableMap().filter((w) => P.isUnlocked(w.id)).map((w) => [w, safe(() => G.savedGame(slotKey(w.id)), null)]).find(([, x]) => x && !x.future);
   if (!sv) return '';
   const [w, x] = sv;
   return `<p class="lb-en-saved">💾 המשחק שלך שמור: ${esc(x.charName || '')} ${esc(P.inW(w.name))}, חודש ${num(String(x.month))}. ממשיכים ממנו בדיוק מאותו מקום.</p>`;
@@ -983,7 +1028,7 @@ function renderHome() {
     <div class="lb-grid ${me ? '' : 'is-guest'}">
       <section class="lb-map" aria-labelledby="lbMapH">
         <div class="map-head"><h2 id="lbMapH">המפה</h2>${trailHtml(p)}</div>
-        <div class="map-grid">${WORLDS.map((w, i) => worldCard(w, i, p)).join('')}</div>
+        <div class="map-grid">${mapGridHtml(p)}</div>
         <div class="map-extra">${historyCard(p)}${libraryCard()}</div>
       </section>
       <section class="lb-card lb-daily" id="lbDaily" aria-label="האתגר היומי">${dailyHtml(cache.daily)}</section>
@@ -996,31 +1041,51 @@ function renderHome() {
   if (me) { loadDaily(t); loadWeekly(t); loadGroups(t); }
 }
 function trailHtml(p) {
-  return `<ol class="map-trail" aria-label="ההתקדמות שלך">${WORLDS.map((w, i) => {
+  const L = mapList(); const play = L.filter((m) => m.playable); const soon = L.length - play.length;
+  return `<ol class="map-trail" aria-label="ההתקדמות שלך">${play.map((w, i) => {
     const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0;
     return `<li class="${un ? 'un' : ''} ${un && !s ? 'cur' : ''} ${un && s ? 'done' : ''}" title="${esc(w.name)}"><span>${!un ? '🔒' : s ? '★'.repeat(s) : i + 1}</span></li>`;
-  }).join('')}</ol>`;
+  }).join('')}${soon > 0 ? `<li class="soon" title="${soon} עולמות בקרוב"><span>🔜 ${soon}</span></li>` : ''}</ol>`;
 }
-function worldCard(w, i, p) {
+/** The map: every world of P.worldMap() in order — playable ones as cards (locked or open), planned ones as "בקרוב" pins (not buttons). */
+function mapGridHtml(p) {
+  const L = mapList(); const tierN = {}; for (const m of L) tierN[m.tier] = (tierN[m.tier] || 0) + 1;
+  return L.map((m, i) => (m.playable ? worldCard(m, i, p, tierN[m.tier] > 1) : soonCard(m, i, tierN[m.tier] > 1))).join('');
+}
+function soonCard(m, i, fork) {
+  return `<div class="map-card is-soon" role="group" aria-labelledby="mapn-${m.id}" data-id="${m.id}" style="--i:${i}">
+    <span class="map-art">${artHtml(m.id)}<span class="map-num">${m.order}</span><span class="map-soon" aria-hidden="true">בקרוב</span></span>
+    <span class="map-body">
+      <span class="map-row"><b class="map-name" id="mapn-${m.id}">${esc(m.name)}</b><span class="map-soon-t">🔜 בקרוב</span></span>
+      <span class="map-tagline">${esc(m.tagline || '')}</span>
+      <span class="map-meta">${diff5Html(m.diff)}${fork ? '<span class="map-fork">🔀 מסלול לבחירה</span>' : ''}</span>
+      ${m.lockText ? `<span class="map-line lock">ייפתח: ${esc(m.lockText)}</span>` : ''}
+    </span>
+  </div>`;
+}
+function worldCard(w, i, p, fork = false) {
+  const m = metaOf(w.id) || w;
   const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0; const best = p.best[w.id];
-  const prev = i ? WORLDS[i - 1] : null;
   const sv = un && G && G.savedGame ? safe(() => G.savedGame(freeKey(w.id))) : null;
   const svL = un && !sv && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
   const d = cache.daily; const isDaily = !!(d && d.world === w.id);
   const isNew = un && i > 0 && !p.seenWorlds.includes(w.id);
   const next = un && !s;
+  const inDaily = WORLDS.some((x) => x.id === w.id);   // the daily / weekly rotation stays w1–w4
   const tags = [
     isNew ? '<span class="map-tag-new">חדש!</span>' : '',
     isDaily ? '<span class="map-tag-daily">🎲 היומי של היום</span>' : '',
     sv ? `<span class="map-tag-save">▶ שמור · חודש ${esc(sv.month)}</span>` : svL ? `<span class="map-tag-save">🎓 תרגול · חודש ${esc(svL.month)}</span>` : '',
   ].join('');
-  return `<button class="map-card ${un ? '' : 'is-locked'} ${next ? 'is-next' : ''} ${s >= 3 ? 'is-max' : ''}" data-act="world" data-id="${w.id}" style="--i:${i}">
-    <span class="map-art"><img src="${cardArt(w.id)}" alt="" loading="lazy" decoding="async"><span class="map-num">${i + 1}</span>${un ? '' : '<span class="map-lock" aria-hidden="true">🔒</span>'}<span class="map-tags">${tags}</span></span>
+  const late = !inDaily;   // the new worlds show what they teach, how hard they are and how long they take (BRIEF-worlds §5)
+  return `<button class="map-card ${un ? '' : 'is-locked'} ${next ? 'is-next' : ''} ${s >= 3 ? 'is-max' : ''} ${late ? 'is-late' : ''}" data-act="world" data-id="${w.id}" style="--i:${i}">
+    <span class="map-art">${artHtml(w.id, '', 'loading="lazy" decoding="async"')}<span class="map-num">${m.order || i + 1}</span>${un ? '' : '<span class="map-lock" aria-hidden="true">🔒</span>'}<span class="map-tags">${tags}</span></span>
     <span class="map-body">
       <span class="map-row"><b class="map-name">${esc(w.name)}</b>${starsHtml(s)}</span>
       <span class="map-tagline">${esc(w.tagline)}</span>
-      ${un ? `<span class="map-line">${esc(P.nextStarLine(w.id))}</span>` : `<span class="map-line lock">לפתוח: לצאת ${esc(P.fromW(prev.name))}</span>`}
-      ${un ? (best ? `<span class="map-best">🏁 שיא: ${best} חודשים</span>` : '') : `<span class="map-tease">${isDaily ? 'אפשר לטעום היום באתגר היומי!' : 'טעימה דרך האתגר היומי'}</span>`}
+      ${late ? `<span class="map-learn">🧠 ${esc(m.learn || '')}</span><span class="map-meta">${diff5Html(m.diff)}${estHtml(m)}${fork ? '<span class="map-fork">🔀 מסלול לבחירה</span>' : ''}${m.ranked === false ? '<span class="map-free">משחק חופשי וחדרים פרטיים</span>' : ''}</span>` : ''}
+      ${un ? `<span class="map-line">${esc(P.nextStarLine(w.id))}</span>` : `<span class="map-line lock">לפתוח: ${esc(unlockLine(m))}</span>`}
+      ${un ? (best ? `<span class="map-best">🏁 שיא: ${best} חודשים</span>` : '') : inDaily ? `<span class="map-tease">${isDaily ? 'אפשר לטעום היום באתגר היומי!' : 'טעימה דרך האתגר היומי'}</span>` : ''}
     </span>
   </button>`;
 }
@@ -1068,7 +1133,7 @@ async function loadDaily(t) {
   if (t !== token) return;
   const box = $('#lbDaily'); if (box) box.innerHTML = dailyHtml(cache.daily);
   // the daily world may be a locked world → refresh the map tags + header streak
-  const grid = $('.map-grid'); if (grid) grid.innerHTML = WORLDS.map((w, i) => worldCard(w, i, P.getProgress())).join('');
+  const grid = $('.map-grid'); if (grid) grid.innerHTML = mapGridHtml(P.getProgress());
   const top = $('.lb-top'); if (top) top.outerHTML = topBar();
 }
 
@@ -1143,16 +1208,47 @@ function t6WorldHtml(w) {
   if (L && L.cfg && L.cfg.worldId === w.id) out.push(`<button class="chip t6-wlast" data-act="t6-last">${esc(RW.STR.lobbyLast)}</button>`);
   return out.join('');
 }
+/** A planned world (meta status 'planned'): what it will teach and how it opens — no play button (BRIEF-worlds §5). */
+function renderSoon(m) {
+  view = { k: 'world', id: m.id }; ++token; trace('world');
+  html(`<div class="lb-shell lb-world is-soon">
+    <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
+    <header class="wv-hero is-locked">${artHtml(m.id)}<div class="wv-hero-txt"><span class="map-num">${m.order}</span><h1>${esc(m.name)}</h1><p>${esc(m.tagline || '')}</p></div></header>
+    <div class="wv-locked"><div class="wv-lock-ic" aria-hidden="true">🔜</div><h2>העולם הזה בקרוב</h2>
+      <p>הוא עוד נבנה — אפשר לראות אותו במפה, אבל עוד לא לשחק בו.</p>
+      ${m.lockText ? `<p class="lb-note">ייפתח: ${esc(m.lockText)}</p>` : ''}
+      <p class="lb-note">${diff5Html(m.diff)}</p>
+      <div class="lb-acts"><button class="primary" data-act="home">חזרה למפה</button></div></div>
+  </div>`);
+}
+/** A lazy world whose rules are still loading (or failed): the hero + a loading line, or an error with "לנסות שוב". */
+function renderWorldLoading(id, opts, failed) {
+  const m = metaOf(id) || {}; view = { k: 'world', id }; const t = ++token; trace('world');
+  html(`<div class="lb-shell lb-world is-loading">
+    <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
+    <header class="wv-hero">${artHtml(id)}<div class="wv-hero-txt"><span class="map-num">${m.order || ''}</span><h1>${esc(m.name || '')}</h1><p>${esc(m.tagline || '')}</p></div></header>
+    ${failed ? `<div class="wv-locked wv-loaderr" role="alert"><div class="wv-lock-ic" aria-hidden="true">📡</div><h2>${esc(LAZY_ERR)}</h2>
+      <div class="lb-acts"><button class="primary" data-act="world" data-id="${esc(id)}">לנסות שוב</button><button data-act="home">חזרה למפה</button></div></div>`
+    : `<div class="wv-locked wv-loading" role="status" aria-live="polite"><div class="lb-spin" aria-hidden="true"></div><h2>טוען את ${esc(m.name || 'העולם')}…</h2><p class="lb-note">החוקים של העולם נטענים בפעם הראשונה.</p></div>`}
+  </div>`);
+  if (failed) return;
+  ensureRules(id, { quiet: true }).then((ok) => { if (t !== token || view.k !== 'world' || view.id !== id) return; if (ok) renderWorld(id, opts); else renderWorldLoading(id, opts, true); });
+}
 function renderWorld(id, opts = {}) {
+  const meta = metaOf(id);
+  if (meta && !meta.playable) return renderSoon(meta);
+  // worlds wave 0: an unlocked lazy world loads its rules BEFORE the character picker (a locked one is shown from meta only)
+  if (meta && !rulesReady(id) && P.isUnlocked(id)) return renderWorldLoading(id, opts, false);
   const w = worldOf(id); view = { k: 'world', id: w.id }; ++token; trace('world');
   if (opts.learn) worldMode = 'learn';
-  const i = WORLDS.indexOf(w); const p = P.getProgress(); const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0;
+  const m = meta || {};
+  const i = (m.order || WORLDS.indexOf(w) + 1) - 1; const p = P.getProgress(); const un = P.isUnlocked(w.id); const s = p.stars[w.id] || 0;
   if (un) P.markWorldSeen(w.id);
   const sv = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id))) : null;
   const svL = un && G && G.savedGame ? safe(() => G.savedGame(slotKey(w.id, true))) : null;
-  const prev = i ? WORLDS[i - 1] : null;
-  const d = cache.daily; const isDaily = !!(d && d.world === w.id && d.my_status !== 'won' && d.my_status !== 'lost');
-  const diffs = difficulty(w);
+  const inDaily = WORLDS.some((x) => x.id === w.id);
+  const d = cache.daily; const isDaily = inDaily && !!(d && d.world === w.id && d.my_status !== 'won' && d.my_status !== 'lost');
+  const diffs = un ? difficulty(w) : {};
   let body;
   if (un) {
     const mode = modeNow(p);
@@ -1164,12 +1260,13 @@ function renderWorld(id, opts = {}) {
       <h2 class="wv-h">${sv || svL ? 'או משחק חדש — ' : ''}בחר דמות</h2>
       <div class="wv-chars">${w.characters.map((c) => charCard(w, c, diffs[c.id], s)).join('')}</div>`;
   } else {
-    const frontier = WORLDS.find((x) => P.isUnlocked(x.id) && !(p.stars[x.id] > 0)) || prev;
+    const frontier = playableMap().find((x) => P.isUnlocked(x.id) && !(p.stars[x.id] > 0)) || null;
+    const ul = unlockLine(m);
     body = `<div class="wv-locked">
       <div class="wv-lock-ic" aria-hidden="true">🔒</div>
       <h2>העולם הזה עוד נעול</h2>
-      <p>לפתוח: לצאת ${esc(P.fromW(prev.name))} עם ★ אחד לפחות.</p>
-      <p class="lb-note">מה מחכה כאן: ${esc(NEW_HERE[w.mechanic] || w.tagline)}</p>
+      <p>${/^לצאת /.test(ul) ? `לפתוח: ${esc(ul)} עם ★ אחד לפחות.` : `לפתוח: ${esc(ul)}`}</p>
+      <p class="lb-note">מה מחכה כאן: ${esc(NEW_HERE[w.mechanic] || m.newHere || w.tagline)}</p>
       <div class="lb-acts">${isDaily ? '<button class="primary" data-act="daily">🎲 לטעום עכשיו באתגר היומי</button>' : ''}
       ${frontier && P.isUnlocked(frontier.id) ? `<button class="${isDaily ? '' : 'primary'}" data-act="world" data-id="${frontier.id}">לשחק ${esc(P.inW(frontier.name))}</button>` : ''}</div>
       ${isDaily ? '' : '<p class="lb-note">טיפ: כל יום האתגר היומי בעולם אחר — גם בעולמות נעולים.</p>'}
@@ -1177,11 +1274,14 @@ function renderWorld(id, opts = {}) {
   }
   html(`<div class="lb-shell lb-world ${un && modeNow(p) === 'learn' ? 'is-learn' : ''}">
     <div class="lb-bar"><button class="chip" data-act="home">› למפה</button>${topMini()}</div>
-    <header class="wv-hero ${un ? '' : 'is-locked'}"><img src="${cardArt(w.id)}" alt="">
+    <header class="wv-hero ${un ? '' : 'is-locked'}">${artHtml(w.id)}
       <div class="wv-hero-txt"><span class="map-num">${i + 1}</span><h1>${esc(w.name)}</h1><p>${esc(w.tagline)}</p>${starsHtml(s, 'lg')}${p.best[w.id] ? `<span class="wv-best-sm">🏁 השיא שלך: ${int(p.best[w.id])} חודשים</span>` : ''}</div></header>
     <div class="wv-goal">
       <div><span>🎯 המטרה</span><b>${esc(w.goalLabel)}</b></div>
-      <div class="wv-new"><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || '')}</b></div>
+      <div class="wv-new"><span>🧠 חדש כאן</span><b>${esc(NEW_HERE[w.mechanic] || m.newHere || '')}</b></div>
+      ${!inDaily && m.learn ? `<div class="wv-learn"><span>📚 מה לומדים</span><b>${esc(m.learn)}</b></div>` : ''}
+      ${!inDaily && m.diff ? `<div class="wv-diff5"><span>🎚️ קושי${m.estMin ? ' ומשך' : ''}</span><b>${diff5Html(m.diff)}${estHtml(m)}</b></div>` : ''}
+      ${!inDaily && m.ranked === false ? `<div class="wv-free"><span>🏷️ איפה משחקים</span><b>משחק חופשי וחדרים פרטיים (עוד בלי טבלאות)</b></div>` : ''}
       ${p.best[w.id] ? `<div><span>🏁 השיא שלך</span><b>${p.best[w.id]} חודשים</b></div>` : ''}
     </div>
     ${body}
@@ -1248,8 +1348,8 @@ function charCard(w, c, d) {
   return `<article class="wv-char" aria-labelledby="${did}-n" data-w="${w.id}" data-c="${c.id}">
     <div class="wv-top"><span class="wv-ic" aria-hidden="true">${CHAR_ICON[c.icon] || '🙂'}</span><span class="wv-cname"><b id="${did}-n">${esc(c.name)}</b>${idl ? `<small class="wv-id">${esc(idl)}</small>` : ''}</span>${diffHtml(d || 2)}</div>
     <p class="wv-desc">${esc(c.desc || '')}</p>
-    ${meta ? `<p class="wv-sw wv-str">💪 ${iso(meta.strength)}</p><p class="wv-sw wv-weak">⚠️ ${iso(meta.weakness)}</p>` : ''}
-    <p class="wv-cf ${neg ? 'neg' : 'pos'}"><span>${neg ? T4.K2 : T4.K4}${neg ? (c.gender === 'f' ? T4.K3f : T4.K3m) : ''}</span><b>${iso((cf > 0 ? '+' : '') + fmt(cf))}</b></p>
+    ${meta ? `<p class="wv-sw wv-str">💪 ${iso(meta.strength)}</p><p class="wv-sw wv-weak">⚠️ ${iso(meta.weakness)}</p>` : c.pros || c.cons ? `${(c.pros || []).slice(0, 2).map((x) => `<p class="wv-sw wv-str">💪 ${iso(x)}</p>`).join('')}${(c.cons || []).slice(0, 2).map((x) => `<p class="wv-sw wv-weak">⚠️ ${iso(x)}</p>`).join('')}` : ''}
+    <p class="wv-cf ${neg ? 'neg' : 'pos'}"><span>${neg ? T4.K2 : T4.K4}${neg ? (c.gender === 'f' ? T4.K3f : T4.K3m) : ''}</span><b>${iso((cf > 0 ? '+' : '') + (Math.abs(cf) >= 1e6 ? fmtM(cf) : fmt(cf)))}</b></p>
     <p class="wv-goalline">${esc(T4.Kgoal(T.maxMonths))}</p>
     <div class="wv-details" id="${did}" hidden>
       <div class="wv-nums"><span><small>${T4.Knet}</small><b>${iso(salary)}</b></span><span><small>${T4.Kcash}</small><b>${iso(fmtM(cc.cash))}</b></span></div>
@@ -1437,7 +1537,7 @@ function renderProfile() {
       </div>
     </section>
     <section class="lb-card pf-worlds"><h2>כוכבים לפי עולם</h2>
-      <div class="pf-wlist">${WORLDS.map((w) => { const un = P.isUnlocked(w.id); return `<button class="pf-w ${un ? '' : 'is-locked'}" data-act="world" data-id="${w.id}"><img src="${cardArt(w.id)}" alt=""><span><b>${esc(w.name)}</b><small>${un ? (p.best[w.id] ? `שיא: ${p.best[w.id]} חודשים` : 'עוד לא יצאת') : '🔒 נעול'}</small></span>${starsHtml(p.stars[w.id] || 0)}</button>`; }).join('')}</div>
+      <div class="pf-wlist">${playableMap().map((w) => { const un = P.isUnlocked(w.id); return `<button class="pf-w ${un ? '' : 'is-locked'}" data-act="world" data-id="${w.id}">${artHtml(w.id)}<span><b>${esc(w.name)}</b><small>${un ? (p.best[w.id] ? `שיא: ${p.best[w.id]} חודשים` : 'עוד לא יצאת') : '🔒 נעול'}</small></span>${starsHtml(p.stars[w.id] || 0)}</button>`; }).join('')}</div>
     </section>
     ${learnProfileHtml()}
     <section class="lb-card pf-pawns"><h2>הכלי שלך</h2>
@@ -1611,7 +1711,7 @@ function renderDuel() {
   html(`<div class="lb-shell lb-duel">
     <div class="lb-bar"><button class="chip" data-act="duel-skip">› למפה</button>${topMini()}</div>
     <article class="duel-card">
-      <div class="end-art"><img src="${cardArt(w.id)}" alt=""></div>
+      <div class="end-art">${artHtml(w.id)}</div>
       <p class="end-kicker">⚔️ דו־קרב</p>
       <h1 class="duel-title">${d.by ? `${esc(d.by)} אתגר אותך!` : 'אתגרו אותך לדו־קרב!'}</h1>
       <p class="duel-sub">${esc(w.name)} · ${esc(c.name)} — אותו לוח, אותן קוביות, אותם קלפים.</p>
@@ -1654,7 +1754,7 @@ function onGameEnd(e, delay) {
   if (!learnMode && !afterWin && (e.mode || 'free') === 'free' && !hist) res.dream = safe(() => P.recordDream(e), null);   // §6.3 badges: free normal games only
   if (!afterWin) logMilestones(e, res);
   lastEndSig = sigOf(e);
-  const ranked = e.mode && e.mode !== 'free' && !!e.resultId;
+  const ranked = e.mode && e.mode !== 'free' && !!e.resultId && (metaOf(e.worldId) || {}).ranked !== false;   // worlds wave 0: an unranked world has no result to send
   endCtx = { e, res, ranked, hist, learn: learnMode, seed, duel: e.duel || (same && cfg.duel) || null, submit: ranked ? { state: 'saving' } : null, groupCode: null, groupName: null, dreamSaved: null,
     ghosts: null, rivals: (e.t6 && e.t6.rivals) || 'off' };
   if (ranked) {
@@ -1695,7 +1795,7 @@ function renderEnd(animate = false) {
   const title = learn ? (won ? T4.L1 : T4.L2) : hist ? (won ? 'ניצחת את המדד!' : bankrupt ? 'פשטת רגל' : 'המדד ניצח הפעם') : won ? (stars >= 3 ? 'משחק מושלם!' : 'יצאת מהמירוץ!') : bankrupt ? 'פשטת רגל' : sprint ? 'הספרינט נגמר' : 'נגמר הזמן';
   const prog = Math.max(0, Math.min(1, e.progress ?? end.progress ?? 0));
   const near = nearMissText(end);
-  const nextIdx = hist ? -1 : WORLDS.indexOf(w) + 1; const nextW = hist ? null : WORLDS[nextIdx] || null;
+  const nextW = hist ? null : playableMap().find((x) => x.order > (w.order || 0) && (x.unlock || []).some((c) => c.any.includes(w.id))) || null;   // the next world on the map that this one opens
   const nextOpen = nextW && P.isUnlocked(nextW.id);
   const modeName = hist ? '⏳ מכונת הזמן' : duel ? '⚔️ דו־קרב' : learn ? '🎓 תרגול' : e.mode === 'free' ? 'משחק חופשי' : (e.title || MODE_NAME[e.mode] || '');
   const kicker = [w.name, c ? c.name : '', modeName].filter(Boolean).map(esc).join(' · ');
@@ -1703,6 +1803,7 @@ function renderEnd(animate = false) {
   const cell = (label, value, cls = '') => `<span><small>${label}</small><b class="${cls}">${iso(value)}</b></span>`;
   const statCells = [cell('חודשים', String(e.months))];
   if (g.type === 'passive') statCells.push(cell('הכנסה פסיבית', fmtM(e.passive || 0), won ? 'pos' : ''), cell('הוצאות', fmtM(e.expenses || 0)));
+  else if (g.type === 'passive12') statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד: ממוצע לחודש', fmtM(g.target || 0)));   // w5: a 12-month average of asset income
   else statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד', fmtM(g.target || 0)));
   if (hist) { statCells.length = 1; statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('קנה והחזק', fmtM((end.benchmark && end.benchmark.netWorth) || 0))); }
   else if (g.type === 'netWorthImpact') statCells.push(`<span><small>השפעה</small><b>${num((end.impact ?? 0) + '/' + g.impact)}</b></span>`);
@@ -1725,7 +1826,7 @@ function renderEnd(animate = false) {
   if (flag('recap2') && e.t6 && T6S && GH && RW) return renderEndT6({ e, res, w, c, end, won, stars, title, kicker, near, learn, ranked, hist, duelHtml, leaksHtml, analysis, nextW, nextOpen, animate, prog, sprint, g });
   html(`<div class="lb-shell lb-end ${won ? 'is-won' : 'is-lost'} ${animate ? 'anim' : ''}">
     <article class="end-card">
-      <div class="end-art ${hist ? 'hist' : ''}"><img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove"></div>
+      <div class="end-art ${hist ? 'hist' : ''}">${hist || PAINTED.has(w.id) ? `<img src="${hist ? HIST_ART : cardArt(w.id)}" alt="" data-fallback="remove">` : artHtml(w.id)}</div>
       <p class="end-kicker">${kicker}</p>
       <h1 class="end-title">${title}</h1>
       ${learn ? learnStarsHtml(won ? res.wouldStars || stars : 0) : `<div class="end-stars" role="img" aria-label="${stars} כוכבים מתוך 3">${[0, 1, 2].map((i) => `<span class="end-star ${!animate && i < stars ? 'on' : ''}" data-i="${i}" aria-hidden="true">★</span>`).join('')}</div>`}
@@ -1978,7 +2079,7 @@ function newsHtml(e, res, resisted = '') {
   const out = [];
   if (res.unlockedWorld) {
     const nw = worldOf(res.unlockedWorld);
-    out.push(`<button class="end-news end-unlock" data-act="end-next" data-id="${nw.id}"><img src="${cardArt(nw.id)}" alt=""><span><small>🔓 נפתח עולם חדש!</small><b>${esc(nw.name)}</b><em>${esc(nw.tagline)}</em></span></button>`);
+    out.push(`<button class="end-news end-unlock" data-act="end-next" data-id="${nw.id}">${artHtml(nw.id)}<span><small>🔓 נפתח עולם חדש!</small><b>${esc(nw.name)}</b><em>${esc(nw.tagline)}</em></span></button>`);
   }
   if (res.bankedLocked) out.push(`<div class="end-news"><span class="end-news-ic">🏦</span><span><small>הכוכבים נשמרו</small><b>${starStr(res.newStars)} ${esc(P.inW(worldOf(res.worldId).name))}</b><em>יחכו לך כשתפתח את העולם הזה</em></span></div>`);
   else if (res.gained > 0 && !res.unlockedWorld) out.push(`<div class="end-news"><span class="end-news-ic">⭐</span><span><small>שיא כוכבים חדש</small><b>${starStr(res.newStars)}</b><em>${esc(P.nextStarLine(res.worldId))}</em></span></div>`);

@@ -991,3 +991,46 @@ body.lb-lobby-open { overflow: hidden; }
 .t6-bcmp table{width:100%;border-collapse:collapse;font-size:14px}
 .t6-bcmp th,.t6-bcmp td{padding:5px 4px;text-align:start;border-bottom:1px solid rgba(0,0,0,.08)}
 .t6-bcmp td.pos{color:var(--green,#15803d);font-weight:700}.t6-bcmp td.neg{color:var(--red,#b91c1c);font-weight:700}
+
+/* ======================================================================= worlds wave 0 + w5: the 12-world map (lobby lane) */
+/* generated card art for worlds without a painted card (sky gradient + motif) — never a missing image */
+.gen-art { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-height: 100%; background: radial-gradient(120% 90% at 70% 110%, rgba(255, 255, 255, .35), transparent 60%), linear-gradient(170deg, var(--g1), var(--g2)); }
+.gen-motif { font-size: clamp(34px, 7vw, 58px); line-height: 1; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .25)); }
+.map-art .gen-art { position: absolute; inset: 0; }
+.map-card:hover .map-art .gen-motif { transform: scale(1.08); transition: transform .3s ease; }
+.map-card.is-locked .gen-art { filter: grayscale(.85) brightness(.75); }
+.wv-hero .gen-art { aspect-ratio: 5 / 3; max-height: 300px; }
+.wv-hero .gen-motif { font-size: 84px; }
+.wv-hero.is-locked .gen-art { filter: grayscale(.8) brightness(.72); }
+.pf-w .gen-art { width: 70px; aspect-ratio: 5 / 3; border-radius: 10px; flex: none; }
+.pf-w .gen-motif, .end-unlock .gen-motif { font-size: 26px; }
+.end-unlock .gen-art { width: 120px; aspect-ratio: 5 / 3; border-radius: 12px; flex: none; }
+.end-art .gen-art { position: absolute; inset: 0; }
+/* the learn / difficulty / length lines of the later worlds (BRIEF-worlds §5) */
+.map-learn { font-size: 13px; line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.map-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--mut); font-weight: 700; }
+.map-diff { display: inline-flex; align-items: center; gap: 4px; }
+.map-diff > span { letter-spacing: 1px; color: light-dark(#b45309, #f4b860); font-size: 12px; }
+.map-diff em { font-style: normal; }
+.map-fork, .map-free { padding: 1px 8px; border-radius: 999px; background: light-dark(#f1e7d6, #3a3346); color: var(--ink); font-weight: 700; }
+/* planned worlds: a "בקרוב" pin, not a button */
+.map-card.is-soon { cursor: default; background: light-dark(#f3eee6, #24212b) !important; box-shadow: 0 3px 10px rgba(60, 30, 0, .10); }
+.map-card.is-soon:hover { transform: none; border-color: transparent !important; box-shadow: 0 3px 10px rgba(60, 30, 0, .10); }
+.map-card.is-soon .gen-art { filter: grayscale(.55) brightness(.92) saturate(.8); }
+.map-card.is-soon .map-name { color: var(--mut); }
+.map-soon { position: absolute; inset: auto 0 10px 0; margin: auto; width: max-content; padding: 3px 12px; border-radius: 999px; background: rgba(20, 14, 30, .62); color: #fff; font-weight: 800; font-size: 13px; }
+.map-soon-t { font-size: 12px; font-weight: 800; color: var(--mut); white-space: nowrap; }
+.map-trail li.soon span { background: transparent; box-shadow: 0 0 0 2px light-dark(#e6d6b6, #4b4358) inset; color: var(--mut); white-space: nowrap; }
+/* the world view of a lazy world: loading / error, and the extra rows */
+.wv-loading, .wv-loaderr { display: grid; justify-items: center; gap: 6px; }
+.lb-spin { width: 34px; height: 34px; border-radius: 50%; border: 4px solid light-dark(#efe5d2, #3a3346); border-top-color: var(--gold); animation: lb-spin .9s linear infinite; }
+.wv-diff5 b { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+@media (max-width: 600px) {
+  .map-learn { font-size: 12px; -webkit-line-clamp: 3; }
+  .map-meta { font-size: 12px; gap: 3px 6px; }
+  .map-free { display: none; }
+  .map-soon { font-size: 12px; bottom: 6px; }
+  .map-soon-t { display: none; }
+  .gen-motif { font-size: 34px; }
+  .map-trail li.soon span { font-size: 12px; }
+}
