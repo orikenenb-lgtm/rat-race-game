@@ -50,6 +50,7 @@ t4_meta|1|engine,ui,lobby,tests|node|tests/t4_meta.test.mjs:onboarding (T4)|none
 render_vocab|0|all|node|tests/render_vocab.test.mjs:rendering (T5)|none|n/a|n/a|600|node tests/render_vocab.test.mjs
 balance_gates|1|engine|node|tests/balance_gates.mjs:T7|none|n/a|n/a|120|node tests/balance_gates.mjs
 lobby_smoke|1|all|browser|tests/lobby_smoke.py:T7|fake|n/a|swiftshader|900|python3 tests/lobby_smoke.py $L
+admin_e2e|2|all|browser|tests/admin_e2e.py:owner|fake|n/a|swiftshader|900|python3 tests/admin_e2e.py $L
 game_e2e_w1|1|engine,shell,rendering,ui,lobby,tests|browser|tests/game_e2e.py:game|none|n/a|swiftshader|2400|python3 tests/game_e2e.py w1 8 --base=$G --prefix=run_
 lobby_e2e|2|lobby,backend,tests,engine,shell|browser|tests/lobby_e2e.py:T7|fake|accept|swiftshader|2400|python3 tests/lobby_e2e.py $L
 lobby_v21|2|lobby,backend,tests,engine,shell|browser|tests/lobby_v21.py:T7|fake|accept|swiftshader|2400|python3 tests/lobby_v21.py $L

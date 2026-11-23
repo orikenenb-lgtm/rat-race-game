@@ -992,3 +992,10 @@ body.lb-lobby-open { overflow: hidden; }
 .t6-bcmp table{width:100%;border-collapse:collapse;font-size:14px}
 .t6-bcmp th,.t6-bcmp td{padding:5px 4px;text-align:start;border-bottom:1px solid rgba(0,0,0,.08)}
 .t6-bcmp td.pos{color:var(--green,#15803d);font-weight:700}.t6-bcmp td.neg{color:var(--red,#b91c1c);font-weight:700}
+/* owner (admin) tools in the profile */
+.pf-admin-rows { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.pf-admin-rows li { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: var(--paper); border-radius: 12px; }
+.pf-admin-who { display: flex; flex-direction: column; min-width: 0; }
+.pf-admin-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-admin-give { display: flex; gap: 6px; }
+.pf-admin-claim summary { cursor: pointer; font-weight: 600; }

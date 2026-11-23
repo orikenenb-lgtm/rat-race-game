@@ -60,6 +60,14 @@ export const net = {
   sendEnergy: (groupId, nickname) => rpc('rr_send_energy', { ...auth(), p_group: groupId, p_nickname: nickname }),
   /** claim waiting gifts + referral bonuses → {total, from:[{nickname, kind:'gift'|'referral', amount}]} */
   claimEnergy: () => rpc('rr_claim_energy', auth()),
+  /** owner tools (server checks the admin row; nothing here is trusted by the server) → {admin:bool} */
+  adminStatus: () => rpc('rr_admin_status', auth()),
+  /** one-time owner code → {admin:true} or throws bad_code */
+  adminClaim: (code) => rpc('rr_admin_claim', { ...auth(), p_code: code }),
+  /** [{id, nickname, stars, joined}] newest first (max 60), filtered by nickname */
+  adminPlayers: (q) => rpc('rr_admin_players', { ...auth(), p_q: q || '' }),
+  /** give n⚡ (1–99) to a player — delivered through the gifts inbox (rr_claim_energy) */
+  adminGive: (to, n) => rpc('rr_admin_give', { ...auth(), p_to: to, p_amount: n }),
   /** free-play milestones for friends' feeds, e.g. logEvent('escaped', {world:'w1', age:34, months:29}) */
   logEvent: (kind, data) => rpc('rr_log_event', { ...auth(), p_kind: kind, p_data: data || {} }),
   /** {feed:[{nickname, kind, data, at, me}], gifted_today:[nickname]} */
