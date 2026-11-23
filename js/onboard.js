@@ -219,6 +219,11 @@ const readCoach = () => { try { return JSON.parse(localStorage.getItem(COACH_KEY
 export const worldCoached = (wid) => !!readCoach()[wid];
 export function markWorldCoached(wid) { try { localStorage.setItem(COACH_KEY, JSON.stringify({ ...readCoach(), [wid]: true })); } catch (e) { /* ignore */ } }
 const narrow = () => innerWidth <= 820;
+/** wave 2: the player finished the tutorial (rr2-progress.tutorialDone / a finished game, as lobby.js decides) or is an existing player (rr2-reveal.all) */
+function tutorialFinished() {
+  try { const p = JSON.parse(localStorage.getItem('rr2-progress') || 'null'); if (p && (p.tutorialDone || p.gamesPlayed > 0 || p.learnGames > 0)) return true; } catch (e) { /* ignore */ }
+  const R = readReveal(); return !!(R && R.all);
+}
 export const WORLD_COACH = {
   w1: [
     { target: '#hGoal', title: 'מד החופש', text: 'המטרה בשכונה: הכנסה פסיבית — כסף שנכסים מכניסים בלי שתעבוד — שמכסה את כל ההוצאות. כשהפס מתמלא, יצאת מהמירוץ.' },
@@ -268,6 +273,9 @@ export async function afterStart(h) {
     if (!alive(h)) return;
     await showCoach(h, 'roll', { target: '#roll', title: 'מטילים קובייה', text: ROLL_TEXT() });   // S-C1 / S-C2 (core 1/2)
   } else if (!worldCoached(h.W.id)) {
+    // wave 2 (A3 #2): the w1 marks repeat the tutorial's own meter / sheet coaches — a player who finished the tutorial never gets
+    // them over the board (worlds 2–4 keep their first-visit mechanic marks). The flag is read from storage: the game-only copy has no progress.js.
+    if (h.W.id === 'w1' && tutorialFinished()) { markWorldCoached('w1'); return; }
     await sleep(900);
     await worldCoach(h);
   }
