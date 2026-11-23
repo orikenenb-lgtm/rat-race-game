@@ -146,5 +146,41 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   for (const m of new Set(Object.values(w5.models).filter(Boolean))) ok(new RegExp(`\\b${m}\\(\\)`).test(sSrc), `standins3d builds ${m} (no .glb is ever requested)`);
   ok(!/\.glb['"`]/.test(sSrc) && !/import\(|fetch\(|Loader/.test(sSrc), 'standins3d requests no file (no .glb URL, no loader)');
 }
+/* worlds wave 2 — w6: identity (ΔE ≥ 10 from every world), character colours, model emoji, the 'plant' level kind (pips + light + states),
+   procedural stand-ins for every w6 model key (warehouse only in w6: w3 keeps its real warehouse.glb), the 2D card states */
+{
+  const w6 = await E.ensureWorld('w6');
+  const st = V.WORLD_STYLE.w6;
+  ok(st && st.decor === 'stacks' && st.sky[0] === '#cfd8dc' && st.sky[1] === '#f5f0e6' && st.accent === '#f97316' && st.edge === '#4b5563' && st.accentInk[0] === '#9a3412' && st.motif && st.caption, 'WORLD_STYLE.w6 = the w6 doc (haze sky, steel edge, safety orange, ink, stacks)');
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  for (const id of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `w6 board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+  ok(new Set(Object.values(V.WORLD_STYLE).map((x) => x.caption)).size === Object.keys(V.WORLD_STYLE).length - 1, 'every world caption distinct (w1 / h share "התיק שלך")');
+  const cs = w6.characters.map((c) => c.id);
+  ok(cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === cs.length, 'CHAR_STYLE: opseng / heir / trader, distinct');
+  for (const m of new Set(Object.values(w6.models).filter(Boolean))) ok(V.CITY_EMOJI[m], 'CITY_EMOJI w6/' + m);
+  // the plant level kind (plant.js cityModels fields as game.js passes them)
+  const L = V.normLevel({ kind: 'plant', n: 2, light: 'amber', cond: 58.4, running: true, util: 0.741, shift: 2, hazard: 'mid' });
+  ok(L && L.kind === 'plant' && L.n === 2 && L.of === 3 && L.light === 'amber' && L.cond === 58 && L.running && L.shift === 2 && L.hazard === 'mid', 'plant level: normalised (pips 2/3, amber, cond 58, running, 2 shifts)');
+  ok(JSON.stringify(V.normLevel(L)) === JSON.stringify(L), 'plant level: normLevel is idempotent');
+  ok(V.levelText(L) === 'מצב 58 · שחוק · ניצולת 74% · 2 משמרות' && V.pipsText(L) === '●●○', `plant level text "${V.levelText(L)}" + pips ●●○`);
+  const dn = V.normLevel({ kind: 'plant', n: 1, light: 'red', cond: 22, down: true, running: false, util: 0 });
+  ok(dn.down && !dn.running && V.activityOf(dn) === 'breakdown' && V.levelText(dn).includes('בתקלה') && V.cardName('קו CNC', 'קו CNC', dn).includes('תקלה בציוד'), 'plant down: 🔧 activity (3D badge, 2D badge, accessible name) + "בתקלה"');
+  const pe = V.normLevel({ kind: 'plant', n: 3, light: 'green', cond: 100, pending: true, running: false });
+  ok(pe.pending && !pe.running && V.pipsText(pe) === '⏳' && V.levelText(pe).includes('בדרך'), 'plant ordered: ⏳, "בדרך"');
+  const mb = V.normLevel({ kind: 'plant', n: 2, light: 'amber', cond: 50, mothball: true, running: true, util: 0.5 });
+  ok(mb.mothball && !mb.running && V.levelText(mb).includes('מושבת'), 'plant mothballed: not running, "מושבת"');
+  ok(V.levelText({ kind: 'plant', n: 3, light: 'green', cond: 90, util: 0, running: false }).includes('עומד בלי הזמנות'), 'plant idle: "עומד בלי הזמנות"');
+  const kp = V.kitParts(L); ok(kp.light === 'amber' && kp.pips === 2 && kp.conveyor === true && !kp.sign && !kp.scaffold && kp.scale === 1, 'plant level: model parts only (no stage kit)');
+  ok(V.kitParts(dn).conveyor === false && V.kitParts(pe).pending && V.kitParts(mb).mothball, 'plant level: conveyor stops when down / ordered / mothballed');
+  ok(V.levelHint(L).includes('תחזוקה') && V.levelHint(dn).includes('תקלה') && V.levelHint(pe).includes('חצי שנה'), 'plant level hints');
+  // stand-ins: every w6 model key is procedural; w6's warehouse only in the w6 folder (w3 has assets/w3/warehouse.glb)
+  const sSrc = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8');
+  for (const m of new Set(Object.values(w6.models).filter(Boolean))) ok(m === 'warehouse' ? /DIR_BUILD = Object\.freeze\(\{ w6: Object\.freeze\(\{ warehouse:/.test(sSrc) : new RegExp(`\\b${m}\\(\\)`).test(sSrc), `standins3d builds ${m} (no .glb is ever requested)`);
+  ok(/lamp/.test(sSrc) && /stepBelt/.test(sSrc) && /scaff/.test(sSrc) && /shutter/.test(sSrc), 'standins3d: lamp, conveyor step, scaffold, shutter');
+}
+
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

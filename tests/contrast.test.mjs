@@ -70,7 +70,7 @@ for (const t of TEXT) {
 /* ---------- A-1: --accent-ink for the 5 worlds × 2 modes (w1 = :root; others from body[data-world=…]) */
 const accentInk = { w1: tok('--accent-ink') };
 const accentFill = {};
-for (const w of ['w2', 'w3', 'w4', 'w5', 'h']) {
+for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
   const b = block(GAME, `body[data-world=${w}]`);
   ok(!!b, `game.css has body[data-world=${w}]`);
   const d = decls(b || '');
@@ -78,7 +78,7 @@ for (const w of ['w2', 'w3', 'w4', 'w5', 'h']) {
   ok(!!accentInk[w], `body[data-world=${w}] sets --accent-ink as light-dark(hex,hex)`);
   if (d['--accent']) accentFill[w] = d['--accent'];
 }
-const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], h: ['#7a5520', '#c8a24a'] };
+const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], h: ['#7a5520', '#c8a24a'] };
 for (const [w, p] of Object.entries(accentInk)) {
   if (!p) continue;
   ok(p.light.toLowerCase() === SPEC_INK[w][0] && p.dark.toLowerCase() === SPEC_INK[w][1], `--accent-ink ${w} matches the §3 identity sheet`);
@@ -122,9 +122,9 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
 }
 
 /* ---------- text on world accent FILLS uses --ink (§2.1, h fill becomes #c8a24a) */
-const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
+const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
 const fillOf = (w) => accentFill[w] || (worldsSrc[w].match(/accent:\s*'(#[0-9a-f]{6})'/i) || worldsSrc.w1.match(/accent:\s*'(#[0-9a-f]{6})'/i))[1];
-for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) {
+for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
   const f = fillOf(w), r = cr(tok('--ink').light, f);
   ok(r >= 4.5, `--ink on ${w} accent fill ${f} ≥ 4.5 (${f2(r)})`);
   table.push({ token: `--ink on accent ${w}`, light: `${f} ${f2(r)}` });

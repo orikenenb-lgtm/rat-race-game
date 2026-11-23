@@ -22,6 +22,8 @@ const T = await import('../js/render/tiles.js');
 const E = await import('../js/engine.js');
 const W5 = (await import('../js/worlds/w5.js')).default; E.registerWorld(W5);   // worlds wave 1: the lazy w5 (its tiles, decks, tile N)
 const SEASON = await import('../js/worlds/mech/season.js');
+const W6 = (await import('../js/worlds/w6.js')).default; E.registerWorld(W6);   // worlds wave 2: the lazy w6 (its tiles, decks, tile C)
+const PLANT = await import('../js/worlds/mech/plant.js');
 
 /* T-opt */
 const OPT = nul.SCENE_OPTIONAL;
@@ -39,7 +41,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -63,7 +65,7 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
   const w = W(wid);
   for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, T.DEAL_WORDS], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
@@ -96,6 +98,25 @@ ok(T.tileText({ type: 'deal', name: 'הזדמנות' }).desc === T.TILE_TEXT.dea
     `w5 N text = ALLOT {months ${A.months}, disc ${A.disc}, counter ${A.counterDisc}, upfront ${A.upfront}}: ${x.desc}`);
   ok(SEASON.season.tiles.N.safe === 'decline' && x.desc.includes('לוותר'), 'w5 N: the safe default (decline) is named');
   ok(T.tileText(Object.values(W5.tiles).find((t) => t.type === 'crisis'), W5).desc.includes('שפל בתיירות'), 'w5 crisis tile: the tourism slump wording');
+}
+/* T-w6: tile C (type 'contract') — the text is built from plant.js CONTRACT (months, volume range, price, counter price); a balance change
+   that moves a number fails here. The w6 decks are named by their own words (lines, industry shocks), never by apartments. */
+{
+  const C = PLANT.CONTRACT; const tC = W6.tiles.C;
+  ok(tC && tC.type === 'contract', 'w6 tile C has type contract');
+  ok(!/\d/.test(T.TILE_TEXT.contract.desc), 'w6 C before prepareWorldText: the number-free wording (no copied numbers)');
+  ok((await T.prepareWorldText(W6)).includes('contract'), 'prepareWorldText(w6) builds the contract text from plant.js');
+  const x = T.tileText(tC, W6); const p = (v) => `${Math.round(v * 100)}%`;
+  ok(x.emoji === '📝' && x.short.length <= T.SHORT_MAX, `w6 C: 📝, short "${x.short}"`);
+  ok(x.desc.includes(`${C.months} חודשים`) && x.desc.includes(`${p(C.volMin)}–${p(C.volMin + C.volSpan)}`) && x.desc.includes(`${p(1 - C.price)} פחות`) && x.desc.includes(`${p(1 - C.counterPrice)} הנחה`),
+    `w6 C text = CONTRACT {months ${C.months}, vol ${C.volMin}+${C.volSpan}, price ${C.price}, counter ${C.counterPrice}}: ${x.desc}`);
+  ok(PLANT.plant.tiles.C.safe === 'decline' && x.desc.includes('לוותר'), 'w6 C: the safe default (decline) is named');
+  const deal = T.tileText(Object.values(W6.tiles).find((t) => t.type === 'deal'), W6).desc;
+  ok(/קווי CNC/.test(deal) && /מפעלי מזון/.test(deal) && !/דירות/.test(deal), 'w6 deal tile: production lines, no apartments: ' + deal);
+  const mk = T.tileText(Object.values(W6.tiles).find((t) => t.type === 'market'), W6).desc;
+  ok(/ביקורת בטיחות/.test(mk) && /הזמנת יצוא/.test(mk), 'w6 market tile: the industry shocks (mk cards) are named: ' + mk);
+  ok(T.tileText(Object.values(W6.tiles).find((t) => t.type === 'crisis'), W6).desc.includes('משבר בתעשייה'), 'w6 crisis tile: the industry crisis wording');
+  ok(T.marketKind({ mk: 'inspect' }) === 'mk:inspect' && T.marketKind({ k: 'price', mk: 'x' }) === 'price', 'marketKind: k first, then mk:');
 }
 
 /* T-pin */

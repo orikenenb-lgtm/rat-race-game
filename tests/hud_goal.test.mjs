@@ -155,5 +155,30 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
   ok(wr && wr.acts[0].act === 'world' && wr.title === m.worldIndicators.panel.title, 'w5: 💼 has the world-panel row (title from the panel descriptor)', wr);
   ok(!moneyHubModel(E.metrics(E.createGame({ worldId: 'w1', charId: 'teacher', seed: 1 }))).rows.some((r) => r.id === 'world'), 'w1: no world-panel row');
 }
+/* 7. worlds wave 2 — w6 (goal: net worth ₪80M, lines valued by profit and condition): rule, gap, ★★★ module gate when the engine exposes it,
+   the 💼 "קווי ייצור" row (engine values only) */
+{
+  const { moneyHubModel, milestoneLadder } = await import('../js/hudgoal.js');
+  await E.ensureWorld('w6');
+  for (const ch of ['opseng', 'heir', 'trader']) {
+    const st = E.createGame({ worldId: 'w6', charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 120 && st.month < 4 && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    }
+    const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w6'), st.charId, m.rules) });
+    const p = M.parts[0] || {};
+    ok(m.goalType === 'netWorth' && p.key === 'netWorth' && p.target === 80000000 && p.targetText === E.fmtM(80000000), `w6/${ch}: one net-worth part, target ₪80M`, p);
+    ok(M.rule.includes(p.targetText) && (M.met || (M.gaps[0] && M.gaps[0].includes(E.fmtM(p.target - p.value)))), `w6/${ch}: the rule names ₪80M and the gap = target − value`, { rule: M.rule, gaps: M.gaps });
+    ok(milestoneLadder(m).some((x) => /שווי נקי של/.test(x.title)), `w6/${ch}: the ladder speaks of net worth`);
+    const sg = (m.worldIndicators.plant || {}).starGate;
+    const g3 = M.stars ? M.stars[2].gates : [];
+    ok(sg ? g3.some((x) => x.key === sg.id && x.ok === !!sg.ok && !/^★/.test(x.text)) : g3.every((x) => x.key === 'fund' || x.key === 'happy'), `w6/${ch}: the ★★★ row shows the module gate exactly when the engine exposes it (${sg ? 'exposed' : 'not exposed'})`, g3);
+    const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world');
+    const P = m.worldIndicators.plant;
+    ok(wr && wr.icon === '🏭' && wr.title === m.worldIndicators.panel.title && wr.value.startsWith(`${P.lines} מתוך ${P.slots} קווים`) && wr.acts[0].act === 'world', `w6/${ch}: 💼 has the "קווי ייצור" row (lines / slots from the engine)`, wr);
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);
