@@ -158,7 +158,7 @@ async def deal_run(b, vp='phone360'):
             btns = pg.locator('#evCard .acts button:not([disabled]), #evCard .choices button:not([disabled])'); n = await btns.count()
             if n: await btns.nth(n - 1).click()
             else:
-                ok = pg.locator('#evCard button:not([disabled])'); await ok.last.click()
+                ok = pg.locator('#evCard button:not([disabled]):visible'); await ok.last.click()   # wave 3a: the payday's impact tabs live in a closed "פירוט"
             await pg.wait_for_timeout(300); continue
         await pg.click('#roll'); await pg.wait_for_timeout(500)
     check(found, f'{vp} reached a deal card')

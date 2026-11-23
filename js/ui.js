@@ -2581,7 +2581,7 @@ export function moneyHubBtn(onClick) {
   if (!b) {
     const at = $('#sheetBtn'); if (!at) return null;
     b = document.createElement('button'); b.id = 'hubBtn'; b.type = 'button'; b.className = 'chip hubbtn';
-    b.innerHTML = '<span aria-hidden="true">💼</span> ניהול כסף'; b.setAttribute('aria-haspopup', 'dialog');
+    b.innerHTML = '<span aria-hidden="true">💼</span><span class="hb-t"> ניהול כסף</span>'; b.setAttribute('aria-haspopup', 'dialog'); b.title = 'ניהול כסף';
     at.insertAdjacentElement('afterend', b);
   }
   b.onclick = () => { sfx('click'); onClick && onClick(); };

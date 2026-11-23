@@ -153,7 +153,7 @@ async def run_hub(b, vp):
     await ctx.close()
 
 async def run_ms(b, vp):
-    for w in ('w1', 'w2', 'w3', 'w4'):
+    for w in (('w1', 'w2', 'w3', 'w4') if vp != 'small' else ('w1',)):
         sc = f'ms-{vp}-{w}'; ctx, pg = await page(b, GAME, vp, mobile=vp != 'desk')
         await setup(pg, w=w, until='month', months=6); await idle(pg); await pg.wait_for_timeout(600)
         exp = await pg.evaluate(f"""async () => {{ const E = await import('./js/engine.js'); const H = await import('./js/hudgoal.js'); const raw = JSON.parse(localStorage.getItem('rr2-save-free-{w}'));
@@ -165,6 +165,8 @@ async def run_ms(b, vp):
         lad = await pg.evaluate("() => [...document.querySelectorAll('#goalPanel .gp-ladder li')].map(l => l.className)")
         check(sc, 'the goal panel lists the whole ladder, the next rung marked', len(lad) == len(exp['lad']) and lad.count('next') == 1, lad)
         if w in ('w1', 'w4'): await shot(pg, f'milestone_{vp}_{w}')
+        if w == 'w1' and vp != 'small':
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300); await shot(pg, f'milestone_{vp}_{w}_hud')
         await ctx.close()
 
 async def run_end(b, vp):
@@ -174,7 +176,7 @@ async def run_end(b, vp):
     s = await idle(pg)
     star = await pg.evaluate("() => document.querySelector('#hMonth')?.textContent || ''")
     check(sc, 'the HUD shows the ★ limit of a free game', '★' in star and str(r['max']) in star, star)
-    if vp == 'desk': await shot(pg, f'end_run_{vp}_1_hud')
+    await shot(pg, f'end_run_{vp}_1_hud')
     offered = False
     for _ in range(10):
         s = await idle(pg)
@@ -205,9 +207,9 @@ async def main():
             if want('pay'): await run_pay(b, vp)
             if want('hub'): await run_hub(b, vp)
         if want('ms'):
-            for vp in ('desk', 'phone'): await run_ms(b, vp)
+            for vp in ('desk', 'phone', 'small'): await run_ms(b, vp)
         if want('end'):
-            for vp in ('desk', 'phone'): await run_end(b, vp)
+            for vp in ('desk', 'phone', 'small'): await run_end(b, vp)
         await b.close()
     for s in SINKS: FB.assert_clean(s)
     fails = [r for r in RESULTS if not r[2]]
