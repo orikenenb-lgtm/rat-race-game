@@ -55,6 +55,7 @@ async def hide_coach(pg):
 
 async def shot(pg, name):
     if not SHOTS: return
+    await pg.evaluate("() => { try { getSelection().removeAllRanges(); } catch (e) {} }")   # a drag test may have selected page text
     await pg.wait_for_timeout(250)
     await pg.screenshot(path=f'{SHOTS}/{TAG}_{name}.png')
 
@@ -176,7 +177,7 @@ async def run_3d(b, size):
     # --- mid-move destination marker (slow animation so the screenshot catches the hop)
     s = await idle(pg)
     if s['roll']:
-        await pg.evaluate("import('/js/scene.js').then(s => s.setSpeed(7))")
+        await pg.evaluate("import('/js/scene.js').then(s => { s.setSpeed(7); if (s.boardUx && s.boardUx().dest === null && !s.boardUx().stalled) s.setCameraMode('overview'); })")   # the whole board: pawn + destination
         await pg.click('#roll')
         if not SHOTS_ONLY:
             for _ in range(240):
@@ -189,7 +190,7 @@ async def run_3d(b, size):
         else: await pg.wait_for_timeout(5200)
         await pg.wait_for_timeout(900)
         await shot(pg, f'{size}_3d_move')
-        await pg.evaluate("import('/js/scene.js').then(s => s.setSpeed(1))")
+        await pg.evaluate("import('/js/scene.js').then(s => { s.setSpeed(1); s.setCameraMode('follow'); })")
         s = await idle(pg)
         if not SHOTS_ONLY:
             mk = await pg.evaluate("import('/js/scene.js').then(s => s.boardUx())")
