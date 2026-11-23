@@ -175,7 +175,11 @@ async def run_end(b, vp):
     if r['over']: return check(sc, 'setup reached the ★ limit without ending', False, r)
     s = await idle(pg)
     star = await pg.evaluate("() => document.querySelector('#hMonth')?.textContent || ''")
-    check(sc, 'the HUD shows the ★ limit of a free game', '★' in star and str(r['max']) in star, star)
+    check(sc, 'the HUD shows the ★ limit of a free game', '★' in star and (str(r['max']) in star or vp != 'desk'), star)
+    if vp != 'desk':   # phones: the 🏁 entry lives in the 💼 hub (the HUD row has no room)
+        await pg.click('#hubBtn'); await pg.wait_for_selector('#gmCard.mhub')
+        check(sc, 'phone: "לסכם את הריצה" is in the 💼 hub past the ★ limit', await pg.locator('#gmCard [data-hub="summarize"]').count() == 1)
+        await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
     await shot(pg, f'end_run_{vp}_1_hud')
     offered = False
     for _ in range(10):

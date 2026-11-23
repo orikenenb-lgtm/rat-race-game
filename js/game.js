@@ -1428,8 +1428,12 @@ function doLoan(act) {
 async function openMoneyHub() {
   if (!S || S.over || summarized) return;
   if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לנהל את הכסף בין תורות'); return; }
-  const act = await ui.moneyHub?.(moneyHubModel(E.metrics(S)));
+  const H = moneyHubModel(E.metrics(S));
+  // past the ★ limit of a free run: "לסכם את הריצה" is here too (on phones the HUD has no room for the 🏁 button)
+  if (canSummarize()) H.rows.push({ id: 'sum', icon: '🏁', title: 'הריצה', value: `עבר מועד הכוכבים (חודש ${S.maxMonths})`, acts: [{ act: 'summarize', label: 'לסכם את הריצה', on: true }] });
+  const act = await ui.moneyHub?.(H);
   if (!act || !S || S.over || busy || ui.isEventOpen()) return;
+  if (act === 'summarize') { summarizeRun(false); return; }
   if (act === 'plan' || act === 'focus') { lifeChip(act); return; }
   sheetAction(act);   // save / unsave / loan / repay / credit / invest — the same flows as the report's buttons
 }
