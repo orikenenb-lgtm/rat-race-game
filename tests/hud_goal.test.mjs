@@ -38,7 +38,7 @@ function check(st, tag) {
     ok(im && im.target === w.goal.impact && im.value === m.worldIndicators.impact, `${tag} impact part = metrics impact vs ${w.goal.impact}`);
   }
   // the hold rule (GOAL_HOLD paydays) and the engine's own goal-met flag
-  ok(M.hold.need === E.GOAL_HOLD && M.hold.streak === Math.min(m.goalHold.streak, E.GOAL_HOLD), `${tag} hold ${M.hold.streak}/${M.hold.need} = engine goalHold`);
+  ok(M.hold.need === m.goalHold.need && M.hold.streak === Math.min(m.goalHold.streak, m.goalHold.need), `${tag} hold ${M.hold.streak}/${M.hold.need} = engine goalHold (the engine's own need, per world if it ever differs)`);
   ok(M.met === m.goalHold.met, `${tag} "goal met" agrees with the engine (${M.met} vs ${m.goalHold.met})`);
   // stars: month limits from starThresholds / st.maxMonths; ★★★ gates
   ok(M.stars[0].limit === st.maxMonths && M.stars[1].limit === th.t2 && M.stars[2].limit === th.t3, `${tag} ★/★★/★★★ months = maxMonths ${st.maxMonths} / t2 ${th.t2} / t3 ${th.t3}`);
