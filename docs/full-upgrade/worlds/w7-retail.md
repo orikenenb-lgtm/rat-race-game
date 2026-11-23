@@ -107,3 +107,27 @@ cash cycle  = inventory paid on order (lead time 2 months) − supplier credit (
 
 ## Size
 L. `mech/chain.js` ~800 lines, data ~300, tests ~450.
+
+## As built (rules 6 — engine lane, wave 3)
+
+Shipped in `js/worlds/mech/chain.js` / `js/worlds/w7.js` / `tools/policies/chain.mjs`; replaces the TUNE values above where they differ.
+
+| item | as built |
+|---|---|
+| draws (`world`) | 1 per payday (demand noise; its low digits pick a bad franchisee's incident), 2 per `R` landing (site kind + sealed location; survey pair + franchisee quality), 0 at init |
+| board | 6 × `R` "מיקום לסניף" (module tile, safe = `pass`) + 10 × `O`; 5 known-location branch cards on the `O` deck (the engine's due diligence prices them) |
+| sites (`w7.sites`) | street ×4 (one with 5 %/yr rent escalation), mall, outlet (counter-cyclical), airport (always A), "anchor store in a new mall" (C 60 %); capex ₪1.8–6M, down 50 %, equipment loan 0.6 %/mo |
+| sales | base × loc (A 1.25 / B 1 / C 0.65) × ramp × (1 − 6 % × neighbours, max 30 %; 10 areas) × span × cycle (exp 1.10 / slow 1 / rec 0.86 / recov 0.96; outlet 0.97/1/1.06/1) × demand (0.86–1.14) × season × brand (0.85 + 0.3 × brand/100) × shocks |
+| fit-out + ramp | 2 months of rent and half the wages before opening; ramp 0.40 → 1.00 over 6 months (founder starts one step later, CFO 0.35 → 1.00) |
+| purchasing | COGS 62 % − 1 % per 5 own branches (max 8 %) − 2 % with a DC; 60-day terms +1 % (free for the CFO) |
+| span | managers × 6 + 3 (the owner, −1 🔋/mo); −5 % sales per branch over the span, floor 50 %, brand −0.5 per over branch a month; manager ₪120k hire + ₪70k/mo |
+| stock | one pool (asset "המלאי של הרשת": value = stock + in transit, debt = supplier invoices); order-up-to (2 + cover) × the next months' need at every payday; lead 2 months (+1 on a shipping delay); invoices after 30/60 days; markdown 15 % of stock above max(2.5, cover + 1) months; clearance −25 % |
+| inventory cash | payday cash += cost of goods sold − invoices paid (the profit already counted the goods) |
+| franchise | 6 % royalty (franchisor 8 %), entry fee 15 % of capex to you, quality 0.6–1.15 (sealed); bad (< 0.35) → incidents (brand −6) that reveal the culprit; franchise system ₪1.5M (franchisor has it); buy back 4 × annual royalty; convert own → franchise at 70 % of value |
+| value | own: 12 × mature normal month × multiple (exp 4.6 / slow 4.2 / rec 3.6 / recov 4.0) × (0.5 + 0.5 × ramp), floor 25 % of capex; franchise 12 × royalty × 4.5 |
+| insolvency | bank debt beyond the voluntary loan cap by > 1 month of the chain's fixed costs → suppliers hold the next order; 3 such paydays in a row → bankrupt (whatever the branches are worth on paper) |
+| goal | `all`: `nw` ≥ ₪120M **and** `liquidity` (cash + savings + liquid holdings) ≥ 4 months of fixed costs (rent + wages + managers + DC + e-commerce), hold 3 |
+| characters | shopFounder (id renamed: `founder` is w4's) 3 trading shops + stock + pipeline, cash ₪3M, brand 75, ★ 66 / 54 / 47 · cfo cash ₪14M, 60-day terms, loans −0.3 pp/mo (rebate), ★ 72 / 56 / 46 · franchisor 8 franchises, cash ₪2.5M, 8 % royalty, ★ 80 / 74 / 64 |
+| Z actions | `cover` (0.5/1/1.5/2/3) · `hire` · `fire` · `terms` (30/60) · `close` · `convert` · `buyBack` · `clearance` · `franSys` · `dcLeaseback` |
+
+Balance: see the gate table in `tools/balance-data/gates-w7.json` (quoted in the commit message).
