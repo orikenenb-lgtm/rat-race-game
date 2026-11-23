@@ -2493,7 +2493,7 @@ export function boardTools({ onHome, onList } = {}) {
 /** Place the board tools and the turn chip inside the free board rect (game.js frame()). r = null keeps the last rect (HUD resize).
  *  wave 3a (review MINOR-1): the tools never sit under the HUD, the mentor bar or the report — a landscape phone has a short free
  *  rect, so the first free spot of a few candidates is used (bottom corner → just under the HUD → the other corner → beside it). */
-const BLOCKERS = '#hud, #bar, #sheet, #hLifeMore, #goalPanel';
+const BLOCKERS = '#hud, #bar, #sheet, #hLifeMore, #goalPanel, #toast';   // a long toast (a lesson with "לקרוא") also takes the spot
 const COVERS = '#start, #evm, #gm, #loading, #coach, #story, #recover';
 let dockT = 0, dockN = 0;
 export function placeBoardUi(r, { kind = '3d', show = true } = {}) {

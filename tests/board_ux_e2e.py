@@ -258,12 +258,16 @@ async def run_land(b, kind):
     s = await idle(pg)
     if s['card']: await answer(pg, s); s = await idle(pg)
     await pg.wait_for_timeout(800)
+    for _ in range(40):   # a lesson / news toast may sit over the board for a while: the tools re-dock at the next render
+        if not await pg.evaluate("() => [...document.querySelectorAll('#toast > *')].some(t => t.getClientRects().length)"): break
+        await pg.wait_for_timeout(500)
+    await pg.evaluate("import('/js/ui.js').then(u => u.placeBoardUi(null, { kind: document.querySelector('#homeViewBtn').hidden ? '2d' : '3d', show: true }))"); await pg.wait_for_timeout(300)
     hit = await pg.evaluate("""() => [...document.querySelectorAll('#boardTools .ibtn')].filter(b => !b.hidden && b.getClientRects().length).map(b => { const r = b.getBoundingClientRect();
       const pts = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 4, r.top + 4], [r.right - 4, r.bottom - 4]];
       return { id: b.id, r: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], ok: pts.every(([x, y]) => { const e = document.elementFromPoint(x, y); return !!e && b.contains(e); }) }; })""")
     check(sc, 'landscape phone: every board tool is on top where it is drawn (tappable)', hit and all(x['ok'] for x in hit), hit)
     check(sc, 'landscape phone: the tools are inside the viewport', hit and all(x['r'][0] >= 0 and x['r'][1] >= 0 and x['r'][2] <= 844 and x['r'][3] <= 390 for x in hit), hit)
-    if hit:
+    if hit and all(x['ok'] for x in hit):
         await pg.click('#tilesBtn'); await pg.wait_for_timeout(500)
         check(sc, 'landscape phone: a tap on 📋 opens the tile list', await pg.is_visible('#gmCard.tlistc'))
         await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
