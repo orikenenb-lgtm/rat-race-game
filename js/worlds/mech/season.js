@@ -40,7 +40,7 @@ export function bandOf(prof, cal) { const m = PROFILES[prof][cal - 1]; return m 
 const WING_FIXED = 0.7, WING_CAP = 0.6;
 const OLD_FIXED = 1.08;        // the hotelier's old building until renovated
 const HOUSING_CUT = 0.95;      // own staff housing: −5% staffing (fixed) on your rooms
-export const ALLOT = Object.freeze({ months: 6, disc: 0.25, counterDisc: 0.15, upfront: 0.5, shareMin: 0.3, shareSpan: 0.3, counterP: 0.5, promoterBonus: 0.25, overlap: 0.6 });
+export const ALLOT = Object.freeze({ months: 6, disc: 0.22, counterDisc: 0.12, upfront: 0.5, shareMin: 0.3, shareSpan: 0.3, counterP: 0.5, promoterBonus: 0.25, overlap: 0.4 });
 const TOUR = Object.freeze({ min: 0.6, max: 1.3, noise: 0.04, revert: 0.1, reviewP: 0.1, review: 8 });
 const LINE = Object.freeze({ fixedMonths: 2, discountPp: 1, convertFee: 0.01, dueCal: 8 });
 const FESTIVAL = Object.freeze({ cost: 300000, bump: 0.3 });
@@ -283,7 +283,7 @@ export const season = {
           note: 'ההערכה לפי קצב ההזמנות הידוע עכשיו (תחזית, לא הבטחה). החדרים שהמפעיל לוקח לא תלויים בעונה — אבל הם גם לא נמכרים במחיר מלא כשיש ביקוש.' };
         ev.options = [
           ctx.opt('accept', `לקבל: ${ctx.fmtM(info.upfront)} עכשיו (הערכה לחצי שנה: ${ctx.sgn(info.delta)})`, true, { kind: 'allot', net: info.delta }),
-          ...(p.countered ? [] : [ctx.opt('counter', `להציע 15% הנחה במקום 25% · סיכוי ${Math.round(info.chance * 100)}%`, true, { kind: 'offer', chance: info.chance })]),
+          ...(p.countered ? [] : [ctx.opt('counter', `להציע ${Math.round(ALLOT.counterDisc * 100)}% הנחה במקום ${Math.round(ALLOT.disc * 100)}% · סיכוי ${Math.round(info.chance * 100)}%`, true, { kind: 'offer', chance: info.chance })]),
           ctx.opt('decline', 'לוותר — החדרים נשארים בשוק', true),
         ];
         const pick = info.delta > 0 || info.runway < 3 ? 'accept' : 'decline';
@@ -295,7 +295,7 @@ export const season = {
         if (o.id === 'counter') {
           p.countered = true;
           const ch = counterChance(st);
-          if (p.wr[1] < ch) { p.disc = ALLOT.counterDisc; out.mentor = ctx.mentorLine(st, 'allotWon', {}) || 'המפעיל הסכים ל־15%. עכשיו להחליט: לקבל או לוותר.'; ctx.addLuck(st, 'negotiation', 0); return false; }
+          if (p.wr[1] < ch) { p.disc = ALLOT.counterDisc; out.mentor = ctx.mentorLine(st, 'allotWon', {}) || `המפעיל הסכים ל־${Math.round(ALLOT.counterDisc * 100)}%. עכשיו להחליט: לקבל או לוותר.`; ctx.addLuck(st, 'negotiation', 0); return false; }
           out.mentor = ctx.mentorLine(st, 'allotLost', {}) || 'המפעיל הלך למלון של המתחרים. משא ומתן הוא סיכון.';
           ctx.lesson(st, out, 'allotment'); ctx.logDecision(st, 'מפעיל תיירות', 'הציע נגדית ונכשל');
           return true;
@@ -386,7 +386,10 @@ export const season = {
   goalValue(st, key) { return key === 'tour' ? W(st).tour : 0; },
   /** The goal counts income in the month it is earned: an allotment paid half up front still earns its rooms each month (accrual). */
   goalAccrual(st, ctx) {
-    let x = 0;
+    // rules-6 balance pass: owner income is AFTER the interest on bank debt beyond a working-capital allowance (2 months of the assets' fixed
+    // costs — what a winter may force you to borrow): borrowing to the cap to buy rooms is not income, a winter's forced loan is not punished.
+    const allow = LINE.fixedMonths * opAssets(st).reduce((s, a) => s + Math.round(a.op.fixed), 0);
+    let x = -Math.round(Math.max(0, st.loans - allow) * ctx.loanPct(st) / 100);
     for (const a of opAssets(st)) { const al = a.op.allot; if (!al || st.month < al.from || st.month > al.until) continue; const m = opMonth(a.op, a.debt, envOf(st, ctx, a)); if (!m.closed) x += Math.round(a.op.u * 30 * a.op.adr * (1 - al.disc) * m.allotOcc * ALLOT.upfront); }
     return x;
   },

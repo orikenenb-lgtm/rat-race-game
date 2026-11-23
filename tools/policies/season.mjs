@@ -138,6 +138,13 @@ export function make({ E, POLICIES, ddRule, facade, firstEnabled, ABL }) {
       between() {},
     },
   };
+  // A4 archetypes in a module world: the generic archetype (js/systems/archetypes.js via POLICIES) PLUS the panel's public suggestions
+  // between rolls (what any player who opens the panel sees highlighted) — without it every archetype ignores the world's core lever and
+  // A4 only measures noise among four equally blind players.
+  for (const a of ['saver', 'founder', 'diversified', 'gambler']) {
+    const base = POLICIES[a]; if (!base) continue;
+    P[a] = { ...base, between(st, c) { if (base.between) base.between(st, c); if (st.over) return; for (const x of E.worldActions(st).filter((y) => y.suggested && y.enabled && y.id !== 'line')) { if (st.over) break; E.worldAction(st, x.id, x.param); } } };
+  }
   void facade;
   // the world's own gate extras (w5 spec "Sim policies" + DESIGN §5.3 G-dom ablations)
   P.__gates = {
