@@ -2,7 +2,7 @@
 import * as F from '../js/flags.js';
 let fails = 0, n = 0;
 const eq = (a, b, msg) => { n++; if (JSON.stringify(a) !== JSON.stringify(b)) { fails++; console.log('FAIL', msg, JSON.stringify(a), '≠', JSON.stringify(b)); } };
-const D = { board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true }; // T6's four practice/summary flags: ON by default (director decision)
+const D = { board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true, rooms: false }; // T6's four practice/summary flags: ON by default (director decision)
 const store = (raw) => ({ getItem: (k) => (k === 'rr2-flags' ? raw : null) });
 
 F._resetForTests({ search: '', storage: store(null) });

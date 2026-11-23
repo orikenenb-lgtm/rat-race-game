@@ -131,6 +131,37 @@ let UIp = null;
 // CR-33: ui.js draws its modals / toasts with css/game-play.css — enabled (and waited for) together with the module
 const playCss = () => (window.__rrPlayCss ? window.__rrPlayCss() : Promise.resolve());
 const ui = () => (UIp ||= Promise.all([import('./ui.js'), playCss()]).then(([m]) => m).catch(() => ({})));
+/* ---- wave 3b: live rooms + groups v2 + competitions (flag `rooms`, default OFF). js/rooms.js loads on demand (not on the boot graph). */
+const roomsOn = () => flag('rooms') === true;
+let RMp = null;
+const roomsMod = () => (RMp ||= import('./rooms.js').catch((e) => { RMp = null; throw e; }));
+let pendingRoom = safe(() => { const c = new URLSearchParams(location.search).get('room'); return c && /^[A-Za-z2-9]{6}$/.test(c) ? c.toUpperCase() : null; });
+function roomsApi() {
+  return {
+    net, html, toast, sfx, go, worldOf, pawnHtml, waHref, baseUrl, isLobbyVisible: lobbyVisible,
+    unlocked: () => P.unlockedWorlds(),
+    confirm: (text, yes) => confirmAsk(text, yes),
+    viewIs: (k, id) => view.k === k && (id == null || view.id === id),
+    clearRoomParam: () => { pendingRoom = null; safe(() => { if (new URLSearchParams(location.search).has('room')) history.replaceState(null, '', location.pathname); }); },
+    reloadGroup: (gid) => { delete cache.group[gid]; return renderGroup(gid); },
+    playChallenge: (id, gid, title) => playRanked('challenge', id, gid, title),
+    hasGameHook: () => !!(G && typeof G.setDriver === 'function'),
+    // the room on the 3D game screen: needs game.js's wave-3b hook (setDriver); the driver keeps polling while the game is open
+    playRoom: async (drv) => {
+      const g = await game(); if (!g || typeof g.setDriver !== 'function') { toast('מסך המשחק עוד לא תומך בחדרים — משחקים כאן'); return false; }
+      const st = drv.state; if (!st) return false;
+      g.setDriver(drv);
+      roomsMod().then((m) => m.leaveView(true)).catch(() => {});
+      return launch(launchCfg({ worldId: st.worldId, charId: st.charId, seed: 1, mode: st.mode, room: drv.roomId, title: 'חדר חי', tutorial: false, resume: false }));
+    },
+  };
+}
+function renderRooms(v) {
+  if (!roomsOn()) return renderHome();
+  view = v; ++token; trace(v.k);
+  return roomsMod().then((m) => m.render(roomsApi(), v)).catch((e) => { console.error(e); toast('לא הצלחנו לטעון את החדרים'); renderHome(); });
+}
+function fillV2(g) { if (roomsOn() && g && g.my_role) roomsMod().then((m) => { if (view.k === 'group' && view.id === g.id) return m.fillGroup(roomsApi(), g); return null; }).catch((e) => console.warn(e)); }
 let AUp = null;
 const audio = () => (AUp ||= import('./audio.js').catch(() => ({})));
 function sfx(name) { audio().then((a) => { try { a.sfx && a.sfx(name); } catch (e) { /* ignore */ } }); }
@@ -218,6 +249,7 @@ export function openLobby(v) {
   if (pendingDuel && nv.k === 'home' && !duelShown) { duelShown = true; nv.k = 'duel'; }
   // T4 verify D7: a player from before the welcome (progress, but no rr2-onboarded) is onboarded already — mark it, no welcome
   if (!safe(() => localStorage.getItem(ONBK)) && (completedAny() || P.getProgress().onboarded)) safe(() => localStorage.setItem(ONBK, '1'));
+  if (nv.k === 'home' && pendingRoom && roomsOn() && net.hasMe()) { nv.k = 'rooms'; nv.code = pendingRoom; }   // wave 3b: ?room=CODE
   if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
   claimGifts();
   startEnergyTicker();
@@ -248,7 +280,9 @@ function focusView() {
 function goRender(v) {
   view = v;
   if (v.k !== 'group') stopGroupRefresh();
+  if (v.k !== 'room' && RMp) RMp.then((m) => m.leaveView()).catch(() => {});
   switch (v.k) {
+    case 'rooms': case 'room': return renderRooms(v);
     case 'world': return renderWorld(v.id, { learn: !!v.learn });
     case 'group': return renderGroup(v.id);
     case 'profile': return renderProfile();
@@ -1066,7 +1100,7 @@ function groupsShell(list) {
   return `<div class="lb-ch-head"><h2>הקבוצות שלי</h2></div><div id="lbGList">${list}</div>
     <form class="lb-form" data-form="newgroup"><label for="lbGname">קבוצה חדשה</label><div class="inl"><input id="lbGname" name="name" maxlength="40" placeholder="למשל: ט׳3 בורסה"><button class="primary">לפתוח</button></div></form>
     <form class="lb-form" data-form="join"><label for="lbJcode">קיבלת קוד מחבר?</label><div class="inl"><input id="lbJcode" name="code" maxlength="6" placeholder="קוד" class="lb-code-in"><button>להצטרף</button></div></form>
-    <p class="err" id="lbGErr" aria-live="polite"></p>`;
+    <p class="err" id="lbGErr" aria-live="polite"></p>${roomsOn() ? '<button class="rm-entry" data-act="rooms"><span class="rm-entry-ic" aria-hidden="true">🎲</span><span><b>חדר חי</b><small>לשחק עכשיו עם חברים — 2–4 שחקנים</small></span><span class="lb-chev" aria-hidden="true">‹</span></button>' : ''}`;
 }
 async function loadGroups(t) {
   try { cache.groups = await net.myGroups(); } catch (e) { cache.groups = { error: e.message }; }
@@ -1228,7 +1262,7 @@ async function renderGroup(id) {
   try {
     const g = await net.group(id); cache.group[id] = g; noteNew(g);
     if (t !== token) return;
-    html(groupHtml(g));
+    html(groupHtml(g)); fillV2(g);
     focusView();   // wave 2 (A3 K-2): the fetched page replaced the loading view (and the node focus was on) — focus lands on its heading
     loadFeed(id);
     startGroupRefresh(id);
@@ -1262,13 +1296,14 @@ async function refreshGroup(id) {
     const a = $('#gpChals'); if (a) a.outerHTML = chalsSection(g);
     const m = $('#gpMembers'); if (m) m.innerHTML = membersHtml(g);
     const cnt = $('#gpCount'); if (cnt) cnt.textContent = countText(g);
+    if (!$('#gpV2 details[open], #gpComps details[open], #gpV2 #gpHist > *')) fillV2(g);   // wave 3b: never under an open form
   } catch (e) { /* offline — try again next tick */ } finally { refreshing = false; }
 }
 const countText = (g) => (g.members.length === 1 ? 'רק אתה כאן — שלח את הקישור לחברים' : g.members.length + ' שחקנים');
 function membersHtml(g) {
   const members = [...g.members].sort((a, b) => int(b.stars) - int(a.stars));
   const gifted = new Set((feedCache[g.id] && feedCache[g.id].gifted_today) || []);
-  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}</span>${titleBadge(int(m.stars))}<span class="gp-st">★ ${int(m.stars)}</span>${m.me ? '' : gifted.has(m.nickname)
+  return members.map((m) => `<li class="${m.me ? 'me' : ''}">${pawnHtml(m.pawn || 'classic', null, 'sm')}<span class="nm">${esc(m.nickname)}${m.me ? ' <small>(אתה)</small>' : ''}${m.owner ? ' <span title="מנהל הקבוצה">👑</span>' : ''}${roomsOn() && m.role === 'admin' ? ' <span class="gp-role r-admin">מנהל</span>' : ''}</span>${titleBadge(int(m.stars))}<span class="gp-st">★ ${int(m.stars)}</span>${m.me ? '' : gifted.has(m.nickname)
     ? '<button class="gp-send sent" disabled title="שלחת לו זריקות היום">✓ נשלח</button>'
     : `<button class="gp-send" data-act="send-energy" data-g="${esc(g.id)}" data-n="${esc(m.nickname)}" title="לשלוח 3 זריקות (פעם ביום)">שלח ⚡ 3</button>`}</li>`).join('');
 }
@@ -1307,8 +1342,9 @@ async function loadFeed(gid) {
   } catch (e) { if (!feedCache[gid]) feedCache[gid] = { feed: [], gifted_today: [] }; }
 }
 function chalsSection(g) {
+  const list = roomsOn() && g.my_role ? g.challenges.filter((c) => !c.status) : g.challenges;   // wave 3b: competitions → #gpComps
   return `<section class="gp-chals" id="gpChals"><h2>אתגרים</h2>
-      ${g.challenges.length ? g.challenges.map((c) => chalHtml(g, c)).join('') : '<p class="lb-empty">אין עדיין אתגרים. פתח את הראשון למטה — ותשלח לקבוצה 👇</p>'}
+      ${list.length ? list.map((c) => chalHtml(g, c)).join('') : '<p class="lb-empty">אין עדיין אתגרים. פתח את הראשון למטה — ותשלח לקבוצה 👇</p>'}
     </section>`;
 }
 function groupLink(g) { return withRef(`${baseUrl()}?join=${g.code}`); }
@@ -1320,7 +1356,9 @@ function groupHtml(g) {
   return `<div class="lb-shell lb-group">
     <div class="lb-bar"><button class="chip" data-act="home">› ללובי</button><button class="chip" data-act="group" data-id="${esc(g.id)}">↻ רענון</button></div>
     <header class="gp-head"><span class="lb-gav lg" aria-hidden="true">${esc([...g.name][0] || '?')}</span><div><h1>${esc(g.name)}</h1><p id="gpCount">${countText(g)}</p></div></header>
+    ${roomsOn() && g.my_role ? '<div id="gpV2"></div>' : ''}
     ${chalsSection(g)}
+    ${roomsOn() && g.my_role ? '<div id="gpComps"></div>' : ''}
     ${feedHtml(g.id)}
     <div class="gp-grid">
       <section class="lb-card gp-invite"><h2>להזמין חברים</h2>
@@ -2242,6 +2280,7 @@ async function onClick(ev) {
       return startFree('w1', 'teacher', { quick: true });   // review M-4: asks before replacing a saved game, like every new game
     }
     case 'groups-view': return go({ k: 'groups' });
+    case 'rooms': sfx('click'); return go({ k: 'rooms' });
     case 'history': sfx('click'); return go({ k: 'history' });
     case 'history-go': return startHistory(id, false);
     case 'history-continue': return startHistory(id, true);
@@ -2275,6 +2314,7 @@ async function onSubmit(ev) {
       await P.pushNow();
       sfx('unlock'); toast(`ברוך הבא, ${n}!`);
       if (pendingJoin) return joinCode(pendingJoin);
+      if (pendingRoom && roomsOn()) return go({ k: 'rooms', code: pendingRoom });   // wave 3b: ?room=CODE after choosing a nickname
       return rerender();
     }
     if (kind === 'rename') {

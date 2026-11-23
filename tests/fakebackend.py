@@ -88,9 +88,9 @@ PARAMS = {   # = the keys js/net.js sends (fakebackend_test.py asserts equality)
     'rr_log_event': AUTH + ('p_kind', 'p_data'),
     'rr_group_feed': AUTH + ('p_group',),
 }
-# Server contracts of the NOT-YET-APPLIED drafts (groups v2, competitions, rooms). js/net.js does not call them yet, so they are kept
-# out of PARAMS (fakebackend_test.py asserts PARAMS == net.js); move a row into PARAMS when net.js starts sending it.
-PARAMS_NEXT = {
+# Server contracts of the NOT-YET-APPLIED drafts (groups v2, competitions, rooms). Wave 3b: js/net.js now sends all of them (behind
+# the `rooms` flag), so they live in PARAMS (fakebackend_test.py asserts PARAMS == net.js); PARAMS_NEXT stays for future drafts.
+PARAMS.update({
     'rr_group_update': AUTH + ('p_group', 'p_name', 'p_description'),
     'rr_group_set_role': AUTH + ('p_group', 'p_member', 'p_role'),
     'rr_group_transfer': AUTH + ('p_group', 'p_member'),
@@ -112,7 +112,8 @@ PARAMS_NEXT = {
     'rr_room_heartbeat': AUTH + ('p_room', 'p_conn'),
     'rr_room_react': AUTH + ('p_room', 'p_kind'),
     'rr_my_rooms': AUTH,
-}
+})
+PARAMS_NEXT = {}
 OPTIONAL = {'p_ref', 'p_challenge', 'p_pawn', 'p_meta', 'p_group', 'p_char', 'p_since', 'p_conn', 'p_before', 'p_description', 'p_rules',
             'p_invite_open', 'p_member_challenges'}
 ROOM_RPC = {'rr_room_create': 'create', 'rr_room_join': 'join', 'rr_room_ready': 'ready', 'rr_room_leave': 'leave', 'rr_room_kick': 'kick',

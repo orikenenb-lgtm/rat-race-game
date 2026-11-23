@@ -3,8 +3,9 @@
 // -name = false). Values outside ALLOWED are ignored, corrupt JSON is ignored. Nothing is read at import time (Node tests).
 // Director decision (after the T6 verification): rivals, rewind, recap2 and afterwin are ON by default; the flags stay the rollback
 // switch (rr2-flags / ?ff=-name). rewind and afterwin remain practice-only in ranked games (PRACTICE_ONLY / flagFor below).
-export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true });
-const ALLOWED = { board2d: ['auto', 'on', 'off'], recover: [true, false], rivals: [true, false], rewind: [true, false], recap2: [true, false], afterwin: [true, false] };
+// Wave 3b: `rooms` = live rooms + groups v2 + competitions UI (server drafts NOT applied in production) — OFF by default; ?ff=rooms to try.
+export const DEFAULTS = Object.freeze({ board2d: 'auto', recover: true, rivals: true, rewind: true, recap2: true, afterwin: true, rooms: false });
+const ALLOWED = { board2d: ['auto', 'on', 'off'], recover: [true, false], rivals: [true, false], rewind: [true, false], recap2: [true, false], afterwin: [true, false], rooms: [true, false] };
 const KEY = 'rr2-flags';
 let F = null;
 let SRC = null; // test override: {search, storage}
