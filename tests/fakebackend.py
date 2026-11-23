@@ -10,6 +10,10 @@
 #   * mode_from_argv(): 'offline' (default) | 'live' (only with RR_LIVE=1, RR_SB_URL=<non-production https://<ref>.supabase.co>,
 #     RR_SB_ANON) — anything else exits 2 before a browser starts. The production host is never contacted in any mode.
 #
+#   * Drafts (NOT applied in production, supabase/migrations/20261124_*.sql): groups v2, competitions and live rooms are modelled here
+#     too (PARAMS_NEXT). Rooms are delegated to the Node sidecar tests/fakeroom.mjs, which runs supabase/functions/room/room_core.js
+#     with the pinned engine — the same code the Edge Function `room` runs. /functions/v1/room is routed in install() and serve().
+#
 # CLI:  python3 tests/fakebackend.py --serve 8779 [--verify=replay|accept|scripted] [--state=in.json]   (HTTP mode, contract test)
 #       python3 tests/fakebackend.py --check-live [--live]                                                (prints the mode or exits 2)
 import atexit, collections, copy, datetime as dt, json, os, queue, random, re, secrets, subprocess, sys, threading, time, uuid
@@ -84,11 +88,48 @@ PARAMS = {   # = the keys js/net.js sends (fakebackend_test.py asserts equality)
     'rr_log_event': AUTH + ('p_kind', 'p_data'),
     'rr_group_feed': AUTH + ('p_group',),
 }
-OPTIONAL = {'p_ref', 'p_challenge', 'p_pawn', 'p_meta'}
+# Server contracts of the NOT-YET-APPLIED drafts (groups v2, competitions, rooms). js/net.js does not call them yet, so they are kept
+# out of PARAMS (fakebackend_test.py asserts PARAMS == net.js); move a row into PARAMS when net.js starts sending it.
+PARAMS_NEXT = {
+    'rr_group_update': AUTH + ('p_group', 'p_name', 'p_description'),
+    'rr_group_set_role': AUTH + ('p_group', 'p_member', 'p_role'),
+    'rr_group_transfer': AUTH + ('p_group', 'p_member'),
+    'rr_group_remove': AUTH + ('p_group', 'p_member'),
+    'rr_group_rotate_code': AUTH + ('p_group',),
+    'rr_group_settings': AUTH + ('p_group', 'p_invite_open', 'p_member_challenges'),
+    'rr_group_history': AUTH + ('p_group', 'p_before'),
+    'rr_create_competition': AUTH + ('p_group', 'p_title', 'p_world', 'p_char', 'p_starts_at', 'p_ends_at', 'p_rules'),
+    'rr_cancel_competition': AUTH + ('p_challenge',),
+    'rr_competition': AUTH + ('p_challenge',),
+    'rr_begin_attempt': AUTH + ('p_challenge',),
+    'rr_room_create': AUTH + ('p_settings', 'p_group'),
+    'rr_room_join': AUTH + ('p_code',),
+    'rr_room_ready': AUTH + ('p_room', 'p_ready', 'p_char'),
+    'rr_room_leave': AUTH + ('p_room',),
+    'rr_room_kick': AUTH + ('p_room', 'p_seat'),
+    'rr_room_cancel': AUTH + ('p_room',),
+    'rr_room_state': AUTH + ('p_room', 'p_since'),
+    'rr_room_heartbeat': AUTH + ('p_room', 'p_conn'),
+    'rr_room_react': AUTH + ('p_room', 'p_kind'),
+    'rr_my_rooms': AUTH,
+}
+OPTIONAL = {'p_ref', 'p_challenge', 'p_pawn', 'p_meta', 'p_group', 'p_char', 'p_since', 'p_conn', 'p_before', 'p_description', 'p_rules',
+            'p_invite_open', 'p_member_challenges'}
+ROOM_RPC = {'rr_room_create': 'create', 'rr_room_join': 'join', 'rr_room_ready': 'ready', 'rr_room_leave': 'leave', 'rr_room_kick': 'kick',
+            'rr_room_cancel': 'cancel', 'rr_room_state': 'state', 'rr_room_heartbeat': 'heartbeat', 'rr_room_react': 'react', 'rr_my_rooms': 'my_rooms'}
+ROOM_MAX_BODY = 8192                      # Edge `room`: bodies are small intents (index.ts MAX_BODY)
+GROUP_LIMITS = {'description': 200, 'failed_joins_per_hour': 20, 'history_page': 20}
+COMP_DEFAULTS = {'attempts': 1, 'metric': 'escape', 'tiebreak': 'ratio', 'join_policy': 'members', 'late_join_until': None, 'grace_minutes': 120}
 LEGACY = {'rr_register', 'rr_start', 'rr_create_challenge', 'rr_sync_progress'}
 ROTATION = [('w1', 0), ('w2', 1), ('w3', 0), ('w4', 1), ('w1', 1), ('w2', 0), ('w3', 1)]   # by ISO weekday-1 [ASSUMED S-8]
 VERIFY_CODES = set('rlcLRCPAIST')
 MAX_ACTIONS, MAX_BODY = 6000, 1000000
+
+def _engine_pin():
+    try:
+        m = re.search(r'ENGINE_SHA256 = "([0-9a-f]{64})"', open(os.path.join(ROOT, 'supabase', 'functions', 'verify-result', 'engine_pin.js'), encoding='utf-8').read())
+        return m.group(1) if m else None
+    except OSError: return None
 
 class FakeError(Exception):
     def __init__(self, code, status=None):
@@ -111,22 +152,23 @@ _CHARS = None
 
 # ---------------------------------------------------------------- verify sidecar (node tests/fakeverify.mjs)
 class _Sidecar:
-    def __init__(self):
-        self.proc = subprocess.Popen(['node', os.path.join(HERE, 'fakeverify.mjs')], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    def __init__(self, script='fakeverify.mjs'):
+        self.proc = subprocess.Popen(['node', os.path.join(HERE, script)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, cwd=ROOT, env={**os.environ, 'RR_FAKE_ROOT': ROOT})
         self.q = queue.Queue(); self.rid = 0; self.lock = threading.Lock()
         threading.Thread(target=self._read, daemon=True).start()
         first = self.q.get(timeout=120)
-        if not first.get('ready'): raise RuntimeError('fakeverify did not start: %r' % first)
+        if not first.get('ready'): raise RuntimeError('%s did not start: %r' % (script, first))
     def _read(self):
         for line in self.proc.stdout:
             try: self.q.put(json.loads(line))
             except ValueError: pass
         self.q.put({'dead': True})
-    def call(self, row, actions, timeout=30):
+    def call(self, row, actions, timeout=30): return self.ask({'row': row, 'actions': actions}, timeout)
+    def ask(self, msg, timeout=30):
         with self.lock:
             self.rid += 1; rid = self.rid
-            self.proc.stdin.write(json.dumps({'rid': rid, 'row': row, 'actions': actions}) + '\n'); self.proc.stdin.flush()
+            self.proc.stdin.write(json.dumps({'rid': rid, **msg}, ensure_ascii=False) + '\n'); self.proc.stdin.flush()
             end = time.time() + timeout
             while True:
                 left = end - time.time()
@@ -159,7 +201,9 @@ class FakeBackend:
         # assumed semantics (§2.6) — each one has a switch
         self.stale_on_equal = False; self.streak_on = 'begin'; self.ranked_feed = 'all'; self.raise_status = 400
         self.daily_key_fmt = '%Y-%m-%d'; self.kind_re = re.compile(r'^[a-z0-9_]{1,30}$')
-        self._side = None; self.lock = threading.RLock()
+        self._side = None; self._rooms = None; self.lock = threading.RLock()
+        self.join_fails = collections.defaultdict(list)   # player → [epoch s] failed group codes (groups v2 throttle)
+        self._room_state = None                           # rooms loaded from a dump, pushed to the sidecar on first use
         atexit.register(self.close)
 
     # -------------------------------------------------- clock
@@ -209,18 +253,42 @@ class FakeBackend:
         p = {'id': str(uuid.uuid4()), 'secret': secrets.token_hex(16), 'nickname': nickname, 'stars': {}, 'achievements': [], 'pawn': None,
              'meta': {'games': 0, 'wins': 0, 'best': {}}, 'daily_streak': 0, 'best_streak': 0, 'last_daily': None, 'created': self.iso()}
         self.P[p['id']] = p; return p
-    def _new_group(self, owner, name):
+    def _code(self):
         while True:
             code = ''.join(self.rng.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
-            if not any(g['code'] == code for g in self.G.values()): break
-        g = {'id': str(uuid.uuid4()), 'code': code, 'name': name, 'owner': owner['id'], 'members': [owner['id']]}
-        self.G[g['id']] = g; return g
+            if not any(g['code'] == code for g in self.G.values()): return code
+    def _new_group(self, owner, name):
+        g = {'id': str(uuid.uuid4()), 'code': self._code(), 'name': name, 'owner': owner['id'], 'members': [owner['id']],
+             'description': '', 'invite_open': True, 'member_challenges': True, 'roles': {}, 'handles': {}, 'bans': {}, 'log': [], 'created': self.iso()}
+        self.G[g['id']] = g; self._glog(g, 'created', owner['id']); return g
+    # groups v2 (draft 20261124_groups_v2.sql): roles owner/admin/member, opaque per-membership handles, bans until the code rotates
+    def _role(self, g, pid):
+        if pid == g['owner']: return 'owner'
+        return g.setdefault('roles', {}).get(pid, 'member') if pid in g['members'] else None
+    def _handle(self, g, pid):
+        hs = g.setdefault('handles', {})
+        if pid not in hs: hs[pid] = str(uuid.uuid4())
+        return hs[pid]
+    def _by_handle(self, g, h):
+        pid = next((p for p, x in g.setdefault('handles', {}).items() if x == h and p in g['members']), None) if isinstance(h, str) else None
+        if not pid: self._err('member_not_found')
+        return pid
+    def _glog(self, g, kind, actor, target=None, data=None):
+        g.setdefault('log', []).append({'kind': kind, 'actor': actor, 'target': target, 'data': data, 'at': self.iso()})
+    def _need(self, g, pid, *roles):
+        if self._role(g, pid) not in roles: self._err('not_allowed')
+    def _drop_member(self, g, pid):
+        g['members'].remove(pid); g.setdefault('roles', {}).pop(pid, None); g.setdefault('handles', {}).pop(pid, None)
+        if not g['members']: del self.G[g['id']]; return
+        if g['owner'] == pid:   # the oldest admin, else the oldest member, becomes owner (production rr_leave_group: oldest member)
+            admins = [m for m in g['members'] if g['roles'].get(m) == 'admin']
+            g['owner'] = (admins or g['members'])[0]; g['roles'].pop(g['owner'], None); self._glog(g, 'owner', pid, g['owner'], {'auto': True})
     def _total(self, p): return sum(int(v or 0) for k, v in p['stars'].items() if k in WORLDS4)
     def _profile(self, p):
         return {'id': p['id'], 'nickname': p['nickname'], 'stars': dict(p['stars']), 'total_stars': self._total(p), 'achievements': list(p['achievements']),
                 'pawn': p['pawn'], 'daily_streak': p['daily_streak'], 'best_streak': p['best_streak'], 'last_daily': p['last_daily'], 'meta': copy.deepcopy(p['meta'])}
     def _groups_of(self, pid): return [g for g in self.G.values() if pid in g['members']]
-    def _active(self, c, t=None): t = t or self.now(); return c['starts_at'] <= t < c['ends_at']
+    def _active(self, c, t=None): t = t or self.now(); return c['starts_at'] <= t < c['ends_at'] and c.get('status') != 'cancelled'
     def _group_out(self, g, pid):
         return {'id': g['id'], 'code': g['code'], 'name': g['name'], 'is_owner': g['owner'] == pid, 'members': len(g['members']),
                 'active': sum(1 for c in self.C.values() if c['group'] == g['id'] and self._active(c))}
@@ -229,7 +297,10 @@ class FakeBackend:
         r = self._mine(pid, challenge=c['id']) if pid else None
         out = {'id': c['id'], 'title': c['title'], 'profession': c['char'], 'world': c['world'], 'starts_at': self.iso(c['starts_at']), 'ends_at': self.iso(c['ends_at'])}
         if pid is not None:
-            out.update(active=self._active(c), my_status=r and r['status'], board=self.board(lambda x: x.get('challenge') == c['id'], pid))
+            r = self._latest(pid, c['id'])
+            out.update(active=self._active(c), my_status=r and r['status'],
+                       board=self.board2(c, pid) if c.get('v2') else self.board(lambda x: x.get('challenge') == c['id'], pid))
+            if c.get('v2'): out['status'] = 'cancelled' if c.get('status') == 'cancelled' else 'scheduled' if self.now() < c['starts_at'] else 'open' if self.now() < c['ends_at'] else 'closed'
         return out
     def _feed_add(self, gid, pid, kind, data): self.feed.append({'group': gid, 'player': pid, 'kind': kind, 'data': data, 'at': self.iso()})
 
@@ -267,10 +338,11 @@ class FakeBackend:
             red = {k: ('<redacted>' if k in ('p_secret', 'secret') else v) for k, v in body.items()}
             def done(st, out):
                 self.log.append((round(time.time(), 3), fn, red, st)); return st, out
-            if fn in LEGACY or fn not in PARAMS:
+            sig = PARAMS.get(fn) or PARAMS_NEXT.get(fn)
+            if fn in LEGACY or sig is None:
                 self.unexpected.append(('legacy' if fn in LEGACY else 'unknown_fn', fn))
                 return done(404, {'code': 'PGRST202', 'message': f'Could not find the function public.{fn}', 'details': None, 'hint': None})
-            want = set(PARAMS[fn]); got = set(body)
+            want = set(sig); got = set(body)
             if (got - want) or (want - OPTIONAL - got):
                 self.unexpected.append(('params', fn, sorted(got - want), sorted(want - OPTIONAL - got)))
                 return done(404, {'code': 'PGRST202', 'message': f'Could not find the function public.{fn}({",".join(sorted(got))})', 'details': None, 'hint': None})
@@ -280,6 +352,8 @@ class FakeBackend:
                     f[2] -= 1; raise FakeError(f[0], f[1])
                 if fn in self._over:
                     out = self._over[fn](self, body)
+                elif fn in ROOM_RPC:
+                    out = self._room_rpc(fn, body)
                 else:
                     out = getattr(self, '_' + fn)(body)
                 if isinstance(out, Raw): return done(out.status, out.body)
@@ -349,27 +423,37 @@ class FakeBackend:
         if len(self._groups_of(p['id'])) >= 20: self._err('too_many_groups')
         return self._group_out(self._new_group(p, n), p['id'])
     def _rr_join_group(self, b):
-        p = self._auth(b); code = self._txt(b.get('p_code')).upper()
+        p = self._auth(b); code = self._txt(b.get('p_code')).upper()[:32]
+        t = self.now().timestamp(); fails = [x for x in self.join_fails[p['id']] if t - x < 3600]; self.join_fails[p['id']] = fails
+        if self.rate_limits and len(fails) >= GROUP_LIMITS['failed_joins_per_hour']: self._err('rate_limited')
         g = next((g for g in self.G.values() if g['code'] == code), None)
-        if not g: self._err('group_not_found')
-        if p['id'] not in g['members']:
+        member = bool(g) and p['id'] in g['members']
+        # revoked/rotated code, a closed invite, a removed member with the same code: all answer like an unknown code (no oracle)
+        if not g or (not member and (not g.get('invite_open', True) or g.get('bans', {}).get(p['id']) == g['code'])):
+            fails.append(t); self._err('group_not_found')
+        if not member:
             if len(g['members']) >= 50: self._err('group_full')
-            g['members'].append(p['id']); self._feed_add(g['id'], p['id'], 'joined', None)
+            g['members'].append(p['id']); self._handle(g, p['id']); g.get('bans', {}).pop(p['id'], None)
+            self._feed_add(g['id'], p['id'], 'joined', None); self._glog(g, 'joined', p['id'])
         return self._group_out(g, p['id'])
     def _rr_leave_group(self, b):
         p = self._auth(b); g = self._member_group(b, p)
-        g['members'].remove(p['id'])
-        if not g['members']: del self.G[g['id']]
+        self._glog(g, 'left', p['id']); self._drop_member(g, p['id'])
         return None
     def _rr_my_groups(self, b):
         p = self._auth(b); return [self._group_out(g, p['id']) for g in self._groups_of(p['id'])]
     def _rr_group(self, b):
         p = self._auth(b); g = self._member_group(b, p)
+        # v2 keys are additive: description, my_role, invite_open, member_challenges, members[].role / .handle (never a player id)
         return {'id': g['id'], 'code': g['code'], 'name': g['name'], 'is_owner': g['owner'] == p['id'],
-                'members': [{'nickname': self.P[m]['nickname'], 'owner': m == g['owner'], 'me': m == p['id'], 'stars': self._total(self.P[m]), 'pawn': self.P[m]['pawn']} for m in g['members']],
-                'challenges': [self._chal_out(c, p['id']) for c in sorted(self.C.values(), key=lambda c: c['starts_at'], reverse=True) if c['group'] == g['id']]}
+                'description': g.get('description', ''), 'my_role': self._role(g, p['id']), 'invite_open': g.get('invite_open', True),
+                'member_challenges': g.get('member_challenges', True),
+                'members': [{'nickname': self.P[m]['nickname'], 'owner': m == g['owner'], 'me': m == p['id'], 'stars': self._total(self.P[m]), 'pawn': self.P[m]['pawn'],
+                             'role': self._role(g, m), 'handle': self._handle(g, m)} for m in g['members']],
+                'challenges': [self._chal_out(c, p['id']) for c in sorted(self.C.values(), key=lambda c: c['starts_at'], reverse=True) if c['group'] == g['id']][:20]}
     def _rr_create_challenge2(self, b):
         p = self._auth(b); g = self._member_group(b, p)
+        if not g.get('member_challenges', True): self._need(g, p['id'], 'owner', 'admin')
         t = self._txt(b.get('p_title'))
         if not 2 <= len(t) <= 50: self._err('bad_title')
         w = b.get('p_world')
@@ -377,7 +461,7 @@ class FakeBackend:
         if b.get('p_char') not in self.characters[w]: self._err('bad_profession')
         days = self._int(b.get('p_days'), 'bad_days')
         if not 1 <= days <= 30: self._err('bad_days')
-        if sum(1 for c in self.C.values() if c['group'] == g['id'] and self._active(c)) >= 5: self._err('too_many_challenges')
+        if sum(1 for c in self.C.values() if c['group'] == g['id'] and self._active(c) and c.get('status') != 'cancelled') >= 5: self._err('too_many_challenges')
         st = self.now()
         c = {'id': str(uuid.uuid4()), 'group': g['id'], 'title': t, 'world': w, 'char': b['p_char'], 'seed': self.rng.randint(1, 2 ** 31 - 1),
              'starts_at': st, 'ends_at': st + dt.timedelta(days=days)}
@@ -411,23 +495,256 @@ class FakeBackend:
             c = self.C.get(b.get('p_challenge')) if isinstance(b.get('p_challenge'), str) else None
             if not c: self._err('challenge_not_found')
             if p['id'] not in self.G.get(c['group'], {}).get('members', []): self._err('not_member')
+            if c.get('status') == 'cancelled': self._err('challenge_cancelled')
             kw = {'challenge': c['id']}; w, ci, mm, seed, prof = c['world'], None, None, c['seed'], c['char']
         else: self._err('bad_mode')
-        r = self._mine(p['id'], **kw)
+        r = self._latest(p['id'], c['id']) if c else self._mine(p['id'], **kw)
         if not r:
-            if c and not self._active(c): self._err('challenge_closed')
+            if c: self._comp_gate(c, p['id'])
             r = {'id': str(uuid.uuid4()), 'player': p['id'], **kw, 'mode': mode, 'status': 'playing', 'seed': seed, 'world': w, 'profession': prof,
                  'char_index': ci, 'max_months': mm, 'months': None, 'net_worth': None, 'passive': None, 'expenses': None, 'stats': None,
                  'checkpoint': None, 'checkpoint_turn': 0, 'started_at': self.iso(), 'finished_at': None, 'title': c and c['title'],
                  'char': c and c['char'], 'group': c and c['group'], 'verified': None, 'verify_error': None, 'verify_attempts': 0,
-                 'start_day': self.day_key(), 'start_week': self.week_key()}
+                 'start_day': self.day_key(), 'start_week': self.week_key(), 'attempt': 1}
             self.R[r['id']] = r
             if mode == 'daily' and self.streak_on == 'begin': self._bump_streak(p)
         out = {'result_id': r['id'], 'status': r['status'], 'seed': r['seed'], 'world': r['world'], 'max_months': r['max_months'], 'title': r['title'],
                'group_id': r['group'], 'streak': p['daily_streak'], 'checkpoint_turn': r['checkpoint_turn'], 'checkpoint': r['checkpoint']}
-        if mode == 'challenge': out['char'] = r['char']
+        if mode == 'challenge':
+            out['char'] = r['char']
+            if c.get('v2'): out.update(attempt=r.get('attempt', 1), attempts=c['rules']['attempts'], rules=c.get('engine_rules'))
         else: out['char_index'] = r['char_index']
         return out
+
+    # -------------------------------------------------- competitions (draft 20261124_competitions.sql) — extends challenges additively
+    def _latest(self, pid, cid):
+        rs = [r for r in self.R.values() if r['player'] == pid and r.get('challenge') == cid]
+        return max(rs, key=lambda r: r.get('attempt', 1)) if rs else None
+    def _comp_gate(self, c, pid):
+        """Starting a NEW attempt: scheduled start, end, join policy / late join (old challenges: only the window)."""
+        t = self.now()
+        if c.get('status') == 'cancelled': self._err('challenge_cancelled')
+        if t < c['starts_at']: self._err('not_started')
+        if t >= c['ends_at']: self._err('challenge_closed')
+        R = c.get('rules') or {}
+        lj = R.get('late_join_until')
+        if lj and t > dt.datetime.fromisoformat(lj): self._err('late_join')
+        if R.get('join_policy') == 'members_before_start':
+            g = self.G.get(c['group']) or {}; joined = next((x['at'] for x in g.get('log', []) if x['kind'] == 'joined' and x['actor'] == pid), None)
+            if joined and dt.datetime.fromisoformat(joined) > c['starts_at']: self._err('late_join')
+    @staticmethod
+    def attempt_seed(seed, k): return seed if k <= 1 else (abs(hashtext(f'{seed}:{k}')) or 1)
+    def _ts(self, v, code):
+        if v is None: return None
+        try:
+            t = dt.datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+            return t if t.tzinfo else t.replace(tzinfo=UTC)
+        except ValueError: self._err(code)
+    def _rules_in(self, raw):
+        r = dict(COMP_DEFAULTS)
+        if raw is None: return r
+        if not isinstance(raw, dict) or set(raw) - set(COMP_DEFAULTS): self._err('bad_rules')
+        r.update(raw)
+        ok = (isinstance(r['attempts'], int) and not isinstance(r['attempts'], bool) and 1 <= r['attempts'] <= 3 and r['metric'] in ('escape', 'networth')
+              and r['tiebreak'] in ('ratio', 'networth') and r['join_policy'] in ('members', 'members_before_start')
+              and isinstance(r['grace_minutes'], int) and not isinstance(r['grace_minutes'], bool) and 0 <= r['grace_minutes'] <= 360)
+        if not ok: self._err('bad_rules')
+        if r['late_join_until'] is not None: r['late_join_until'] = self._ts(r['late_join_until'], 'bad_rules').isoformat()
+        return r
+    def _comp_out(self, c, pid):
+        out = self._chal_out(c, pid)
+        R = c.get('rules') or COMP_DEFAULTS; t = self.now()
+        status = 'cancelled' if c.get('status') == 'cancelled' else 'scheduled' if t < c['starts_at'] else 'open' if t < c['ends_at'] else 'closed'
+        mine = [r for r in self.R.values() if r['player'] == pid and r.get('challenge') == c['id']]
+        out.update(status=status, rules=dict(R), engine_rules=c.get('engine_rules'), engine_sha=c.get('engine_sha'), created_by_me=c.get('by') == pid,
+                   cancelled_at=c.get('cancelled_at'), attempts_used=len(mine), board=self.board2(c, pid))
+        return out
+    def board2(self, c, me):
+        """game.board2(): best attempt per player, dense shared rank by the competition metric (never time), unfinished / late /
+        disqualified rows shown but not ranked."""
+        R = c.get('rules') or COMP_DEFAULTS; grace = dt.timedelta(minutes=R.get('grace_minutes', 120)); closed = self.now() >= c['ends_at']
+        def prog(r):
+            v = (r.get('stats') or {}).get('progress')
+            try: return float(v) if v is not None else ((r['passive'] or 0) / r['expenses'] if r['expenses'] else 0)
+            except (TypeError, ValueError): return 0.0
+        def key(r):
+            won = r['status'] == 'won'; ratio = round((r['passive'] or 0) / max(1, r['expenses'] or 0), 3)
+            main = (-(r['net_worth'] or 0),) if R.get('metric') == 'networth' else (0 if won else 1, (r['months'] or 0) if won else -round(prog(r), 3))
+            tb = (-(r['net_worth'] or 0), -ratio) if R.get('tiebreak') == 'networth' else (-ratio, -(r['net_worth'] or 0))
+            return main + tb
+        def flag(r):
+            if r.get('verified') is False: return 'disqualified'
+            if r['status'] == 'playing': return 'unfinished' if closed else 'playing'
+            fin = dt.datetime.fromisoformat(r['finished_at']) if r.get('finished_at') else None
+            if fin and fin > c['ends_at'] + grace: return 'late'
+            return 'ok'
+        best = {}
+        for r in (x for x in self.R.values() if x.get('challenge') == c['id']):
+            f = flag(r); cur = best.get(r['player'])
+            order = {'ok': 0, 'playing': 1, 'unfinished': 2, 'late': 3, 'disqualified': 4}
+            if cur is None or (order[f], key(r) if f == 'ok' else ()) < (order[cur[1]], key(cur[0]) if cur[1] == 'ok' else ()): best[r['player']] = (r, f)
+        ranked = sorted((x for x in best.values() if x[1] == 'ok'), key=lambda x: key(x[0]))
+        rest = sorted((x for x in best.values() if x[1] != 'ok'), key=lambda x: ({'playing': 0, 'unfinished': 1, 'late': 2, 'disqualified': 3}[x[1]], self.P[x[0]['player']]['nickname']))
+        out = []; prev = None
+        for i, (r, f) in enumerate(ranked + rest):
+            rank = None
+            if f == 'ok':
+                k = key(r); rank = out[-1]['rank'] if prev is not None and k == prev else i + 1; prev = k
+            p = self.P[r['player']]
+            out.append({'nickname': p['nickname'], 'status': r['status'], 'months': r['months'], 'net_worth': r['net_worth'], 'passive': r['passive'], 'expenses': r['expenses'],
+                        'me': r['player'] == me, 'stars': self._total(p), 'pawn': p['pawn'], 'progress': None if r['status'] == 'playing' else round(prog(r), 3), 'verified': r.get('verified'),
+                        'rank': rank, 'flag': f, 'attempt': r.get('attempt', 1),
+                        'attempts': sum(1 for x in self.R.values() if x.get('challenge') == c['id'] and x['player'] == r['player'])})
+        return out[:100]
+    def _rr_create_competition(self, b):
+        p = self._auth(b); g = self._member_group(b, p)
+        if not g.get('member_challenges', True): self._need(g, p['id'], 'owner', 'admin')
+        t = self._txt(b.get('p_title'))
+        if not 2 <= len(t) <= 50: self._err('bad_title')
+        w = b.get('p_world')
+        if w not in WORLDS4 or w not in self.characters: self._err('bad_world')
+        if b.get('p_char') not in self.characters[w]: self._err('bad_profession')
+        now = self.now(); st = self._ts(b.get('p_starts_at'), 'bad_window') or now; en = self._ts(b.get('p_ends_at'), 'bad_window')
+        if en is None or st < now - dt.timedelta(minutes=5) or en <= st + dt.timedelta(hours=1) or en - st > dt.timedelta(days=30) or st - now > dt.timedelta(days=30): self._err('bad_window')
+        R = self._rules_in(b.get('p_rules'))
+        if R['late_join_until'] and not st <= dt.datetime.fromisoformat(R['late_join_until']) <= en: self._err('bad_rules')
+        if sum(1 for c in self.C.values() if c['group'] == g['id'] and c.get('status') != 'cancelled' and c['ends_at'] > now) >= 5: self._err('too_many_challenges')
+        day = st.astimezone(IL).date().isoformat()
+        c = {'id': str(uuid.uuid4()), 'group': g['id'], 'title': t, 'world': w, 'char': b['p_char'], 'seed': self.rng.randint(1, 2 ** 31 - 1),
+             'starts_at': st, 'ends_at': en, 'v2': True, 'rules': R, 'status': 'scheduled', 'by': p['id'], 'created': now,
+             'engine_rules': 3 if day < '2026-12-07' else 4, 'engine_sha': _engine_pin()}
+        self.C[c['id']] = c; self._glog(g, 'competition', p['id'], None, {'title': t})
+        return self._comp_out(c, p['id'])
+    def _comp_member(self, b, p):
+        c = self.C.get(b.get('p_challenge')) if isinstance(b.get('p_challenge'), str) else None
+        if not c: self._err('challenge_not_found')
+        g = self.G.get(c['group'])
+        if not g or p['id'] not in g['members']: self._err('not_member')
+        return c, g
+    def _rr_competition(self, b):
+        p = self._auth(b); c, _ = self._comp_member(b, p); return self._comp_out(c, p['id'])
+    def _rr_cancel_competition(self, b):
+        p = self._auth(b); c, g = self._comp_member(b, p)
+        if c.get('by') != p['id'] and self._role(g, p['id']) not in ('owner', 'admin'): self._err('not_allowed')
+        if c.get('status') == 'cancelled': self._err('already_cancelled')
+        if self.now() >= c['ends_at']: self._err('challenge_closed')
+        c['status'] = 'cancelled'; c['cancelled_at'] = self.iso(); self._glog(g, 'competition_cancelled', p['id'], None, {'title': c['title']})
+        return self._comp_out(c, p['id'])
+    def _rr_begin_attempt(self, b):
+        p = self._auth(b); c, _ = self._comp_member(b, p)
+        last = self._latest(p['id'], c['id']); n = (last or {}).get('attempt', 0)
+        if last and last['status'] == 'playing': self._err('attempt_open')
+        if n >= (c.get('rules') or COMP_DEFAULTS)['attempts']: self._err('attempts_used')
+        self._comp_gate(c, p['id'])
+        k = n + 1
+        r = {'id': str(uuid.uuid4()), 'player': p['id'], 'challenge': c['id'], 'mode': 'challenge', 'status': 'playing', 'seed': self.attempt_seed(c['seed'], k),
+             'world': c['world'], 'profession': c['char'], 'char_index': None, 'max_months': None, 'months': None, 'net_worth': None, 'passive': None, 'expenses': None,
+             'stats': None, 'checkpoint': None, 'checkpoint_turn': 0, 'started_at': self.iso(), 'finished_at': None, 'title': c['title'], 'char': c['char'], 'group': c['group'],
+             'verified': None, 'verify_error': None, 'verify_attempts': 0, 'start_day': self.day_key(), 'start_week': self.week_key(), 'attempt': k}
+        self.R[r['id']] = r
+        return {'result_id': r['id'], 'status': 'playing', 'seed': r['seed'], 'world': r['world'], 'max_months': None, 'title': c['title'], 'group_id': c['group'],
+                'streak': p['daily_streak'], 'checkpoint_turn': 0, 'checkpoint': None, 'char': c['char'], 'attempt': k, 'attempts': (c.get('rules') or COMP_DEFAULTS)['attempts'],
+                'rules': c.get('engine_rules')}
+
+    # -------------------------------------------------- groups v2 RPCs
+    def _group_v2_out(self, g, pid):
+        return {**self._group_out(g, pid), 'description': g.get('description', ''), 'my_role': self._role(g, pid), 'invite_open': g.get('invite_open', True),
+                'member_challenges': g.get('member_challenges', True)}
+    def _rr_group_update(self, b):
+        p = self._auth(b); g = self._member_group(b, p); self._need(g, p['id'], 'owner', 'admin')
+        n = self._txt(b.get('p_name')); d = b.get('p_description')
+        if not 2 <= len(n) <= 40: self._err('bad_name')
+        if d is not None:
+            d = self._txt(d)
+            if len(d) > GROUP_LIMITS['description'] or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', d): self._err('bad_description')
+            g['description'] = d
+        g['name'] = n; self._glog(g, 'updated', p['id'])
+        return self._group_v2_out(g, p['id'])
+    def _rr_group_set_role(self, b):
+        p = self._auth(b); g = self._member_group(b, p); self._need(g, p['id'], 'owner')
+        tgt = self._by_handle(g, b.get('p_member')); role = b.get('p_role')
+        if role not in ('admin', 'member'): self._err('bad_role')
+        if tgt == g['owner']: self._err('not_allowed')
+        g.setdefault('roles', {})[tgt] = role
+        if role == 'member': g['roles'].pop(tgt, None)
+        self._glog(g, 'role', p['id'], tgt, {'role': role}); return self._group_v2_out(g, p['id'])
+    def _rr_group_transfer(self, b):
+        p = self._auth(b); g = self._member_group(b, p); self._need(g, p['id'], 'owner')
+        tgt = self._by_handle(g, b.get('p_member'))
+        if tgt == p['id']: self._err('not_allowed')
+        g['owner'] = tgt; g.setdefault('roles', {}).pop(tgt, None); g['roles'][p['id']] = 'admin'
+        self._glog(g, 'owner', p['id'], tgt); return self._group_v2_out(g, p['id'])
+    def _rr_group_remove(self, b):
+        p = self._auth(b); g = self._member_group(b, p)
+        tgt = self._by_handle(g, b.get('p_member')); me, them = self._role(g, p['id']), self._role(g, tgt)
+        if tgt == p['id'] or not (me == 'owner' or (me == 'admin' and them == 'member')): self._err('not_allowed')
+        g.setdefault('bans', {})[tgt] = g['code']        # blocked until the code is rotated; results stay on the boards
+        self._glog(g, 'removed', p['id'], tgt); self._drop_member(g, tgt)
+        return self._group_v2_out(g, p['id'])
+    def _rr_group_rotate_code(self, b):
+        p = self._auth(b); g = self._member_group(b, p); self._need(g, p['id'], 'owner', 'admin')
+        g['code'] = self._code(); g['bans'] = {}; self._glog(g, 'code_rotated', p['id'])
+        return self._group_v2_out(g, p['id'])
+    def _rr_group_settings(self, b):
+        p = self._auth(b); g = self._member_group(b, p); self._need(g, p['id'], 'owner', 'admin')
+        for k, key in (('p_invite_open', 'invite_open'), ('p_member_challenges', 'member_challenges')):
+            v = b.get(k)
+            if v is None: continue
+            if not isinstance(v, bool): self._err('bad_settings')
+            g[key] = v
+        self._glog(g, 'settings', p['id'], None, {'invite_open': g.get('invite_open', True), 'member_challenges': g.get('member_challenges', True)})
+        return self._group_v2_out(g, p['id'])
+    def _rr_group_history(self, b):
+        p = self._auth(b); g = self._member_group(b, p)
+        before = self._ts(b.get('p_before'), 'bad_before') if b.get('p_before') is not None else None
+        cs = sorted((c for c in self.C.values() if c['group'] == g['id'] and (before is None or c.get('created', c['starts_at']) < before)),
+                    key=lambda c: c.get('created', c['starts_at']), reverse=True)[:GROUP_LIMITS['history_page']]
+        nick = lambda pid: self.P[pid]['nickname'] if pid in self.P else None
+        log = [{'kind': x['kind'], 'actor': nick(x['actor']), 'target': nick(x['target']) if x.get('target') else None, 'data': x.get('data'), 'at': x['at']}
+               for x in reversed(g.get('log', [])) if before is None or dt.datetime.fromisoformat(x['at']) < before][:50]
+        return {'challenges': [self._comp_out(c, p['id']) if c.get('v2') else self._chal_out(c, p['id']) for c in cs], 'log': log,
+                'next_before': self.iso(cs[-1].get('created', cs[-1]['starts_at'])) if len(cs) == GROUP_LIMITS['history_page'] else None}
+
+    # -------------------------------------------------- live rooms (rr_room_* SQL draft + Edge `room`) → tests/fakeroom.mjs
+    def _room_side(self):
+        if self._rooms is None:
+            self._rooms = _Sidecar('fakeroom.mjs')
+            if self._room_state: self._rooms.ask({'op': 'load', 'args': self._room_state}, 60); self._room_state = None
+        return self._rooms
+    def _room_ask(self, op, p, args):
+        who = {'id': p['id'], 'nickname': p['nickname'], 'pawn': p['pawn']}
+        m = self._room_side().ask({'op': op, 'player': who, 'groups': [g['id'] for g in self._groups_of(p['id'])], 'args': args,
+                                   'now': int(self.now().timestamp() * 1000)}, 60)
+        return m['status'], m['body']
+    def _room_rpc(self, fn, b):
+        p = self._auth(b); op = ROOM_RPC[fn]
+        args = {k[2:]: v for k, v in b.items() if k not in AUTH}
+        if op == 'create': args = {'settings': b.get('p_settings') if b.get('p_settings') is not None else {}, 'group': b.get('p_group')}
+        st, out = self._room_ask(op, p, args)
+        if st != 200: raise FakeError(out.get('error', 'server_error'), self.raise_status)   # PL/pgSQL: raise exception '<code>' → 400 P0001
+        if isinstance(out, dict): out.pop('ok', None)
+        return out
+    def room_fn(self, body, raw_len=None):
+        """POST /functions/v1/room (Edge Function `room`): → (status, json)."""
+        self.calls['room'] += 1; self.requests.append(('room', body))
+        if raw_len is not None and raw_len > ROOM_MAX_BODY: return 413, {'ok': False, 'error': 'too_big'}
+        if not isinstance(body, dict): return 400, {'ok': False, 'error': 'bad_json'}
+        pid = body.get('id'); sec = body.get('secret')
+        with self.lock:
+            p = self.P.get(pid) if isinstance(pid, str) and UUID_RE.match(pid) else None
+            if not p or not isinstance(sec, str) or p['secret'] != sec: return 401, {'ok': False, 'error': 'unauthorized'}
+            op = body.get('op')
+            if op not in ('start', 'act', 'tick'): return 400, {'ok': False, 'error': 'bad_op'}
+            room = body.get('room')
+            if not isinstance(room, str) or not UUID_RE.match(room): return 403, {'ok': False, 'error': 'not_in_room'}
+            args = {'room': room}
+            if op == 'act': args['intent'] = {k: body.get(k) for k in ('action_id', 'state_version', 'code', 'args', 'engine') if k in body}
+            self.log.append((round(time.time(), 3), 'room', {'op': op, 'room': room, 'code': body.get('code')}, None))
+            try: return self._room_ask(op, p, args)
+            except (TimeoutError, queue.Empty): return 503, {'ok': False, 'error': 'engine_unavailable'}
+    def rooms_dump(self):
+        return self._rooms.ask({'op': 'dump', 'player': {}, 'args': {}}, 60)['body'] if self._rooms else self._room_state
+
     def _own_result(self, b, p):
         r = self.R.get(b.get('p_result')) if isinstance(b.get('p_result'), str) else None
         if not r or r['player'] != p['id']: self._err('result_not_found')
@@ -578,7 +895,7 @@ class FakeBackend:
             raise TypeError(type(o))
         d = {k: getattr(self, k) for k in ('P', 'G', 'C', 'R', 'feed', 'gifts')}
         d['events_today'] = [[list(k), v] for k, v in self.events_today.items()]
-        d['offset_s'] = self._offset.total_seconds(); d['meta'] = self.meta
+        d['offset_s'] = self._offset.total_seconds(); d['meta'] = self.meta; d['rooms'] = self.rooms_dump()
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f: json.dump(d, f, ensure_ascii=False, default=enc)
     @classmethod
@@ -588,10 +905,11 @@ class FakeBackend:
             d = json.load(f, object_hook=lambda o: dt.datetime.fromisoformat(o['__dt']) if set(o) == {'__dt'} else o)
         for k in ('P', 'G', 'C', 'R', 'feed', 'gifts'): setattr(fb, k, d.get(k, getattr(fb, k)))
         fb.events_today = collections.Counter({tuple(k): v for k, v in d.get('events_today', [])})
-        fb._offset = dt.timedelta(seconds=d.get('offset_s', 0)); fb.meta = d.get('meta') or {}
+        fb._offset = dt.timedelta(seconds=d.get('offset_s', 0)); fb.meta = d.get('meta') or {}; fb._room_state = d.get('rooms')
         return fb
     def close(self):
         if self._side: self._side.close(); self._side = None
+        if self._rooms: self._rooms.close(); self._rooms = None
 
 # ---------------------------------------------------------------- guard-only sink (suites with no backend use)
 class GuardOnly:
@@ -648,8 +966,18 @@ async def install(ctx, fb, *, fonts='stub', live=None):
             except ValueError: return await route.fulfill(status=400, content_type='application/json', body='{"ok":false,"error":"bad_json"}', headers=CORS)
             st, out = await asyncio.to_thread(fb.verify, body, len(raw))
             await route.fulfill(status=st, content_type='application/json', body=json.dumps(out, ensure_ascii=False), headers=CORS)
+        async def room(route):
+            req = route.request
+            if req.method == 'OPTIONS': return await route.fulfill(status=204, headers=CORS)
+            if fb.take_network_failure('room'): return await route.abort('internetdisconnected')
+            raw = req.post_data or ''
+            try: body = json.loads(raw)
+            except ValueError: return await route.fulfill(status=400, content_type='application/json', body='{"ok":false,"error":"bad_json"}', headers=CORS)
+            st, out = await asyncio.to_thread(fb.room_fn, body, len(raw.encode('utf-8')))
+            await route.fulfill(status=st, content_type='application/json', body=json.dumps(out, ensure_ascii=False), headers=CORS)
         await ctx.route(SB_PROD + '/rest/v1/rpc/**', rpc)
         await ctx.route(SB_PROD + '/functions/v1/verify-result', verify)
+        await ctx.route(SB_PROD + '/functions/v1/room', room)
     async def finished(req):   # a supabase request that got a response from a real server (not route.fulfill) = left the machine
         if not _host(req.url).endswith('.supabase.co'): return
         try:
@@ -748,8 +1076,13 @@ def serve(port, fb):
                 try: body = json.loads(raw)
                 except ValueError: return self._send(400, {'ok': False, 'error': 'bad_json'})
                 return self._send(*fb.verify(body, len(raw)))
+            if self.path.startswith('/functions/v1/room'):
+                if len(raw.encode('utf-8')) > ROOM_MAX_BODY: return self._send(413, {'ok': False, 'error': 'too_big'})
+                try: body = json.loads(raw)
+                except ValueError: return self._send(400, {'ok': False, 'error': 'bad_json'})
+                return self._send(*fb.room_fn(body, len(raw.encode('utf-8'))))
             if self.path.startswith('/__fake/advance'):     # test-only clock control (HTTP mode only)
-                b = json.loads(raw or '{}'); fb.advance(days=b.get('days', 0), hours=b.get('hours', 0), minutes=b.get('minutes', 0))
+                b = json.loads(raw or '{}'); fb.advance(days=b.get('days', 0), hours=b.get('hours', 0), minutes=b.get('minutes', 0)); fb._offset += dt.timedelta(seconds=b.get('seconds', 0))
                 return self._send(200, {'now': fb.iso()})
             self._send(404, {'code': 'PGRST205', 'message': 'not found'})
     srv = ThreadingHTTPServer(('127.0.0.1', port), H)
