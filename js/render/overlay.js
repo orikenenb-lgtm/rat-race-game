@@ -19,10 +19,17 @@ export const STR = {
   E1: 'לא הצלחנו לפתוח את המשחק',
   E2: 'ההתקדמות שלך שמורה. אפשר לנסות שוב, לעבור למצב קל (בלי תלת־ממד) או לחזור ללובי.',
   E3: 'לנסות שוב', E4: 'מצב קל', E5: 'חזרה ללובי', E6: 'פרטים טכניים',
-  N1: 'הדפדפן הזה לא תומך בתלת־ממד, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה.',
-  N2: 'לא הצלחנו לטעון את התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.',
-  N2a: 'לנסות תלת־ממד',
-  N3: 'התלת־ממד לא עלה במכשיר הזה, אז עברנו למצב קל. המשחק עצמו זהה.',
+  // renderer notices — one per real cause (BRIEF §8). The no-WebGL text names the usual cause (hardware acceleration off,
+  // common in cloud / VM / locked-down browsers) instead of blaming "the browser".
+  N1: 'התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה.',
+  N1b: 'הדפדפן או המכשיר הזה תומכים רק בגרסה הישנה של WebGL, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה.',  // no digit: iso() would isolate it and flip the bidi order
+  N2: 'לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.',
+  N2s: 'התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה.',
+  N2a: 'לנסות שוב בתלת־ממד',
+  N3: 'התלת־ממד לא הצליח לעלות בדפדפן הזה, אז עברנו למצב קל. המשחק עצמו זהה.',
+  N8: 'התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה.',
+  // the code + GPU string is Latin: one LTR isolate (U+2066…U+2069) keeps its brackets in order inside the Hebrew line
+  tech: (code, gpu) => `פרטים טכניים: \u2066${code}${gpu ? ' · ' + (gpu.length > 60 ? gpu.slice(0, 59) + '…' : gpu) : ''}\u2069`,
   N4: 'מצב קל פועל: לוח שטוח ומהיר, אותו משחק בדיוק.',
   N5: 'לא הצלחנו להציג את הלוח, אבל אפשר להמשיך לשחק: הקוביות, הכרטיסים והדוח עובדים כרגיל.',
   N6: 'חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק.',
@@ -32,10 +39,41 @@ export const STR = {
   R1t: 'משהו נתקע באמצע התור', R1b: 'ההתקדמות שלך שמורה, ואפשר להמשיך בדיוק מאותה נקודה.',
   R2b: 'זה קורה שוב. אפשר לנסות במצב קל, או לחזור ללובי.',
   R2b2d: 'זה קורה שוב. אפשר להמשיך מהשמירה, או לחזור ללובי.',
-  R3t: 'התצוגה התלת־ממדית נעצרה', R3b: 'זה קורה לפעמים בטלפונים כשנגמר הזיכרון. ההתקדמות שמורה.',
+  R3t: 'התצוגה התלת־ממדית נעצרה', R3b: 'כנראה נגמר הזיכרון הגרפי, או שהדפדפן איפס את התצוגה. ההתקדמות שמורה.',
   R4: 'משהו השתבש. אפשר לחזור ללובי ולהמשיך מהשמירה.',
   Rsave: 'להמשיך מהשמירה', Rlite: 'להמשיך במצב קל', R3d: 'לנסות שוב בתלת־ממד', Rlobby: 'חזרה ללובי',
 };
+
+/**
+ * Which renderer notice fits the real cause? Pure (no DOM). info = {kind, reason, gpu?, failed?, lowPower?, liteOffered?, liteAllowed?}
+ * (kind/reason/gpu from select.loadRenderer, failed = number of GLBs that did not load, lowPower = software GL).
+ * → null: nothing to say yet (3D running fine — a later start may still have something to report);
+ *   {id, text:'', ...}: settled, say nothing (מצב קל chosen by the player or a flag);
+ *   {id, text, sub, ms, action}: show a toast. action = null | 'reload3d' (button label `actionLabel`, → game.reloadInto3D())
+ *   | 'lite' (→ game.setLite(true)). `sub` is the short "פרטים טכניים" line (reason code + GPU string when known).
+ */
+export function noticeFor(info = {}) {
+  const { kind, reason = null, gpu = '', failed = 0, lowPower = false, liteOffered = false, liteAllowed = true } = info || {};
+  const t = (id, text, code, action = null, actionLabel = '') =>
+    ({ id, text, sub: code ? STR.tech(code, gpu) : '', ms: action ? 9000 : 8000, action, actionLabel });
+  if (kind === 'none') return t('N5', STR.N5, reason || '2d-failed');
+  if (kind === '2d') {
+    switch (reason) {
+      case 'user-lite': case 'flag': return { id: 'quiet', text: '', sub: '', ms: 0, action: null, actionLabel: '' };
+      case 'no-webgl': return t('N1', STR.N1, 'no-webgl');
+      case 'no-webgl2': return t('N1b', STR.N1b, 'no-webgl2');
+      case 'three-failed': return t('N2', STR.N2, 'three-failed', 'reload3d', STR.N2a);
+      case 'three-timeout': return t('N2s', STR.N2s, 'three-timeout', 'reload3d', STR.N2a);
+      case 'context-lost': return t('N8', STR.N8, 'context-lost', 'reload3d', STR.N2a);
+      case 'webgl-init-failed': return t('N3', STR.N3, 'webgl-init-failed');
+      default: return { id: 'quiet', text: '', sub: '', ms: 0, action: null, actionLabel: '' }; // unknown: never a wrong diagnosis
+    }
+  }
+  if (kind !== '3d') return null;
+  if (failed > 0) return { id: 'N6', text: STR.N6, sub: '', ms: 6000, action: null, actionLabel: '' };   // still 3D, stand-ins
+  if (lowPower && !liteOffered && liteAllowed) return { id: 'N7', text: STR.N7, sub: '', ms: 6000, action: 'lite', actionLabel: STR.N7a };
+  return null;
+}
 
 const $ = (s) => document.querySelector(s);
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -126,10 +164,11 @@ export function showFatal({ title = STR.E1, body = STR.E2, details = '', actions
 }
 
 /* ============================================================ recover bar */
-/** actions: [{label, primary?, fn}] — never dismissed by Escape or an outside click */
-export function showRecover({ title, body, actions = [] } = {}) {
+/** actions: [{label, primary?, fn}] — never dismissed by Escape or an outside click. details: optional short "פרטים טכניים" line */
+export function showRecover({ title, body, details = '', actions = [] } = {}) {
   const r = $('#recover'); if (!r) return;
-  r.innerHTML = `<div class="rtx"><b id="recoverT">${esc(title)}</b><p id="recoverD">${esc(body)}</p></div><div class="racts">${actions.map((a, i) => `<button type="button" data-i="${i}" class="${a.primary || i === 0 ? 'primary' : ''}">${esc(a.label)}</button>`).join('')}</div>`;
+  const det = String(details || '').slice(0, 200);
+  r.innerHTML = `<div class="rtx"><b id="recoverT">${esc(title)}</b><p id="recoverD">${esc(body)}</p>${det ? `<small class="rtech" dir="auto">${esc(det)}</small>` : ''}</div><div class="racts">${actions.map((a, i) => `<button type="button" data-i="${i}" class="${a.primary || i === 0 ? 'primary' : ''}">${esc(a.label)}</button>`).join('')}</div>`;
   r.hidden = false;
   r.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (!b) return; const a = actions[+b.dataset.i]; try { a.fn && a.fn(); } catch (x) { console.error(x); } };
   setTimeout(() => r.querySelector('button.primary')?.focus(), 30);

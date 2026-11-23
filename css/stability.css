@@ -1,6 +1,18 @@
 /* מירוץ העכברים — T1 "stability": renderer switch, מצב קל (flat 2D board), honest loading stages, error panel, recover bar.
    Owned by the stability lane (js/render/*, js/game.js shell). Loaded after game.css / lobby.css. */
 
+/* ============================================================ self-hosted fonts (team ב, BRIEF §20 / A2 G-11)
+   Rubik (variable, one file per subset covers weights 300–900) and Secular One, SIL OFL 1.1 — vendor/fonts/, see ATTRIBUTION.md.
+   Same families, weights and unicode ranges the Google Fonts CSS served before; font-display:swap as before. */
+@font-face{font-family:Rubik;font-style:normal;font-display:swap;font-weight:300 900;src:url(../vendor/fonts/rubik-hebrew-wght-normal.woff2) format("woff2");
+  unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-display:swap;font-weight:300 900;src:url(../vendor/fonts/rubik-latin-wght-normal.woff2) format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Secular One";font-style:normal;font-display:swap;font-weight:400;src:url(../vendor/fonts/secular-one-hebrew-400-normal.woff2) format("woff2");
+  unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"Secular One";font-style:normal;font-display:swap;font-weight:400;src:url(../vendor/fonts/secular-one-latin-400-normal.woff2) format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
 /* ============================================================ renderer switch (body[data-renderer] = 3d | 2d | none) */
 /* game.css gives canvas#c display:block, so [hidden] alone would not hide it */
 body:not([data-renderer="3d"]) canvas#c{display:none}
@@ -80,6 +92,18 @@ body[data-renderer="2d"] #board2d:not([hidden]){display:block;position:fixed;ins
 .recover .rtx p{margin:2px 0 0;font-size:15px}
 .recover .racts{display:flex;flex-wrap:wrap;gap:8px}
 .recover .racts button.primary{background:var(--gold);color:var(--gold-ink);font-weight:700}
+.recover .rtech{display:block;margin-top:4px;font-size:13px;color:var(--mut);word-break:break-word}
+/* team ב (B1 G4): an open card / dialog keeps its action buttons at the bottom (phones: a sticky bottom row), so while one is
+   open the bar moves to the top edge instead of covering them. The card's title may sit under it; its buttons never do. */
+body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px))}
+/* team ב: phones — #toast sits at left:50%, so a shrink-to-fit toast only had half the screen width: the renderer notices (two
+   lines + a "לנסות שוב בתלת־ממד" button) wrapped into a narrow column. max-content (capped by the existing max-width) lets a long
+   toast use the row; a two-line toast with a button puts the button under the text. Short toasts keep their size. */
+@media (max-width:600px){
+  #toast{width:max-content}
+  #toast.two.act{flex-wrap:wrap;justify-content:center;row-gap:6px}
+  #toast.two.act .tw{flex:1 1 240px}
+}
 
 @media (prefers-reduced-motion:reduce){.lbar.indet::after{animation:none}}
 
