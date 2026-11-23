@@ -463,6 +463,7 @@ function topBar() {
   const streak = si.streak;
   // T7 AX-2 (CR-12) label-in-name: the player and ⚡ buttons are named by their visible text plus a hidden lead-in (no aria-label)
   return `<header class="lb-top">
+    <p class="lb-rights">כל הזכויות שמורות להשם יתברך (לאורי קינן)</p>
     <div class="lb-logo" aria-label="מירוץ העכברים">מירוץ<br>העכברים</div>
     <button class="lb-player" data-act="profile">
       <span class="sr">הפרופיל שלי: </span>${pawnHtml(p.pawn, p.pawnColor, 'md')}
