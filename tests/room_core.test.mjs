@@ -237,13 +237,15 @@ await test(`full rooms (${ROOMS}): 2–4 seats × w1–w4 × pass/greedy/random 
   let acts = 0, ms = 0;
   for (let k = 0; k < ROOMS; k++) {
     const world = C.WORLDS[k % 4]; const n = 2 + (k % 3);
-    const h = new Harness({ world, end: k % 2 ? 'all' : 'first_win', max_rounds: k % 3 === 0 ? 120 : 40, char_policy: k % 3 ? 'choose' : 'same' }, n, { k: k + 2, now: k % 5 === 4 ? T_R3 : T_R4 });
+    const casual = k % 6 === 5 ? { mode: 'casual', help: 'guide' } : {};          // one casual room (engine 'free' + help level)
+    const h = new Harness({ world, end: k % 2 ? 'all' : 'first_win', max_rounds: k % 3 === 0 ? 120 : 40, char_policy: k % 3 ? 'choose' : 'same', ...casual }, n, { k: k + 2, now: k % 5 === 4 ? T_R3 : T_R4 });
     const chars = E.getWorld(world).characters.map((c) => c.id);
     h.startAll(h.room.settings.char_policy === 'choose' ? h.players.map((_, i) => chars[i % chars.length]) : []);
     const t0 = Date.now();
     h.play(pols[k % 3], prng(k + 1), { onState: (hh, i) => { const s = hh.seat(i); assertNoLeak(s.state, s.view); if (s.state && !s.state.over) parity(s.state, s.view); } });
     ms += Date.now() - t0; acts += h.steps;
     assert.ok(['finished'].includes(h.room.status), h.room.status);
+    if (casual.mode) assert.ok(h.room.seats.every((x) => x.state.mode === 'free' && x.state.mentor === 'guide' && !x.state.tutorial && !x.state.bailout), 'casual room = free mode with the chosen help');
     finished.push(h);
   }
   console.log(`   ${acts} intents, ${(ms / Math.max(1, acts)).toFixed(1)} ms/intent incl. JSON persistence; parity: metrics ${PARITY.metrics}/${PARITY.states}, event ${PARITY.event} equal, ${PARITY.eventDiff} differ, ${PARITY.ddL1} dd level-1 skipped`);
@@ -308,7 +310,6 @@ await test('timeout: the autopilot only rolls and takes safe defaults; away afte
   assert.equal(s1.status === 'forfeit' || s1.result?.forfeit, true, 'forfeit after 10 missed rounds');
   assert.equal(h.room.status, 'finished'); assert.ok(h.room.events.filter((e) => e.kind === 'autopilot' && e.data.seat === s1.seat).length >= 10 || s1.missed >= 10, `rounds ${rounds} ${h.room.end_reason} r${h.room.round} ` + JSON.stringify(h.room.seats.map((s) => [s.status, s.missed, s.state.over && s.state.result.status])));
   const ev = h.room.events.map((e) => e.kind); assert.ok(ev.includes('away') && ev.includes('forfeit') && ev.includes('autopilot'));
-  if (rounds < 10) console.log('   debug', h.room.end_reason, h.room.round, JSON.stringify(h.room.seats.map((s) => [s.status, s.missed, s.state.over && s.state.result.status])));
   const fr = h.room.results.find((x) => x.seat === s1.seat); assert.ok(fr.forfeit && fr.rank === 2, 'a forfeit ranks after everyone else');
 });
 await test('strict disconnect policy: forfeit after 3 missed rounds; a returning away player is playing again', async () => {

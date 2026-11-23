@@ -212,13 +212,14 @@ export function react(room, player, kind, now) {
 }
 
 /* ============================================================ start (Edge: needs the engine) */
-export function start(E, room, player, now) {
+export function start(E, room, player, now, ctx = {}) {
   const me = seatOf(room, player.id); if (!me) fail('not_in_room', 403);
   if (room.host_id !== player.id) fail('not_host', 403);
   if (room.status !== 'lobby') fail('room_started', 409);
   if (room.seats.length < room.settings.min_seats) fail('not_enough_players', 409);
   if (room.seats.some((s) => s.status !== 'ready')) fail('not_ready', 409);
   room.date_key = israelDay(now);
+  if (ctx.engine_sha) room.engine_sha = ctx.engine_sha;            // the Edge Function's pin: clients with another engine get 426
   const seats = room.seats.map((s) => {
     const st = E.createGame(seatConfig(room, s.char_id || room.settings.char));
     return { s, st };
@@ -622,7 +623,7 @@ function route(E, room, op, player, args, now, ctx) {
       case 'state': return snapshot(room, player, args.since ?? null, now);
       case 'heartbeat': return heartbeat(room, player, args.conn ?? null, now);
       case 'react': return react(room, player, args.kind, now);
-      case 'start': return start(E, room, player, now);
+      case 'start': return start(E, room, player, now, ctx);
       case 'act': return act(E, room, player, args, now, ctx);
       case 'tick': return tick(E, room, player, now);
       default: fail('bad_op');
