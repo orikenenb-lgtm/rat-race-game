@@ -6,22 +6,18 @@ import { boardInfo } from '../engine.js';
 import { reducedMotion } from '../motion.js'; // T5: the in-app motion setting wins over the OS (CR-R1)
 import { MOTION, labelColor, worldStyle, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
 import { bus } from '../bus.js';
+import { tileText, tileEmoji } from './tiles.js';
 
 export const kind = '2d';
 
 const TOKEN = { classic: '♟', car: '🚕', tophat: '🎩', rocket: '🚀', crown: '👑', diamond: '💎' };
-const TILE_ICON = [
-  [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
-  [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
-  [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'],
-];
 const HISTORY_COLORS = { board: '#daceb8', boardEdge: '#5b4127', center: '#e6d6b0' };
 
 let root = null, boardEl = null, gridEl = null, cityEl = null, capEl = null, pawnEl = null, fxEl = null;
 let n = 40, side = 10, pos = 0, speed = 1, paused = false, camMode = 'follow', rect = null, gridN = 4;
 const city = new Map(); // key -> {el, model, label, kind, level}
-const pickCbs = new Set();
+const pickCbs = new Set(), tileCbs = new Set();
+const marks = { current: null, dest: null }; let focusTile = 0, emptyEl = null;
 let curWorld = null, motionOverride = null, quality = 'high', turnMs = 0, hlKey = null;
 const timers = new Set();
 const anims = new Set();
@@ -52,7 +48,7 @@ function gridXY(i) {
 }
 function tileCenter(i) { const c = cellPx(); const [gx, gz] = gridXY(i); return { x: (gx + 0.5) * c, y: (gz + 0.5) * c }; }
 const pawnXf = (p, lift = 0, sx = 1, sy = 1) => `translate(${p.x}px, ${p.y - lift}px) translate(-50%, -62%) scale(${sx}, ${sy})`;
-function tileIcon(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
+const tileIcon = tileEmoji;
 const cityIcon = cityEmoji;
 
 /* ============================================================ setup */
@@ -74,9 +70,9 @@ export function dispose() {
   try {
     for (const t of timers) clearTimeout(t); timers.clear();
     for (const a of anims) { try { a.cancel(); } catch (e) { /* ignore */ } } anims.clear();
-    city.clear(); pickCbs.clear();
+    city.clear(); pickCbs.clear(); tileCbs.clear(); marks.current = marks.dest = null;
     if (root) { root.innerHTML = ''; root.hidden = true; }
-    root = boardEl = gridEl = cityEl = capEl = pawnEl = fxEl = null;
+    root = boardEl = gridEl = cityEl = capEl = pawnEl = fxEl = emptyEl = null;
   } catch (e) { warn(e); }
 }
 export function onContextLost() {}
@@ -128,20 +124,34 @@ export function buildWorld(w) {
     boardEl.style.setProperty('--b2d-accent', ws.accent); boardEl.style.setProperty('--b2d-rim', ws.rim);
     gridEl.innerHTML = '';
     gridEl.style.gridTemplateColumns = gridEl.style.gridTemplateRows = `repeat(${side + 1}, 1fr)`;
+    // wave 1 (B1 G5 / A2 G-05): every tile is a button (one tab stop, arrows move along the ring) with a short name that fits
+    // (no "…") — tap / Enter opens the tile sheet with the full name and what happens there
+    gridEl.setAttribute('role', 'group'); gridEl.setAttribute('aria-label', 'משבצות הלוח — חצים כדי לעבור בין המשבצות, Enter לפרטים');
+    marks.current = marks.dest = null; focusTile = 0;
     for (const t of tiles) {
-      const i = t.index ?? t.i ?? 0; const [gx, gz] = gridXY(i);
-      const d = el('div', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl);
+      const i = t.index ?? t.i ?? 0; const [gx, gz] = gridXY(i); const tx = tileText(t);
+      const d = el('button', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl); d.type = 'button';
       d.style.gridColumn = String(gx + 1); d.style.gridRow = String(gz + 1);
       d.style.background = t.color || '#ddd'; d.style.color = t.ink || '#222';
-      d.dataset.i = String(i); d.title = t.name || ''; hidden(d);
+      d.dataset.i = String(i); d.tabIndex = i === 0 ? 0 : -1;
+      d.setAttribute('aria-label', `${tx.name}, משבצת ${i + 1} מתוך ${tiles.length}`);
       hidden(el('span', 'b2d-ti', d, tileIcon(t.icon)));
-      const nm = el('span', 'b2d-tn', d, t.name || ''); nm.dir = 'rtl';
+      const nm = hidden(el('span', 'b2d-tn', d, tx.short)); nm.dir = 'rtl';
+      nm.style.setProperty('--len', String(Math.max(3, ...tx.short.split(/\s+/).map((x) => x.length))));
+      d.addEventListener('click', (e) => { focusTile = i; rove(); const r = d.getBoundingClientRect(); emitTile(i, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
+      d.addEventListener('keydown', onTileKey);
     }
     const center = el('div', 'b2d-center', gridEl);
     center.style.gridColumn = `2 / span ${Math.max(1, side - 1)}`; center.style.gridRow = `2 / span ${Math.max(1, side - 1)}`;
     capEl = hidden(el('div', 'b2d-cap', center, worldStyle(w).caption)); capEl.dir = 'rtl';
+    // wave 1 (B1 G8): an intended empty state — lots "למכירה", the first one glowing; never looks owned (no rim, no card)
+    emptyEl = el('div', 'b2d-empty', center); emptyEl.dir = 'rtl';
+    const lots = hidden(el('div', 'b2d-lots', emptyEl)); lots.dir = 'ltr';   // the first lot is where the first card appears (the city grid is LTR)
+    for (let k = 0; k < 4; k++) { const l = el('span', 'b2d-lot' + (k === 0 ? ' b2d-lot-next' : ''), lots, k === 0 ? '+' : ''); if (k === 1 || k === 3) el('i', 'b2d-sale', l, 'למכירה'); }
+    el('p', 'b2d-empty-cap', emptyEl, 'כאן יקומו הנכסים שלך');
     cityEl = el('div', 'b2d-city', center); cityEl.setAttribute('role', 'group'); cityEl.setAttribute('aria-label', 'העיר שלך');
     city.clear(); gridN = 4; cityEl.style.setProperty('--n', String(gridN));
+    updateEmpty();
     layout();
   } catch (e) { warn(e); }
 }
@@ -180,6 +190,42 @@ export function resetCamera() {}
 export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; }
 export function getCameraMode() { return camMode; }
 
+/* ============================================================ wave 1: tiles (buttons, markers, keyboard) */
+function tileEl(i) { return gridEl ? gridEl.querySelector(`.b2d-tile[data-i="${i}"]`) : null; }
+function rove() { if (!gridEl) return; for (const t of gridEl.querySelectorAll('.b2d-tile')) t.tabIndex = Number(t.dataset.i) === focusTile ? 0 : -1; }
+function onTileKey(e) {
+  const i = Number(e.currentTarget.dataset.i); let j = null;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') j = (i + 1) % n;          // along the direction of play
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') j = (i - 1 + n) % n;
+  else if (e.key === 'Home') j = marks.current ?? 0;
+  else if (e.key === 'End') j = marks.dest ?? marks.current ?? 0;
+  if (j == null) return;
+  e.preventDefault(); focusTile = j; rove(); const t = tileEl(j); if (t) t.focus();
+}
+function emitTile(i, x, y) {
+  for (const f of [...tileCbs]) { try { f(i, { x, y }); } catch (e) { warn(e); } }
+  try { bus.emit('tile:pick', { index: i, x, y, source: '2d' }); } catch (e) { warn(e); }
+}
+/** onTilePick(cb) → unsubscribe; cb(tileIndex, {x, y}) on a click / Enter on a tile (SCENE_OPTIONAL). */
+export function onTilePick(cb) { if (typeof cb !== 'function') return () => {}; tileCbs.add(cb); return () => tileCbs.delete(cb); }
+/** markTile('current' | 'dest', i | null): .b2d-cur (outline + the roving tab stop) / .b2d-dest (pulsing gold outline). */
+export function markTile(kind, i) {
+  try {
+    if (!(kind in marks) || !gridEl) return;
+    const cls = kind === 'current' ? 'b2d-cur' : 'b2d-dest';
+    for (const t of gridEl.querySelectorAll('.' + cls)) t.classList.remove(cls);
+    marks[kind] = i == null || i < 0 ? null : Number(i);
+    const t = marks[kind] != null ? tileEl(marks[kind]) : null; if (t) t.classList.add(cls);
+    if (kind === 'current' && marks.current != null && !(gridEl.contains(document.activeElement))) { focusTile = marks.current; rove(); }
+  } catch (e) { warn(e); }
+}
+export function cityKeys() { return [...city.keys()]; }
+export function homeView() {}
+function updateEmpty() {
+  if (!emptyEl) return; const e = city.size === 0;
+  emptyEl.hidden = !e; if (capEl) capEl.hidden = e; if (cityEl) cityEl.classList.toggle('b2d-none', e);
+}
+
 /* ============================================================ city: cards in the centre grid */
 function ensureGrid(count) {
   let g = 4; while (g * g < count && g < 8) g++;
@@ -189,11 +235,12 @@ function ensureGrid(count) {
 function addCard(key, model, label, kind = null, level = null) {
   const c = el('button', 'b2d-card', cityEl); c.type = 'button';
   c.dataset.key = key; c.dataset.kind = 'plain'; c.title = label || '';
+  if (/^L:/.test(key) && key !== 'L:pension' && key !== 'L:index') c.dataset.life = '1';   // a life event, not an owned asset (B1 G9)
   hidden(el('span', 'b2d-ce', c, cityIcon(model)));
   if (label) { const l = hidden(el('span', 'b2d-cl', c, String(label).slice(0, 18))); l.dir = 'rtl'; }
   c.addEventListener('click', (e) => { const r = c.getBoundingClientRect(); emitPick(key, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
   const it = { el: c, model, label: label || '', kind, level: null };
-  city.set(key, it);
+  city.set(key, it); updateEmpty();
   paintLevel(it, normLevel(level));
   return c;
 }
@@ -232,13 +279,13 @@ export function spawn(key, model, opts = {}) {
 }
 export function despawn(key) {
   try {
-    const it = city.get(key); if (!it) return; city.delete(key);
+    const it = city.get(key); if (!it) return; city.delete(key); updateEmpty();
     animate(it.el, [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.01)', opacity: 0 }], { duration: reduced() ? MOTION.t1 : D(MOTION.despawn), fill: 'forwards' }).then(() => it.el.remove());
   } catch (e) { warn(e); }
 }
 export function launch(key, success) {
   try {
-    const it = city.get(key); if (!it) return; city.delete(key);
+    const it = city.get(key); if (!it) return; city.delete(key); updateEmpty();
     const frames = success ? [{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-400%)', opacity: 0 }] : [{ transform: 'rotate(0)', opacity: 1 }, { transform: 'rotate(70deg) translateY(20%)', opacity: 0 }];
     animate(it.el, frames, { duration: D(success ? 1300 : 800), easing: success ? 'ease-in' : 'ease-out', fill: 'forwards' }).then(() => it.el.remove());
   } catch (e) { warn(e); }
@@ -249,6 +296,7 @@ export function syncCity(list, { silent = true } = {}) { // eslint-disable-line 
     const fx = fixtureCount(globalThis.location ? location.search : '');
     const want = new Map([...(list || []), ...(fx && curWorld ? fixtureCity(curWorld, fx) : [])].map((m) => [m.key, m]));
     for (const k of [...city.keys()]) if (!want.has(k)) { city.get(k).el.remove(); city.delete(k); }
+    updateEmpty();
     ensureGrid(want.size);
     for (const m of want.values()) {
       if (!city.has(m.key)) addCard(m.key, m.model, m.label, m.kind || null, m.level || null);
