@@ -9,6 +9,7 @@ import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } 
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
 import { createKit } from './render/kit3d.js';
+import { tileText } from './render/tiles.js';
 
 let renderer, scene, camera, controls, hemi, sun, fill;
 let worldGroup, cityGroup, fxGroup, pawn = null, pawnRing = null, pawnKey = '';
@@ -17,7 +18,7 @@ let speed = 1;
 let hopping = false;
 let shakeUntil = 0, shakeDur = 1, shakeAmp = 0;
 let viewRect = null;
-let centerMat = null;
+let centerMat = null, tileFrames = null, landmarkCount = 0, pedestalCount = 0;
 const tweens = [];
 const updaters = new Set();
 const disposables = [];
@@ -26,7 +27,7 @@ export let lowPower = false;
 let tier = 'high', cfg = TIER_CONFIG.high, coarse = false, reduced = false, pageHidden = false;
 let framesRendered = 0, turnMs = 0, fpsBuf = [], governor = null, kit = null;
 let loopFn = null, onVis = null, onPtr = [], offBus = [], perfEl = null, perfTimer = 0, onOnline = null;
-const pickCbs = new Set();
+const pickCbs = new Set(), tileCbs = new Set();
 
 const loader = new GLTFLoader();
 const cache = new Map();   // url -> Promise<Group>
@@ -98,7 +99,7 @@ export async function init(canvas) {
 
   worldGroup = new THREE.Group(); cityGroup = new THREE.Group(); fxGroup = new THREE.Group();
   kit = createKit(); kit.setTier(tier);
-  scene.add(worldGroup, cityGroup, fxGroup, kit.group, pickGroup, labelGroup);
+  scene.add(worldGroup, cityGroup, fxGroup, kit.group, pickGroup, labelGroup, markGroup);
 
   onResize = () => { resize(); invalidate(); };
   addEventListener('resize', onResize);
@@ -115,15 +116,15 @@ export async function init(canvas) {
   };
   offBus.push(bus.on('quality:change', onQ));
   resize();
-  controls.addEventListener('start', () => { interacting = true; wake(); });
-  controls.addEventListener('end', () => { interacting = false; wake(1500); });
-  controls.addEventListener('change', () => wake(600));
+  controls.addEventListener('start', () => { interacting = true; orbitMoved = false; homing = false; wake(); });
+  controls.addEventListener('end', () => { interacting = false; if (orbitMoved) keepUserOrbit(); wake(1500); });
+  controls.addEventListener('change', () => { if (interacting) orbitMoved = true; else if (userDir && !camMoving && !celebrating && !homing) keepUserOrbit(); wake(600); }); // damping inertia after a drag
   let last = performance.now();
   loopFn = (now) => {
     const rawDt = now - last; const dt = Math.min(0.1, rawDt / 1000); last = now;
     // render on demand: full speed while something moves; nothing when idle, under the lobby (paused) or in a hidden tab.
     // (T5: frames under the lobby were wasted and each one is a synchronous GPU wait on software GL — the boot freeze.)
-    if (paused || pageHidden || covered()) return;
+    if (paused || pageHidden || covered() || stalled) return;
     const active = interacting || camMoving || tweens.length > 0 || now < shakeUntil || now < activeUntil;
     if (!active && !dirty) return;
     dirty = false; lastRender = now; framesRendered++;
@@ -131,7 +132,7 @@ export async function init(canvas) {
     for (let i = tweens.length - 1; i >= 0; i--) {
       const tw = tweens[i]; if (!tw) continue; const p = Math.min(1, (now - tw.t0) / tw.dur);
       try { tw.fn(p); } catch (e) { console.error(e); }
-      if (p >= 1) { tweens.splice(i, 1); tw.res(); }
+      if (p >= 1) { tweens.splice(i, 1); clearTimeout(tw.wd); tw.res(); }
     }
     if (active && !reduced) {
       simT += dt;
@@ -141,6 +142,7 @@ export async function init(canvas) {
     }
     if (pawn && pawnRing) { pawnRing.position.x = pawn.position.x; pawnRing.position.z = pawn.position.z; }
     camStep(dt);
+    markStep(now);
     controls.update();
     let off = null;
     if (now < shakeUntil && !reduced) {
@@ -189,13 +191,30 @@ function tween(dur, fn, tag = null) {
   if (AWAITED.has(tag)) turnMs += Math.max(1, dur);
   // T5 §4.3 skip(): a tap during the turn animation finishes the awaited tweens that start right after it, too
   if (AWAITED.has(tag) && performance.now() < skipUntil) { try { fn(1); } catch (e) { console.error(e); } invalidate(); return Promise.resolve(); }
-  wake(dur + 1500); return new Promise((res) => tweens.push({ t0: performance.now(), dur: Math.max(1, dur), fn, res, tag }));
+  wake(dur + 1500);
+  return new Promise((res) => { const tw = { t0: performance.now(), dur: Math.max(1, dur), fn, res, tag, wd: 0 }; tweens.push(tw); armWatch(tw); });
 }
+/* ---------- wave 1 (B1 G10 / A2 G-08): animation watchdog. A tween normally finishes inside the render loop on wall-clock time.
+ * If the loop stalls (no frames while the page is visible and not paused), the tween is finished at its end state by a timer at
+ * dur + WATCH_MARGIN_MS. While the page is hidden / paused under the lobby / covered by the loading overlay the watchdog waits
+ * and re-arms (the loop finishes the tween on its first frame back). It only ends an animation early: outcomes never change. */
+export const WATCH_MARGIN_MS = 1500;
+let stalled = false, watchFired = 0;
+function armWatch(tw, ms = tw.dur + WATCH_MARGIN_MS) { clearTimeout(tw.wd); tw.wd = setTimeout(() => watchTween(tw), ms); }
+function watchTween(tw) {
+  const i = tweens.indexOf(tw); if (i < 0) return;
+  if (pageHidden || paused || covered()) { armWatch(tw, 1000); return; }
+  tweens.splice(i, 1); watchFired++;
+  try { tw.fn(1); } catch (e) { console.error(e); }
+  tw.res(); invalidate();
+}
+/** test hook (outside SCENE_API): simulate a stalled render loop (frames stop while the page stays visible). */
+export function debugStall(on) { stalled = !!on; if (!stalled) { invalidate(); wake(800); } return { stalled, watchFired }; }
 /** T5 §4.3: resolve every running tween at its end state (a tap on the board during dice/hops). */
 export function skip() {
   try {
     skipUntil = performance.now() + 400;
-    for (const tw of tweens.splice(0)) { try { tw.fn(1); } catch (e) { console.error(e); } tw.res(); }
+    for (const tw of tweens.splice(0)) { clearTimeout(tw.wd); try { tw.fn(1); } catch (e) { console.error(e); } tw.res(); }
     invalidate();
   } catch (e) { console.warn(e); }
 }
@@ -207,7 +226,7 @@ export function setMotion(r) {
 }
 export const getMotion = () => reduced;
 /** Finish (resolve) and drop running tweens with a tag without applying their last frame. */
-function cancelTweens(tag) { for (let i = tweens.length - 1; i >= 0; i--) if (tweens[i].tag === tag) { const tw = tweens[i]; tweens.splice(i, 1); tw.res(); } }
+function cancelTweens(tag) { for (let i = tweens.length - 1; i >= 0; i--) if (tweens[i].tag === tag) { const tw = tweens[i]; tweens.splice(i, 1); clearTimeout(tw.wd); tw.res(); } }
 const easeOutBack = (p) => { const c = 1.7; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
 const easeInOut = (p) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
 function easeOutBounce(x) {
@@ -235,7 +254,11 @@ const focus = new THREE.Vector3();
 export function getCameraMode() { return camMode; }
 /** Debug/perf: draw calls, triangles and object counts of the last frame. */
 export function renderStats() { let objs = 0, meshes = 0; scene.traverse((o) => { objs++; if (o.isMesh) meshes++; }); const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles, objs, meshes, city: cityGroup.children.length, world: worldGroup.children.length, fx: fxGroup.children.length, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, px: [renderer.domElement.width, renderer.domElement.height], dpr: renderer.getPixelRatio(), shadows: renderer.shadowMap.enabled }; }
-export function cameraState() { return { mode: camMode, target: controls.target.toArray().map((x) => +x.toFixed(2)), pos: camera.position.toArray().map((x) => +x.toFixed(2)), focus: focus.toArray(), followDist, overviewDist, goal: camGoal.target.toArray() }; }
+export function cameraState() {
+  const off = camera.position.clone().sub(controls.target);
+  return { mode: camMode, target: controls.target.toArray().map((x) => +x.toFixed(2)), pos: camera.position.toArray().map((x) => +x.toFixed(2)), focus: focus.toArray(), followDist, overviewDist, goal: camGoal.target.toArray(),
+    az: +Math.atan2(off.x, off.z).toFixed(3), az0: +Math.atan2(camGoal.dir.x, camGoal.dir.z).toFixed(3), user: !!userDir, zoom: userZoom, azRange: [+controls.minAzimuthAngle.toFixed(3), +controls.maxAzimuthAngle.toFixed(3)] };
+}
 /** 'follow' | 'overview' — smooth transition. */
 export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; applyCamGoal(true); }
 /** Point the follow camera at a world position (pawn, dice landing…). */
@@ -251,15 +274,42 @@ function camStep(dt) {
   const k = reduced ? 1 : 1 - Math.exp(-dt * 5.5); // reduced motion: follow/overview switches snap
   const off = camera.position.clone().sub(controls.target);
   const len = off.length(); const dir = len > 1e-3 ? off.divideScalar(len) : camGoal.dir.clone();
-  // drift the viewing direction back toward the default angle a little (user can still orbit)
-  dir.lerp(camGoal.dir, reduced ? 0.35 : k * 0.35).normalize();
+  // wave 1 (G7): a user's orbit is kept (no drift back) until "מבט ראשי"; without one, drift toward the default angle a
+  // little; "מבט ראשי" itself (homing) eases all the way back
+  const goalDir = userDir || camGoal.dir;
+  dir.lerp(goalDir, homing ? (reduced ? 1 : k) : userDir ? 0 : reduced ? 0.35 : k * 0.35).normalize();
   controls.target.lerp(camGoal.target, k);
-  const nl = len + (camGoal.dist - len) * k;
+  const gd = goalDist();
+  const nl = len + (gd - len) * k;
   camera.position.copy(controls.target).addScaledVector(dir, nl);
   const o = camMode === 'overview' ? overviewOff : followOff;
   const vo = camera.view; if (vo) { vo.offsetX += (o.x - vo.offsetX) * k; vo.offsetY += (o.y - vo.offsetY) * k; camera.updateProjectionMatrix(); }
   // keep animating until we are there (low frame rates must still converge)
-  if (controls.target.distanceTo(camGoal.target) < 0.03 && Math.abs(nl - camGoal.dist) < 0.05 && (!vo || (Math.abs(vo.offsetX - o.x) < 0.5 && Math.abs(vo.offsetY - o.y) < 0.5))) camMoving = false;
+  if (controls.target.distanceTo(camGoal.target) < 0.03 && Math.abs(nl - gd) < 0.05 && (!vo || (Math.abs(vo.offsetX - o.x) < 0.5 && Math.abs(vo.offsetY - o.y) < 0.5))
+    && (!homing || dir.angleTo(goalDir) < 0.003)) { camMoving = false; homing = false; }
+}
+/* ---------- wave 1 (B1 G7): the user's orbit survives resizes, HUD height changes and placePawn; "מבט ראשי" resets it */
+let userDir = null, userZoom = null, orbitMoved = false, homing = false;
+const AZ_RANGE = Math.PI / 3;              // ±60° around the default azimuth: the tile labels always stay readable
+const goalDist = () => { const d = camGoal.dist * (userZoom || 1); return Math.min(controls.maxDistance, Math.max(controls.minDistance, d)); };
+function keepUserOrbit() {
+  const off = camera.position.clone().sub(controls.target); const len = off.length(); if (len < 1e-3) return;
+  userDir = off.divideScalar(len);
+  userZoom = Math.min(2.5, Math.max(0.35, len / Math.max(1e-3, camGoal.dist)));
+}
+/** "מבט ראשי": back to the starting view — follow camera, default angle and distance (smooth; snaps with reduced motion). */
+export function homeView() {
+  try {
+    if (!controls) return;
+    userDir = null; userZoom = null; camMode = 'follow'; celebrating = false; controls.enabled = true;
+    if (reduced) { resize(); invalidate(); return; }
+    homing = true; applyCamGoal(true);
+  } catch (e) { console.warn('[scene] homeView', e); }
+}
+/** test hook (outside SCENE_API): orbit like a user drag by `rad` around the vertical axis, then keep it as the user's orbit. */
+export function debugOrbit(rad = 0.5) {
+  const off = camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), rad);
+  camera.position.copy(controls.target).add(off); controls.update(); keepUserOrbit(); invalidate(); return cameraState();
 }
 let camMoving = false;
 let camDist = 30;
@@ -310,12 +360,14 @@ function resize() {
   controls.target.copy(goalT);
   controls.maxDistance = Math.max(40, dist * 1.7);
   controls.minDistance = Math.min(7, dist * 0.35);
-  if (!celebrating) camera.position.copy(goalT).addScaledVector(dir, goalD);
+  const az0 = Math.atan2(dir.x, dir.z); controls.minAzimuthAngle = az0 - AZ_RANGE; controls.maxAzimuthAngle = az0 + AZ_RANGE;
+  // a resize (window, HUD / bar height, placePawn in follow mode) keeps the user's orbit and zoom instead of snapping back
+  if (!celebrating) camera.position.copy(goalT).addScaledVector(userDir || dir, userDir ? goalDist() : goalD);
   if (scene.fog) { scene.fog.near = dist * 1.25; scene.fog.far = dist * 3.6; }
   controls.update();
 }
 let celebrating = false;
-export function resetCamera() { celebrating = false; controls.enabled = true; resize(); }
+export function resetCamera() { celebrating = false; controls.enabled = true; userDir = null; userZoom = null; homing = false; resize(); }
 
 /* ============================================================ models */
 export const modelUrl = (dir, name) => `assets/${dir}/${name}.glb`;
@@ -369,6 +421,7 @@ export function failedModels() { return [...failed]; }
 /** T1: stop rendering and release WebGL (switch to מצב קל). Re-initialising three in the same page is not supported. */
 export function dispose() {
   try { if (renderer) renderer.setAnimationLoop(null); } catch (e) { /* ignore */ }
+  try { for (const tw of tweens) clearTimeout(tw.wd); } catch (e) { /* ignore */ }
   try { if (onResize) removeEventListener('resize', onResize); onResize = null; } catch (e) { /* ignore */ }
   try { if (onVis) document.removeEventListener('visibilitychange', onVis); onVis = null; } catch (e) { /* ignore */ }
   try { for (const [el, ev, f] of onPtr) el.removeEventListener(ev, f); onPtr = []; } catch (e) { /* ignore */ }
@@ -377,7 +430,7 @@ export function dispose() {
   try { for (const g of ready.values()) disposeTree(g); ready.clear(); cache.clear(); } catch (e) { /* ignore */ }
   try { for (const un of offBus) un(); offBus = []; if (onOnline) removeEventListener('online', onOnline); onOnline = null; } catch (e) { /* ignore */ }
   try { if (renderer) renderer.forceContextLoss(); } catch (e) { /* ignore */ } // the 2D board must not keep a live WebGL context (m-2)
-  pickCbs.clear();
+  pickCbs.clear(); tileCbs.clear();
   try { if (controls) controls.dispose(); } catch (e) { /* ignore */ }
   try { if (renderer) renderer.dispose(); } catch (e) { /* ignore */ }
   ctxCbs = [];
@@ -584,7 +637,7 @@ function tileTexture(tile, frame) {
   g.fillStyle = gr; g.beginPath(); g.roundRect(12, 12, 232, 232, 28); g.fill();
   drawIcon(g, tile.icon, 128, 94, tile.ink || '#fff');
   g.fillStyle = tile.ink || '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl';
-  const name = tile.name || '';
+  const name = tileText(tile).short || ''; // wave 1 (G5): the short render-side name, never cut
   let fs = 38; g.font = `800 ${fs}px Rubik`;
   const words = name.split(' ');
   if (g.measureText(name).width > 214 && words.length > 1) {
@@ -600,6 +653,10 @@ function tileTexture(tile, frame) {
 }
 
 const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך' };
+/** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
+export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'] };
+let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
   const cv = mkCanvas(1024), g = cv.getContext('2d');
@@ -608,18 +665,62 @@ function drawCenter(n) {
   // soft vignette
   const rg = g.createRadialGradient(512, 512, 120, 512, 512, 720); rg.addColorStop(0, dark ? 'rgba(255,255,255,.05)' : 'rgba(255,255,255,.25)'); rg.addColorStop(1, 'rgba(0,0,0,.06)');
   g.fillStyle = rg; g.fillRect(0, 0, 1024, 1024);
-  g.strokeStyle = dark ? 'rgba(160,190,255,.22)' : shade(theme.center, -0.12); g.lineWidth = 5; g.setLineDash([20, 14]);
   const cell = 984 / n;
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) g.strokeRect(20 + c * cell + 8, 20 + r * cell + 8, cell - 16, cell - 16);
-  g.setLineDash([]);
-  g.fillStyle = dark ? 'rgba(200,220,255,.16)' : 'rgba(110,80,40,.2)';
-  g.font = '800 92px Rubik'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl';
-  g.fillText(CAPTION[world.id] || 'התיק שלך', 512, 512);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl';
+  if (emptyShown) {
+    // an intended empty state: building lots (not plinths), the first one where the first asset will rise glows softly
+    const [lot, edge] = LOT[theme.decor] || LOT.trees;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const x = 20 + c * cell + 12, y = 20 + r * cell + 12, s = cell - 24;
+      g.fillStyle = lot; g.globalAlpha = 0.85; g.beginPath(); g.roundRect(x, y, s, s, 18); g.fill(); g.globalAlpha = 1;
+      g.strokeStyle = edge; g.lineWidth = 4; g.setLineDash([3, 15]); g.lineCap = 'round'; g.beginPath(); g.roundRect(x + 6, y + 6, s - 12, s - 12, 14); g.stroke(); g.setLineDash([]);
+    }
+    const x0 = 20 + 12, y0 = 20 + 12, s0 = cell - 24;
+    g.save(); g.shadowColor = 'rgba(242,182,50,.9)'; g.shadowBlur = 28; g.strokeStyle = '#f2b632'; g.lineWidth = 9; g.beginPath(); g.roundRect(x0, y0, s0, s0, 18); g.stroke(); g.restore();
+    g.fillStyle = dark ? '#fff4d6' : '#7a4a12'; g.font = `800 ${Math.round(cell * 0.22)}px Rubik`; g.fillText('+', x0 + s0 / 2, y0 + s0 / 2);
+    // caption on a soft band across the middle
+    g.font = '800 70px Rubik'; const tw = g.measureText(EMPTY_CAPTION).width + 80;
+    g.fillStyle = dark ? 'rgba(10,14,30,.55)' : 'rgba(255,250,240,.82)'; g.beginPath(); g.roundRect(512 - tw / 2, 512 - 56, tw, 112, 56); g.fill();
+    g.fillStyle = dark ? '#f8fafc' : '#5b3a1a'; g.fillText(EMPTY_CAPTION, 512, 516);
+  } else {
+    g.strokeStyle = dark ? 'rgba(160,190,255,.22)' : shade(theme.center, -0.12); g.lineWidth = 5; g.setLineDash([20, 14]);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) g.strokeRect(20 + c * cell + 8, 20 + r * cell + 8, cell - 16, cell - 16);
+    g.setLineDash([]);
+    g.fillStyle = dark ? 'rgba(200,220,255,.16)' : 'rgba(110,80,40,.2)';
+    g.font = '800 92px Rubik';
+    g.fillText(CAPTION[world.id] || 'התיק שלך', 512, 512);
+  }
   const old = centerMat.map;
   centerMat.map = canvasTex(cv); centerMat.needsUpdate = true;
   if (old) old.dispose();
 }
 
+/** three small red-and-white "למכירה" signs on empty lots (shared texture / geometry, freed with the world) */
+function buildEmptyLots() {
+  const cv = mkCanvas(256, 128), g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 128); g.strokeStyle = '#c0262d'; g.lineWidth = 10; g.strokeRect(5, 5, 246, 118);
+  g.fillStyle = '#c0262d'; g.font = '800 58px Rubik'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl'; g.fillText('למכירה', 128, 68);
+  const tex = canvasTex(cv);
+  const board = std('#ffffff', { map: tex, roughness: 0.6 }), wood = std('#8b5e34', { roughness: 0.9 }), plain = std('#f1f1f1', { roughness: 0.7 });
+  const bGeo = new THREE.BoxGeometry(1.1, 0.55, 0.06), pGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.9, 6);
+  disposables.push(board, wood, plain, bGeo, pGeo);
+  emptyGroup = new THREE.Group(); emptyGroup.name = 'city:empty';
+  const s = Math.min(1.45, CS / 10.6);
+  for (const slot of [3, 12, 15]) {   // clear of the caption band and of slot 0 (the glowing "next" lot)
+    const [x, z] = slotXZ(slot, 4); const sg = new THREE.Group();
+    const pole = new THREE.Mesh(pGeo, wood); pole.position.y = 0.45; sg.add(pole);
+    const b = new THREE.Mesh(bGeo, [plain, plain, plain, plain, board, plain]); b.position.y = 0.95; sg.add(b);
+    sg.position.set(x, 0.1, z); sg.scale.setScalar(s); sg.rotation.y = (slot % 2 ? 0.12 : -0.1);
+    sg.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    emptyGroup.add(sg);
+  }
+  emptyGroup.visible = emptyShown; worldGroup.add(emptyGroup);
+}
+/** the city became empty / non-empty: swap the centre between the empty lots and the city grid */
+function updateEmpty() {
+  const e = city.size === 0; if (e === emptyShown) return;
+  emptyShown = e; drawCenter(gridN); if (emptyGroup) emptyGroup.visible = e; invalidate();
+}
 function plankTexture(base) {
   const cv = mkCanvas(512), g = cv.getContext('2d');
   g.fillStyle = base; g.fillRect(0, 0, 512, 512);
@@ -683,7 +784,7 @@ function clearWorld() {
   for (const o of worldGroup.children) if (o.userData.ownTree) disposeTree(o);  // inst() placeholders (m-5)
   worldGroup.clear();
   for (const t of disposables.splice(0)) t.dispose();
-  centerMat = null;
+  centerMat = null; tileFrames = null; emptyGroup = null;
 }
 function own(mesh) { mesh.userData.ownGeo = true; mesh.userData.ownMat = true; return mesh; }
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...o });
@@ -700,7 +801,7 @@ function releaseOtherWorlds(dir) {
   }
 }
 export function buildWorld(w) {
-  clearWorld(); clearCity();
+  clearWorld(); clearCity(); marks.current = marks.dest = null; if (markObj) placeMarks();
   releaseOtherWorlds(assetDir(w));
   world = w; theme = w.mechanic === 'history' ? HISTORY_THEME(w.theme) : w.theme; setBoardSize(w.board.length);
   const T = theme;
@@ -740,7 +841,7 @@ export function buildWorld(w) {
   const frames = own(new THREE.InstancedMesh(tGeo, tMat, boardN)); frames.userData.ownGeo = false; frames.userData.ownMat = false; frames.receiveShadow = true; frames.name = 'tiles:frames';
   const d0 = new THREE.Object3D();
   for (let i = 0; i < boardN; i++) { const p = tilePos(i); d0.position.set(p.x, 0.18, p.z); d0.rotation.set(0, 0, 0); d0.updateMatrix(); frames.setMatrixAt(i, d0.matrix); }
-  worldGroup.add(frames);
+  worldGroup.add(frames); tileFrames = frames;
   for (const [ch, list] of byType) {
     const tile = w.tiles[ch];
     const tex = tileTexture(tile, frame);
@@ -751,14 +852,25 @@ export function buildWorld(w) {
   }
   // neon trims (dusk / night worlds)
   if (T.neon || T.aurora) neonTrim(T);
-  // landmarks on the four board corners
-  const lm = landmarkNames(w);
+  // landmarks on the four board corners — decoration, so they stand on a square stone pedestal (wave 1, B1 G9): never the round
+  // "owned" plinth with the world-coloured rim that the player's own assets get
+  const lm = landmarkNames(w); landmarkCount = 0; pedestalCount = 0;
+  const stone = std(shade(T.boardEdge, 0.55), { roughness: 0.95 }), stoneTop = std(shade(T.boardEdge, 0.72), { roughness: 0.9 });
+  const pedGeo = new THREE.BoxGeometry(1, 1, 1);
+  disposables.push(stone, stoneTop, pedGeo);
   [[-1, 1], [-1, -1], [1, -1], [1, 1]].forEach(([sx, sz], k) => {
     const name = lm[k % lm.length]; if (!name) return;
-    const m = inst(name); m.position.set(sx * (HB - 1.7), 0.1, sz * (HB - 1.7)); m.scale.setScalar(0.95 * Math.min(1.5, K));
-    m.lookAt(sx * 3, 0.1, 40);
-    worldGroup.add(m);
+    const x = sx * (HB - 1.7), z = sz * (HB - 1.7), ps = 2.7 * Math.min(1.5, K);
+    const ped = new THREE.Group(); ped.name = 'landmark:pedestal'; ped.userData.pedestal = true;
+    const b0 = new THREE.Mesh(pedGeo, stone); b0.scale.set(ps, 0.18, ps); b0.position.y = 0.19;
+    const b1 = new THREE.Mesh(pedGeo, stoneTop); b1.scale.set(ps * 0.86, 0.12, ps * 0.86); b1.position.y = 0.34;
+    for (const b of [b0, b1]) { b.castShadow = true; b.receiveShadow = true; ped.add(b); }
+    ped.position.set(x, 0, z); worldGroup.add(ped); pedestalCount++;
+    const m = inst(name); m.position.set(x, 0.4, z); m.scale.setScalar(0.88 * Math.min(1.5, K)); m.userData.landmark = true;
+    m.lookAt(sx * 3, 0.4, 40);
+    worldGroup.add(m); landmarkCount++;
   });
+  buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
   ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory }[T.decor] || decorTrees)(T);
@@ -766,6 +878,7 @@ export function buildWorld(w) {
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
   kit.setWorld(worldStyle(w), T.center);
+  markMeshes().cur.material.color.set(dark ? '#ffffff' : '#2b2540');   // the current-tile outline contrasts with the tile frames
   // history sepia is a full-screen CSS filter (an extra compositing pass): off at the low tier (§3, §8.1)
   try { renderer.domElement.style.filter = (w.mechanic === 'history' && !cfg.sepia) ? 'none' : ''; } catch (e) { /* ignore */ }
   if (w.mechanic === 'history') historyModelsLater(w);
@@ -1129,6 +1242,45 @@ export async function setPawn(id = 'classic', color = '#e2483d') {
   if (ringColor) pawnRing.material.color.set(ringColor);
 }
 export function placePawn(i) { cancelTweens('hop'); hopping = false; if (pawn) { pawn.position.copy(tilePos(i)); pawn.scale.setScalar(1.7); pawn.userData.away = false; } focus.copy(tilePos(i)); if (camMode === 'follow') { resize(); } invalidate(); }
+/* ---------- wave 1 (B1 G6): tile markers — a persistent outline on the current tile; during a move the destination tile gets a
+ * gold outline and a bobbing arrow before the first hop, cleared after landing (game.js drives both through markTile). */
+const markGroup = new THREE.Group(); markGroup.name = 'marks';
+const marks = { current: null, dest: null };
+let markObj = null;
+function markMeshes() {
+  if (markObj) return markObj;
+  const sq = (rIn, rOut) => new THREE.RingGeometry(rIn, rOut, 4, 1, Math.PI / 4).rotateX(-Math.PI / 2); // a square outline, axis-aligned
+  const cur = new THREE.Mesh(sq(1.3, 1.5), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthWrite: false }));
+  const dest = new THREE.Group();
+  const ring = new THREE.Mesh(sq(1.24, 1.5), new THREE.MeshBasicMaterial({ color: '#f2b632', transparent: true, opacity: 0.95, depthWrite: false }));
+  const fillM = new THREE.Mesh(new THREE.PlaneGeometry(2.04, 2.04).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#f2b632', transparent: true, opacity: 0.22, depthWrite: false }));
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.62, 4).rotateX(Math.PI), new THREE.MeshStandardMaterial({ color: '#f2b632', emissive: '#f2b632', emissiveIntensity: 0.55, roughness: 0.4 }));
+  arrow.position.y = 2.1; arrow.name = 'arrow';
+  dest.add(ring, fillM, arrow);
+  cur.renderOrder = dest.renderOrder = 3; cur.visible = dest.visible = false; cur.name = 'mark:current'; dest.name = 'mark:dest';
+  markGroup.add(cur, dest);
+  markObj = { cur, dest, arrow, ring };
+  return markObj;
+}
+function placeMarks() {
+  const m = markMeshes();
+  for (const [k, o] of [['current', m.cur], ['dest', m.dest]]) {
+    const i = marks[k]; o.visible = i != null && i >= 0 && i < boardN;
+    if (o.visible) { const p = tilePos(i); o.position.set(p.x, 0.285, p.z); }
+  }
+  invalidate();
+}
+/** markTile('current' | 'dest', tileIndex | null) — show / move / clear a tile marker (SCENE_OPTIONAL, no-op in null.js). */
+export function markTile(kind, i) {
+  try { if (!(kind in marks)) return; marks[kind] = i == null || i < 0 ? null : Number(i); placeMarks(); if (kind === 'dest' && marks.dest != null) wake(1200); } catch (e) { console.warn('[scene] markTile', e); }
+}
+function markStep(now) {
+  if (!markObj || !markObj.dest.visible) return;
+  const t = now / 1000;
+  if (reduced) { markObj.arrow.position.y = 2.1; markObj.ring.material.opacity = 0.95; return; }
+  markObj.arrow.position.y = 2.1 + Math.sin(t * 5) * 0.22; markObj.arrow.rotation.y = t * 1.6;
+  markObj.ring.material.opacity = 0.7 + Math.sin(t * 6) * 0.25;
+}
 let glowMesh = null;
 function tileGlow(i) {
   if (!glowMesh) { glowMesh = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.05, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#f2b632', transparent: true, depthWrite: false })); glowMesh.visible = false; }
@@ -1191,7 +1343,7 @@ function syncKit() {
     const o = it.obj; const s = o.scale.x; const h = (it.h0 || 1.4) * s;
     let badge = it.badgeUntil > now ? it.badgeCell : null;
     if (!badge && it.level) { const a = activityOf({ ...it.level, trouble: false }); if (a) badge = ACTIVITY_ICON[a]; }
-    items.push({ key, x: o.position.x, y: CITY_Y, z: o.position.z, s, sp, h, level: it.level, highlight: key === hlKey || key === hoverKey, badge,
+    items.push({ key, x: o.position.x, y: CITY_Y, z: o.position.z, s, sp, h, level: it.level, highlight: key === hlKey || key === hoverKey, badge, life: isLifeMarker(key),
       sign: it.level && it.level.kind === 'biz' ? (ARCHETYPE_ICON[it.level.type] || 'shop') : null });
     let px = pickGroup.children[i];
     if (!px) { px = new THREE.Mesh(pickGeo, pickMat); px.layers.set(1); pickGroup.add(px); }
@@ -1199,7 +1351,7 @@ function syncKit() {
     px.position.set(o.position.x, CITY_Y + h * 0.575, o.position.z); px.scale.set(w, h * 1.15, w); px.updateMatrixWorld();
     i++;
   }
-  kit.sync(items); kitDirty = false; invalidate();
+  kit.sync(items); kitDirty = false; updateEmpty(); invalidate();
 }
 function relayout(animate = true) {
   // compact slots in current order so a bigger grid stays tidy
@@ -1218,6 +1370,16 @@ function ensureGrid(count, animate = true) {
 }
 export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); }
 export function hasKey(key) { return city.has(key); }
+/** wave 1 (A2 G-03): the keys the city shows now (SCENE_OPTIONAL) — game.js reconciles them with E.cityModels(S) + L:* */
+export function cityKeys() { return [...city.keys()]; }
+/** life events (not owned assets) get the "life" base instead of the owned plinth + rim; the pension and the index fund are real holdings */
+export const isLifeMarker = (key) => /^L:/.test(String(key)) && key !== 'L:pension' && key !== 'L:index';
+/** test / debug (outside SCENE_API): what the board shows right now */
+export function boardUx() {
+  return { empty: emptyShown && !!(emptyGroup && emptyGroup.visible), city: city.size, current: marks.current, dest: marks.dest, landmarks: landmarkCount, pedestals: pedestalCount,
+    life: [...city.keys()].filter(isLifeMarker), watchFired, stalled, pawnTile: pawnTileNow() };
+}
+function pawnTileNow() { if (!pawn) return null; let best = null, bd = 1e9; for (let i = 0; i < boardN; i++) { const p = tilePos(i); const d = (p.x - pawn.position.x) ** 2 + (p.z - pawn.position.z) ** 2; if (d < bd) { bd = d; best = i; } } return bd < 0.05 ? best : null; }
 /** life models arrive lazily (CR-05): swap the stand-in for the real model in place */
 function swapWhenReady(key, model) {
   const it = city.get(key); if (!it || !it.obj.userData.fallbackOf) return;
@@ -1450,6 +1612,7 @@ export async function celebrate(win) {
   const from = new THREE.Spherical().setFromVector3(camera.position.clone().sub(tgt));
   const to = from.clone();
   if (win) { to.theta += 0.75; to.phi = Math.min(from.phi + 0.18, 1.15); to.radius *= 0.8; } else { to.radius *= 1.1; to.phi = Math.max(from.phi - 0.12, 0.35); }
+  to.theta = Math.min(controls.maxAzimuthAngle, Math.max(controls.minAzimuthAngle, to.theta)); // never ends outside the orbit limits (no jump after it)
   await tween(win ? MOTION.celebrate : MOTION.celebrate * 0.8, (p) => {
     const e = easeInOut(p);
     const s = new THREE.Spherical(from.radius + (to.radius - from.radius) * e, from.phi + (to.phi - from.phi) * e, from.theta + (to.theta - from.theta) * e);
@@ -1712,6 +1875,24 @@ export function pickAt(cx, cy) {
     return best;
   } catch (e) { console.warn('[scene] pickAt', e); return null; }
 }
+/** wave 1 (B1 G5): index of the board tile under a screen point (raycast the instanced tile frames), else null. */
+const tileRay = new THREE.Raycaster();
+export function tileAt(cx, cy) {
+  try {
+    if (!renderer || !tileFrames) return null;
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    camera.updateMatrixWorld(); tileRay.setFromCamera(ndc, camera);
+    const hit = tileRay.intersectObject(tileFrames, false)[0];
+    return hit && hit.instanceId != null ? hit.instanceId : null;
+  } catch (e) { console.warn('[scene] tileAt', e); return null; }
+}
+/** onTilePick(cb) → unsubscribe; cb(tileIndex, {x, y}) on a tap on a board tile that is not a city item (same tap rule as onPick). */
+export function onTilePick(cb) { if (typeof cb !== 'function') return () => {}; tileCbs.add(cb); return () => tileCbs.delete(cb); }
+function emitTile(i, x, y) {
+  for (const f of [...tileCbs]) { try { f(i, { x, y }); } catch (e) { console.error(e); } }
+  try { bus.emit('tile:pick', { index: i, x, y, source: '3d' }); } catch (e) { console.error(e); }
+}
 /** onPick(cb) → unsubscribe; cb(key, {x, y}) on a tap (one pointer, < 8 px, < 350 ms; drags/pinches/orbits never pick). */
 export function onPick(cb) { if (typeof cb !== 'function') return () => {}; pickCbs.add(cb); return () => pickCbs.delete(cb); }
 function emitPick(key, x, y) {
@@ -1728,12 +1909,17 @@ function initPick(canvas) {
     const was = multi; if (!down.size) multi = false;
     if (!d || was || e.button > 0) return;
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) >= 8 || performance.now() - d.t >= 350) return;
-    const key = pickAt(e.clientX, e.clientY); if (key) emitPick(key, e.clientX, e.clientY);
+    const key = pickAt(e.clientX, e.clientY); if (key) { emitPick(key, e.clientX, e.clientY); return; }
+    const t = tileAt(e.clientX, e.clientY); if (t != null) emitTile(t, e.clientX, e.clientY);
   });
   on('pointercancel', (e) => { down.delete(e.pointerId); if (!down.size) multi = false; });
   if (fine) on('pointermove', (e) => {
     if (down.size) return; hx = e.clientX; hy = e.clientY; if (hoverRaf) return;
-    hoverRaf = requestAnimationFrame(() => { hoverRaf = 0; if (paused) return; const k = pickAt(hx, hy); if (k !== hoverKey) { hoverKey = k; canvas.style.cursor = k ? 'pointer' : ''; syncKit(); } });
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0; if (paused) return; const k = pickAt(hx, hy);
+      if (k !== hoverKey) { hoverKey = k; syncKit(); }
+      canvas.style.cursor = k || (tileCbs.size && tileAt(hx, hy) != null) ? 'pointer' : '';
+    });
   });
 }
 

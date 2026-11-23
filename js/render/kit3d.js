@@ -7,9 +7,9 @@ import * as THREE from 'three';
 import { kitParts } from './vocab.js';
 
 const CAP = 64;            // city items (8×8 grid max)
-const CELLS = ['cup', 'washer', 'box', 'pizza', 'phone', 'shop', 'people', 'rival', 'wrench', 'emptybox', 'garland', 'alert', 'up', 'down', 'star', 'blank'];
+const CELLS = ['cup', 'washer', 'box', 'pizza', 'phone', 'shop', 'people', 'rival', 'wrench', 'emptybox', 'garland', 'alert', 'up', 'down', 'star', 'blank', 'heart'];
 const ATLAS_COLS = 8, CELL = 64;
-const RING = { alert: '#b8322a', down: '#b8322a', up: '#13744a', star: '#8a5a00' };
+const RING = { alert: '#b8322a', down: '#b8322a', up: '#13744a', star: '#8a5a00', heart: '#be185d' };
 
 /* ---------- icon atlas (icons only, no text: R-5) */
 function drawCell(g, name, x, y) {
@@ -34,6 +34,7 @@ function drawCell(g, name, x, y) {
     case 'garland': P(); g.moveTo(cx - 17, cy - 8); g.quadraticCurveTo(cx, cy + 8, cx + 17, cy - 8); g.stroke(); [-10, 0, 10].forEach((dx, i) => { g.fillStyle = ['#be185d', '#c98a12', '#2459b8'][i]; P(); g.arc(cx + dx, cy + 4 - Math.abs(dx) * 0.4, 4, 0, 7); g.fill(); }); break;
     case 'alert': P(); g.moveTo(cx, cy - 17); g.lineTo(cx + 17, cy + 13); g.lineTo(cx - 17, cy + 13); g.closePath(); g.fill(); g.fillStyle = '#fffaf0'; g.fillRect(cx - 2, cy - 7, 4, 11); g.fillRect(cx - 2, cy + 7, 4, 3); break;
     case 'up': case 'down': g.save(); g.translate(cx, cy); if (name === 'down') g.rotate(Math.PI); P(); g.moveTo(0, -16); g.lineTo(13, 0); g.lineTo(5, 0); g.lineTo(5, 15); g.lineTo(-5, 15); g.lineTo(-5, 0); g.lineTo(-13, 0); g.closePath(); g.fill(); g.restore(); break;
+    case 'heart': g.fillStyle = '#be185d'; P(); g.moveTo(cx, cy + 15); g.bezierCurveTo(cx - 22, cy, cx - 14, cy - 18, cx, cy - 7); g.bezierCurveTo(cx + 14, cy - 18, cx + 22, cy, cx, cy + 15); g.fill(); break;
     case 'star': P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 8 : 18; g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); g.fill(); break;
     default: break;
   }
@@ -85,6 +86,9 @@ export function createKit() {
     cone: mk('cone', new THREE.ConeGeometry(0.5, 1, 8), std({ color: '#ffffff', roughness: 0.5 }), { color: true }),
     glow: mk('glow', new THREE.TorusGeometry(1, 0.06, 6, 40).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#000000', emissive: '#f2b632', emissiveIntensity: 1.8 })),
     people: mk('people', new THREE.CapsuleGeometry(0.5, 0.9, 2, 6), std({ color: '#ffffff', roughness: 0.8 }), { color: true }),
+    // wave 1 (B1 G9): life events (wedding, family home, studies, side gig, rest) are not owned assets — a low hexagonal lawn with
+    // a heart badge instead of the round plinth + world rim (different shape, no rim, a badge: not only a colour)
+    lifeBase: mk('lifeBase', new THREE.CylinderGeometry(1, 1, 1, 6), std({ color: '#f9dbe8', roughness: 0.95 }), { color: true }),
     dome: mk('dome', new THREE.SphereGeometry(1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), std({ color: '#cfe8ff', roughness: 0.15, metalness: 0.2 })),
   };
   const d = new THREE.Object3D(); const col = new THREE.Color();
@@ -127,6 +131,12 @@ export function createKit() {
       for (const it of items) {
         live.add(it.key);
         const r = Math.max(0.3, Math.min(0.47 * it.sp, 1.05 * it.s)); const top = it.y; const y0 = top - 0.08;
+        if (it.life) {
+          put(M.lifeBase, it.x, y0 + 0.04, it.z, r * 1.06, 0.08, r * 1.06, Math.PI / 6, it.highlight ? '#ffffff' : null);
+          sprite(it.key, 'sign', null);
+          sprite(it.key, 'badge', it.badge || 'heart', it.x, top + it.h + 0.4 * it.s, it.z, 0.5 * Math.max(0.6, it.s));
+          continue;
+        }
         put(M.plinth, it.x, y0 + 0.04, it.z, r, 0.08, r, 0, it.highlight ? '#ffffff' : null);
         put(M.rim, it.x, top, it.z, r, 1, r, 0, it.highlight ? '#ffffff' : null);
         if (it.highlight && M.rim.instanceColor) { col.set(style ? style.rim : '#f2b632').multiplyScalar(1.9); M.rim.setColorAt(M.rim.count - 1, col); }
