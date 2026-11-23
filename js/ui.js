@@ -28,8 +28,10 @@ export function setGender(g) { uiG = g === 'f' ? 'f' : 'm'; }
 /** The engine's genderize for a UI string (data is written in the masculine form). */
 /* wave 2 (A3 #5): the engine's table (pinned) turns "אתה" into "את" but leaves a few verbs after it masculine ("לפני שאת מחליט").
    A UI-side pass completes those phrases for a female player — display only; the engine text and its table are unchanged. */
-const GZ_UI = [[/(^|[^\u05D0-\u05EA])(ש?את) מחליט(?![\u05D0-\u05EA])/g, '$1$2 מחליטה'], [/כסף את שם(?![\u05D0-\u05EA])/g, 'כסף את שמה'],
-  [/(^|[^\u05D0-\u05EA])(ש?את) מתאהב(?![\u05D0-\u05EA])/g, '$1$2 מתאהבת']];
+const GZ_UI_W = { עובד: 'עובדת', משלם: 'משלמת', יודע: 'יודעת', גר: 'גרה', צריך: 'צריכה', עייף: 'עייפה', עומד: 'עומדת', מתאהב: 'מתאהבת', מרוויח: 'מרוויחה',
+  מפריש: 'מפרישה', מפסיד: 'מפסידה', מחליט: 'מחליטה', מושך: 'מושכת', מגודר: 'מגודרת', חשוף: 'חשופה', בוחר: 'בוחרת' };   // the words that follow "אתה" in the data
+const GZ_UI = [[new RegExp(`(^|[^\u05D0-\u05EA])((?:ש|ו|כש)?את (?:לא |כבר )?)(${Object.keys(GZ_UI_W).join('|')})(?![\u05D0-\u05EA])`, 'g'), (x, a, b, w) => a + b + GZ_UI_W[w]],
+  [/כסף את שם(?![\u05D0-\u05EA])/g, 'כסף את שמה']];
 export const gzFix = (t, g = uiG) => { if (g !== 'f' || !t) return t; let x = String(t); for (const [re, f] of GZ_UI) x = x.replace(re, f); return x; };
 export const gz = (t) => gzFix(genderize(t, uiG));
 /** Pick the masculine / feminine form of a phrase the GZ table does not cover. */
