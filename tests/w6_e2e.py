@@ -235,6 +235,8 @@ async def run_play(b):
     await pg.click('#hGoalBtn'); await pg.wait_for_selector('#goalPanel:not([hidden])', timeout=5000)
     gp = await pg.evaluate("() => document.querySelector('#goalPanel').textContent")
     check(sc, 'goal panel: net worth ₪80 מיליון, the gap and the ladder', '80 מיליון' in gp and 'שווי נקי' in gp and 'הדרך ליעד' in gp, gp[:300])
+    exposed = await pg.evaluate("() => import('./js/engine.js').then((E) => !!(E.getWorld('w6').mech || []).some((m) => typeof m.starGates === 'function'))")
+    check(sc, 'goal panel: the ★★★ safety-inspection gate is listed when the engine has it', (not exposed) or 'ביקורת בטיחות' in gp, (exposed, gp[-300:]))
     await pg.click('#hGoalBtn'); await pg.wait_for_timeout(300)
     a0 = await pg.evaluate("import('./js/game.js').then((g) => g.cityAudit())")
     lv_ok = all(a0['levels'].get(k, {}).get('kind') == 'plant' and a0['levels'][k]['n'] == v['pips'] and a0['levels'][k]['light'] == v['light'] and bool(a0['levels'][k].get('pending')) == v['pending'] for k, v in a0['plant'].items())
