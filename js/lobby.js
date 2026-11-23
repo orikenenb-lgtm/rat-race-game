@@ -1229,6 +1229,7 @@ async function renderGroup(id) {
     const g = await net.group(id); cache.group[id] = g; noteNew(g);
     if (t !== token) return;
     html(groupHtml(g));
+    focusView();   // wave 2 (A3 K-2): the fetched page replaced the loading view (and the node focus was on) — focus lands on its heading
     loadFeed(id);
     startGroupRefresh(id);
   } catch (e) { if (t !== token) return; delete cache.group[id]; toast(e.message); renderHome(); }
