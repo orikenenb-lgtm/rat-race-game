@@ -1034,5 +1034,5 @@ body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boa
    transparent border, which overflow:hidden clips; the 1px frame is an outline on the same rounded box) */
 .say .st{border:7px solid transparent;border-inline-width:0;padding:0 11px;outline:1px solid light-dark(#f2d48a,#5b4720);outline-offset:-1px}
 /* 44 × 44 touch targets (A2 G-12) for the phone HUD: the tools, the home button and the goal toggle (row 2 grows by a few px) */
-@media (max-width:600px){ .htools .ibtn{width:44px;min-width:44px} .hgoal{min-height:44px} }
+@media (max-width:600px){ .htools .ibtn{width:44px;min-width:44px} .htools{gap:4px} .hstats .stat{padding-inline:5px} .hgoal{min-height:44px} }   /* the 4 px the wider tools take come out of the stats' padding, not their numbers */
 @media (max-width:380px){ .hbtn{width:44px} .htools{gap:3px} .htools .ibtn{width:44px;height:44px} .hstats .stat{padding-inline:4px} }

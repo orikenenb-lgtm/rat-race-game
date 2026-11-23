@@ -501,7 +501,7 @@ let debtT = 0;
 export function debtChip(d) {
   let el = $('#debtChip');
   if (!d) { if (el) { el.classList.remove('on'); el.textContent = ''; } clearTimeout(debtT); return; }
-  if (!el) { el = document.createElement('p'); el.id = 'debtChip'; el.className = 'debtc'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); document.body.appendChild(el); }
+  if (!el) { el = document.createElement('p'); el.id = 'debtChip'; el.className = 'debtc'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); ($('#hud') || document.body).appendChild(el); }   // inside the HUD landmark (fixed: placed below)
   const host = $('.hstats'); const r = host && host.getBoundingClientRect();
   if (r && r.width) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.left = Math.round(r.left + r.width / 2) + 'px'; }
   el.innerHTML = `<span aria-hidden="true">🏦</span> ${escI(d.text)}`;
