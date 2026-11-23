@@ -53,7 +53,14 @@ async def idle(pg, t=120):
     t0 = time.time()
     while time.time() - t0 < t:
         s = await pg.evaluate("() => ({ roll: !document.querySelector('#roll').disabled, card: !document.querySelector('#evm').hidden, gm: !document.querySelector('#gm').hidden, coach: !document.querySelector('#coach').hidden, story: !!document.querySelector('#stGo') && !document.querySelector('#story').hidden })")
-        if s['gm']: await pg.click('#gm .acts button.primary'); await pg.wait_for_timeout(300); continue
+        if s['gm']:   # a mentor modal; a picker ("לבחור" disabled) needs a choice first
+            if await pg.evaluate("() => !!document.querySelector('#gm .acts button.primary[disabled]')"):
+                await pg.evaluate("() => { const c = document.querySelector('#gmCard'); const r = c.querySelector('input[type=radio]:not([disabled])'); if (r) { r.click(); return; } const b = [...c.querySelectorAll('button:not([disabled])')].find((x) => !x.closest('.acts')); if (b) b.click(); }")
+                await pg.wait_for_timeout(300)
+            p = pg.locator('#gm .acts button.primary:not([disabled])')
+            if await p.count(): await p.first.click()
+            else: await pg.locator('#gm .acts button:not([disabled])').last.click()
+            await pg.wait_for_timeout(300); continue
         if s['story']: await pg.click('#stGo'); await pg.wait_for_timeout(300); continue
         if s['coach']:
             b = pg.locator('#coach [data-c="next"]')
