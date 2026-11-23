@@ -23,7 +23,8 @@ import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coach
 import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data behind a tapped city item (reads metrics only)
 import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
 import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
-import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/tiles.js';   // 3D upgrade wave 1: tile names / descriptions (render-side)
+import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/tiles.js';
+import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -710,7 +711,7 @@ async function startInner(cfg, my) {
     syncLevels(false);
     OV.hideLoading();
     ui.flushFeedback?.({ toasts: false });   // T5 §4.2: the last game's queued cards / verdicts / reveal lines are not this game's
-    ui.resetHud();
+    ui.resetHud(); debtPrev = null;
     frame(); scene.resetCamera();
     try { scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK); } catch (e) { console.warn(e); }   // T5 CR-B5
     const firstInWorld = !resumed && !S.over && !onboard.worldCoached(W.id);
@@ -779,6 +780,7 @@ function fundWarn(m) {
 /* ============================================================ render */
 function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed, t6: t6Hud() }; }
 let opsSeen = false;
+let debtPrev = null;   // wave 2 (G-07): the last render's {total liabilities, loan + card interest} (engine values; never saved)
 function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
@@ -787,6 +789,7 @@ function render(animate = true) {
   onboard.revealTick?.(S, { m, cfg: CFG });   // T4 §4.3: month thresholds (fund 4, happy / tools 6, credit 10, age 12) and ⚡ after the free rolls
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
+  { const ds = debtSnap(m); const nd = newDebt(debtPrev, ds); debtPrev = ds; if (nd && typeof ui.debtChip === 'function') ui.debtChip(nd); }   // wave 2 (G-07)
   if (typeof ui.worldTag === 'function') ui.worldTag(!!(CFG && CFG.learn));       // T4 S-M7
   const goalOn = !!(m.nextGoal && !m.nextGoal.done);
   if (typeof ui.renderNext === 'function') ui.renderNext(m.nextGoal || null, { show: onboard.isRevealed('next') });   // T4 §4.3 `next`

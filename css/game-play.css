@@ -964,3 +964,75 @@ body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boa
 #board2d .b2d-card[data-life]{border:2px dashed #be185d;border-radius:50%;background:#fdf0f6}
 #board2d .b2d-card[data-life]::after{content:'♥';position:absolute;top:-6px;inset-inline-start:-6px;font:800 max(12px,calc(var(--cell) * .8 / var(--n)))/1 var(--font,Rubik,sans-serif);
   color:#be185d;background:#fffaf0;border-radius:999px;padding:1px 3px}
+
+/* ============================================================ 3D upgrade wave 2 (team ד): goal panel, new-debt chip, safe areas, targets, contrast */
+/* the goal card: an inner role=meter + a full-card toggle (#hGoalBtn) that opens "יעד העולם" (A2 G-04) */
+.hgoal{position:relative}
+.hgoal>.gm{display:inherit;flex-direction:inherit;align-items:inherit;justify-content:inherit;gap:inherit;flex:1 1 auto;min-width:0}
+.hgoal>.gx{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;padding:0;border:0;border-radius:inherit;background:none;box-shadow:none;cursor:pointer;color:inherit}
+.hgoal>.gx:hover{background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.hgoal>.gx:focus-visible{outline:3px solid var(--focus,#2f6fdb);outline-offset:2px}
+.hgoal>.gx .gchev{position:absolute;top:4px;inset-inline-end:6px;width:16px;height:16px;border-radius:50%;background:var(--paper3,#f3ead6);box-shadow:var(--shadow-s)}
+.hgoal>.gx .gchev::before{content:"";position:absolute;inset:5px 4px 4px;border:solid var(--mut);border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px);width:5px;height:5px;margin:auto}
+.hgoal>.gx[aria-expanded=true] .gchev::before{transform:rotate(-135deg) translate(-1px,-1px)}
+.hgoal .gl{padding-inline-end:18px}
+@media (max-width:600px){ .hgoal .gl{padding-inline-end:0} .hgoal>.gx .gchev{top:auto;bottom:-6px;inset-inline-end:50%;transform:translateX(50%);width:14px;height:14px} .hgoal>.gx .gchev::before{inset:4px 3px 3px;width:4px;height:4px} }
+.gpanel{position:fixed;z-index:8;inset-inline:calc(8px + var(--safe-r,0px)) calc(8px + var(--safe-l,0px));top:120px;max-height:70dvh;overflow:auto;overscroll-behavior:contain;
+  background:var(--paper);color:var(--ink);border-radius:var(--radius,18px);box-shadow:var(--shadow);padding:10px 16px 14px;border:1px solid var(--line)}
+.gpanel[hidden]{display:none}
+.gp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:-10px;margin:-10px -16px 4px;padding:6px 10px 6px 16px;background:var(--paper);z-index:1}
+.gp-head h2{font:22px/1.1 var(--title);margin:0}
+.gp-head h2:focus{outline:none}.gp-head h2:focus-visible{outline:3px solid var(--focus,#2f6fdb);outline-offset:2px}
+.gp-x{flex:none}
+.gpanel h3{font-size:14px;font-weight:700;margin:12px 0 4px;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:3px}
+.gp-rule{margin:0 0 8px;font-size:14px;line-height:1.45}
+.gp-part{margin:6px 0}
+.gp-pl{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700}
+.gpanel .gbar{position:relative;height:9px;border-radius:6px;background:light-dark(#efe2c2,#463a26);overflow:hidden;margin-top:3px}
+.gpanel .gbar i{position:absolute;inset-block:0;inset-inline-start:0;display:block;background:linear-gradient(90deg,var(--gold),#3ccf8a);border-radius:6px}
+.gp-gap{margin:8px 0 0;padding:7px 10px;border-radius:12px;background:light-dark(#fff3d2,#33291a);font-weight:800;font-size:14px}
+.gp-gap.met{background:light-dark(#e3f6ec,#173527)}
+.gp-row{display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:14px}.gp-row>span:first-child{flex:1}
+.gp-note{margin:6px 0 0;font-size:13px;color:var(--mut)}
+.gp-stars,.gp-gates{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.gp-stars>li{display:grid;grid-template-columns:3.4em 1fr auto;align-items:start;gap:4px 8px;font-size:14px}
+.gp-stars .gp-s{color:var(--gold-text);font-weight:800;letter-spacing:-1px;white-space:nowrap}
+.gp-stars .gp-t small{display:block;color:var(--mut)}
+.gp-gates{grid-column:2/-1;margin:2px 0 0}
+.gp-gates>li{display:grid;grid-template-columns:1fr auto;gap:8px;font-size:13px}
+.gp-gates small{display:inline;color:var(--mut)}
+.gp-ok{font-weight:900;font-size:16px;line-height:1.2}.gp-ok.pos{color:var(--green)}.gp-ok.neg{color:var(--red)}
+.gp-tot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:4px 0 0}
+.gp-tot>div{background:var(--paper2,light-dark(#f6eedc,#2a2433));border-radius:10px;padding:5px 8px;min-width:0}
+.gp-tot dt{font-size:12px;color:var(--mut)}.gp-tot dd{margin:0;font-weight:800;font-size:15px;overflow-wrap:anywhere}.gp-tot dd.neg{color:var(--red)}
+@media (max-width:380px){ .gpanel{padding:10px 12px 12px} .gp-head{margin-inline:-12px} .gp-tot{grid-template-columns:1fr 1fr} .gp-tot>div:last-child{grid-column:1/-1} }
+/* new debt (A2 G-07): a short chip under the money stats; never takes taps */
+.debtc{position:fixed;z-index:8;top:70px;left:50%;transform:translate(-50%,-4px);margin:0;padding:5px 12px;border-radius:999px;pointer-events:none;opacity:0;
+  background:light-dark(#fde2e1,#4a2323);color:light-dark(#8a1c14,#ffb4ac);border:1.5px solid var(--red);font-weight:800;font-size:14px;white-space:nowrap;box-shadow:var(--shadow-s);
+  max-width:calc(100vw - 16px - var(--safe-l,0px) - var(--safe-r,0px));overflow:hidden;text-overflow:ellipsis;transition:opacity .2s,transform .2s}
+.debtc.on{opacity:1;transform:translate(-50%,0)}
+.debtc .num{color:inherit}
+@media (prefers-reduced-motion:reduce){ :root:not([data-motion=full]) .debtc{transition:none;transform:translate(-50%,0)} }
+:root[data-motion=reduce] .debtc{transition:none;transform:translate(-50%,0)}
+/* safe areas left / right (A2 G-10): landscape notch. Margins shrink the fixed boxes that already set both insets. */
+:root{--safe-l:env(safe-area-inset-left,0px);--safe-r:env(safe-area-inset-right,0px)}
+.hud,#bar{margin-left:var(--safe-l);margin-right:var(--safe-r)}
+@media (min-width:821px){ #sheet{margin-right:var(--safe-r)} }
+@media (max-width:820px){ #sheet{padding-left:calc(18px + var(--safe-l));padding-right:calc(18px + var(--safe-r))} }
+.modal{padding-left:calc(16px + var(--safe-l));padding-right:calc(16px + var(--safe-r))}
+@media (max-width:600px){
+  .modal{padding-left:var(--safe-l);padding-right:var(--safe-r)}
+  .modal.top{padding-left:calc(12px + var(--safe-l));padding-right:calc(12px + var(--safe-r))}
+}
+#toast{max-width:min(560px,calc(100vw - 24px - var(--safe-l) - var(--safe-r)))}
+/* contrast: a tag inside a gold (primary) button reads on the gold fill in both themes (A3: "המנטור ממליץ לבדוק" in dark mode) */
+.primary .tagc,.primary .tagc.dflt{color:var(--gold-ink)}
+.primary .tagc.rec,.choice.primary .tagc.rec,.ddins .insp.primary .tagc.rec{color:#0a4a2c}
+#evm{padding-left:calc(16px + var(--safe-l));padding-right:calc(16px + var(--safe-r))}
+@media (max-width:600px){ #evm{padding-left:var(--safe-l);padding-right:var(--safe-r)} }
+/* A3 #4: the card's mentor bubble clamps to 2 lines — its padding no longer shows a sliver of line 3 (the vertical padding is a
+   transparent border, which overflow:hidden clips; the 1px frame is an outline on the same rounded box) */
+.say .st{border:7px solid transparent;border-inline-width:0;padding:0 11px;outline:1px solid light-dark(#f2d48a,#5b4720);outline-offset:-1px}
+/* 44 × 44 touch targets (A2 G-12) for the phone HUD: the tools, the home button and the goal toggle (row 2 grows by a few px) */
+@media (max-width:600px){ .htools .ibtn{width:44px;min-width:44px} .hgoal{min-height:44px} }
+@media (max-width:380px){ .hbtn{width:44px} .htools{gap:3px} .htools .ibtn{width:44px;height:44px} .hstats .stat{padding-inline:4px} }

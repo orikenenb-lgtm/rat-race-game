@@ -1,7 +1,8 @@
 // מירוץ העכברים 2.0 — DOM layer: HUD, statement sheet, event cards (incl. the v1.1 trade window), mentor, dice,
 // toasts, achievement toast, coach marks, flying coins. Generic helpers (toast/modal/confirmBox/achievementToast)
 // are also used by the lobby.
-import { fmt, fmtM, sgn, fmtP, genderize } from './engine.js';
+import { fmt, fmtM, sgn, fmtP, genderize, starThresholds } from './engine.js';
+import { goalPanelModel } from './hudgoal.js';   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
@@ -25,7 +26,12 @@ const HEB = /[\u0590-\u05FF]/;
 let uiG = 'm';
 export function setGender(g) { uiG = g === 'f' ? 'f' : 'm'; }
 /** The engine's genderize for a UI string (data is written in the masculine form). */
-export const gz = (t) => genderize(t, uiG);
+/* wave 2 (A3 #5): the engine's table (pinned) turns "אתה" into "את" but leaves a few verbs after it masculine ("לפני שאת מחליט").
+   A UI-side pass completes those phrases for a female player — display only; the engine text and its table are unchanged. */
+const GZ_UI = [[/(^|[^\u05D0-\u05EA])(ש?את) מחליט(?![\u05D0-\u05EA])/g, '$1$2 מחליטה'], [/כסף את שם(?![\u05D0-\u05EA])/g, 'כסף את שמה'],
+  [/(^|[^\u05D0-\u05EA])(ש?את) מתאהב(?![\u05D0-\u05EA])/g, '$1$2 מתאהבת']];
+export const gzFix = (t, g = uiG) => { if (g !== 'f' || !t) return t; let x = String(t); for (const [re, f] of GZ_UI) x = x.replace(re, f); return x; };
+export const gz = (t) => gzFix(genderize(t, uiG));
 /** Pick the masculine / feminine form of a phrase the GZ table does not cover. */
 export const gw = (m, f) => (uiG === 'f' ? f : m);
 const num = (s, c = '') => (HEB.test(String(s)) ? `<span class="num rtl ${c}">${iso(s)}</span>` : `<span class="num ${c}">${s}</span>`);
@@ -306,7 +312,7 @@ export function setCash(v, animate = true) {
     cashRaf = requestAnimationFrame(step);
   } else el.textContent = money(v);
 }
-export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; }
+export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; goalPanel(false); debtChip(null); }
 export function setMonth(month, max) {
   const el = $('#hMonth'); if (!el) return;
   el.innerHTML = max ? `${month}<small>/${max}</small>` : String(month);
@@ -354,10 +360,15 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   const sig = m.goalType + parts.length;
   if (g.dataset.sig !== sig) {
     g.dataset.sig = sig;
-    g.innerHTML = `<div class="gl"><span>${label}</span><b class="num"></b></div>` +
+    // wave 2 (A2 G-04): the meter is an inner role=meter (a meter's children are presentational) + a full-card toggle that opens "יעד העולם"
+    for (const a of ['role', 'aria-label', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-valuetext']) g.removeAttribute(a);
+    g.innerHTML = `<div class="gm" role="meter" aria-valuemin="0" aria-valuemax="100"><div class="gl"><span>${label}</span><b class="num"></b></div>` +
       parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${p.key === 'impact' ? 'השפעה' : 'שווי'}</em>` : ''}</div>`).join('') +
-      '<div class="gsub num"></div>';
+      '<div class="gsub"></div></div>' +
+      `<button type="button" class="gx" id="hGoalBtn" aria-controls="goalPanel" aria-expanded="${gpOpen}"><span class="gchev" aria-hidden="true"></span></button>`;
+    g.querySelector('.gx').onclick = (e) => { sfx('click'); goalPanel(!gpOpen, { focus: e.detail === 0 }); };
   }
+  const gm = g.querySelector('.gm');
   g.querySelector('.gl b').textContent = pc + '%';
   if (m.goalType !== 'benchmark') milestoneCheck(pc);
   const bars = g.querySelectorAll('.gbar');
@@ -368,12 +379,13 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     b.querySelector('s').style.width = pend + '%';
   });
   const gh = m.goalHold && m.goalType !== 'benchmark' && m.goalHold.streak > 0 && m.goalHold.streak < m.goalHold.need ? ` · ⏳ מחזיק ${m.goalHold.streak}/${m.goalHold.need}` : '';
-  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${N(p.value)}/${N(p.target)}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : `${money(p.value)} / ${money(p.target)}`).join(' · ') + gh;
-  g.setAttribute('aria-label', label);
+  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
+  gm.setAttribute('aria-label', label);
   // T7 CR-01: a role=meter needs its value
-  g.setAttribute('aria-valuemin', '0'); g.setAttribute('aria-valuemax', '100'); g.setAttribute('aria-valuenow', String(pc));
-  g.setAttribute('aria-valuetext', `${pc}%${parts.length > 1 ? ' (הפס החלש מבין השניים)' : ''}`);
+  gm.setAttribute('aria-valuenow', String(pc));
+  gm.setAttribute('aria-valuetext', `${pc}%${parts.length > 1 ? ' (הפס החלש מבין השניים)' : ''}`);
   g.classList.toggle('done', pc >= 100);
+  goalPanelUpdate(m, ctx);
   // the mentor's level next to its name (T2 §15.1 "show metrics().mentor.label")
   const mb = $('#mentor .mt>b');
   if (mb && m.mentor) { const t = `אבא עשיר · ${m.mentor.label}`; if (mb.dataset.t !== t) { mb.dataset.t = t; mb.innerHTML = `אבא עשיר <small class="mlv">· ${esc(m.mentor.label)}</small>`; } }
@@ -382,6 +394,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   if (rev) {
     const set = (k, el) => { if (!el) return; el.hidden = !rev(k); revealPulse(k, el); };
     set('cf', $('#hCf')?.closest('.stat')); set('goal', g); set('sheet', $('#sheetBtn'));
+    if (g.hidden && gpOpen) goalPanel(false);
     document.body.classList.toggle('t4-nosheet', !rev('sheet'));   // desktop: the side sheet waits for its reveal too (freeRect sees it as absent)
     set('tools', $('#turboBtn')); if ($('#camBtn')?.dataset.kind === '3d') set('tools', $('#camBtn'));
   }
@@ -405,6 +418,93 @@ function shownPct(m) {
   const parts = m.goalParts || [];
   const p = parts.length ? Math.min(...parts.map((x) => x.progress)) : (m.goalProgress || 0);
   return Math.max(0, Math.min(100, Math.floor(p * 100)));
+}
+
+/* ============================================================ wave 2 (A2 G-04, brief §14): "יעד העולם" — the world's real win condition
+   Primary info stays in the HUD (meter, %); the panel holds the secondary part: what is missing, the 2-payday hold, ★★ / ★★★ months
+   and gates, total assets / liabilities. Model: hudgoal.js (engine outputs only). Non-modal disclosure: Esc / ✕ / a tap outside closes,
+   focus returns to the toggle. Nothing here is saved. */
+let gpOpen = false, gpData = null;
+const gpTick = (ok) => (ok == null ? '' : `<span class="gp-ok ${ok ? 'pos' : 'neg'}" aria-hidden="true">${ok ? '✓' : '✗'}</span><span class="sr">${ok ? ' — עומד' : ' — לא עומד'}</span>`);
+function goalPanelEl() {
+  let el = $('#goalPanel'); if (el) return el;
+  el = document.createElement('section'); el.id = 'goalPanel'; el.className = 'gpanel'; el.hidden = true;
+  el.setAttribute('role', 'region'); el.setAttribute('aria-labelledby', 'gpH');
+  el.innerHTML = '<div class="gp-head"><h2 id="gpH" tabindex="-1">יעד העולם</h2><button type="button" class="ibtn gp-x" aria-label="לסגור את יעד העולם" title="סגירה">✕</button></div><div class="gp-body"></div>';
+  el.querySelector('.gp-x').onclick = () => { sfx('click'); goalPanel(false, { focus: true }); };
+  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); goalPanel(false, { focus: true }); } });
+  document.addEventListener('pointerdown', (e) => { if (gpOpen && !e.target.closest('#goalPanel, #hGoal')) goalPanel(false); }, { passive: true });
+  document.addEventListener('keydown', (e) => { if (gpOpen && e.key === 'Escape' && e.target.closest && e.target.closest('#hGoal')) goalPanel(false, { focus: true }); });
+  addEventListener('resize', () => { if (gpOpen) placeGoalPanel(); });
+  document.body.appendChild(el);
+  return el;
+}
+function placeGoalPanel() {
+  const el = $('#goalPanel'), g = $('#hGoal'), hud = $('#hud'); if (!el || !g || !hud) return;
+  const hb = hud.getBoundingClientRect(), gb = g.getBoundingClientRect();
+  const top = Math.round(Math.max(hb.bottom, gb.bottom) + 6);
+  el.style.top = top + 'px';
+  if (innerWidth > 600) {   // under the goal card, kept inside the viewport (RTL: aligned to the card's right edge)
+    const w = Math.min(420, innerWidth - 24);
+    const right = Math.max(12, Math.min(innerWidth - gb.right, innerWidth - w - 12));
+    el.style.right = right + 'px'; el.style.left = 'auto'; el.style.width = w + 'px';
+  } else { el.style.right = ''; el.style.left = ''; el.style.width = ''; }
+  el.style.maxHeight = `calc(100dvh - ${top}px - 12px - var(--safe-b, 0px))`;
+}
+function goalPanelHtml(M) {
+  const parts = M.parts.map((p) => `<div class="gp-part"><div class="gp-pl"><span>${esc(p.label)}</span><b>${escI(p.valueText)} מתוך ${escI(p.targetText)}</b></div><div class="gbar" aria-hidden="true"><i style="width:${Math.max(2, Math.round(p.progress * 100))}%"></i></div></div>`).join('');
+  const gaps = M.gaps.length ? M.gaps.map((t) => `<p class="gp-gap"><span aria-hidden="true">🎯</span> ${escI(t)}</p>`).join('') : `<p class="gp-gap met">${gpTick(true)} ${escI(M.summary)}</p>`;
+  const hold = M.hold ? `<p class="gp-row"><span><span aria-hidden="true">⏳</span> ${esc(M.hold.text)}</span><b class="num">${esc(M.hold.status)}</b>${gpTick(M.hold.ok ? true : null)}</p>` : '';
+  const starLi = (s) => `<li><span class="gp-s" aria-label="${s.n === 1 ? 'כוכב אחד' : s.n === 2 ? 'שני כוכבים' : 'שלושה כוכבים'}">${'★'.repeat(s.n)}</span><span class="gp-t">${escI(s.text)}${s.now ? ` <small>${escI(s.now)}</small>` : ''}</span>${gpTick(s.ok)}` +
+    (s.gates && s.gates.length ? `<ul class="gp-gates">${s.gates.map((x) => `<li><span class="gp-t">${x.key === 'fund' ? '<span aria-hidden="true">🛟</span> ' : '<span aria-hidden="true">🙂</span> '}${escI(x.text)} <small class="num">${esc(x.now)}${x.note ? ` · ${esc(x.note)}` : ''}</small></span>${gpTick(x.ok)}</li>`).join('')}</ul>` : '') + '</li>';
+  const stars = M.stars ? `<h3>כוכבים</h3><ul class="gp-stars">${M.stars.map(starLi).join('')}</ul>` : '';
+  const T = M.totals;
+  return `<p class="gp-rule">${escI(M.rule)}</p>${parts}${gaps}${M.pending ? `<p class="gp-note">${esc(M.pending)}</p>` : ''}${hold}${stars}${M.starsNote ? `<p class="gp-note">${esc(M.starsNote)}</p>` : ''}` +
+    `<h3>נכסים וחובות</h3><dl class="gp-tot"><div><dt>סך הנכסים</dt><dd class="num">${escI(T.assetsText)}</dd></div><div><dt>סך החובות</dt><dd class="num ${T.liabilities > 0 ? 'neg' : ''}">${escI(T.liabilitiesText)}</dd></div><div><dt>שווי נקי</dt><dd class="num">${escI(T.netWorthText)}</dd></div></dl>` +
+    '<p class="gp-note">הפירוט המלא — בדוח הכספי.</p>';
+}
+function goalModelOf(m, ctx) {
+  const w = ctx && ctx.world, st = ctx && ctx.st;
+  let thresholds = {};
+  try { if (w && st) thresholds = starThresholds(w, st.charId, m.rules); } catch (e) { /* the history world has no characters' stars */ }
+  return goalPanelModel(m, { thresholds, learn: !!(ctx && ctx.cfg && ctx.cfg.learn), startNW: st && st.history ? st.history.startNW : null, impactPending: (m.worldIndicators || {}).impactPending || 0 });
+}
+function goalPanelUpdate(m, ctx) {
+  gpData = { m, ctx };
+  const btn = $('#hGoalBtn');
+  let M = null;
+  try { M = goalModelOf(m, ctx); } catch (e) { console.warn(e); }
+  if (btn) { const t = `יעד העולם — מה חסר לניצחון${M && M.summary ? `: ${iso(M.summary)}` : ''}`; if (btn.getAttribute('aria-label') !== t) { btn.setAttribute('aria-label', t); btn.title = 'יעד העולם — מה חסר לניצחון'; } }
+  if (!gpOpen || !M) return;
+  const body = $('#goalPanel .gp-body'); if (!body) return;
+  const html = goalPanelHtml(M); if (body.dataset.h !== html) { body.dataset.h = html; body.innerHTML = html; }
+  placeGoalPanel();
+}
+/** open / close the "יעד העולם" panel (focus: move focus into it on open, back to the toggle on close) */
+export function goalPanel(open, { focus = false } = {}) {
+  const was = gpOpen;
+  gpOpen = !!open && !!gpData && !!$('#hGoalBtn') && !$('#hGoal').hidden;
+  const el = gpOpen ? goalPanelEl() : $('#goalPanel');
+  const btn = $('#hGoalBtn'); if (btn) btn.setAttribute('aria-expanded', String(gpOpen));
+  document.body.classList.toggle('gp-open', gpOpen);
+  if (!el) return;
+  if (gpOpen) { const b = el.querySelector('.gp-body'); b.dataset.h = ''; el.hidden = false; goalPanelUpdate(gpData.m, gpData.ctx); if (focus) el.querySelector('#gpH').focus({ preventScroll: true }); }
+  else { el.hidden = true; if (was && focus && btn) btn.focus({ preventScroll: true }); }
+}
+export const goalPanelOpen = () => gpOpen;
+
+/* ============================================================ wave 2 (A2 G-07, brief §15): new debt → a short chip under the money stats
+   "חוב חדש ₪X · ₪Y בחודש": both numbers are differences of engine values (hudgoal.newDebt), computed by game.js between renders. */
+let debtT = 0;
+export function debtChip(d) {
+  let el = $('#debtChip');
+  if (!d) { if (el) { el.classList.remove('on'); el.textContent = ''; } clearTimeout(debtT); return; }
+  if (!el) { el = document.createElement('p'); el.id = 'debtChip'; el.className = 'debtc'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); document.body.appendChild(el); }
+  const host = $('.hstats'); const r = host && host.getBoundingClientRect();
+  if (r && r.width) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.left = Math.round(r.left + r.width / 2) + 'px'; }
+  el.innerHTML = `<span aria-hidden="true">🏦</span> ${escI(d.text)}`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  clearTimeout(debtT); debtT = setTimeout(() => debtChip(null), 6500 * Math.max(0.6, speed));
 }
 
 /* ============================================================ v3 life row (age · energy · happiness · credit · inflation) */
@@ -867,6 +967,7 @@ const ddLevel = (ev) => (ev && ev.data && ev.data.dd ? ev.data.dd.level : -1);
  */
 export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
+  if (gpOpen) goalPanel(false);   // wave 2: the card wins over the goal panel
   evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() } };
   if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); stickyAside(); } // phones: the new card wins
   renderEvent(true);
@@ -1181,7 +1282,7 @@ function quizView(ev) {
  /** The mentor's question as a speech bubble at the top of the card (2 lines; tap to read all). */
 function say(text) {
   if (!text) return '';
-  return `<button type="button" class="say" data-say aria-expanded="false"><span class="av sm" aria-hidden="true">אע</span><span class="sr">אבא עשיר אומר: </span><span class="st" id="evSay">${escI(text)}</span></button>`;
+  return `<button type="button" class="say" data-say aria-expanded="false"><span class="av sm" aria-hidden="true">אע</span><span class="sr">אבא עשיר אומר: </span><span class="st" id="evSay">${escI(gz(text))}</span></button>`;
 }
 function head(ev, M = null) {
   const hb = M ? hintBtnHtml(ev, M) : '';
@@ -1729,7 +1830,7 @@ function tradeUpd(fromEvent = false) {
   const s1 = (d.step || [10])[0];
   // first tap must do something: start from one step (what you can afford; else what you can sell)
   if (fromEvent) evState.q = d.maxBuy > 0 ? Math.min(s1, d.maxBuy) : d.maxSell > 0 ? Math.min(s1, d.maxSell) : 0;
-  const sayEl = $('#evSay'); if (sayEl && evState.ev.mentor) sayEl.innerHTML = escI(evState.ev.mentor);
+  const sayEl = $('#evSay'); if (sayEl && evState.ev.mentor) sayEl.innerHTML = escI(gz(evState.ev.mentor));
   const lim = Math.max(d.maxBuy, d.maxSell);
   let q = Math.max(0, Math.min(Math.round(evState.q) || 0, lim)); evState.q = q;
   $('#qv').value = N(q); $('#qv').textContent = N(q);

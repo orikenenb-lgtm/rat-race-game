@@ -208,6 +208,18 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
   ok(appCount === osCount, `${name}: ${appCount} data-motion=reduce rules mirror ${osCount} OS rules`);
 }
 
+/* ---------- 3D upgrade wave 2 (A3): a tag inside a gold (primary) button — "המנטור ממליץ לבדוק", "הבחירה של המנטור" — in both themes */
+{
+  const sG = strip(G);
+  const last = (sel) => { let v = null; for (const m of sG.matchAll(/([^{}]+)\{([^}]*)\}/g)) if (m[1].split(',').map((x) => x.trim()).includes(sel)) { const c = m[2].match(/(?:^|;)\s*color:\s*([^;]+)/); if (c) v = c[1].trim(); } return v; };
+  const res = (v) => (v && v.startsWith('var(') ? tok(v.slice(4, -1)) : pair(v));
+  for (const sel of ['.primary .tagc', '.primary .tagc.dflt', '.primary .tagc.rec', '.choice.primary .tagc.rec', '.ddins .insp.primary .tagc.rec']) {
+    const p = res(last(sel));
+    ok(p && cr(p.light, gold) >= 4.5 && cr(p.dark, gold) >= 4.5, `${sel} on the gold fill ≥ 4.5 in light and dark (${p ? f2(cr(p.light, gold)) + ' / ' + f2(cr(p.dark, gold)) : 'no rule'})`);
+    if (p) table.push({ token: `${sel} on --gold`, light: `${p.light} ${f2(cr(p.light, gold))}`, dark: `${p.dark} ${f2(cr(p.dark, gold))}` });
+  }
+}
+
 /* ---------- report */
 if (VERBOSE || fails) {
   console.log('\ncontrast table (light: value r(paper)/r(paper2)/r(paper3); dark likewise)');
