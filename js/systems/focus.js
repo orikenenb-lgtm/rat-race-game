@@ -36,6 +36,8 @@ export const FOCUS_REASON = Object.freeze({
 export function focusCfg(worldId) {
   return {
     frugalCut: worldId === 'w1' ? 0.10 : 0.08,   // share cut from the largest eligible expense line, for good
+    frugalCut5: worldId === 'w1' ? 0.05 : 0.06,  // rules 5 (E1 C1): cuts were the dominant lever (f:frugal best in 26 of 31 cells)
+    frugalCost5: { energy: 4, happiness: 3 },     // rules 5: going over every bill is an evening's work (was 1 🔋)
     debtAdj: worldId === 'w2' ? -0.25 : -0.5,      // bank-loan rate, percentage points a month, for 6 months
     debtMonths: 6, debtFeeMin: 150, debtFeePct: 0.005, debtCredit: 10,
     networkNeg: 0.10, networkRaise: 0.10, noneEnergy: 3, researchMonths: 3, frugalMaxCuts: 4,

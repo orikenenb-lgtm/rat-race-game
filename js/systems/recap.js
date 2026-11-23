@@ -20,8 +20,14 @@ export const T = {
   crisisTitle: 'המשבר הגדול: חודשים {from}–{to}', crisisTrough: 'השווי הנקי ירד ב־{depth}. הכרית הכי נמוכה: {xm} (חודש {m}).',
   crisisBack: 'חזרת לשווי שלפני המשבר אחרי {nm}.', crisisNotBack: 'עד סוף המשחק לא חזרת לשווי שלפני המשבר.', crisisNone: 'לא היה משבר גדול במשחק הזה.',
   rForced: 'חודש {m}: הבנק נתן הלוואה כפויה של {x}', rSell: 'חודש {m}: מכרת את {name} ב־{x}', rPlan: 'חודש {m}: עברת לתוכנית "{plan}"', rFocus: 'חודש {m}: מוקד החודש — {focus}', rStory: 'חודש {m}: {text}',
-  next: 'בפעם הבאה: {why}', strengthen: 'כדאי לחזק: {name} — {tip}',
+  next: 'בחודש {m}, בכרטיס "{c}"{lp}: {why}. זה הלקח לפעם הבאה.', strengthen: 'כדאי לחזק: {name} — {tip}',
 };
+/** A decision's `why` as a clause inside the focused lesson (old saves keep the pre-E3 subject-less cushion text; "היה עדיף: X" → quoted). */
+export function whyClause(why) {
+  const w = String(why || '').trim().replace(/[.。]+$/, '');
+  if (w === 'השאיר אותך בלי כרית') return 'כמעט לא נשארה לך כרית ביטחון';
+  const m = /^היה עדיף: (.+)$/.exec(w); return m ? `היה עדיף "${m[1]}"` : w;
+}
 export const DIM_META = {
   speed: { icon: '⏱️', title: 'מהירות', orderText: 'מסודר לפי: מי יצא קודם, ואחר כך מי התקדם יותר' },
   resilience: { icon: '🛡️', title: 'חוסן', orderText: 'מסודר לפי: פחות הלוואות כפויות, ואחר כך כרית נמוכה פחות' },
@@ -167,7 +173,10 @@ export function recapOf(I) {
   // one focused suggestion (rule order)
   let suggestion = null;
   const weak1 = decs.filter((r) => isWeak(r.v) && ((LK.get(r.k) ?? 0) <= -E || (r.gap || 0) >= 1)).sort((a, b) => (LK.get(a.k) ?? 0) - (LK.get(b.k) ?? 0) || (b.gap || 0) - (a.gap || 0))[0];
-  if (weak1) suggestion = { rule: 1, text: fill(T.next, { why: weak1.why }), k0: weak1.k0 != null && weak1.k0 >= 0 ? weak1.k0 : null };
+  if (weak1) { // J1 E3: the lesson names the month, the card and the choice (and reads as a sentence)
+    const why = whyClause(weak1.why); const l = weak1.l ? String(weak1.l) : '';
+    suggestion = { rule: 1, text: fill(T.next, { m: weak1.m, c: weak1.c, lp: l ? ` בחרת "${l}"` : '', why }), k0: weak1.k0 != null && weak1.k0 >= 0 ? weak1.k0 : null, m: weak1.m, card: weak1.c, choice: l || null, why };
+  }
   else if (I.leakTip) suggestion = { rule: 2, text: I.leakTip, k0: null };
   else {
     const weakP = Object.entries(I.mastery || {}).filter(([k, m]) => m.n >= 3 && m.v < 0.6 && PRINCIPLE_NAME[k]).sort((a, b) => a[1].v - b[1].v)[0];

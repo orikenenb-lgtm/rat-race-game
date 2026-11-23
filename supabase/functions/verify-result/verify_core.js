@@ -8,6 +8,9 @@ export const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
  *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
 export const RULES4_FROM = '2026-12-07'; // a Monday (review B1): a weekly never straddles the cut-over
+/** First Israel date of rules 5 (E1 economy fixes). PLACEHOLDER — the owner confirms it at release.
+ *  MUST equal js/systems/rules.js RULES5_FROM (tested equal). A Monday, like RULES4_FROM. */
+export const RULES5_FROM = '2026-12-21';
 // ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
 function daysFromCivil(y, m, d) {
   y -= m <= 2 ? 1 : 0;
@@ -39,12 +42,13 @@ export function isoDay(v) {
   const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(s); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 /**
- * Legacy games (daily/weekly/challenge started before RULES4_FROM) replay with the pre-T2 rules. ONE Israel calendar date decides:
+ * The rule set of a ranked game. ONE Israel calendar date decides:
  * daily_key · weekly_start (Monday of the ISO week) · challenge_day (index.ts: created_at AT TIME ZONE 'Asia/Jerusalem').
+ * day < RULES4_FROM → 3 (pre-T2) · day < RULES5_FROM → 4 (Next Level) · otherwise (or no date) → 5. Same as js/systems/rules.js rulesForDay.
  */
 export function rulesFor(row) {
   const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
-  return day && day < RULES4_FROM ? 3 : 4;
+  return !day ? 5 : day < RULES4_FROM ? 3 : day < RULES5_FROM ? 4 : 5;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -119,17 +123,19 @@ export function claimOf(row) {
 export function verifyGame(E, row, actions) {
   const cfg = configFor(E, row);
   const first = replayCompare(E, cfg, row, actions);
-  // review B1 defence in depth: a game the row dates before the cut-over may have been started by a v4 client — retry ONCE with
-  // rules 4. Never from 4 to 3. T3 review m3: rules 4 is NOT always harder (better on 12–15 % of seeds), so best-of-two is a real
-  // option — the retry is allowed only for a result FINISHED in the cut-over week (RULES4_FROM … RULES4_FROM + 6 days).
-  if (first.ok || cfg.rules !== 3 || !inCutoverWeek(row.finished_day)) return first;
-  const second = replayCompare(E, { ...cfg, rules: 4 }, row, actions);
+  // review B1 defence in depth: a game the row dates before a cut-over may have been started by a newer client — retry ONCE with
+  // the next rule set (3 → 4 in the RULES4_FROM week, 4 → 5 in the RULES5_FROM week). Never backwards (4 → 3, 5 → 4). T3 review m3:
+  // a newer rule set is NOT always harder, so best-of-two is a real option — the retry is allowed only for a result FINISHED in the
+  // cut-over week of THAT next rule set (FROM … FROM + 6 days).
+  const nextRules = cfg.rules === 3 ? 4 : cfg.rules === 4 ? 5 : null;
+  if (first.ok || !nextRules || !inCutoverWeek(row.finished_day, nextRules === 4 ? RULES4_FROM : RULES5_FROM)) return first;
+  const second = replayCompare(E, { ...cfg, rules: nextRules }, row, actions);
   return second.ok ? { ...second, rulesFallback: true } : first;
 }
-/** Is this (Israel) date inside the cut-over week [RULES4_FROM, RULES4_FROM + 6]? (missing date → false) */
-export function inCutoverWeek(day) {
+/** Is this (Israel) date inside the cut-over week [from, from + 6] (default RULES4_FROM)? (missing date → false) */
+export function inCutoverWeek(day, fromDay = RULES4_FROM) {
   const d = isoDay(day); if (!d) return false;
-  const [y, m, dd] = RULES4_FROM.split('-').map(Number); const from = daysFromCivil(y, m, dd);
+  const [y, m, dd] = fromDay.split('-').map(Number); const from = daysFromCivil(y, m, dd);
   const [y2, m2, d2] = d.split('-').map(Number); const x = daysFromCivil(y2, m2, d2);
   return x >= from && x <= from + 6;
 }

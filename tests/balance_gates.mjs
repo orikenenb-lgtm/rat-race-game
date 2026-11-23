@@ -25,7 +25,7 @@ const WORLDS = ['w1', 'w2', 'w3', 'w4'];
 // ---------------------------------------------------------------- --run (the producing commands, tools/balance-report.md header)
 const RUN = [
   ...WORLDS.map((w) => `node tools/sim.mjs --matrix 100 ${w} --quiet`), ...WORLDS.map((w) => `node tools/sim.mjs --dominance 40 ${w}`),
-  ...WORLDS.map((w) => `node tools/sim.mjs --stories 60 ${w}`), 'node tools/sim.mjs --perf', 'node tools/sim.mjs --rivals 80', 'node tools/sim.mjs --report',
+  ...WORLDS.map((w) => `node tools/sim.mjs --stories 60 ${w}`), ...WORLDS.map((w) => `node tools/sim.mjs --strategies 36 ${w}`), 'node tools/sim.mjs --perf', 'node tools/sim.mjs --rivals 80', 'node tools/sim.mjs --report',
 ];
 if (process.argv.includes('--run')) {
   const busy = spawnSync('sh', ['-c', "ps aux | grep -E 'chrome.*(swiftshader|headless)|perf_probe|_e2e\\.py|lobby_' | grep -v grep | wc -l"]).stdout.toString().trim();
@@ -40,7 +40,7 @@ function rowsOf(d) {
   return [];
 }
 const REQUIRED = [...WORLDS.map((w) => `matrix-${w}.json`), ...WORLDS.map((w) => `dominance-${w}.json`), 'perf.json'];
-const OPTIONAL = ['rivals.json', ...WORLDS.map((w) => `stories-${w}.json`)];
+const OPTIONAL = ['rivals.json', ...WORLDS.map((w) => `stories-${w}.json`), ...WORLDS.map((w) => `strategies-${w}.json`)]; // strategies: the E1 set (rules 5)
 const files = []; const missing = []; const stale = []; const raw = {};
 for (const f of [...REQUIRED, ...OPTIONAL]) {
   const p = join(DIR, f);
@@ -91,6 +91,28 @@ const G = [
   ...['S8', 'S9', 'S10', 'S11', 'S15', 'S16', 'S17', 'S21', 'S24', 'S25', 'S28'].map((x) => [`G-${x}`, false, `T3 #${x.slice(1)} (stories table in tools/balance-report.md)`, () => (raw[`stories-w1.json`] ? { status: 'REPORT', value: 'see the T3 table' } : M('stories (T3)', 'tools/balance-data/stories-wN.json'))]),
   ['G-T4', false, 'T4 tutorial sim check (if T4 ships it)', () => M('onboarding (T4)', 'AC-R5')],
   ...['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9'].map((id) => [`T6-${id}`, !['G5', 'G9'].includes(id), `T6 §16 ${id}`, () => { const x = G6.find((y) => y.id === id); if (!x) return M('engine', 'matrix / dominance'); return { status: x.status === 'met' ? 'PASS' : x.status === 'not met' ? 'FAIL' : x.status === 'accepted' ? 'ACCEPTED' : x.status === 'report' ? 'REPORT' : 'MISSING(engine: --rivals)', value: x.text }; }]),
+  // ---- full upgrade (rules 5, team ב): the director's keep list and the E1 strategy targets (REPORT: they never block CI on their own)
+  ['K-keep', false, 'keep list: guide ≥ 60 % · blind ≤ 8 % · smart ≥ naive + 5 pp · smart w2–w4 55–80 % (per world) · T6 G2', () => {
+    if (!has(T2.filter((r) => r.policy === 'smart'), 'inTime', 'world')) return M('engine', 'matrix');
+    const P = (w, p) => pct(T2.filter((r) => r.world === w && r.policy === p), inT);
+    const items = WORLDS.map((w) => { const g = P(w, 'guideTapper'), b = P(w, 'blindTapper'), s = P(w, 'smart'), n = P(w, 'naive');
+      const bad = [g < 60 && `guide ${g}`, b > 8 && `blind ${b}`, s < n + 5 && `smart ${s} < naive ${n} + 5`, w !== 'w1' && (s < 55 || s > 80) && `smart ${s}`].filter(Boolean);
+      return `${w} guide ${g} · blind ${b} · smart ${s} · naive ${n}${bad.length ? ' ✗ ' + bad.join(', ') : ''}`; });
+    const g2 = G6.find((y) => y.id === 'G2'); const ok = items.every((x) => !x.includes('✗')) && g2 && g2.status === 'met';
+    return { status: ok ? 'PASS' : 'FAIL', value: [...items, `G2 ${g2 ? g2.status : '—'}`] }; }],
+  ['E1-C1', false, 'f:frugal best focus in ≤ 50 % of cells and in ≥ 1 (E1 C1; A5 cells)', () => {
+    if (!G2) return M('engine', 'matrix'); const f = G2.A5.find((x) => x.focus === 'f:frugal'); const cells = G2.A4.cells;
+    return { status: f.bestCells >= 1 && f.bestCells <= cells / 2 ? 'PASS' : 'FAIL', value: `f:frugal best ${f.bestCells} of ${cells} cells (worse than f:none in ${f.worseThanNoneCells})` }; }],
+  ['E1-C2', false, 'always overtime in time ≤ smart − 25 pp in every world (E1 C2; strategies-wX.json)', () => {
+    const S = WORLDS.map((w) => raw[`strategies-${w}.json`]); if (S.some((x) => !x)) return M('engine', '--strategies');
+    const P = (d, p) => { const R = d.recs.filter((r) => r[0] === p); return R.length ? +(100 * R.filter((r) => r[6]).length / R.length).toFixed(0) : null; };
+    const v = WORLDS.map((w, i) => ({ w, ot: P(S[i], 'e1:overtimeAlways'), side: P(S[i], 'e1:sideAlways'), smart: P(S[i], 'smart') }));
+    return { status: v.every((x) => x.ot <= x.smart - 25) ? 'PASS' : 'FAIL', value: v.map((x) => `${x.w} overtime ${x.ot} · side ${x.side} · smart ${x.smart}`) }; }],
+  ['E1-dom', false, 'no E1 strategy (max debt, buy all, always side / overtime, save only, career, frugal) is the best in time in every world', () => {
+    const S = WORLDS.map((w) => raw[`strategies-${w}.json`]); if (S.some((x) => !x)) return M('engine', '--strategies');
+    const top = S.map((d) => { const pols = [...new Set(d.recs.map((r) => r[0]))]; const it = (p) => d.recs.filter((r) => r[0] === p && r[6]).length / d.recs.filter((r) => r[0] === p).length; const m = Math.max(...pols.map(it)); return pols.filter((p) => it(p) === m); });
+    const always = top.reduce((a, t) => a.filter((p) => t.includes(p)), top[0]).filter((p) => /^(e1:|f:frugal)/.test(p));
+    return { status: always.length ? 'FAIL' : 'PASS', value: WORLDS.map((w, i) => `${w}: ${top[i].join('/')}`) }; }],
   ['B-1', true, 'cautious in time ≥ 30 % per world and ≥ 0.5× smart; no character < 15 %', () => {
     if (!has(T7.filter((r) => r.policy === 'cautious'), 'inTime', 'world')) return M('engine', 'CR-21 (cautious policy)');
     const out = Object.entries(by(T7, 'world')).map(([w, xs]) => { const c = pct(xs.filter((r) => r.policy === 'cautious'), inT), s = pct(xs.filter((r) => r.policy === 'smart'), inT);

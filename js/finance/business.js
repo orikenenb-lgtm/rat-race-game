@@ -682,6 +682,18 @@ export function valuation(b) {
   return { price, method, multiple: method === 'revenue' ? p.revMultiple : p.multiple, normMonthlyProfit: normMonthly, floor, profitValue, revenueValue,
     growth: Math.round(growth * 1000) / 1000, cash: cashIn, receivables, proceeds, invested: b.invested, gain, tax, net: proceeds - tax, text };
 }
+/**
+ * E1 B2 (engine rules 5): what the owner can draw every month WITHOUT emptying the till — the normalised monthly profit (avg EBT +
+ * one-offs of the last ≤12 months, as valuation(), minus a manager's wage when there is none) after corporate tax and after the 30 %
+ * dividend tax. ≥ 0, whole ₪. The passive-income goal counts a managed business at min(this month's draw, this) — a draw bigger than the
+ * profit is the business's own cash coming out once, not income.
+ */
+export function sustainableDraw(b) {
+  if (!b || b.closed || !b.hist || !b.hist.length) return 0;
+  const h = b.hist.slice(-12);
+  const avgEbt = h.reduce((s, x) => s + x.ebt + (x.one || 0), 0) / h.length - (b.manager ? 0 : rnd(b.p.managerWage * b.cpi));
+  return avgEbt > 0 ? rnd(avgEbt * (1 - CORP_TAX) * (1 - DIV_TAX)) : 0;
+}
 /** Sell the business. → {business (closed), sale: valuation + {net}}. The engine credits sale.net to the player. */
 export function sell(b0, opts = {}) {
   if (b0.closed) throw new Error('business.sell: already closed');

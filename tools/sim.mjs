@@ -20,6 +20,8 @@ const MD = args.includes('--md') ? args[args.indexOf('--md') + 1] : null;
 const QUIET = args.includes('--quiet');
 // ablation switches for the smart policy (for checking that each mechanic's decisions matter): ABL=noHedge,alwaysVar,...
 const ABL = new Set((process.env.ABL || '').split(',').filter(Boolean));
+/** SIM_RULES=3|4|5 plays every sim game under that rule set (before/after comparisons); unset = the engine's current rules (5). */
+const SIM_RULES = [3, 4, 5].includes(+process.env.SIM_RULES) ? +process.env.SIM_RULES : undefined;
 
 /* ---------- tiny local PRNG for the random policy (never touches game RNG) */
 function prng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -266,6 +268,38 @@ POLICIES.owner = { ...smartLike(), decide(st, ev, ctx) { if (ev.type === 'busine
 for (const id of ['none', 'scout', 'debt', 'ops', 'frugal', 'network', 'research', 'adaptive']) POLICIES['f:' + id] = smartLike({ focus: id });
 for (const id of ['never', 'always', 'flagged', 'borderline']) POLICIES['dd:' + id] = smartLike({ dd: id });
 POLICIES.tapper = POLICIES.guideTapper; // v3 name
+/* ---------- E1 strategy set (docs/full-upgrade/research/E1-economy.md §3; BRIEF §13 "no choice that always wins"): wrappers on smart */
+const safeId = (ev) => (ev.options.find((o) => o.enabled && ['pass', 'skip', 'done', 'ok'].includes(o.id)) || ev.options.find((o) => o.enabled)).id;
+const S1 = () => POLICIES.smart;
+function borrowToCap(st) { let g = 0; while (!st.over && g++ < 40) { const r = E.takeLoan(st); if (r.ok === false) break; } }
+const forcePlan = (plan) => ({ ...smartLike(), between(st, c) { S1().between(st, c); if (!st.over) E.setPlan(st, plan); },
+  decide(st, ev, ctx) { if (ev.type === 'payday' || ev.type === 'edu') { const o = ev.options.find((x) => x.enabled && x.plan === plan); if (o) return [o.id]; } return S1().decide(st, ev, ctx); } });
+Object.assign(POLICIES, {
+  // max debt: smart decisions, but every between-roll window borrows up to the bank's cap
+  'e1:maxDebt': { ...smartLike(), between(st, c) { S1().between(st, c); if (!st.over) borrowToCap(st); } },
+  // no debt: smart, but never a deal / business that needs a loan, and repays every loan it can
+  'e1:noDebt': { ...smartLike(), decide(st, ev, ctx) { if ((ev.type === 'deal' || ev.type === 'business') && ctx.n === 0) { const d = S1().decide(st, ev, ctx); const o = ev.options.find((x) => x.id === d[0]); if (o && o.loanAmount) return [safeId(ev)]; return d; } return S1().decide(st, ev, ctx); },
+    between(st, c) { S1().between(st, c); let g = 0; while (!st.over && st.loans > 0 && g++ < 40) { const r = E.repayLoan(st); if (r.ok === false) break; } } },
+  // buy everything: the first enabled buy on every deal / business offer / pitch, otherwise smart
+  'e1:buyAll': { ...smartLike(), decide(st, ev, ctx) { if (['deal', 'business', 'pitch'].includes(ev.type) && (ev.type !== 'business' || ev.data.mode === 'offer')) { const b = ev.options.find((o) => (o.kind === 'buy' || /^inv:/.test(o.id)) && o.enabled); if (b) return [b.id]; } return S1().decide(st, ev, ctx); } },
+  'e1:sideAlways': forcePlan('side'), 'e1:overtimeAlways': forcePlan('overtime'),
+  // save only: never invests, skips wants, cheapest life option, all cash above 1 month of expenses → the emergency fund
+  'e1:saveOnly': { mentor: 'hint', quiz: 'smart', decide(st, ev) {
+      if (ev.type === 'life') { const en = ev.options.filter((o) => o.enabled); return [en.slice().sort((a, b) => lifeMoney(b) - lifeMoney(a))[0].id]; }
+      if (ev.type === 'payday' || ev.type === 'edu') { const w = ev.options.find((o) => o.enabled && o.plan === 'work'); return [w ? w.id : safeId(ev)]; }
+      if (ev.type === 'doodad') return [has(ev, 'skip') ? 'skip' : 'pay'];
+      if (ev.type === 'upgrade') { const t = ev.options.find((o) => o.id.startsWith('trim:') && o.enabled); return [t ? t.id : safeId(ev)]; }
+      return [safeId(ev)];
+    }, between(st) { if (st.over) return; const m = E.metrics(st); if (st.credit && st.cash >= st.credit) E.payCredit(st); const spare = st.cash - Math.round(m.expenses); if (spare > 500) E.moveSavings(st, spare); if (st.life.plan !== 'work') E.setPlan(st, 'work'); } },
+  // career: study first, then work (ask for raises), 15 % of salary auto-invested in the index fund, a 3-month fund; buys nothing else
+  'e1:career': { mentor: 'hint', quiz: 'smart', decide(st, ev, ctx) {
+      if (ev.type === 'payday' || ev.type === 'edu') { if (has(ev, 'raise')) return ['raise']; const want = st.life.study.done ? 'work' : 'study'; const o = ev.options.find((x) => x.enabled && x.plan === want) || ev.options.find((x) => x.enabled && x.plan === 'work'); return [o ? o.id : safeId(ev)]; }
+      return POLICIES['e1:saveOnly'].decide(st, ev, ctx);
+    }, between(st) { if (st.over) return; const m = E.metrics(st); if (st.credit && st.cash >= st.credit) E.payCredit(st); const want = st.life.study.done ? 'work' : 'study'; if (st.life.plan !== want && !(want === 'study' && st.life.energy < 35)) E.setPlan(st, st.life.energy < 30 ? 'rest' : want);
+      const auto = Math.round(m.salary * 0.15 / 100) * 100; if (st.life.autoInvest !== auto) E.setAutoInvest(st, auto); const want3 = Math.round(m.expenses * 3) - st.savings; if (want3 > 500 && st.cash - want3 > m.expenses) E.moveSavings(st, want3); } },
+});
+/** The E1 strategy table's policy set (BRIEF §12–§13, §29): references + every "always X" strategy. */
+export const E1_SET = ['smart', 'guideTapper', 'f:frugal', 'e1:maxDebt', 'e1:noDebt', 'e1:buyAll', 'e1:sideAlways', 'e1:overtimeAlways', 'e1:saveOnly', 'e1:career', 'diversified', 'saver', 'founder'];
 const has2 = has; void has2;
 
 function betweenCommon(st, bufMonths, smart = false) {
@@ -411,7 +445,7 @@ const QUIZ_SKILL = { random: 0.33, cautious: 0.8, greedy: 0.7, smart: 0.95, reck
 export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
   const { log, onRoll, onLanding, ...gameOpts } = opts;
   const P = POLICIES[pol];
-  const st = E.createGame({ worldId, charId, seed, mode: 'free', mentor: P.mentor || 'hint', ...gameOpts });
+  const st = E.createGame({ worldId, charId, seed, mode: 'free', mentor: P.mentor || 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}), ...gameOpts });
   const r = prng(seed * 7919 + pol.length);
   const skill = QUIZ_SKILL[P.quiz || pol] ?? 0.7;
   let end = null; let guard = 0;
@@ -620,7 +654,7 @@ export function gates(byWorld) {
 export function dominance(wid, n) {
   const w = E.getWorld(wid); const tally = {}; const ALLOW = (type, id, ev) => id === 'save' || (type === 'doodad' && id === 'skip');
   for (const ch of w.characters) for (let i = 0; i < n; i++) {
-    const st = E.createGame({ worldId: wid, charId: ch.id, seed: seedOf(wid, i) + 77, mode: 'free', mentor: 'hint' }); const P = POLICIES.smart; const r = prng(i + 3);
+    const st = E.createGame({ worldId: wid, charId: ch.id, seed: seedOf(wid, i) + 77, mode: 'free', mentor: 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}) }); const P = POLICIES.smart; const r = prng(i + 3);
     const lim = Math.round(E.starThresholds(w, ch.id).maxMonths * 1.6);
     for (let g = 0; g < 4000 && !st.over && st.month <= lim; g++) {
       P.between(st, { r }); if (st.over) break;
@@ -643,6 +677,42 @@ export function dominance(wid, n) {
     }
   }
   return tally;
+}
+/**
+ * E1 strategy table (BRIEF §12–§13, §29): every E1_SET policy × N seeds per world (characters rotated, seeds 9000 + i·13 + world·100003 as
+ * E1), free mode, cap 1.6× the limit, quizzes right. After a win the game goes on 24 months under the same policy (continueAfterWin):
+ * does the freedom hold? Records: [pol, char, i, status, reason, months, inTime, stars, burnouts, forcedLoans, happy, credit, pwMet, pwBroke]
+ */
+export function strategiesWorld(wid, n, pols = E1_SET) {
+  const w = E.getWorld(wid); const recs = [];
+  for (const pol of pols) for (let i = 0; i < n; i++) {
+    const ch = w.characters[i % w.characters.length]; const seed = 9000 + i * 13 + wid.charCodeAt(1) * 100003; const P = POLICIES[pol];
+    const st = E.createGame({ worldId: wid, charId: ch.id, seed, mode: 'free', mentor: P.mentor || 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}) });
+    const r = prng(seed * 7919 + pol.length); const lim = E.starThresholds(w, ch.id, st.rules).maxMonths; const cap = Math.round(lim * 1.6);
+    let end = null;
+    const resolve = (ev0) => { let ev = ev0, k = 0; while (ev) { let c;
+      if (ev.auto) c = [ev.options[0].id];
+      else if (ev.type === 'mystery' && ev.data.kind === 'quiz') { const q2 = w.mystery.find((x) => x.kind === 'quiz' && x.text === ev.data.question); c = ['a' + q2.correct]; }
+      else if (k >= 6) c = [safeId(ev)]; else c = P.decide(st, ev, { r, n: k });
+      let res = E.choose(st, ev, c[0], c[1]); if (!res.ok) res = E.choose(st, ev, safeId(ev)); k++; if (res.end) end = res.end; ev = res.event; if (k > 40) break; } };
+    const step = () => { if (P.story && !st.over) storyStep(st, P.story, r); if (st.over) return; P.between(st, { r }); if (st.over) return; if (st.pending) { resolve(E.currentEvent(st)); if (st.over) return; } E.rollDice(st); resolve(E.landing(st)); };
+    let g = 0; while (!end && st.month <= cap && g++ < 5000) { step(); if (st.over && !end) end = st.result; }
+    const won = !!(end && end.status === 'won');
+    let pwMet = null, pwBroke = null;
+    if (won && E.continueAfterWin(st).ok !== false) { const m0 = st.month; let gg = 0; while (!st.over && st.month < m0 + 24 && gg++ < 2000) step(); pwMet = E.metrics(st).goalHold.met ? 1 : 0; pwBroke = st.flags.bankrupt ? 1 : 0; }
+    recs.push([pol, ch.id, i, end ? end.status : 'open', end ? end.reason : null, won ? end.months : null, won && end.months <= lim ? 1 : 0, end ? end.stars || 0 : 0, st.life.burnouts, st.stats.forcedLoans, Math.round(st.life.happiness), Math.round(st.life.creditScore), pwMet, pwBroke]);
+  }
+  return recs;
+}
+/** The strategy table (markdown rows) from strategies-wX.json files. */
+export function strategiesTable(byWorld) {
+  const L = ['| world | policy | in time | won ≤1.6× | median mo | bankrupt | burnouts/game | final 😊 (med) | goal still met 24 mo after win |', '|---|---|---|---|---|---|---|---|---|'];
+  for (const [wid, d] of Object.entries(byWorld)) {
+    const pols = [...new Set(d.recs.map((x) => x[0]))];
+    for (const p of pols) { const R = d.recs.filter((x) => x[0] === p); const W = R.filter((x) => x[3] === 'won'); const pw = W.filter((x) => x[12] != null);
+      L.push(`| ${wid} | ${p} | ${pctS(R.filter((x) => x[6]).length / R.length)} | ${pctS(W.length / R.length)} | ${W.length ? q(W.map((x) => x[5]), 0.5) : '—'} | ${pctS(R.filter((x) => x[4] === 'bankrupt').length / R.length)} | ${(R.reduce((a, x) => a + x[8], 0) / R.length).toFixed(1)} | ${q(R.map((x) => x[10]), 0.5)} | ${pw.length ? pctS(pw.filter((x) => x[12]).length / pw.length) : '—'} |`); }
+  }
+  return L;
 }
 /** T6 §16 G9: empirical P(close at step k | not before) of the sealed draws on real competed landings vs the public hazard table. */
 export function rivalsCalib(wid, n) {
@@ -669,7 +739,7 @@ export function perf(wid = null, n = 6) {
   return { states: sts.length, describe: { p50: p(dsc, 0.5), p95: p(dsc, 0.95) }, impactFor: { n: imp.length, p50: p(imp, 0.5), p95: p(imp, 0.95) }, sim: { games, secs: (Date.now() - t0) / 1000, gamesPerSec: +(games / ((Date.now() - t0) / 1000)).toFixed(2) } };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories') || args.includes('--rivals'))) {
+if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--strategies') || args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories') || args.includes('--rivals'))) {
   const nArg = +(args.find((a) => /^\d+$/.test(a)) || 0);
   mkdirSync('tools/balance-data', { recursive: true });
   if (args.includes('--stories')) {
@@ -678,11 +748,17 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--matrix'
     writeFileSync(`tools/balance-data/stories-${wid}.json`, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), summary: sum, games: games.length }) + '\n');
     console.log(JSON.stringify(sum));
   }
+  if (args.includes('--strategies')) {
+    const wid = ONLY || 'w1'; const n = nArg || 36; const t0 = Date.now(); const out = process.env.SIM_OUT || `tools/balance-data/strategies-${wid}.json`;
+    const recs = strategiesWorld(wid, n);
+    writeFileSync(out, JSON.stringify({ world: wid, n, rules: SIM_RULES || E.RULES_CURRENT, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'status', 'reason', 'months', 'inTime', 'stars', 'burnouts', 'forcedLoans', 'happy', 'credit', 'pwMet', 'pwBroke'], recs }) + '\n');
+    console.log(strategiesTable({ [wid]: { recs } }).join('\n'));
+  }
   if (args.includes('--matrix')) {
     const wid = ONLY || 'w1'; const n = nArg || 100; const t0 = Date.now();
     const recs = matrixWorld(wid, n, undefined, (pol, ch, secs) => { if (!QUIET) console.log(`${wid} ${ch} ${pol} done (${secs}s)`); });
     const file = `tools/balance-data/matrix-${wid}.json`;
-    writeFileSync(file, JSON.stringify({ world: wid, n, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints', 'rivalLost', 'played'], recs }) + '\n');
+    writeFileSync(file, JSON.stringify({ world: wid, n, rules: SIM_RULES || E.RULES_CURRENT, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'inspections', 'hints', 'rivalLost', 'played'], recs }) + '\n');
     console.log(`wrote ${file}: ${recs.length} games in ${Math.round((Date.now() - t0) / 1000)}s`);
   }
   if (args.includes('--dominance')) {
@@ -749,7 +825,9 @@ function t2Report() {
   const dom = {}; for (const f of ['tools/balance-data/dominance.json', ...['w1', 'w2', 'w3', 'w4'].map((w) => `tools/balance-data/dominance-${w}.json`)]) if (existsSync(f)) { const j = JSON.parse(readFileSync(f, 'utf8')); delete j.engineSha; Object.assign(dom, j); }
   const perfF = ['tools/balance-data/perf.json', 'tools/balance-t2-perf.json'].find(existsSync) || 'tools/balance-data/perf.json'; const pf = existsSync(perfF) ? JSON.parse(readFileSync(perfF, 'utf8')) : null;
   const L = [];
-  L.push('# דוח איזון — מירוץ העכברים v4 (T2 "עומק אסטרטגי" + T3 "סיפורים ועסקים" + T2 review fixes)', '');
+  const rulesSet = [...new Set(Object.values(byWorld).map((x) => x.rules || (x.engineSha === ENGINE_SHA ? E.RULES_CURRENT : 4)))].join('/');
+  L.push(`# דוח איזון — מירוץ העכברים, כללים ${rulesSet} (שדרוג מלא: תיקוני כלכלה E1 + איזון, על בסיס T2/T3/T6)`, '');
+  L.push(`Rule set measured: **${rulesSet}** (free games start with the current rules). Never compare these numbers with a run of another rule set as if they were the same game (BRIEF §12).`, '');
   L.push(`Generated by \`node tools/sim.mjs --matrix N wX\` (one process per world) + \`--dominance\` + \`--perf\`, then \`node tools/sim.mjs --report\`. Seeds are fixed (\`1000 + i·7 + world·100003\`), so the numbers are reproducible. N per (world × character × policy): ${Object.values(byWorld).map((x) => `${x.world} ${x.n}`).join(' · ')}. Free mode, capped at 1.6× the character's month limit; "in time" = escaped within the limit. Cells = world × character × cycle bucket (§8.6) with ≥ 15 games.`, '');
   L.push('Policies: **guideTapper** (mentor מתחיל, taps the highlighted option and the suggested focus) · **blindTapper** (מתקדם, uniform random clicks, no hints, no between-roll actions) · **naive** (believes the seller: buys whenever the claimed net > 0, never inspects/negotiates, plan work, no fund/focus) · **smart** (the reference heuristic: expected net at the public basis, DD rule "flagged", adaptiveFocus; ignores the cycle) · **adaptive** (smart + the cycle gauge) · **cautious / greedy** (v3 heuristics; greedy believes the claimed numbers) · archetypes **saver / founder / diversified / gambler** (gameplay.md §7d) · focus variants **f:<id>** (smart with one fixed focus; f:none = never) · DD variants **dd:never / dd:always / dd:borderline** (smart with that inspect rule; dd:flagged = smart) · ablations **abl:noCycle / abl:noDD** (smart, `_dev` switches).', '');
   L.push('## Gates (spec §13.5)', '', '| gate | result | numbers |', '|---|---|---|');
@@ -784,6 +862,8 @@ function t2Report() {
       L.push('', '## T3 stories & business (`node tools/sim.mjs --stories N wX`: blindTapper, guideTapper, smart, sideHustler, owner × N each)', '', '| world | car / move / friend / career / crisis start | side (side-plan ≥ 15 mo) | completion | steps / run | chain items / 12 mo (med · p90) | business items / business-year (med · p90) | defaults share | standalone repeats < 12 mo | max open items / chains | stage distribution (0/1/2/3) |', '|---|---|---|---|---|---|---|---|---|---|---|');
       for (const [w, x] of Object.entries(st)) L.push(`| ${w} | ${x.start.car}% / ${x.start.move}% / ${x.start.friend}% / ${x.start.career}% / ${x.start.crisis}% | ${x.side15 ?? '—'}% | ${x.completion}% | ${x.stepsPerRun} | ${x.chainItems12.med} · ${x.chainItems12.p90} | ${x.bizItemsYear.med} · ${x.bizItemsYear.p90} | ${x.defaultsShare}% | ${x.repeats} | ${x.maxOpen} / ${x.maxChains} | ${x.stageDist.join('/')} |`);
     } }
+  { const sd = {}; for (const w of ['w1', 'w2', 'w3', 'w4']) { const f = `tools/balance-data/strategies-${w}.json`; if (existsSync(f)) sd[w] = JSON.parse(readFileSync(f, 'utf8')); }
+    if (Object.keys(sd).length) L.push('', `## E1 strategy table (BRIEF §12–§13, §29: \`node tools/sim.mjs --strategies N wX\`, N = ${Object.values(sd).map((x) => `${x.world} ${x.n}`).join(' · ')} per policy, characters rotated, seeds 9000 + i·13 + world·100003; after a win the same policy plays 24 more months)`, '', ...strategiesTable(sd)); }
   L.push('', '## In time by world × policy (all characters pooled)', '', '| policy | ' + Object.keys(byWorld).join(' | ') + ' |', '|---|' + Object.keys(byWorld).map(() => '---|').join(''));
   const pols = [...new Set(Object.values(byWorld).flatMap((x) => x.recs.map((r) => r[0])))];
   for (const pol of pols) L.push(`| ${pol} | ` + Object.keys(byWorld).map((w) => { const s = cellStats(byWorld[w].recs.filter((r) => r[0] === pol)); return `${P(s.inTime)} · med ${Mo(s.med)} · ★★★ ${P(s.star3)}`; }).join(' | ') + ' |');

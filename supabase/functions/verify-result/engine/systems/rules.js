@@ -1,4 +1,5 @@
-// js/systems/rules.js — which rule set (3 = exact v3, 4 = Next Level) a ranked game is played with, from its date key.
+// js/systems/rules.js — which rule set (3 = exact v3, 4 = Next Level, 5 = full upgrade economy fixes) a ranked game is played with,
+// from its date key.
 // Pure: no Date, no clock. The SAME logic runs in the client (createGame for daily/weekly/challenge) and in the verifier
 // (supabase/functions/verify-result/verify_core.js rulesFor — a byte-for-byte duplicate, tested equal in tests/verify.test.mjs).
 //
@@ -6,10 +7,14 @@
 //   daily     → the daily key (Israel date, 'YYYY-MM-DD')
 //   weekly    → the Monday of the ISO week of the weekly key ('YYYY-Www'), as index.ts weekly_start = to_date(key,'IYYY-"W"IW')
 //   challenge → the Israel date the challenge was created (index.ts challenge_day = created_at AT TIME ZONE 'Asia/Jerusalem')
-// day < RULES4_FROM → rules 3, otherwise rules 4. A missing / unreadable key → rules 4 (the current game).
+// day < RULES4_FROM → rules 3; RULES4_FROM ≤ day < RULES5_FROM → rules 4; otherwise rules 5. A missing / unreadable key → rules 5
+// (the current game). Free and learning games are not ranked: they take the current rules (5) at once (engine.js createGame).
 
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release (and in verify_core.js — tested equal). */
 export const RULES4_FROM = '2026-12-07'; // a Monday: daily and weekly eras flip together (review B1)
+/** Israel date (YYYY-MM-DD) of the first day ranked games use rules 5 (E1 B1/B2/A1 + balance). PLACEHOLDER — the owner confirms it at
+ *  release (and in verify_core.js — tested equal). A Monday, so daily and weekly eras flip together. */
+export const RULES5_FROM = '2026-12-21';
 
 /** Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant). */
 function daysFromCivil(y, m, d) {
@@ -42,4 +47,4 @@ export function dayOf(key) {
   const m = /(\d{4})-?(\d{2})-?(\d{2})/.exec(s); return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 /** The rule set for a ranked game whose date key is `key` (see THE RULE above). */
-export function rulesForDay(key) { const d = dayOf(key); return d && d < RULES4_FROM ? 3 : 4; }
+export function rulesForDay(key) { const d = dayOf(key); return !d ? 5 : d < RULES4_FROM ? 3 : d < RULES5_FROM ? 4 : 5; }
