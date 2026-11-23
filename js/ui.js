@@ -424,7 +424,7 @@ function shownPct(m) {
    Primary info stays in the HUD (meter, %); the panel holds the secondary part: what is missing, the 2-payday hold, ★★ / ★★★ months
    and gates, total assets / liabilities. Model: hudgoal.js (engine outputs only). Non-modal disclosure: Esc / ✕ / a tap outside closes,
    focus returns to the toggle. Nothing here is saved. */
-let gpOpen = false, gpData = null;
+let gpOpen = false, gpData = null, gpHtml = '';
 const gpTick = (ok) => (ok == null ? '' : `<span class="gp-ok ${ok ? 'pos' : 'neg'}" aria-hidden="true">${ok ? '✓' : '✗'}</span><span class="sr">${ok ? ' — עומד' : ' — לא עומד'}</span>`);
 function goalPanelEl() {
   let el = $('#goalPanel'); if (el) return el;
@@ -477,7 +477,7 @@ function goalPanelUpdate(m, ctx) {
   if (btn) { const t = `יעד העולם — מה חסר לניצחון${M && M.summary ? `: ${iso(M.summary)}` : ''}`; if (btn.getAttribute('aria-label') !== t) { btn.setAttribute('aria-label', t); btn.title = 'יעד העולם — מה חסר לניצחון'; } }
   if (!gpOpen || !M) return;
   const body = $('#goalPanel .gp-body'); if (!body) return;
-  const html = goalPanelHtml(M); if (body.dataset.h !== html) { body.dataset.h = html; body.innerHTML = html; }
+  const html = goalPanelHtml(M); if (gpHtml !== html) { gpHtml = html; body.innerHTML = html; }
   placeGoalPanel();
 }
 /** open / close the "יעד העולם" panel (focus: move focus into it on open, back to the toggle on close) */
@@ -488,7 +488,7 @@ export function goalPanel(open, { focus = false } = {}) {
   const btn = $('#hGoalBtn'); if (btn) btn.setAttribute('aria-expanded', String(gpOpen));
   document.body.classList.toggle('gp-open', gpOpen);
   if (!el) return;
-  if (gpOpen) { const b = el.querySelector('.gp-body'); b.dataset.h = ''; el.hidden = false; goalPanelUpdate(gpData.m, gpData.ctx); if (focus) el.querySelector('#gpH').focus({ preventScroll: true }); }
+  if (gpOpen) { gpHtml = ''; el.hidden = false; goalPanelUpdate(gpData.m, gpData.ctx); if (focus) el.querySelector('#gpH').focus({ preventScroll: true }); }
   else { el.hidden = true; if (was && focus && btn) btn.focus({ preventScroll: true }); }
 }
 export const goalPanelOpen = () => gpOpen;
