@@ -104,7 +104,10 @@ export function isUnlocked(worldId) {
   const i = WIDS.indexOf(worldId);
   if (ADMIN && i >= 0) return true;
   if (i <= 0) return i === 0;
-  return isUnlocked(WIDS[i - 1]) && (P.stars[WIDS[i - 1]] || 0) >= 1;
+  // hotfix 2026-11-23: escaping the previous world at ANY speed opens the next one (the map always said "לפתוח: לצאת מ…");
+  // a ★ (escape within the month limit) still opens it too — e.g. stars banked from a daily.
+  const prev = WIDS[i - 1];
+  return isUnlocked(prev) && ((P.stars[prev] || 0) >= 1 || P.best[prev] != null);
 }
 export function unlockedWorlds() { return WIDS.filter(isUnlocked); }
 
@@ -137,7 +140,7 @@ export function nextGoal() {
   const sub = nt ? `עוד ${nt.need === 1 ? '★ אחד' : nt.need + '★'} לדרגת ${nt.name}` : 'הגעת לדרגה הכי גבוהה. עכשיו תנצח את החברים.';
   if (lockedIdx > 0) {
     const prev = getWorld(WIDS[lockedIdx - 1]); const next = getWorld(WIDS[lockedIdx]);
-    return { text: `עוד ★ אחד ${inW(prev.name)} כדי לפתוח את ${next.name}`, sub, worldId: prev.id };
+    return { text: `לצאת מהמירוץ ${inW(prev.name)} כדי לפתוח את ${next.name}`, sub, worldId: prev.id };
   }
   const notMax = WIDS.find((w) => (P.stars[w] || 0) < 3);
   if (notMax) {

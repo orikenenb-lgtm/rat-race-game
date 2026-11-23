@@ -1157,7 +1157,7 @@ function renderWorld(id, opts = {}) {
     body = `<div class="wv-locked">
       <div class="wv-lock-ic" aria-hidden="true">🔒</div>
       <h2>העולם הזה עוד נעול</h2>
-      <p>לפתוח: לצאת ${esc(P.fromW(prev.name))} עם ★ אחד לפחות.</p>
+      <p>לפתוח: לצאת ${esc(P.fromW(prev.name))} (בכל קצב — ★ זה בונוס).</p>
       <p class="lb-note">מה מחכה כאן: ${esc(NEW_HERE[w.mechanic] || w.tagline)}</p>
       <div class="lb-acts">${isDaily ? '<button class="primary" data-act="daily">🎲 לטעום עכשיו באתגר היומי</button>' : ''}
       ${frontier && P.isUnlocked(frontier.id) ? `<button class="${isDaily ? '' : 'primary'}" data-act="world" data-id="${frontier.id}">לשחק ${esc(P.inW(frontier.name))}</button>` : ''}</div>

@@ -18,6 +18,13 @@ P.beginSession();
 let r = P.recordGame({ status: 'lost', stars: 0, months: 60, worldId: 'w1', charId: 'teacher', mode: 'free', netWorth: 1000 });
 eq([r.newStars, r.unlockedWorld, P.getProgress().gamesPlayed, P.getProgress().tutorialDone], [0, null, 1, true], 'loss');
 
+// hotfix 2026-11-23: an escape slower than the ★ limit (0★ win) still opens the next world (the map says "לפתוח: לצאת מהשכונה")
+{ const snap = JSON.stringify(P.getProgress());
+  P.beginSession();
+  const r0 = P.recordGame({ status: 'won', stars: 0, months: 55, worldId: 'w1', charId: 'teacher', mode: 'free', netWorth: 50000 });
+  eq([r0.newStars, r0.unlockedWorld, P.isUnlocked('w2'), P.isUnlocked('w3')], [0, 'w2', true, false], '0★ escape unlocks w2 only');
+  P._reset(JSON.parse(snap)); }
+eq(P.unlockedWorlds(), ['w1'], 'restored after the 0★ case');
 // in-game achievement then a 2★ win in w1 → w2 unlocks, car pawn, title חוסך, achievements reported
 P.beginSession();
 const fresh = P.addAchievements(['first_asset', 'nope', 'first_asset']);
