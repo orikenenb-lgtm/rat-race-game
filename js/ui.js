@@ -63,7 +63,9 @@ export function fmtC(n) {
 const compact = () => innerWidth < 600;
 const tiny = () => innerWidth < 420;
 /** HUD money: exact on desktop, ₪16.6K on phones (₪1.6K on the narrowest ones). */
-const money = (n) => (tiny() && Math.abs(n) >= 1000 ? (n < 0 ? '−' : '') + '₪' + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : (Math.round(Math.abs(n) / 100) / 10) + 'K') : compact() ? fmtC(n) : fmtM(n));
+// worlds wave 1: from ₪100K up a phone uses E.money 'tiny' (3 significant digits, ≤ 6 chars: "₪127K", "₪1.8M", "₪1.25B") — w5's
+// "+₪127.1K" overlapped the cash next to it at 390 px; below ₪100K the old wording stays (w1–w4 phones unchanged)
+const money = (n) => (tiny() && Math.abs(n) >= 1e5 ? moneyOf(n, 'tiny') : tiny() && Math.abs(n) >= 1000 ? (n < 0 ? '−' : '') + '₪' + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : (Math.round(Math.abs(n) / 100) / 10) + 'K') : compact() ? fmtC(n) : fmtM(n));
 const moneyS = (n) => (Math.round(n) > 0 ? '+' : '') + money(n);
 
 /* ============================================================ icons */
@@ -356,7 +358,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   } else if (w.mechanic === 'angel') { key = 'impact'; v = wi.impact; text = `השפעה ${num(`${wi.impact}/${wi.impactTarget}`)}`; goodUp = 1; }
   else if (wi.season) {   // w5: the month's season and the city's demand — a button that opens the world panel (עונות ותפוסה)
     const se = wi.season; key = 'tour'; v = se.tour; goodUp = 1;
-    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח העולם')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} ${esc(MONTH_HE[se.cal - 1] || '')} · ${esc(BAND_HE[se.band] || '')} · ביקוש ${num(tourTxt(se.tour))}</button>`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח העולם')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} <span class="hb-mf">${esc(MONTH_HE[se.cal - 1] || '')}</span><span class="hb-ms">${esc(MONTH_S[se.cal - 1] || '')}</span><span class="hb-b"> · ${esc(BAND_HE[se.band] || '')}</span> <span class="hb-w">· ביקוש </span>${num(tourTxt(se.tour))}</button>`;
     if (se.festival) extra = '<span class="hedge" title="פסטיבל החודש">🎪</span>';
   }
   else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor

@@ -1144,5 +1144,7 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
   .wp-ring{width:118px;height:118px}
   .hind-btn{font-size:12px;padding:2px 8px;min-height:30px}
 }
+.hind-btn .hb-ms{display:none}
+@media (max-width:420px){.hind-btn .hb-b,.hind-btn .hb-w,.hind-btn .hb-mf{display:none}.hind-btn .hb-ms{display:inline}.hind-btn{max-width:100%;overflow:hidden;text-overflow:ellipsis}}
 .wp-strip.mini12{margin-top:4px}.wp-strip.mini12 .wp-bar{height:32px}.wp-strip.mini12 .wp-bar i{width:9px}
 .opmini .note{margin:6px 0 0}
