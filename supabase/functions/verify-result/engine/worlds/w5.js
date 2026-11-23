@@ -33,7 +33,7 @@ export default {
   board,
   tiles: tilesFor(board, { N: { name: 'מפעיל תיירות' }, X: { name: 'שפל בתיירות' }, M: { name: 'העונה' } }),
   calendar: { startMonth: 10 },  // the game starts in October: winter is ahead
-  // bank loans: 1.6% a month (+ credit band + cycle), up to 10 × monthly income — above the planned yield, so borrowing to the cap does not pay; forced loans in ₪50k steps. Hotel mortgages are on the assets (op.rate).
+  // bank loans: 1.6% a month (+ credit band + cycle), up to 10 × monthly income; the goal counts owner income AFTER the interest on bank debt beyond a 2-month working-capital allowance (season.goalAccrual), so borrowing to the cap does not pay — above the planned yield, so borrowing to the cap does not pay; forced loans in ₪50k steps. Hotel mortgages are on the assets (op.rate).
   loan: { unit: 100000, autoUnit: 50000, pct: 1.6, cap: 10, bankrupt: 10 },
   creditPct: 3,
   sideReportFee: 400,
@@ -161,7 +161,7 @@ export default {
     { w: 3, kind: 'raise', amount: 6000, title: 'הרצאות לחברות', text: 'הזמינו אותך להרצות. המשכורת עולה ב־₪6,000 בחודש.', after: 'עוד מזומן כל חודש = עוד כרית לחורף.' },
     { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'אוגוסט, המלון מלא ויש תור להזמנות. מה הכי חכם לעשות עם המחיר?', answers: ['להוריד מחיר כדי למשוך עוד אורחים', 'להעלות מחיר — החדרים יימכרו בכל מקרה', 'להשאיר כמו בחורף'], correct: 1, reward: 'lesson', lesson: 'capacity_pricing', explain: 'כשאין חדר פנוי, מחיר נמוך לא מביא עוד אורחים — אין לאן. מחיר גבוה מוכר את אותם חדרים ביותר כסף.' },
     { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'המלון הרוויח ₪500 אלף ביולי. כמה מזה מותר להוציא?', answers: ['הכל — זה רווח', 'מה שנשאר אחרי שמכסים את חודשי החורף שבדרך', 'כלום, אף פעם'], correct: 1, reward: 'lesson', lesson: 'seasonal_year', explain: 'בעסק עונתי הקיץ משלם את החורף. רווח של חודש טוב הוא חלק מהממוצע של השנה — לא בונוס.' },
-    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'מפעיל תיירות מציע לקנות חצי מהחדרים לחודשים ינואר–יוני בהנחה של 25%, ומשלם חצי מראש. מתי זה כדאי?', answers: ['תמיד, כסף מראש זה הכי טוב', 'כשהחודשים האלה חלשים, והחדרים היו נשארים ריקים', 'אף פעם, הנחה זה הפסד'], correct: 1, reward: 'lesson', lesson: 'allotment', explain: 'הנחה על חדר שהיה נשאר ריק היא רווח. הנחה על חדר שהיה נמכר במחיר מלא היא הפסד. מה שקובע זה הביקוש בחודשים האלה.' },
+    { w: 4, kind: 'quiz', title: 'שאלת אבא עשיר', text: 'מפעיל תיירות מציע לקנות חצי מהחדרים לחודשים ינואר–יוני בהנחה של 22%, ומשלם חצי מראש. מתי זה כדאי?', answers: ['תמיד, כסף מראש זה הכי טוב', 'כשהחודשים האלה חלשים, והחדרים היו נשארים ריקים', 'אף פעם, הנחה זה הפסד'], correct: 1, reward: 'lesson', lesson: 'allotment', explain: 'הנחה על חדר שהיה נשאר ריק היא רווח. הנחה על חדר שהיה נמכר במחיר מלא היא הפסד. מה שקובע זה הביקוש בחודשים האלה.' },
   ],
 
   mentor: {
@@ -175,7 +175,7 @@ export default {
     allotYes: 'קיבלת {amount} מראש. חלק מהחדרים מכורים לחצי שנה — גם בחודשים חלשים, וגם בחזקים.',
     allotNo: 'ויתרת. החדרים נשארים בשוק — במחיר מלא, ובסיכון מלא.',
     allotLost: 'המפעיל הלך למלון של המתחרים. משא ומתן הוא סיכון.',
-    allotWon: 'המפעיל הסכים ל־15% הנחה. עכשיו להחליט: לקבל או לוותר.',
+    allotWon: 'המפעיל הסכים ל־12% הנחה. עכשיו להחליט: לקבל או לוותר.',
     winterBurn: 'חודש חלש: הנכסים שלך מפסידים החודש. בשביל זה שומרים מהקיץ — ומכינים תוכנית מחירים לחורף.',
     linePaid: 'סגרת את הקו העונתי. ככה משתמשים בו: לוקחים בחורף, מחזירים כשהקיץ מגיע.',
     lineConverted: 'הקו העונתי ({amount}) לא נסגר עד אוגוסט — הוא הפך להלוואה רגילה, ועוד עמלה של {fee}.',

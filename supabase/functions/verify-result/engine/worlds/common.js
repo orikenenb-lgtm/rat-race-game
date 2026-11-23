@@ -22,6 +22,8 @@ export const TILE_TYPES = {
   K: { type: 'business', name: 'העסק שלך', color: '#b45309', ink: '#ffffff', icon: 'shop' },
   // worlds wave 1 (w5): a module tile — its type is the module's (js/worlds/mech/season.js tiles.N)
   N: { type: 'allot', name: 'מפעיל תיירות', color: '#0ea5a4', ink: '#ffffff', icon: 'plane' },
+  // worlds wave 2 (w6): a module tile — js/worlds/mech/plant.js tiles.C (a 24-month supply contract)
+  C: { type: 'contract', name: 'חוזה אספקה', color: '#f97316', ink: '#ffffff', icon: 'doc' },
 };
 
 /** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */

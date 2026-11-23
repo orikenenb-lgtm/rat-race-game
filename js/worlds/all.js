@@ -3,6 +3,7 @@
 // (js/worlds/index.js), so it never downloads rules it does not use. The verifier loads one per-world pack instead (tools/build-edge.mjs).
 import { registerWorld } from './index.js';
 import w5 from './w5.js';
+import w6 from './w6.js';
 
-export const LAZY = [w5];
+export const LAZY = [w5, w6];
 for (const w of LAZY) registerWorld(w);
