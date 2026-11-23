@@ -220,6 +220,7 @@ export function openLobby(v) {
   if (!safe(() => localStorage.getItem(ONBK)) && (completedAny() || P.getProgress().onboarded)) safe(() => localStorage.setItem(ONBK, '1'));
   if (nv.k === 'home' && !pendingJoin && !pendingDuel && !safe(() => localStorage.getItem(ONBK))) nv.k = 'welcome';
   claimGifts();
+  checkAdmin();
   startEnergyTicker();
   go(nv);
 }
@@ -703,6 +704,35 @@ function emptyEnergyHtml() {
     <div class="lb-acts start"><button class="primary" data-act="learn-now">${T4.M8}</button>${dailyOpen ? '<button data-act="daily">🎲 האתגר היומי (בלי זריקות)</button>' : ''}
       <button data-act="library">📚 ספריית השיעורים</button>${net.hasMe() ? '<button data-act="groups-view">🎁 לשלוח זריקות לחברים</button>' : ''}</div></div></section>`;
 }
+/* -------- owner (admin): the server decides (rr_admin_status); the client only opens worlds/pawns locally and tops up ⚡ */
+async function checkAdmin() {
+  if (!net.hasMe() || !net.adminStatus) { P.setAdmin(false); return; }
+  try {
+    const r = await net.adminStatus(); const on = !!(r && r.admin); const was = P.isAdmin();
+    P.setAdmin(on);
+    if (on && EN.get() < EN.CAP) { EN.add(EN.CAP - EN.get(), 'admin'); refreshEnergyChips(); }
+    if (on !== was && view && (view.k === 'home' || view.k === 'profile')) rerender();
+  } catch (e) { /* offline: keep the current state */ }
+}
+function adminHtml() {
+  if (!net.hasMe()) return '';
+  if (P.isAdmin()) return `<section class="lb-card pf-admin"><h2>🛡️ מנהל</h2>
+      <p class="lb-note">אצלך כל העולמות והכלים פתוחים, והזריקות מתמלאות בכל כניסה ללובי. כוכבים, שיאים ומשחקים מדורגים לא משתנים.</p>
+      <form class="lb-form" data-form="admin-search"><label for="pfAdminQ">לתת זריקות לשחקן</label><div class="inl"><input id="pfAdminQ" name="q" placeholder="חיפוש לפי כינוי (ריק = החדשים)" autocomplete="off"><button>לחפש</button></div><p class="err" aria-live="polite"></p></form>
+      <div id="pfAdminList" class="pf-admin-list" aria-live="polite"></div></section>`;
+  return `<details class="lb-card pf-admin-claim"><summary>קוד מנהל</summary>
+      <form class="lb-form" data-form="admin-claim"><label for="pfAdminCode">קוד חד־פעמי של בעל המשחק</label><div class="inl"><input id="pfAdminCode" name="code" dir="ltr" autocomplete="off" placeholder="XXXX-XXXX-XXXX"><button>לאשר</button></div><p class="err" aria-live="polite"></p></form></details>`;
+}
+async function loadAdminList(q) {
+  const box = $('#pfAdminList'); if (!box || !P.isAdmin()) return;
+  box.innerHTML = '<p class="lb-note">טוען…</p>';
+  try {
+    const rows = (await net.adminPlayers(q)) || [];
+    box.innerHTML = rows.length ? `<ul class="pf-admin-rows">${rows.map((r) => `<li><span class="pf-admin-who"><b>${esc(r.nickname)}</b><small>★ ${+r.stars || 0} · מ־${esc(String(r.joined || ''))}</small></span>
+        <span class="pf-admin-give">${[5, 10, 25].map((n) => `<button class="chip" data-act="admin-give" data-id="${esc(r.id)}" data-n="${n}" data-nick="${esc(r.nickname)}" aria-label="לתת ${n} זריקות ל${esc(r.nickname)}">+${n} ⚡</button>`).join('')}</span></li>`).join('')}</ul>`
+      : '<p class="lb-note">לא נמצאו שחקנים.</p>';
+  } catch (e) { box.innerHTML = '<p class="lb-note">לא הצלחנו לטעון את הרשימה. נסה שוב.</p>'; }
+}
 let claimAt = 0;
 async function claimGifts() {
   if (!net.hasMe() || !net.claimEnergy || Date.now() - claimAt < 30000) return;
@@ -713,7 +743,7 @@ async function claimGifts() {
     if (total > 0) {
       EN.add(total, 'gift');
       const from = (r && r.from) || [];
-      const lines = from.length ? from.map((f) => f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
+      const lines = from.length ? from.map((f) => f.kind === 'admin' ? `🛡️ המנהל שלח לך ${EN.label(f.amount)} ⚡` : f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
       lines.slice(0, 3).forEach((t, i) => setTimeout(() => toast('🎁 ' + t), i * 2700));
       sfx('coin'); refreshEnergyChips();
     }
@@ -1402,6 +1432,7 @@ function renderProfile() {
       <div class="pf-agrid">${achs.map((a) => { const got = have.has(a.id); const hid = !got && a.hidden; const wn = a.world ? worldOf(a.world).name : a.meta ? 'מסע' : ''; return `<div class="pf-a ${got ? 'got' : ''} ${hid ? 'hid' : ''}" title="${hid ? 'הישג סודי' : esc(a.desc)}"><span class="pf-aic">${hid ? '?' : ACH_ICON[a.icon] || '🏅'}</span><b>${hid ? 'הישג סודי' : esc(a.name)}</b><small>${hid ? 'תגלה כשתשיג' : esc(a.desc)}</small>${wn && !hid ? `<em>${esc(wn)}</em>` : ''}</div>`; }).join('')}</div>
     </section>
     ${dreamsProfileHtml(p)}
+    ${adminHtml()}
     ${settingsHtml()}
     <section class="lb-card pf-recover"><h2>להעביר את השחקן למכשיר אחר</h2>
       ${me ? `<p class="lb-note">קוד השחזור מעביר את השחקן, הכוכבים והקבוצות למכשיר אחר. <b>אל תשלח אותו לאף אחד</b> — מי שמחזיק בו שולט בשחקן שלך.</p>
@@ -1410,6 +1441,7 @@ function renderProfile() {
     </section>
   </div>`);
   refreshMuted();
+  loadAdminList('');
 }
 
 /* -------- T4 F4 + T5 §7.3 settings: sound, "תצוגה ותנועה" (motion, graphics quality when the rendering lane ships it, מצב קל), help */
@@ -2172,6 +2204,14 @@ async function onClick(ev) {
     case 'home': sfx('click'); return go({ k: 'home' });
     case 'reload-home': cache.daily = null; return renderHome();
     case 'profile': sfx('click'); return go({ k: 'profile' });
+    case 'admin-give': {
+      const n = +b.dataset.n || 0; if (!P.isAdmin() || !n) return;
+      b.disabled = true;
+      try { await net.adminGive(id, n); sfx('coin'); toast(`נשלחו ${EN.label(n)} ⚡ ל${b.dataset.nick}. הן יגיעו כשייכנס ללובי.`); }
+      catch (e) { toast('השליחה נכשלה. נסה שוב.'); }
+      finally { b.disabled = false; }
+      return;
+    }
     case 'world': sfx('click'); return go({ k: 'world', id });
     case 'char': return startFree(b.dataset.w, b.dataset.c, { learn: modeNow() === 'learn' });
     case 'continue-free': return continueFree(id, { learn: b.dataset.learn === '1' });
@@ -2292,12 +2332,18 @@ async function onSubmit(ev) {
       if (made && made.id) markSeen(gid, [made.id]);
       sfx('unlock'); toast('האתגר נפתח! שתף אותו בקבוצה'); delete cache.group[gid]; return renderGroup(gid);
     }
+    if (kind === 'admin-claim') {
+      const code = f.code.value.trim(); if (!code) throw new Error('הקלד את הקוד');
+      try { await net.adminClaim(code); } catch (e2) { throw new Error(e2 && e2.code === 'bad_code' ? 'הקוד לא נכון' : (e2 && e2.message) || 'לא הצלחנו לאשר. נסה שוב.'); }
+      P.setAdmin(true); await checkAdmin(); sfx('unlock'); toast('🛡️ אתה המנהל. הכל פתוח אצלך.'); return renderProfile();
+    }
+    if (kind === 'admin-search') { await loadAdminList(f.q.value.trim()); return; }
     if (kind === 'restore') {
       const code = f.code.value.trim(); if (!code) throw new Error('הדבק קוד שחזור');
       const prof = await net.restore(code);
       P.mergeProfile(prof); await P.pushNow(); revealAfterMerge();
       cache.daily = cache.weekly = cache.groups = null; cache.group = {};
-      sfx('unlock'); toast(`השחקן שוחזר. ברוך שובך, ${prof.nickname}!`); return renderProfile();
+      checkAdmin(); sfx('unlock'); toast(`השחקן שוחזר. ברוך שובך, ${prof.nickname}!`); return renderProfile();
     }
   } catch (e) {
     if (err) err.textContent = e.message; else toast(e.message);

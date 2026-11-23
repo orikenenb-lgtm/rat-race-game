@@ -95,8 +95,14 @@ export function nextTitle(p = P) {
   const n = TITLES.find((x) => x.min > t);
   return n ? { name: n.name, need: n.min - t, min: n.min } : null;
 }
+/** owner (admin) mode: every world and pawn is open on this device — set only from a server-confirmed rr_admin_status.
+ *  Not stored in progress: stars, records and ranked games are unchanged. */
+let ADMIN = false;
+export function setAdmin(on) { const was = ADMIN; ADMIN = !!on; if (was !== ADMIN) changed(); }
+export function isAdmin() { return ADMIN; }
 export function isUnlocked(worldId) {
   const i = WIDS.indexOf(worldId);
+  if (ADMIN && i >= 0) return true;
   if (i <= 0) return i === 0;
   return isUnlocked(WIDS[i - 1]) && (P.stars[WIDS[i - 1]] || 0) >= 1;
 }
@@ -143,7 +149,7 @@ export function nextGoal() {
 }
 
 /* ---------------- pawns */
-export function pawnUnlocked(id, p = P) { const x = PAWNS.find((q) => q.id === id); return !!x && totalStars(p) >= x.need; }
+export function pawnUnlocked(id, p = P) { const x = PAWNS.find((q) => q.id === id); return !!x && (ADMIN || totalStars(p) >= x.need); }
 export function unlockedPawns(p = P) { return PAWNS.filter((x) => pawnUnlocked(x.id, p)).map((x) => x.id); }
 export function setPawn(id) { if (!pawnUnlocked(id)) return false; P.pawn = id; P.pawnChosenAt = Date.now(); changed(); scheduleSync(); return true; }
 export function setPawnColor(hex) { if (!PAWN_COLORS.some((c) => c.hex === hex)) return false; P.pawnColor = hex; changed(); return true; }
