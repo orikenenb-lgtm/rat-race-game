@@ -4,7 +4,7 @@
 // cost); every exported function catches its own errors. Styles live in css/stability.css (#board2d / .b2d-*).
 import { boardInfo } from '../engine.js';
 import { reducedMotion } from '../motion.js'; // T5: the in-app motion setting wins over the OS (CR-R1)
-import { MOTION, labelColor, worldStyle, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
+import { MOTION, labelColor, worldStyle, WORLD_STYLE, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
 import { bus } from '../bus.js';
 import { tileText, tileEmoji } from './tiles.js';
 
@@ -113,7 +113,9 @@ export function buildWorld(w) {
     let tiles = [];
     try { tiles = [...boardInfo(w.id)]; } catch (e) { tiles = (w && w.board ? [...w.board] : []).map((ch, i) => ({ index: i, name: '', color: '#ddd', ink: '#222', icon: '' })); }
     n = tiles.length || 40; side = Math.max(1, Math.round(n / 4));
-    const T = hist ? HISTORY_COLORS : ((w && w.theme) || {});
+    // worlds wave 2: later worlds (w5 …) take their board look from WORLD_STYLE like the 3D scene (the engine theme is legacy data there)
+    const late = !hist && w && !/^w[1-4]$/.test(w.id) && WORLD_STYLE[w.id];
+    const T = hist ? HISTORY_COLORS : late ? { board: late.board, boardEdge: late.edge, center: late.center } : ((w && w.theme) || {});
     boardEl.style.setProperty('--b2d-board', T.board || '#f6efe2');
     boardEl.style.setProperty('--b2d-edge', T.boardEdge || '#6b4430');
     boardEl.style.setProperty('--b2d-center', T.center || '#efe3cb');
@@ -256,6 +258,7 @@ function emitPick(key, x, y) {
   for (const f of [...pickCbs]) { try { f(key, { x, y }); } catch (e) { warn(e); } }
   try { bus.emit('city:pick', { key, x, y, source: '2d' }); } catch (e) { warn(e); }
 }
+const PLANT_DOT = { green: '🟢', amber: '🟠', red: '🔴' };
 /** card look per level (T5 §5.3): data-level / data-kind, pips, corner badges, accessible name T5-C2 */
 function paintLevel(it, L) {
   const c = it.el; it.level = L;
@@ -266,6 +269,10 @@ function paintLevel(it, L) {
   if (L) {
     hidden(el('span', 'b2d-pips', c, pipsText(L)));
     if (L.kind === 'occ' && (L.closed || L.wing)) hidden(el('span', 'b2d-corner-b', c, L.closed ? '⛔' : '◧'));   // w5: closed asset / closed wing
+    if (L.kind === 'plant') {   // w6: the condition light as a corner dot (the pips and the accessible name carry it too); ordered ⏳, mothballed 💤
+      hidden(el('span', 'b2d-corner-b', c, L.pending ? '⏳' : L.mothball ? '💤' : L.down ? '🔴' : PLANT_DOT[L.light] || '🟢'));
+      c.dataset.light = L.pending || L.mothball ? 'off' : L.down ? 'red' : L.light; c.dataset.run = L.running ? '1' : '0';
+    } else { delete c.dataset.light; delete c.dataset.run; }
     if (L.kind === 'biz') {
       const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');
       hidden(el('span', 'b2d-corner-b', c, corner));

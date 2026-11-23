@@ -30,6 +30,11 @@ export const WORLD_STYLE = Object.freeze({
   // coral accent #ff7a59, ink #9a3412, palms, 🌴. The doc's sand #f3e2c0 is ΔE76 7.6 from w3's sand and 9.6 from h (rule: ≥ 10), so
   // the board is the warmer peach sand #fdd5b8 (ΔE 11.1 to w3, 12.6 to h, 17.1 to w1); the engine theme's #f3e2c0 is legacy only.
   w5: { name: 'עיר התיירות', mood: 'golden hour beach', sky: ['#ffd6a5', '#48cae4'], board: '#fdd5b8', edge: '#9a3412', center: '#fbe9c9', decor: 'palms', accent: '#ff7a59', accent2: '#48cae4', accentInk: ['#9a3412', '#ff9f7f'], rim: '#ff7a59', rimGlow: false, motif: 'palms', caption: 'המפרץ שלך', sea: '#2ec4d6' },
+  // worlds wave 2 — w6 אזור התעשייה (docs/full-upgrade/worlds/w6-industry.md "Visual language"): industrial morning haze, sky #cfd8dc →
+  // #f5f0e6, steel edge #4b5563, safety orange #f97316, ink #9a3412, chimneys (decor 'stacks'), 🏭. The doc's concrete #d6d3cd is ΔE76 9.2
+  // from h's newsprint (rule: ≥ 10), so the board is a cooler concrete #c9cbcc (ΔE 13.3 to h, 15.0 to w4, 15.3 to w1, 23.6 to w5); the
+  // engine theme's #d6d3cd is legacy only. The dark accent ink is #fb923c (w5 already owns #ff9f7f).
+  w6: { name: 'אזור התעשייה', mood: 'industrial morning haze', sky: ['#cfd8dc', '#f5f0e6'], board: '#c9cbcc', edge: '#4b5563', center: '#e7e5e4', decor: 'stacks', accent: '#f97316', accent2: '#fbbf24', accentInk: ['#9a3412', '#fb923c'], rim: '#f97316', rimGlow: false, motif: 'gears', caption: 'המפעל שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -46,6 +51,7 @@ export const CHAR_STYLE = Object.freeze({
   importer: '#c2410c', exporter: '#4d7c0f', captain: '#0e7490',
   founder: '#db2777', engineer: '#64748b', social: '#16a34a',
   hotelier: '#0e7490', restaurateur: '#e8833a', promoter: '#c026d3',   // w5
+  opseng: '#0f766e', heir: '#b45309', trader: '#475569',                // w6
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -66,7 +72,9 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   factory: '🏭', gold: '🥇', campus: '🏫', datacenter: '🖥️', rocket: '🚀', foundation: '💗', home_family: '🏡', wedding: '💍', university: '🎓', pension: '🏝️',
   index_fund: '📊', side_hustle: '🛠️', hospital: '🏥', skyline: '🏙️', crane: '🏗️', turbine: '🌬️', time_machine: '🕰️', ticker_board: '📊',
   // w5 model keys (procedural stand-ins in 3D, js/render/kit3d.js RESORT_KIT; no .glb files)
-  hotel_beach: '🏨', resort: '🏝️', spa: '♨️', conference: '🏛️', waterpark: '🌊', apartments: '🏘️', restaurant: '🍽️', dive_center: '🤿', staff_housing: '🏢' });
+  hotel_beach: '🏨', resort: '🏝️', spa: '♨️', conference: '🏛️', waterpark: '🌊', apartments: '🏘️', restaurant: '🍽️', dive_center: '🤿', staff_housing: '🏢',
+  // w6 model keys (procedural stand-ins in 3D, js/render/standins3d.js; no .glb files). warehouse keeps its 📦.
+  factory_cnc: '⚙️', factory_plastic: '🧴', factory_food: '🥫', factory_recycle: '♻️', factory_metal: '🔩', factory_pack: '📦' });
 export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
 
 
@@ -79,6 +87,10 @@ const HINTS = ['כדי להתייצב: רווח ממוצע חיובי לאורך
 const HINT_UP = 'אפשר לשדרג במשבצת "שדרוג" בלוח.';
 
 const int = (x, d = 0) => (Number.isFinite(Number(x)) ? Math.round(Number(x)) : d);
+/** w6 condition light (plant.js cityModels condLight): the words a light stands for (light + pips: never colour alone). */
+export const PLANT_LIGHTS = Object.freeze(['green', 'amber', 'red']);
+export const PLANT_LIGHT_HE = Object.freeze({ green: 'תקין', amber: 'שחוק', red: 'במצב ירוד' });
+export const PLANT_LIGHT_COLOR = Object.freeze({ green: '#22c55e', amber: '#f59e0b', red: '#ef4444', off: '#6b7280' });
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
 export function normLevel(level) {
   if (!level || typeof level !== 'object') return null;
@@ -97,6 +109,17 @@ export function normLevel(level) {
     const pct = closed ? 0 : Math.max(0, Math.min(100, Number.isFinite(Number(level.occ)) ? Math.round(Number(level.occ) * 100) : n * 10));
     return { kind: 'occ', n, of: 10, pct, occ: pct / 100, closed, wing: !!level.wing, activity: null, trouble: false };   // occ kept: normLevel(normLevel(x)) = normLevel(x)
   }
+  if (level.kind === 'plant') {   // w6: a production line (plant.js cityModels): condition pips 1–3 + light, running / down / ordered / mothballed
+    const n = Math.max(1, Math.min(3, int(level.n, 2)));
+    const light = PLANT_LIGHTS.includes(level.light) ? level.light : n >= 3 ? 'green' : n === 2 ? 'amber' : 'red';
+    const cond = Number.isFinite(Number(level.cond)) ? Math.max(0, Math.min(100, Math.round(Number(level.cond)))) : null;
+    const pending = !!level.pending, mothball = !pending && !!level.mothball, down = !pending && !mothball && !!level.down;
+    const util = Number.isFinite(Number(level.util)) ? Math.max(0, Math.round(Number(level.util) * 1000) / 1000) : 0;
+    const running = !pending && !mothball && !down && level.running !== false && util > 0;
+    const shift = Math.max(1, Math.min(3, int(level.shift, 1)));
+    const hazard = ['low', 'mid', 'high'].includes(level.hazard) ? level.hazard : null;
+    return { kind: 'plant', n, of: 3, light, cond, running, down, pending, mothball, util, shift, hazard, activity: down ? { breakdown: true } : null, trouble: false };
+  }
   return null;
 }
 /** T5-L0/L1/L2 */
@@ -104,6 +127,13 @@ export function levelText(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'upgrade') return `שדרוגים: ${L.n} מתוך ${L.of}`;
   if (L.kind === 'occ') return L.closed ? 'סגור עכשיו' : `תפוסה ${L.pct}%${L.wing ? ' · אגף סגור' : ''}`;
+  if (L.kind === 'plant') {
+    if (L.pending) return 'בדרך: הקו עוד לא הגיע';
+    const st = `מצב ${L.cond != null ? L.cond + ' · ' : ''}${PLANT_LIGHT_HE[L.light]}`;
+    if (L.mothball) return `${st} · מושבת זמנית`;
+    if (L.down) return `${st} · בתקלה, לא מייצר`;
+    return `${st} · ${L.running ? `ניצולת ${Math.round(L.util * 100)}%` : 'עומד בלי הזמנות'}${L.shift > 1 ? ` · ${L.shift} משמרות` : ''}`;
+  }
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
 /** T5-H0…H3 / T5-HU */
@@ -111,12 +141,15 @@ export function levelHint(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'upgrade') return L.n < L.of ? HINT_UP : '';
   if (L.kind === 'occ') return L.closed ? 'סגור החודש: אין הכנסה, אבל חלק מהעלויות הקבועות ממשיכות.' : 'החלונות הדלוקים = התפוסה. בעונה המלון מתמלא; בשפל מחיר נמוך ממלא חדרים.';
+  if (L.kind === 'plant') return L.pending ? 'שילמת מקדמה. הקו מגיע אחרי חצי שנה, ורק אז מתחיל לייצר.' : L.mothball ? 'מושבת: משלם רק חלק מהעלויות הקבועות, המצב קפוא. אפשר להפעיל מחדש בלוח קווי הייצור.'
+    : L.down ? 'הקו בתקלה: אין ייצור עד שהתיקון נגמר, והעלויות הקבועות ממשיכות.' : 'הנורה והנקודות = מצב הקו. מצב נמוך = יותר תקלות ושווי נמוך יותר. תחזוקה בלוח קווי הייצור.';
   return HINTS[L.n];
 }
 /** '●●○' — 2D pips (visual only, aria-hidden). */
 export function pipsText(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'occ') { if (L.closed) return '🔒'; const k = Math.round(L.n / 2); return '▮'.repeat(k) + '▯'.repeat(5 - k); }   // 5 windows, each 2 deciles
+  if (L.kind === 'plant' && L.pending) return '⏳';   // w6: an ordered line has no condition to show yet
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -140,6 +173,7 @@ export function kitParts(level) {
   if (!L) return p;
   if (L.kind === 'upgrade') { p.band = L.n >= 1; p.dome = L.n >= 2; return p; }
   if (L.kind === 'occ') { p.windows = L.n; p.closed = L.closed; p.wing = L.wing; return p; }   // drawn on the model itself (standins3d.js)
+  if (L.kind === 'plant') { p.light = L.light; p.pips = L.n; p.conveyor = L.running; p.down = L.down; p.pending = L.pending; p.mothball = L.mothball; return p; }   // w6: on the model (standins3d.js paintPlant)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }
   if (L.n >= 1) p.sign = true;

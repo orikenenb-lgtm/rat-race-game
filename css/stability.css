@@ -129,6 +129,15 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 .b2d-m-neon .b2d-center{background-image:linear-gradient(rgba(255,79,216,.22) 1px,transparent 1px),linear-gradient(90deg,rgba(34,211,238,.18) 1px,transparent 1px);background-size:18px 18px}
 .b2d-m-waves .b2d-center{background-image:repeating-linear-gradient(170deg,rgba(14,165,233,.14) 0 4px,transparent 4px 14px)}
 .b2d-m-stars .b2d-center{background-image:radial-gradient(rgba(109,40,217,.28) 1px,transparent 1.5px),radial-gradient(rgba(34,211,238,.28) 1px,transparent 1.5px);background-size:22px 22px,31px 31px;background-position:0 0,11px 7px}
+.b2d-m-gears .b2d-center{background-image:repeating-linear-gradient(135deg,rgba(249,115,22,.16) 0 6px,transparent 6px 18px),linear-gradient(rgba(75,85,99,.12) 1px,transparent 1px);background-size:auto,16px 16px}
+/* w6 production lines: the condition light also colours the card border; a running line shows a moving conveyor strip (never with reduced motion) */
+.b2d-card[data-kind="plant"][data-light="green"]{border-color:#15803d}.b2d-card[data-kind="plant"][data-light="amber"]{border-color:#b45309}
+.b2d-card[data-kind="plant"][data-light="red"]{border-color:#b91c1c;border-style:dashed}.b2d-card[data-kind="plant"][data-light="off"]{border-color:#6b7280;border-style:dotted}
+.b2d-card[data-kind="plant"][data-run="1"]::after{content:"";position:absolute;inset-inline:10%;bottom:9px;height:4px;border-radius:2px;pointer-events:none;
+  background:repeating-linear-gradient(90deg,#374151 0 6px,#9ca3af 6px 9px);background-size:18px 4px;animation:b2dBelt 1.2s linear infinite}
+@keyframes b2dBelt{to{background-position:18px 0}}
+:root[data-motion=reduce] .b2d-card[data-kind="plant"]::after{animation:none}
+@media (prefers-reduced-motion:reduce){.b2d-card[data-kind="plant"]::after{animation:none}}
 .b2d-m-news .b2d-center{background-image:repeating-linear-gradient(0deg,rgba(91,65,39,.16) 0 1px,transparent 1px 12px)}
 :root[data-motion=reduce] .b2d-card,:root[data-motion=reduce] .b2d-pawn{transition:none}
 /* dense city grids (6–8 per row): the short label goes; the card's accessible name keeps it (12 px floor, review m-6) */

@@ -25,6 +25,8 @@ export const TILE_TEXT = Object.freeze({
   // w5 עיר התיירות — tile N (js/worlds/mech/season.js tiles.N). Number-free until prepareWorldText() built the text from the module's
   // real constants (MODULE_TEXT below).
   allot: { short: 'הקצאה', desc: 'מפעיל תיירות רוצה חלק מהחדרים של המלון שלך לכמה חודשים בהנחה, ומשלם חלק מראש. אפשר לקבל, להציע הנחה קטנה יותר, או לוותר.' },
+  // w6 אזור התעשייה — tile C (js/worlds/mech/plant.js tiles.C). Number-free until prepareWorldText() built it from CONTRACT.
+  contract: { short: 'חוזה', desc: 'לקוח גדול מציע חוזה אספקה ארוך על חלק מהקיבולת של קו, במחיר נמוך ממחיר השוק. אפשר לחתום, לבקש הנחה קטנה יותר, או לוותר.' },
 });
 
 /** Per-world name overrides from the world data (js/worlds/w*.js tilesFor(...)) → their own short name / description. */
@@ -36,6 +38,8 @@ const BY_NAME = Object.freeze({
   'פיתוי': { short: 'פיתוי', desc: 'משהו נוצץ לקנות, או הוצאה שאי אפשר לדחות. כסף שיוצא ולא חוזר.' },
   'כותרות': { short: 'כותרות', desc: 'כותרת אמיתית מהתקופה, ואפשר לקנות או למכור קרן מחקה מדד במחיר של אז.' },
   // w5: the crisis tile (w5.crises: a regional slump on the beach, an operation, a city-wide outage)
+  // w6: the crisis tile (w6.crises: the big customer goes bankrupt, a fire in the raw-material store, an operation)
+  'משבר בתעשייה': { short: 'משבר', desc: 'משבר בתעשייה: לקוח גדול קורס, שריפה במחסן או חודש בלי משכורת. כרית מזומן ולקוחות מפוזרים עוזרים לעבור אותו.' },
   'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
 /* ---------- worlds wave 1: module tiles get their text from the module's own constants (no copied numbers that drift) */
@@ -43,6 +47,7 @@ const pctW = (x) => `${Math.round(x * 100)}%`;
 const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
 /** mechanic id → (its module namespace) → { tile type: {short, desc} } */
 const MODULE_TEXT = {
+  plant: (M) => (M && M.CONTRACT ? { contract: { short: 'חוזה', desc: `לקוח מציע חוזה ל־${M.CONTRACT.months} חודשים על ${pctW(M.CONTRACT.volMin)}–${pctW(M.CONTRACT.volMin + M.CONTRACT.volSpan)} מהקיבולת של קו, ב־${pctW(1 - M.CONTRACT.price)} פחות ממחיר השוק. אפשר לחתום, לבקש רק ${pctW(1 - M.CONTRACT.counterPrice)} הנחה, או לוותר.` } } : {}),
   season: (M) => (M && M.ALLOT ? { allot: { short: 'הקצאה', desc: `מפעיל תיירות רוצה חלק מהחדרים של המלון שלך ל־${M.ALLOT.months} חודשים, ב־${pctW(M.ALLOT.disc)} הנחה, ו${partW(M.ALLOT.upfront)} מראש. אפשר לקבל, להציע ${pctW(M.ALLOT.counterDisc)} הנחה במקום, או לוותר.` } } : {}),
 };
 const MOD_TYPE = {};   // tile type → {short, desc}, filled by prepareWorldText
@@ -67,7 +72,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -78,6 +83,7 @@ export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, 
 export const DEAL_WORDS = Object.freeze({
   re: 'דירות', biz: 'עסקים קטנים', tower: 'דירות ובניינים', mall: 'חנויות ומרכזים מסחריים', hotel: 'מלונות וצימרים',
   ship: 'ספינות', warehouse: 'יבואנים ומחסנים', factory: 'מפעלים', datacenter: 'חוות שרתים', campus: 'קמפוסים ומשרדים',
+  cnc: 'קווי CNC', plastic: 'מכונות הזרקה', food: 'מפעלי מזון', recycle: 'מפעלי מיחזור', metal: 'מסגריות', pack: 'קווי אריזה',   // w6
   resort: 'ריזורטים', spa: 'ספא', conference: 'כנסים', waterpark: 'פארקי מים', apts: 'דירות נופש', housing: 'מגורי עובדים', restaurant: 'מסעדות', dive: 'צלילה',   // w5
   'tk:GOLD': 'זהב', 'tk:USD': 'דולרים', 'tk:MADAD': 'קרן מדד', 'tk:INDX': 'מדד החדשנות', 'tk:IDX': 'קרן מדד', 'tk:AGAH': 'אג"ח ממשלתי', stock: 'מניות', crypto: 'קריפטו',
 });
@@ -88,12 +94,15 @@ export const MARKET_WORDS = Object.freeze({
   loss: { t: 'חודש של הפסדים' }, reval: { t: 'שווי הנכסים משתנה' }, fx: { t: 'הדולר זז' }, gold: { t: 'מחיר הזהב זז', trade: true },
   exitwave: { t: 'גל אקזיטים' }, markdown: { t: 'ירידת שווי לסטארט־אפים' }, match: { t: 'קרן שמכפילה השקעה' },
   tourism: { t: 'התיירים באים יותר או פחות' },   // w5: demand shocks, a new flight line, a storm, a mega-resort
+  // w6 module market cards (plant.js market: c.mk): shocks to the lines' costs, staff, demand and supply
+  'mk:tariff': { t: 'חשמל יקר' }, 'mk:workers': { t: 'מחסור בעובדים' }, 'mk:export': { t: 'הזמנת יצוא' }, 'mk:raw': { t: 'מחסור בחומרי גלם' },
+  'mk:inspect': { t: 'ביקורת בטיחות' }, 'mk:grant': { t: 'מענק אוטומציה' },
 });
 const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH', 'IDX']);
 /** deal card → DEAL_WORDS key */
 export function dealKind(c) { return !c ? '' : c.crypto ? 'crypto' : c.tk ? (KNOWN_TK.has(c.tk) ? 'tk:' + c.tk : 'stock') : c.k || ''; }
 /** market card → MARKET_WORDS key */
-export function marketKind(c) { return !c ? '' : c.crypto ? 'crypto' : c.k || ''; }
+export function marketKind(c) { return !c ? '' : c.crypto ? 'crypto' : c.k || (c.mk ? 'mk:' + c.mk : ''); }   // w6: module cards carry mk (named only when MARKET_WORDS has it)
 const uniq = (a) => [...new Set(a.filter(Boolean))];
 const listHe = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' או ' + xs[xs.length - 1]);
 /** the kinds (in deck order) of a world's deal / market deck → { kinds, words } — only kinds with a word are named */

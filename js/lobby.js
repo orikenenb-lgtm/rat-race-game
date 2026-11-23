@@ -678,6 +678,7 @@ function nearMissText(end) {
   if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
   if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
   if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
+  if (end.starsBlockedBy && end.starsBlockedBy.label) return `יצאת בזמן של ★★★, אבל ${end.starsBlockedBy.label}.`;   // worlds: a module's star rule (w6)
   return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
 }
 const completedAny = (p = P.getProgress()) => (p.gamesPlayed || 0) + (p.learnGames || 0) > 0;
@@ -2005,20 +2006,22 @@ function happyGateHtml(e, w, stars) {
   const ls = end.lifeSummary || {};
   const happy = end.happiness ?? ls.happiness;
   const byFund = !!end.starsBlockedByFund; const byHappy = !!end.starsBlockedByHappiness;
-  if (happy == null && !byFund) return '';
+  const byMod = end.starsBlockedBy && end.starsBlockedBy.label ? end.starsBlockedBy : null;   // worlds: a module's own star rule (w6: no safety stop in 12 months)
+  if (happy == null && !byFund && !byMod) return '';
   const T = e.worldId === 'h' ? null : safe(() => starThresholds(w, e.charId));
   const need = int(T && T.happy, 60); const fundNeed = int(T && T.fundMonths, 3);
   const timeOk = T ? e.months <= T.t3 : true; const happyOk = happy == null ? true : happy >= need;
-  if (!byHappy && !byFund && happyOk) return '';
+  if (!byHappy && !byFund && !byMod && happyOk) return '';
   // fund months are not always in the end payload: ✗ when the engine says so, ✓ when known, otherwise neutral
   const fm = end.emergency && end.emergency.months != null ? +end.emergency.months : ls.emergencyMonths != null ? +ls.emergencyMonths : null;
   const fundCls = byFund ? 'no' : fm != null ? (fm >= fundNeed ? 'ok' : 'no') : 'na';
   const fundMark = byFund ? '✗' : fm != null ? (fm >= fundNeed ? '✓' : '✗') : '';
-  const head = byFund && !byHappy ? FUND_MSG.replace('3 חודשים', `${fundNeed} חודשים`) : byHappy ? 'הכסף היה שם — האושר לא.' : 'מה חסר ל־★★★';
+  const head = byMod && !byFund && !byHappy ? 'מה חסר ל־★★★' : byFund && !byHappy ? FUND_MSG.replace('3 חודשים', `${fundNeed} חודשים`) : byHappy ? 'הכסף היה שם — האושר לא.' : 'מה חסר ל־★★★';
   return `<div class="end-gate ${byFund ? 'fund' : ''}"><b>${esc(head)}</b>
     <span class="${timeOk ? 'ok' : 'no'}">⏱️ ${T ? `לצאת תוך ${int(T.t3)} חודשים` : 'מהירות'} ${timeOk ? '✓' : `✗ (${int(e.months)})`}</span>
     ${happy != null ? `<span class="${happyOk ? 'ok' : 'no'}">😊 אושר ${need}+ ${happyOk ? '✓' : `✗ (${Math.round(happy)})`}</span>` : ''}
     <span class="${fundCls}">🐷 קרן חירום ${fundNeed} חודשים ${fundMark}</span>
+    ${byMod ? `<span class="no">🦺 ${esc(byMod.label.replace(/^★+\s*/, ''))} ✗</span>` : ''}
     ${byFund && byHappy ? `<small>${esc(FUND_MSG.replace('3 חודשים', `${fundNeed} חודשים`))}</small>` : ''}</div>`;
 }
 const decText = (d) => [d.c, d.o].filter(Boolean).join(' ← ');

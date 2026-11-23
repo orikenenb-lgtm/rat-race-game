@@ -1,4 +1,4 @@
-// w5 עיר התיירות — procedural 3D stand-ins for the world's model keys (w5.js `models`: hotel_beach, resort, spa, conference,
+// w5 עיר התיירות + w6 אזור התעשייה — procedural 3D stand-ins for the world's model keys (w5.js `models`: hotel_beach, resort, spa, conference,
 // waterpark, apartments, restaurant, dive_center, staff_housing). No .glb exists for them, so scene.js never requests one
 // (worldModelNames skips STANDIN names) and builds these instead — never a 404, never a grey placeholder box.
 //
@@ -128,13 +128,141 @@ const BUILD = {
     return g;
   },
 };
-/** Model names that are built here (no GLB is ever requested for them). */
-export const STANDIN_NAMES = Object.freeze(Object.keys(BUILD));
-export function hasStandin(name) { return Object.prototype.hasOwnProperty.call(BUILD, String(name || '').split('/').pop()); }
+/* ---------------------------------------------------------------- w6 אזור התעשייה: production lines
+   plant.js cityModels → {cond, condLight, condPips, running, down, pending, mothball, shift, hazardBand, util}, normalised by
+   vocab.normLevel kind 'plant'. Every line carries (userData): `lamp` (a condition light on a pole: green / amber / red, grey when
+   stopped on purpose), `pips` (3 condition pips on the facade: the shape that does not rely on colour), `belt` (a conveyor with crates
+   that scene.js moves while the line runs — never under reduced motion), `scaff` (a scaffold shown while an ordered line is still on its
+   way, the shed itself drawn as a pale frame) and `shutter` (a closed door when the line is mothballed). paintPlant() is the only writer. */
+const PIP_ON = '#f8fafc', PIP_OFF = '#1f2937';
+export const PLANT_LAMP = Object.freeze({ green: '#22c55e', amber: '#f59e0b', red: '#ef4444', off: '#6b7280' });
+/** a sawtooth shed (the classic factory roof): body + n roof teeth along x; returns the body meshes (for the "on its way" frame) */
+function shed(g, { w, d, h, body, roof, teeth = 3, x = 0, z = 0 }) {
+  const parts = [box(g, w, h, d, body, x, 0, z)];
+  const tw = w / teeth;
+  for (let i = 0; i < teeth; i++) {
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.58, tw * 0.58, d * 0.98, 3), mat(roof));
+    t.rotation.set(-Math.PI / 2, 0, 0); t.position.set(x - w / 2 + tw * (i + 0.5), h + tw * 0.26, z); g.add(t); parts.push(t);
+    const gl = new THREE.Mesh(new THREE.PlaneGeometry(tw * 0.5, tw * 0.36), mat('#bfdbfe', { roughness: 0.2 })); gl.position.set(x - w / 2 + tw * (i + 0.5), h + tw * 0.2, z + d / 2 + 0.004); g.add(gl);
+  }
+  return parts;
+}
+function chimney(g, x, z, h, r = 0.09) { const c = cyl(g, r * 0.85, r, h, '#9ca3af', x, 0, z, 10); const b = cyl(g, r * 0.9, r * 0.9, 0.08, '#ef4444', x, h * 0.78, z, 10); return [c, b]; }
+/** the plant kit every line shares: lamp on a pole, 3 pips on the facade, a conveyor with 4 crates, a scaffold and a shutter (hidden) */
+function plantKit(g, { w, d, h, beltY = 0, beltZ, crate = '#c2410c', door = 0.34 }) {
+  const fz = d / 2;
+  // condition lamp (MeshBasicMaterial: the colour reads in any light) on a pole at the front corner
+  cyl(g, 0.02, 0.025, h * 0.95, '#374151', w / 2 + 0.12, 0, fz - 0.05, 6);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), new THREE.MeshBasicMaterial({ color: PLANT_LAMP.green }));
+  lamp.position.set(w / 2 + 0.12, h * 0.95 + 0.08, fz - 0.05); lamp.name = 'standin:lamp'; g.add(lamp); g.userData.lamp = lamp;
+  // 3 condition pips on the facade
+  const pips = new THREE.InstancedMesh(new THREE.BoxGeometry(0.11, 0.11, 0.02), new THREE.MeshBasicMaterial({ color: '#ffffff' }), 3);
+  pips.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(9).fill(1), 3);
+  const o = new THREE.Object3D();
+  for (let i = 0; i < 3; i++) { o.position.set(-0.18 + i * 0.18, h * 0.78, fz + 0.012); o.updateMatrix(); pips.setMatrixAt(i, o.matrix); }
+  pips.name = 'standin:pips'; pips.castShadow = false; g.add(pips); g.userData.pips = pips;
+  // the door + a shutter that closes it (mothball)
+  box(g, door, h * 0.5, 0.02, '#334155', -w * 0.3, 0, fz + 0.005);
+  const sh = box(g, door + 0.04, h * 0.52, 0.03, '#9ca3af', -w * 0.3, 0, fz + 0.02); sh.visible = false; sh.name = 'standin:shutter'; g.userData.shutter = sh;
+  // conveyor: a dark belt on legs in front of the shed, 4 crates riding it (scene.js moves them while the line runs)
+  const bz = beltZ ?? fz + 0.32, bw = w * 0.92;
+  box(g, bw, 0.05, 0.22, '#1f2937', 0, beltY + 0.18, bz);
+  for (const lx of [-bw / 2 + 0.06, bw / 2 - 0.06]) box(g, 0.04, 0.18, 0.18, '#4b5563', lx, beltY, bz);
+  const crates = [];
+  for (let i = 0; i < 4; i++) { const c = box(g, 0.13, 0.11, 0.14, crate, -bw / 2 + bw * (i + 0.5) / 4, beltY + 0.23, bz); c.name = 'standin:crate'; crates.push(c); }
+  g.userData.belt = { crates, w: bw, x0: -bw / 2, phase: 0, y: beltY + 0.23 };
+  // scaffold (an ordered line that has not arrived): 4 poles + 2 rails, hidden
+  const sc = new THREE.Group(); sc.name = 'standin:scaffold'; sc.visible = false;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(sc, 0.04, h * 1.15, 0.04, '#f59e0b', sx * (w / 2 + 0.06), 0, sz * (d / 2 + 0.06));
+  for (const f of [0.45, 0.95]) box(sc, w + 0.16, 0.035, 0.035, '#f59e0b', 0, h * f, d / 2 + 0.06);
+  g.add(sc); g.userData.scaff = sc;
+}
+function finishPlant(g, body) { g.userData.body = body; g.userData.plant = true; paintPlant(g, null); return g; }
+const PLANT = {
+  factory_cnc() {   // a precise machining hall: blue-grey shed, sawtooth roof, a small exhaust stack
+    const g = new THREE.Group(); const body = shed(g, { w: 1.5, d: 0.95, h: 0.75, body: '#cbd5e1', roof: '#475569' });
+    body.push(...chimney(g, 0.55, -0.32, 1.25, 0.07)); plantKit(g, { w: 1.5, d: 0.95, h: 0.75, crate: '#64748b' }); return finishPlant(g, body);
+  },
+  factory_plastic() {   // injection moulding: a tall white hall with two silos for the pellets
+    const g = new THREE.Group(); const body = shed(g, { w: 1.3, d: 0.9, h: 0.9, body: '#f1f5f9', roof: '#f97316', teeth: 2, x: -0.12 });
+    body.push(cyl(g, 0.16, 0.16, 1.2, '#e2e8f0', 0.68, 0, -0.22, 12), cyl(g, 0.12, 0.12, 1.0, '#fdba74', 0.7, 0, 0.18, 12));
+    plantKit(g, { w: 1.3, d: 0.9, h: 0.9, crate: '#0ea5e9' }); return finishPlant(g, body);
+  },
+  factory_food() {   // a big food plant: long shed, two stacks, a tank
+    const g = new THREE.Group(); const body = shed(g, { w: 1.8, d: 1.0, h: 0.8, body: '#fef3c7', roof: '#b45309', teeth: 4 });
+    body.push(...chimney(g, -0.55, -0.35, 1.5), ...chimney(g, -0.25, -0.35, 1.3), cyl(g, 0.2, 0.2, 0.7, '#e5e7eb', 0.72, 0.8, -0.2, 14));
+    plantKit(g, { w: 1.8, d: 1.0, h: 0.8, crate: '#d97706' }); return finishPlant(g, body);
+  },
+  factory_recycle() {   // recycling: a green shed, a scrap heap and a sorting hopper
+    const g = new THREE.Group(); const body = shed(g, { w: 1.4, d: 0.9, h: 0.7, body: '#bbf7d0', roof: '#166534', teeth: 3 });
+    const heap = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.36, 7), mat('#78716c', { flatShading: true })); heap.position.set(0.62, 0.18, -0.3); g.add(heap); body.push(heap);
+    const hop = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.3, 4, 1, true), mat('#15803d')); hop.position.set(-0.5, 1.0, -0.1); hop.rotation.x = Math.PI; g.add(hop); body.push(hop);
+    plantKit(g, { w: 1.4, d: 0.9, h: 0.7, crate: '#16a34a' }); return finishPlant(g, body);
+  },
+  factory_metal() {   // a metal works: dark steel shed, a gantry crane on top, a stack
+    const g = new THREE.Group(); const body = shed(g, { w: 1.4, d: 0.95, h: 0.8, body: '#9ca3af', roof: '#374151', teeth: 2 });
+    body.push(box(g, 0.06, 0.5, 0.06, '#f59e0b', -0.6, 0.8, 0.3), box(g, 0.06, 0.5, 0.06, '#f59e0b', 0.6, 0.8, 0.3), box(g, 1.3, 0.06, 0.08, '#f59e0b', 0, 1.3, 0.3), ...chimney(g, 0.5, -0.3, 1.4, 0.08));
+    plantKit(g, { w: 1.4, d: 0.95, h: 0.8, crate: '#57534e' }); return finishPlant(g, body);
+  },
+  factory_pack() {   // a packing line: a low wide hall with a loading dock
+    const g = new THREE.Group(); const body = shed(g, { w: 1.7, d: 0.85, h: 0.6, body: '#e7e5e4', roof: '#0f766e', teeth: 3 });
+    body.push(box(g, 0.6, 0.18, 0.3, '#a8a29e', 0.45, 0, 0.56));
+    plantKit(g, { w: 1.7, d: 0.85, h: 0.6, beltZ: 0.72, crate: '#a16207' }); return finishPlant(g, body);
+  },
+};
+/** w6's logistics warehouse (a leased box: no machines, no breakdowns) — w6 only: w3 has a real warehouse.glb (see DIR_BUILD). */
+function warehouse6() {
+  const g = new THREE.Group();
+  const body = [box(g, 1.6, 0.7, 1.0, '#d6d3d1'), box(g, 1.66, 0.06, 1.06, '#f97316', 0, 0.7)];
+  for (let i = 0; i < 3; i++) box(g, 0.34, 0.42, 0.02, i === 1 ? '#475569' : '#64748b', -0.5 + i * 0.5, 0, 0.505);
+  for (let i = 0; i < 3; i++) box(g, 0.24, 0.16, 0.2, '#b45309', -0.55 + i * 0.3, 0, 0.75);
+  g.userData.body = body;
+  return g;
+}
+/** level (normalised, kind 'plant') → lamp colour, lit pips, conveyor on/off, the "on its way" frame, the shutter. null → a neutral fit line. */
+export function paintPlant(g, L) {
+  const ud = g && g.userData; if (!ud || !ud.lamp) return false;
+  const lv = L && L.kind === 'plant' ? L : null;
+  const pending = !!(lv && lv.pending), mothball = !!(lv && lv.mothball), down = !!(lv && lv.down);
+  const light = !lv ? 'green' : pending || mothball ? 'off' : down ? 'red' : lv.light || 'green';
+  ud.lamp.material.color.set(PLANT_LAMP[light] || PLANT_LAMP.green);
+  const lit = pending ? 0 : lv ? Math.max(0, Math.min(3, lv.n | 0)) : 3;
+  const c = new THREE.Color();
+  for (let i = 0; i < 3; i++) { c.set(i < lit ? PIP_ON : PIP_OFF); ud.pips.setColorAt(i, c); }
+  ud.pips.instanceColor.needsUpdate = true;
+  const conveyor = !!(lv ? lv.running : true);
+  for (const cr of ud.belt.crates) cr.visible = !pending;
+  if (ud.scaff) ud.scaff.visible = pending;
+  if (ud.shutter) ud.shutter.visible = mothball;
+  for (const m of ud.body || []) { if (!m.material) continue; m.material.transparent = pending; m.material.opacity = pending ? 0.42 : 1; m.material.depthWrite = !pending; m.material.needsUpdate = true; }
+  ud.plantState = { light, pipsLit: lit, conveyor, ghost: pending, shutter: mothball, shift: lv ? lv.shift || 1 : 1 };
+  return true;
+}
+/** One animation step of a line's conveyor (scene.js calls it per frame while the scene is animating, never under reduced motion). */
+export function stepBelt(g, dt) {
+  const ud = g && g.userData; const b = ud && ud.belt; if (!b || !ud.plantState || !ud.plantState.conveyor) return false;
+  b.phase = (b.phase + dt * 0.12 * (ud.plantState.shift || 1)) % 1;
+  b.crates.forEach((c, i) => { c.position.x = b.x0 + (((i + 0.5) / b.crates.length + b.phase) % 1) * b.w; });
+  return true;
+}
+
+/** Model names that are built here in every world (no GLB is ever requested for them). */
+export const STANDIN_NAMES = Object.freeze([...Object.keys(BUILD), ...Object.keys(PLANT)]);
+/** Names built here only for a given asset folder (a name another world has a real .glb for). */
+const DIR_BUILD = Object.freeze({ w6: Object.freeze({ warehouse: warehouse6 }) });
+const base = (name) => String(name || '').split('/').pop();
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+/** Is `name` (in asset folder `dir`) a procedural stand-in? A 'dir/name' model keeps its own folder. */
+export function hasStandin(name, dir = null) {
+  const s = String(name || ''); const n = base(s); const d = s.includes('/') ? s.split('/')[0] : dir;
+  return own(BUILD, n) || own(PLANT, n) || !!(d && DIR_BUILD[d] && own(DIR_BUILD[d], n));
+}
 /** A fresh stand-in group (own geometry / materials: the caller disposes it with the object). */
-export function buildStandin(name) {
-  const f = BUILD[String(name || '').split('/').pop()]; if (!f) return null;
+export function buildStandin(name, dir = null) {
+  const s = String(name || ''); const n = base(s); const d = s.includes('/') ? s.split('/')[0] : dir;
+  const f = BUILD[n] || PLANT[n] || (d && DIR_BUILD[d] && DIR_BUILD[d][n]); if (!f) return null;
   const g = shadowAll(f()); g.userData.standin = name;
   if (g.userData.win) { g.userData.win.castShadow = false; g.userData.win.receiveShadow = false; }
+  for (const k of ['lamp', 'pips']) if (g.userData[k]) { g.userData[k].castShadow = false; g.userData[k].receiveShadow = false; }
   return g;
 }

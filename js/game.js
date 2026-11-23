@@ -490,7 +490,9 @@ export function cityAudit() {
   // worlds wave 1: the city-piece levels the game set (w5 occupancy: {kind:'occ', n, closed, wing}) beside the engine's own hints
   const levels = Object.fromEntries([...prevLevels].filter(([, L]) => L));
   const occ = Object.fromEntries(E.cityModels(S).filter((m) => m.occDecile != null || m.closed).map((m) => [m.key, { decile: m.occDecile ?? 0, closed: !!m.closed }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ };
+  // w6: the engine's line state per city piece (plant.js cityModels) — tests compare it with levels / scene.levelOf
+  const plant = Object.fromEntries(E.cityModels(S).filter((m) => m.condPips != null).map((m) => [m.key, { pips: m.condPips, light: m.condLight, running: !!m.running, down: !!m.down, pending: !!m.pending, mothball: !!m.mothball }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -501,6 +503,9 @@ function levelOf(entry, m) {
     const row = (((m.worldIndicators || {}).panel || {}).rows || []).find((r) => r.assetId === entry.key);
     return { kind: 'occ', n: entry.occDecile ?? 0, of: 10, occ: entry.occ ?? null, closed: !!entry.closed, wing: !!(row && row.wing) };
   }
+  // w6 (plant.js cityModels): a production line's condition (pips + light), running / down / ordered / mothballed, shift, hazard band
+  if (entry.condPips != null) return { kind: 'plant', n: entry.condPips, of: 3, light: entry.condLight, cond: entry.cond ?? null, running: !!entry.running, down: !!entry.down,
+    pending: !!entry.pending, mothball: !!entry.mothball, util: entry.util ?? 0, shift: entry.shift || 1, hazard: entry.hazardBand || null };
   const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
   const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
   if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
@@ -513,7 +518,7 @@ function syncLevels(animate) {
   for (const e of E.cityModels(S)) {
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && L.kind === 'occ') }); } catch (x) { console.warn(x); }   // w5 occupancy changes every month: no bump
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant')) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state change every month: no bump
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1479,7 +1484,7 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {
   if (!S || S.over || summarized) return;

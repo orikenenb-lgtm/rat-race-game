@@ -71,6 +71,11 @@ export function goalPanelModel(m, o = {}) {
   const gates = [];
   if (fundNow != null && th.fundMonths != null) gates.push({ key: 'fund', text: `קרן חירום: לפחות ${th.fundMonths} חודשי הוצאות`, now: `${fundNow}/${th.fundMonths}`, ok: fundNow >= th.fundMonths });
   if (happyNow != null && th.happy != null) gates.push({ key: 'happy', text: `אושר ${th.happy} לפחות`, now: `${Math.round(happyNow)}/${th.happy}`, ok: Math.round(happyNow) >= th.happy, note: m.life && m.life.happiness !== m.life.happinessBase ? 'בלי השמחה הזמנית' : null });
+  // worlds: a module's own ★★★ rule when the engine exposes it (w6 worldIndicators.plant.starGate: no safety-inspection stop in 12 months)
+  for (const x of Object.values(m.worldIndicators || {})) {
+    const sg = x && typeof x === 'object' ? x.starGate : null;
+    if (sg && sg.label) gates.push({ key: sg.id || 'world', text: String(sg.label).replace(/^★+\s*/, ''), now: sg.ok ? 'כרגע ✓' : 'נעצר', ok: !!sg.ok });
+  }
   let stars = null, starsNote = null;
   if (o.learn) starsNote = 'במשחק לימוד לא אוספים כוכבים — כאן רק לומדים.';
   else if (bench) {
@@ -180,9 +185,13 @@ export function moneyHubModel(m) {
   // worlds wave 1: a world with a panel descriptor (w5 "עונות ותפוסה") opens it from the hub too
   const WI = m.worldIndicators || {};
   if (WI.panel) {
-    const se = WI.season; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
-    const value = se ? `ביקוש ${(Math.round((+se.tour || 0) * 100) / 100).toFixed(2)}${g && g.value != null ? ` · כרית לחורף ${Math.round(g.value * 10) / 10} חודשים` : ''}${se.line ? ` · קו עונתי ${fmtM(se.line)}` : ''}` : (WI.panel.title || '');
-    rows.push({ id: 'world', icon: se ? '🌴' : '🧭', title: WI.panel.title || 'לוח העולם', value, acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : 'לפתוח', on: true }] });
+    const se = WI.season; const pl = WI.plant; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
+    // w6 (plant): lines, utilisation, lines down, runway (metrics values only)
+    const down = pl ? (WI.panel.rows || []).filter((r) => r.down).length : 0;
+    const value = se ? `ביקוש ${(Math.round((+se.tour || 0) * 100) / 100).toFixed(2)}${g && g.value != null ? ` · כרית לחורף ${Math.round(g.value * 10) / 10} חודשים` : ''}${se.line ? ` · קו עונתי ${fmtM(se.line)}` : ''}`
+      : pl ? `${pl.lines} מתוך ${pl.slots} קווים${pl.utilisation != null ? ` · ניצולת ${Math.round(pl.utilisation * 100)}%` : ''}${down ? ` · ${down} בתקלה` : ''}${pl.runway != null ? ` · כרית ${Math.round(pl.runway * 10) / 10} חודשי קבועות` : ''}`
+      : (WI.panel.title || '');
+    rows.push({ id: 'world', icon: se ? '🌴' : pl ? '🏭' : '🧭', title: WI.panel.title || 'לוח העולם', value, acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : pl ? 'תחזוקה, משמרות וחוזים' : 'לפתוח', on: true }] });
   }
   if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
   return { rows, cash: +m.cash || 0, cashText: fmtM(+m.cash || 0) };

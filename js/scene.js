@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
-import { hasStandin, buildStandin, paintWindows } from './render/standins3d.js';   // w5: procedural models, occupancy windows
+import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt } from './render/standins3d.js';   // w5 / w6: procedural models, occupancy windows, production lines
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
@@ -457,7 +457,7 @@ export function worldModelNames(w) {
   for (const t of Object.values(w.tickers || {})) if (t.model) set.add(t.model);
   const dm = DECOR_MODEL[w.theme.decor]; if (dm) set.add(dm);
   if (w.mechanic === 'history' || w.id === 'h') for (const n of HISTORY_MODELS) set.add('history/' + n); // T5 CR-05: only for h
-  return [...set].filter((n) => !hasStandin(n));   // w5: stand-in models are built, never fetched (no 404)
+  return [...set].filter((n) => !hasStandin(n, assetDir(w)));   // w5 / w6: stand-in models are built, never fetched (no 404); w6's warehouse only in w6
 }
 const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine' };
 function landmarkNames(w) {
@@ -539,7 +539,7 @@ function inst(name, dir = assetDir(world)) {
   const g = ready.get(modelUrl(dir, name));
   if (g) return g.clone(true);
   let grp;
-  if (hasStandin(name)) { grp = buildStandin(name); grp.userData.ownTree = true; return grp; }   // w5: procedural, no GLB to swap in later
+  if (hasStandin(name, dir)) { grp = buildStandin(name, dir); grp.userData.ownTree = true; return grp; }   // w5 / w6: procedural, no GLB to swap in later
   if (dir === 'life' && LIFE_FALLBACK[name]) grp = LIFE_FALLBACK[name]();
   else {
     // placeholder so a missing model never breaks the game
@@ -625,6 +625,12 @@ function drawIcon(g, icon, x, y, c) {
       g.fillRect(x - 32, y + 8, 30, 20); g.fillRect(x + 10, y + 8, 20, 36); break;
     case 'news': case 'newspaper':
       g.strokeRect(x - 44, y - 34, 88, 68); g.fillRect(x - 34, y - 24, 68, 12); [0, 14, 28].forEach((d) => g.fillRect(x - 34, y - 4 + d, 30, 6)); g.fillRect(x + 4, y - 4, 30, 34); break;
+    case 'doc': // w6 tile C: a contract page with text lines and a signature
+      g.lineWidth = 7; g.strokeRect(x - 34, y - 46, 68, 88); [-28, -12, 4].forEach((d) => g.fillRect(x - 22, y + d, 44, 6));
+      P(); g.moveTo(x - 22, y + 30); g.quadraticCurveTo(x - 8, y + 14, x + 2, y + 30); g.quadraticCurveTo(x + 12, y + 42, x + 24, y + 24); g.stroke(); break;
+    case 'plane': // w5 tile N
+      P(); g.moveTo(x, y - 48); g.lineTo(x + 8, y - 10); g.lineTo(x + 48, y + 10); g.lineTo(x + 8, y + 4); g.lineTo(x + 6, y + 32); g.lineTo(x + 18, y + 44); g.lineTo(x - 18, y + 44);
+      g.lineTo(x - 6, y + 32); g.lineTo(x - 8, y + 4); g.lineTo(x - 48, y + 10); g.lineTo(x - 8, y - 10); g.closePath(); g.fill(); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -654,10 +660,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -773,10 +779,11 @@ const LIGHTS = {
   sea: { hemi: 1.15, sun: 2.7, exp: 1.04, env: 0.42, sunPos: [10, 24, 12] },
   stars: { hemi: 0.75, sun: 1.5, exp: 1.0, env: 0.36, sunPos: [-8, 20, 10], fill: ['#22d3ee', 10] },
   palms: { hemi: 1.1, sun: 2.6, exp: 1.03, env: 0.4, sunPos: [16, 15, 8], fill: ['#ff9f7f', 4] },   // w5: golden hour, a low warm sun
+  stacks: { hemi: 1.12, sun: 2.2, exp: 1.02, env: 0.38, sunPos: [-11, 21, 13], fill: ['#fbbf24', 3] },  // w6: morning haze, a soft high sun
 };
 
 function clearWorld() {
-  updaters.clear();
+  updaters.clear(); steamHook = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -879,7 +886,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1123,6 +1130,63 @@ function decorPalms(T) {
     const sl = new THREE.Mesh(sailG, std(i % 2 ? '#ff7a59' : '#fff4e6', { roughness: 0.9 })); sl.position.set(0.1, 1.2, 0); sl.scale.set(1, 1, 0.08); b.add(sl);
     b.position.set(x, -1.0, z); b.rotation.y = r; worldGroup.add(b);
     if (cfg.updaters) updaters.add((t) => { b.position.y = -1.0 + Math.sin(t * 1.1 + i) * 0.1; b.rotation.z = Math.sin(t * 0.8 + i) * 0.04; });
+  });
+}
+/** w6 אזור התעשייה: a concrete industrial park in the morning haze — a ring road, chimneys whose steam thickens with the share of your
+ *  lines that are running, a water tower, fences and pallets. One updater also runs the city's conveyors (standins3d.js stepBelt): it
+ *  only ticks while the scene animates and never under reduced motion (the render loop skips updaters then). */
+let steamHook = null;
+function decorStacks(T) {
+  island(32, std('#c2b59b', { roughness: 1 }), '#8a7a5e');   // the dusty Negev ground around the concrete board
+  const road = own(new THREE.Mesh(new THREE.RingGeometry(12.0, 15.2, 72), std('#4b4f56', { roughness: 0.85 })));
+  road.rotation.x = -Math.PI / 2; road.position.y = -0.7; road.receiveShadow = true; worldGroup.add(road);
+  const d = new THREE.Object3D();
+  const dashes = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 0.02, 0.8), std('#fbbf24', { roughness: 0.6 }), 48);
+  for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; d.position.set(Math.sin(a) * 13.6, -0.68, Math.cos(a) * 13.6); d.rotation.set(0, a, 0); d.scale.setScalar(1); d.updateMatrix(); dashes.setMatrixAt(i, d.matrix); }
+  own(dashes); worldGroup.add(dashes);
+  // background halls (plain blocks, instanced) and chimneys, mostly behind the board
+  const halls = scatter(dn(14), 18, 29, { backOnly: true, seed: 17 });
+  const hall = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#ffffff', { roughness: 0.9 }), halls.length);
+  const tones = ['#9ca3af', '#a8a29e', '#8b95a1', '#b5aea3', '#7c8591'];
+  halls.forEach((p, i) => { const w = 2.4 + p.k * 2.4, h = 1.2 + p.k * 1.6; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, Math.atan2(p.x, p.z), 0); d.scale.set(w, h, 1.6 + p.k); d.updateMatrix(); hall.setMatrixAt(i, d.matrix); hall.setColorAt(i, new THREE.Color(tones[i % tones.length])); });
+  hall.castShadow = true; hall.receiveShadow = true; own(hall); worldGroup.add(hall);
+  const sp = scatter(dn(7), 19, 27, { backOnly: true, seed: 29 });
+  const stackG = new THREE.CylinderGeometry(0.42, 0.62, 1, 14), bandG = new THREE.CylinderGeometry(0.46, 0.46, 0.5, 14);
+  const stacks = new THREE.InstancedMesh(stackG, std('#9ca3af', { roughness: 0.8 }), sp.length), bands = new THREE.InstancedMesh(bandG, std('#f97316', { roughness: 0.7 }), sp.length * 2);
+  const tops = [];
+  sp.forEach((p, i) => {
+    const h = 6 + p.k * 5; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, 0, 0); d.scale.set(1, h, 1); d.updateMatrix(); stacks.setMatrixAt(i, d.matrix);
+    for (let k = 0; k < 2; k++) { d.position.set(p.x, -0.72 + h * (0.72 + k * 0.16), p.z); d.scale.set(1, 1, 1); d.updateMatrix(); bands.setMatrixAt(i * 2 + k, d.matrix); }
+    tops.push(new THREE.Vector3(p.x, -0.72 + h + 0.2, p.z));
+  });
+  [stacks, bands].forEach((m) => { m.castShadow = true; own(m); worldGroup.add(m); });
+  // a water tower and a few pallet stacks by the road (front side kept clear by scatter)
+  const wt = new THREE.Group(); const legG = new THREE.CylinderGeometry(0.08, 0.08, 4, 6); disposables.push(legG);
+  for (const [lx, lz] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) { const l = new THREE.Mesh(legG, std('#6b7280')); l.position.set(lx, 2, lz); wt.add(l); }
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 1.6, 18), std('#e5e7eb')); tank.position.y = 4.6; wt.add(tank);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.6, 18), std('#f97316')); cap.position.y = 5.7; wt.add(cap);
+  wt.position.set(-22, -0.72, -10); wt.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.userData.ownMat = true; if (o.geometry !== legG) o.userData.ownGeo = true; } }); worldGroup.add(wt);
+  const pal = scatter(dn(12), 15.8, 18.5, { seed: 41, frontMin: 17.5 });
+  const palM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.5, 0.9), std('#ffffff', { roughness: 0.95 }), pal.length);
+  const pcol = ['#b45309', '#a16207', '#78716c', '#92400e'];
+  pal.forEach((p, i) => { const h = 0.5 + Math.floor(p.k * 3) * 0.5; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, p.a, 0); d.scale.set(1, h / 0.5, 1); d.updateMatrix(); palM.setMatrixAt(i, d.matrix); palM.setColorAt(i, new THREE.Color(pcol[i % pcol.length])); });
+  palM.castShadow = true; own(palM); worldGroup.add(palM);
+  // steam: soft sprites rising from every chimney; how many are visible follows the running share of the player's lines
+  const steamMat = new THREE.SpriteMaterial({ map: soft(), color: '#f5f5f4', transparent: true, depthWrite: false, opacity: 0.55 }); disposables.push(steamMat);
+  const puffs = [];
+  tops.forEach((tp, i) => { for (let k = 0; k < 5; k++) { const s = new THREE.Sprite(steamMat); s.position.copy(tp); s.userData.k = k; s.userData.i = i; s.scale.setScalar(1.2 + k * 0.5); worldGroup.add(s); puffs.push(s); } });
+  const runShare = () => { let n = 0, on = 0; for (const it of city.values()) { const st = it.obj.userData.plantState; if (!st) continue; n++; if (st.conveyor) on++; } return n ? on / n : 0.2; };
+  const placeSteam = (t) => {
+    const share = runShare(); const show = 1 + Math.round(share * 4);
+    for (const s of puffs) { const k = s.userData.k; const ph = ((t * 0.18 + k / 5 + s.userData.i * 0.13) % 1); s.visible = k < show;
+      s.position.set(tops[s.userData.i].x + ph * 1.6, tops[s.userData.i].y + ph * 3.2, tops[s.userData.i].z - ph * 0.6); s.scale.setScalar(1 + ph * 2.4); }
+    steamMat.opacity = 0.25 + share * 0.4;
+  };
+  placeSteam(0);   // a static first frame (also the reduced-motion / low-tier look)
+  steamHook = () => { placeSteam(simT); invalidate(); };   // a line that starts / stops redraws the steam even when nothing animates
+  updaters.add((t, dt) => {
+    placeSteam(t);
+    for (const it of city.values()) stepBelt(it.obj, dt || 0);   // the conveyors of running lines (standins3d.js)
   });
 }
 function decorTrees(T) {
@@ -1523,6 +1587,7 @@ export function bump(key) {
 /* ---------- T5 §5.2: levels (business stages, upgrades), pulses, activity badges */
 function applyLevelParts(it) {
   if (it.level && it.level.kind === 'occ') { paintWindows(it.obj, it.level); return; }   // w5: lit windows = occupancy decile (no kit parts)
+  if (it.level && it.level.kind === 'plant') { paintPlant(it.obj, it.level); return; }    // w6: lamp, pips, conveyor, scaffold, shutter on the model
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1555,6 +1620,7 @@ export function setLevel(key, level, { animate = false } = {}) {
     const down = prev && L && prev.kind === 'biz' && L.kind === 'biz' && L.n < prev.n;
     if (down || (L && L.trouble && !(prev && prev.trouble))) flashBadge(it, 'alert', 1500);
     applyLevelParts(it);
+    if (L && L.kind === 'plant' && steamHook) steamHook();
     const s1 = sOf(it), o = it.obj, now = performance.now();
     const up = !down && animate && !reduced && now - it.lastAnim > 2500; // ≤ 1 level animation per item per payday
     if (up) {
@@ -1576,7 +1642,7 @@ export function pulse(key, kind = 'good') {
 /** highlight(key|null) — brightens the item's plinth rim (taps that are not allowed to open the modal, hover). */
 export function highlight(key) { try { hlKey = key && city.has(key) ? key : null; syncKit(); } catch (e) { console.warn(e); } }
 /** for tests and the info modal: the level object an item currently shows */
-export function levelOf(key) { const it = city.get(key); return it && it.level ? { ...it.level, parts: kitParts(it.level), annex: !!it.annex } : null; }
+export function levelOf(key) { const it = city.get(key); return it && it.level ? { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(it.obj.userData.plantState ? { model: { ...it.obj.userData.plantState, beltPhase: it.obj.userData.belt ? it.obj.userData.belt.phase : null } } : {}) } : null; }
 export function shield(keys) {
   for (const key of keys || []) {
     const it = city.get(key); if (!it) continue;
@@ -1641,7 +1707,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
