@@ -134,5 +134,26 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
   const st = E.createGame({ worldId: 'w4', seed: 9, mode: 'free' }); const before = JSON.stringify(st); model(st); debtSnap(E.metrics(st));
   ok(JSON.stringify(st) === before, 'goalPanelModel / debtSnap leave the engine state unchanged');
 }
+/* 6. worlds wave 1 — w5 (goal type passive12): rule, gap per month, months note, the ladder words and the 💼 world row (engine values only) */
+{
+  const { moneyHubModel, milestoneLadder } = await import('../js/hudgoal.js');
+  await E.ensureWorld('w5');
+  const st = E.createGame({ worldId: 'w5', charId: 'hotelier', seed: 7, mode: 'free' });
+  for (let k = 0; k < 120 && st.month < 5 && !st.over; k++) {
+    if (st.phase === 'roll') E.rollDice(st);
+    let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+    while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+  }
+  const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w5'), st.charId, m.rules) });
+  const p = M.parts[0] || {};
+  ok(m.goalType === 'passive12' && p.key === 'passive12' && p.label.includes('12'), 'w5: one passive12 part with its own label', p);
+  ok(/12 ימי המשכורת/.test(M.rule) && M.rule.includes(p.targetText), 'w5: the rule names the 12-payday average and the target', M.rule);
+  ok(M.met || (M.gaps[0] && M.gaps[0].includes('בחודש בממוצע השנתי') && M.gaps[0].includes(E.fmtM(p.target - p.value))), 'w5: the gap is "חסרים X בחודש בממוצע השנתי" = target − value', M.gaps);
+  ok(p.months == null || p.months >= 12 || (M.pending && M.pending.includes('נספרו')), 'w5: fewer than 12 counted paydays → the "נספרו N מתוך 12" note', { months: p.months, pending: M.pending });
+  ok(milestoneLadder(m).some((x) => /ממוצע שנתי של/.test(x.title)) && !milestoneLadder(m).some((x) => /שווי נקי של/.test(x.title)), 'w5: the ladder speaks of the yearly average, never of net worth');
+  const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world');
+  ok(wr && wr.acts[0].act === 'world' && wr.title === m.worldIndicators.panel.title, 'w5: 💼 has the world-panel row (title from the panel descriptor)', wr);
+  ok(!moneyHubModel(E.metrics(E.createGame({ worldId: 'w1', charId: 'teacher', seed: 1 }))).rows.some((r) => r.id === 'world'), 'w1: no world-panel row');
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);

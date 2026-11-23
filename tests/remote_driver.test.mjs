@@ -88,7 +88,14 @@ for (let i = 0; i < 12 && dA.event; i++) {
 check('choose(): A done for the round → waiting()', dA.waiting() && !dA.event, { w: dA.waiting(), ev: dA.event && dA.event.title });
 const refused = await dA.call('retire', S);
 check('call(): engine calls a room refuses (retire) → {ok:false} without a request', refused.ok === false && refused.code === 'room_refused', refused);
-check('ROOM_CODE maps the 11 allowed mutations', Object.keys(ROOM_CODE).length === 11 && ROOM_CODE.takeLoan === 'L' && ROOM_CODE.resolveStory === 'Q');
+check('ROOM_CODE maps the 12 allowed mutations (+ Z world actions)', Object.keys(ROOM_CODE).length === 12 && ROOM_CODE.takeLoan === 'L' && ROOM_CODE.resolveStory === 'Q' && ROOM_CODE.worldAction === 'Z');
+{ // worlds wave 0: every client room code is allowed by room_core, and the rooms UI offers exactly the server's worlds
+  const RC = await import(pathToFileURL(join(ROOT, 'supabase/functions/room/room_core.js')).href);
+  check('every ROOM_CODE is in room_core ALLOWED (Z included)', Object.values(ROOM_CODE).every((c) => RC.ALLOWED.has(c)));
+  const src = (await import('node:fs')).readFileSync(join(ROOT, 'js/rooms.js'), 'utf8');
+  const m = /ROOM_WORLDS = Object\.freeze\((\[[^\]]*\])\)/.exec(src);
+  check('rooms.js ROOM_WORLDS = room_core WORLDS (no lazy world in a room the server cannot run)', !!m && JSON.stringify(JSON.parse(m[1].replace(/'/g, '"'))) === JSON.stringify(RC.WORLDS), m && m[1]);
+}
 
 /* ---------------- lost answer → same action_id retried (applied once) */
 const vB = dB.stateVersion; const acts0 = NET.roomActs;

@@ -20,6 +20,8 @@ const nul = await import('../js/render/null.js');
 const b2d = await import('../js/render/board2d.js');
 const T = await import('../js/render/tiles.js');
 const E = await import('../js/engine.js');
+const W5 = (await import('../js/worlds/w5.js')).default; E.registerWorld(W5);   // worlds wave 1: the lazy w5 (its tiles, decks, tile N)
+const SEASON = await import('../js/worlds/mech/season.js');
 
 /* T-opt */
 const OPT = nul.SCENE_OPTIONAL;
@@ -37,7 +39,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -61,7 +63,7 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'h']) {
   const w = W(wid);
   for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, T.DEAL_WORDS], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
@@ -82,6 +84,19 @@ ok(!/ריבית|הדולר/.test(T.tileText(Object.values(W('w1').tiles).find((t
 ok(!/דירות/.test(T.tileText(Object.values(W('w3').tiles).find((t) => t.type === 'deal'), W('w3')).desc), 'w3 deal: no apartments');
 ok(!/מניות|קריפטו/.test(T.tileText(Object.values(W('h').tiles).find((t) => t.type === 'deal'), W('h')).desc), 'h deal: no shares / crypto (filtered deck)');
 ok(T.tileText({ type: 'deal', name: 'הזדמנות' }).desc === T.TILE_TEXT.deal.desc, 'no world → the shared wording (makes no deck claim)');
+/* T-w5: tile N (type 'allot') — the text is built from the module's real constants (js/worlds/mech/season.js ALLOT); a balance change
+   that moves a number fails here. */
+{
+  const A = SEASON.ALLOT; const tN = W5.tiles.N;
+  ok(!/\d/.test(T.tileText(tN, W5).desc), 'w5 N before prepareWorldText: the number-free wording (no copied numbers)');
+  ok(JSON.stringify(await T.prepareWorldText(W5)) === '["allot"]', 'prepareWorldText(w5) builds the allot text from season.js');
+  const x = T.tileText(tN, W5);
+  ok(tN.type === 'allot' && x.emoji === '✈️' && x.short.length <= T.SHORT_MAX, `w5 N: type allot, ✈️, short "${x.short}"`);
+  ok(x.desc.includes(`${A.months} חודשים`) && x.desc.includes(`${Math.round(A.disc * 100)}% הנחה`) && x.desc.includes(`${Math.round(A.counterDisc * 100)}% הנחה`) && (A.upfront === 0.5 ? x.desc.includes('חצי') : x.desc.includes(Math.round(A.upfront * 100) + '%')),
+    `w5 N text = ALLOT {months ${A.months}, disc ${A.disc}, counter ${A.counterDisc}, upfront ${A.upfront}}: ${x.desc}`);
+  ok(SEASON.season.tiles.N.safe === 'decline' && x.desc.includes('לוותר'), 'w5 N: the safe default (decline) is named');
+  ok(T.tileText(Object.values(W5.tiles).find((t) => t.type === 'crisis'), W5).desc.includes('שפל בתיירות'), 'w5 crisis tile: the tourism slump wording');
+}
 
 /* T-pin */
 let pin = ''; try { pin = execFileSync('node', [resolve(ROOT, 'tools/build-edge.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { pin = 'ERR ' + (e.stdout || '') + (e.stderr || ''); }
