@@ -298,11 +298,19 @@ function goRender(v) {
 }
 const rerender = () => { if (lobbyVisible() && view.k !== 'end') go(view); };
 
+/** wave 3b: a boot-time re-render never wipes what the player is typing (a nickname typed before the game modules finished loading
+ *  was replaced together with its form, and its Enter went nowhere — seen as a flaky "#lbDaily" wait in the lobby suites). */
+function typing() {
+  const r = root(); if (!r) return false;
+  const a = document.activeElement;
+  if (a && r.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
+  return [...r.querySelectorAll('input[type="text"], input:not([type]), textarea')].some((x) => !x.readOnly && x.value);
+}
 function boot() {
   migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
   // CR-33: the in-game graph starts loading right AFTER this first render (a task later), so it never delays the home itself
-  setTimeout(() => Promise.all([game(), t6Mods(), cmP(), playCss()]).then(([m]) => { if ((m || CM) && lobbyVisible() && (view.k === 'home' || view.k === 'world')) rerender(); }), 0);
-  P.syncFromServer().then((ch) => { if (ch) revealAfterMerge(); if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile')) rerender(); });
+  setTimeout(() => Promise.all([game(), t6Mods(), cmP(), playCss()]).then(([m]) => { if ((m || CM) && lobbyVisible() && (view.k === 'home' || view.k === 'world') && !typing()) rerender(); }), 0);
+  P.syncFromServer().then((ch) => { if (ch) revealAfterMerge(); if (ch && lobbyVisible() && (view.k === 'home' || view.k === 'profile') && !typing()) rerender(); });
   flushPending();
   scenarios(); LIB.lessons().then(() => { const el = $('.map-lib'); if (el) el.outerHTML = libraryCard(); });
   if (pendingJoin) {
