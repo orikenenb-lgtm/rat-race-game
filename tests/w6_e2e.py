@@ -266,8 +266,11 @@ async def run_2d(b):
             s = await idle(pg, stop_on='mech' if vp != 'desk' else None)
             if s['card'] and s['type'] == 'mech':
                 saw_c = await pg.evaluate(CARD)
+                await pg.wait_for_timeout(900)   # after the card's pop-in scale
                 fit = await pg.evaluate("() => { const c = document.querySelector('#evCard').getBoundingClientRect(); return c.width <= innerWidth && document.documentElement.scrollWidth <= innerWidth + 1 && [...document.querySelectorAll('#evCard .grid .row')].every((r) => r.scrollWidth <= r.clientWidth + 1); }")
-                check(sc, 'the contract card fits the phone width, no row overflows (3 market states)', fit and saw_c['mt'] == 3, saw_c and saw_c['text'][:200])
+                dims = await pg.evaluate("() => ({ card: document.querySelector('#evCard').getBoundingClientRect().width, vw: innerWidth, doc: document.documentElement.scrollWidth })")
+                over = await pg.evaluate("() => [...document.querySelectorAll('#evCard .grid .row')].filter((r) => r.scrollWidth > r.clientWidth + 1).map((r) => [r.textContent, r.scrollWidth, r.clientWidth])")
+                check(sc, 'the contract card fits the phone width, no row overflows (3 market states)', fit and saw_c['mt'] == 3, (over, dims))
                 await shot(pg, f'contract_card_{vp}')
                 await pg.locator('#evCard button[data-o="decline"]').click(); await pg.wait_for_timeout(600)
                 await idle(pg); break
