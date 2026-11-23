@@ -5,6 +5,9 @@ const SBK = 'sb_publishable_w3ubvawN4BnqOul66NSaLg_KM6yTJhc';
 const KEY = 'rr-player';
 const FN_VERIFY = `${SB}/functions/v1/verify-result`;
 const FN_ROOM = `${SB}/functions/v1/room`;     // live rooms (NOT deployed; only called when the `rooms` flag is on)
+import { metaOf } from './worlds/meta.js';
+/** worlds wave 0: a world whose meta says ranked:false (w5 … until the DB migration) is free play / private rooms only. */
+export const unrankedWorld = (id) => !!id && (metaOf(id) || {}).ranked === false;
 
 const ERR = {
   unauthorized: 'החשבון שלך לא מזוהה בשרת.',
@@ -131,10 +134,12 @@ export const net = {
   /** Save a ranked game's state on the server. Call after every landing and every decision. turn must not decrease (server rejects rewinds). */
   checkpoint: (resultId, turn, state) => rpc('rr_checkpoint', { ...auth(), p_result: resultId, p_turn: Math.max(0, Math.floor(turn)), p_state: state }),
   /** stats may include {progress:0..1, stars, ...}; progress is used to rank unfinished/lost games */
-  finish: ({ resultId, status, months, passive, expenses, netWorth, stats }) => rpc('rr_finish', {
+  finish: ({ resultId, status, months, passive, expenses, netWorth, stats, worldId }) => (unrankedWorld(worldId || (stats && stats.world))
+    ? Promise.reject(Object.assign(new Error('העולם הזה עוד לא בטבלאות'), { code: 'unranked_world' }))   // worlds wave 0: meta ranked:false never reaches rr_finish
+    : rpc('rr_finish', {
     ...auth(), p_result: resultId, p_status: status, p_months: Math.max(1, Math.min(200, Math.round(months))),
     p_passive: Math.round(passive), p_expenses: Math.max(0, Math.round(expenses)), p_net_worth: Math.round(netWorth), p_stats: stats || {},
-  }),
+  })),
 
   /** Server-side replay of a finished ranked game (Edge Function verify-result). actions = engine st.actions. Call AFTER finish().
    *  → {ok, verified, stored, already?, error?, result:{status, months, passive, expenses, netWorth, stars, progress}} */

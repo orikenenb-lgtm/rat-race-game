@@ -20,6 +20,7 @@
 export const ROOM_CODE = Object.freeze({
   takeLoan: 'L', repayLoan: 'R', payCredit: 'C', setPlan: 'P', setAutoInvest: 'A', invest: 'I', moveSavings: 'S',
   setSideReport: 'T', setFocus: 'F', requestHint: 'H', resolveStory: 'Q',
+  worldAction: 'Z',   // worlds wave 0: a world module action (room_core ALLOWED has Z; args [name, param])
 });
 /** Engine calls a room never allows (help level is a room setting; practice/after-win features are off in rooms). */
 export const ROOM_REFUSED = Object.freeze(['setMentorLevel', 'retire', 'answerPractice', 'afterWin', 'rewind', 'branch']);

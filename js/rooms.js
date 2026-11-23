@@ -10,6 +10,9 @@
 // * No free chat: reactions are ids from a fixed list (room_core.REACTIONS).
 import { RemoteDriver, REACTIONS } from './remote.js';
 import { fmtM, metrics } from './engine.js';
+/** Worlds a live room / competition can use = the server's room_core WORLDS (supabase/functions/room/room_core.js; tests/remote_driver
+ *  checks they agree). Meta roomOk (w5) is not enough: the room server does not load lazy worlds yet. Unlocked ∩ this list. */
+export const ROOM_WORLDS = Object.freeze(['w1', 'w2', 'w3', 'w4']);
 
 let A = null;                       // the lobby's helper object (lobby.js roomsApi())
 let DRV = null;                     // the driver of the room on screen (kept while that room's game screen is open)
@@ -128,7 +131,7 @@ function mineHtml(rs) {
   return `${open.length ? `<div class="lb-glist">${open.map(row).join('')}</div>` : ''}${done.length ? `<h3 class="lb-sub">הסתיימו לאחרונה</h3><div class="lb-glist">${done.map(row).join('')}</div>` : ''}`;
 }
 function hubHtml(rs, code) {
-  const un = (A.unlocked() || ['w1']).filter((w) => /^w[1-4]$/.test(w));
+  const un = (A.unlocked() || ['w1']).filter((w) => ROOM_WORLDS.includes(w));
   const w0 = un[0] || 'w1';
   const sel = (name, opts, def, label, extra = '') => `<label class="rm-f"><span>${label}</span><select name="${name}" ${extra}>${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(def) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
   return `<div class="lb-shell rm-hub">
@@ -449,7 +452,7 @@ function historyHtml(h) {
     ${cs.length ? `<h4>אתגרים ותחרויות קודמים</h4><ul class="gp-hlog">${cs.map((c) => `<li><b>${esc(c.title)}</b> · ${esc(worldName(c.world))}${c.status ? ' · ' + esc(H.compStatus[c.status] || c.status) : ''}</li>`).join('')}</ul>` : ''}${!log.length && !cs.length ? '<p class="lb-empty">אין עדיין היסטוריה.</p>' : ''}</div>`;
 }
 function compsHtml(g, comps) {
-  const un = (A.unlocked() || ['w1']).filter((w) => /^w[1-4]$/.test(w));
+  const un = (A.unlocked() || ['w1']).filter((w) => ROOM_WORLDS.includes(w));
   const canCreate = g.member_challenges !== false || g.my_role === 'owner' || g.my_role === 'admin';
   const sel = (name, opts, def, label) => `<label class="rm-f"><span>${label}</span><select name="${name}">${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(def) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
   return `<section class="gp-comps2"><h2>תחרויות</h2>
