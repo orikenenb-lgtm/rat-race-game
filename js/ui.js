@@ -2294,3 +2294,62 @@ export function renderNext(g, { show = true } = {}) {
   el.innerHTML = `<span aria-hidden="true">🎯</span><span class="nt"><b>${esc(g.title || '')}</b>${val ? `<small class="num">${esc(val)}</small>` : ''}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
   el.setAttribute('aria-label', `המטרה הבאה: ${g.title || ''}${val ? `, ${val}` : ''}`);
 }
+
+/* ============================================================ 3D upgrade wave 1 (team ג): tile sheet, tile list, board tools, turn chip */
+/** The small accessible sheet for one board tile (data from js/render/tiles.js tileSheet()): icon, full name, what happens there,
+ *  "אתה כאן" / "עוד N צעדים". Opened by a tap / click / Enter on a tile (3D raycast or 2D button) or from the tile list. */
+export function tileSheet(d, { onList = null } = {}) {
+  if (!d) return Promise.resolve();
+  const html = `<div class="tsheet"><span class="tsicon" aria-hidden="true">${esc(d.emoji || '')}</span>
+    <p class="d">${escI(d.desc || '')}</p>
+    <p class="twhere${d.here ? ' here' : ''}"><b>${esc(d.where)}</b>${d.short && d.short !== d.name ? `<small> · על הלוח: ${esc(d.short)}</small>` : ''}</p></div>`;
+  const acts = [{ label: 'סגירה', cls: 'primary' }];
+  if (onList) acts.push({ label: 'כל המשבצות', v: 'list' });
+  return modal({ tag: `משבצת ${d.index + 1}`, color: '#2f6fdb', title: d.name, html, actions: acts, dismissable: true, cls: 'tinfo' })
+    .then((v) => { if (v === 'list' && onList) onList(); return v; });
+}
+/** The text alternative of the board: every tile as a button (index, icon, short name, distance) → resolves with the chosen index. */
+export function tileList(items, { pos = 0 } = {}) {
+  let chosen = null;
+  const rows = items.map((t) => `<li><button type="button" data-tile="${t.index}" class="${t.index === pos ? 'here' : ''}"${t.index === pos ? ' aria-current="location"' : ''}>
+    <span class="tn num" aria-hidden="true">${t.index + 1}</span><span aria-hidden="true">${esc(t.emoji)}</span><b>${esc(t.name)}</b><small>${esc(t.where)}</small></button></li>`).join('');
+  return modal({ tag: 'הלוח', color: '#2f6fdb', title: 'המשבצות בלוח', html: `<ol class="tlist" aria-label="המשבצות, לפי סדר המשחק">${rows}</ol>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true, cls: 'tlistc',
+    onOpen: (c) => { setTimeout(() => { const h = c.querySelector('.tlist button.here'); if (h) { h.scrollIntoView({ block: 'center' }); h.focus({ preventScroll: true }); } }, 60); },
+    onExtra: (e) => { const b = e.target.closest('button[data-tile]'); if (!b) return; chosen = Number(b.dataset.tile); sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
+    .then(() => chosen);
+}
+/** Floating board tools over the free board area: "מבט ראשי" (3D only) and the tile list. Created once; game.js wires them. */
+export function boardTools({ onHome, onList } = {}) {
+  let box = $('#boardTools');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'boardTools'; box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'כלי הלוח');
+    box.innerHTML = `<button id="homeViewBtn" class="ibtn" type="button" aria-label="מבט ראשי: חזרה לזווית ההתחלתית" title="מבט ראשי"><span aria-hidden="true">🎯</span></button>
+      <button id="tilesBtn" class="ibtn" type="button" aria-label="רשימת המשבצות בלוח" title="המשבצות בלוח"><span aria-hidden="true">📋</span></button>`;
+    document.body.appendChild(box);
+  }
+  const h = $('#homeViewBtn'), l = $('#tilesBtn');
+  if (onHome) h.onclick = () => { sfx('click'); onHome(); };
+  if (onList) l.onclick = () => { sfx('click'); onList(); };
+  return box;
+}
+/** Place the board tools and the turn chip inside the free board rect (game.js frame()). */
+export function placeBoardUi(r, { kind = '3d', show = true } = {}) {
+  const box = $('#boardTools'); const s = document.documentElement.style;
+  if (r) { s.setProperty('--fr-x0', Math.round(r.x0) + 'px'); s.setProperty('--fr-x1', Math.round(r.x1) + 'px'); s.setProperty('--fr-y0', Math.round(r.y0) + 'px'); s.setProperty('--fr-y1', Math.round(r.y1) + 'px'); }
+  if (box) { box.hidden = !show; box.dataset.kind = kind; const h = $('#homeViewBtn'); if (h) h.hidden = kind !== '3d'; }
+}
+let chipT = 0;
+/** §13 the short turn state: "זורקים…" / "זזים N צעדים" / "נחתת על …". role=status, aria-live polite (always in the DOM, so it is
+ *  announced); `quiet` updates the text without announcing it (the dice and the landing already have their own announcements).
+ *  null clears it. Reduced motion: no fade (css). */
+export function turnChip(text, { quiet = false, ms = 0 } = {}) {
+  let el = $('#turnChip');
+  if (!el) { el = document.createElement('p'); el.id = 'turnChip'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); document.body.appendChild(el); }
+  clearTimeout(chipT);
+  if (text === undefined) return el;
+  if (!text) { el.setAttribute('aria-live', 'off'); el.classList.remove('on'); chipT = setTimeout(() => { el.textContent = ''; el.setAttribute('aria-live', 'polite'); }, reduced() ? 0 : 220); return el; }
+  el.setAttribute('aria-live', quiet ? 'off' : 'polite');
+  el.textContent = text; el.classList.add('on');
+  if (ms) chipT = setTimeout(() => turnChip(null), ms);
+  return el;
+}

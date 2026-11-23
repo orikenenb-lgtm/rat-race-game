@@ -23,6 +23,7 @@ import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coach
 import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data behind a tapped city item (reads metrics only)
 import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
 import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
+import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/tiles.js';   // 3D upgrade wave 1: tile names / descriptions (render-side)
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -257,6 +258,7 @@ async function initRenderer() {
   const r = await loadRenderer({ want: ch.kind, reason: ch.reason, canvas: $('#c'), root: $('#board2d'), onSlow: () => emitInit({ type: 'slow' }) });
   scene = r.scene;
   try { scene.onPick?.(onAssetPick); } catch (e) { console.warn(e); }   // T5 CR-B2
+  try { scene.onTilePick?.(onTilePick); } catch (e) { console.warn(e); }   // wave 1: tap / Enter on a board tile → the tile sheet
   rendererInfo = { kind: r.kind, reason: r.reason };
   initPhase = 'models';
   emitInit({ type: 'renderer', kind: r.kind });
@@ -289,6 +291,8 @@ async function initRenderer() {
     scene.onContextLost(onContext);
   } else { lifeP = Promise.resolve(); lifeSettled = true; }
   const cam = $('#camBtn'); if (cam) { cam.hidden = scene.kind !== '3d'; cam.dataset.kind = scene.kind; }
+  ui.boardTools({ onHome: homeView, onList: () => openTileList() }); ui.turnChip();   // wave 1: "מבט ראשי", the tile list, the turn chip
+  lastRect = ''; frame();
   syncLiteBtn();
   scene.setPaused(!$('#start').hidden);
 }
@@ -418,6 +422,62 @@ function frame(force = true) {
   const r = ui.freeRect(); const k = [r.x0, r.y0, r.x1, r.y1].map(Math.round).join(',');
   if (!force && k === lastRect) return;
   lastRect = k; scene.frame(r);
+  try { ui.placeBoardUi?.(r, { kind: scene.kind, show: scene.kind !== 'none' }); } catch (e) { console.warn(e); }
+}
+/** wave 1 (B1 G7): "מבט ראשי" — the follow camera at its starting angle and distance (the overview toggle goes back to off) */
+function homeView() {
+  try { scene.homeView?.(); } catch (e) { console.warn(e); }
+  const c = $('#camBtn'); if (c) { c.setAttribute('aria-pressed', 'false'); c.title = 'מבט על כל הלוח'; }
+}
+
+/* ============================================================ wave 1 (B1 G5/G6, A2 G-05): board tiles */
+function boardTiles() { try { return E.boardInfo(S ? S.worldId : (W && W.id) || 'w1'); } catch (e) { return []; } }
+/** tap / click / Enter on a tile (3D raycast or a 2D tile button) → the tile sheet. Never over a card, dialog, coach or the lobby. */
+function onTilePick(i) {
+  const coach = document.querySelector('#coach:not([hidden])');
+  if (!S || busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || coach) return;
+  const tiles = boardTiles(); const t = tiles[i]; if (!t) return;
+  sfx('click');
+  ui.tileSheet?.(tileSheet(t, i, S.pos, tiles.length), { onList: () => openTileList() });
+}
+/** the text alternative of the board (3D canvas and 2D): every tile in play order → its sheet */
+async function openTileList() {
+  if (!S || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden) return;
+  const tiles = boardTiles(); const pos = S.pos;
+  const items = tiles.map((t, i) => { const tx = tileText(t); return { index: i, name: tx.name, emoji: tx.emoji, where: whereText(stepsTo(pos, i, tiles.length)) }; });
+  const i = await ui.tileList?.(items, { pos });
+  if (i != null && S) onTilePick(i);
+}
+/** the landing: markers + the turn chip + the live region */
+function landed(pos) {
+  try { scene.markTile?.('dest', null); scene.markTile?.('current', pos); } catch (e) { console.warn(e); }
+  const t = boardTiles()[pos]; if (!t) return;
+  const txt = landedText(t);
+  ui.turnChip?.(txt, { quiet: true, ms: 2600 }); ui.announce?.(txt);
+}
+/** A2 G-03: the city always equals E.cityModels(S) (+ the life markers syncLifeCity keeps). Idempotent; engine spawns keep their
+ *  animation (they are already in the scene, so this changes nothing then). Dev fixtures (?fx=, perf) are ignored. */
+const DEV_KEY = /^(fx|perf)/;
+function cityWant() { return [...E.cityModels(S)]; }
+function reconcileCity() {
+  if (!S || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
+  try {
+    const want = cityWant(); const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k));
+    const life = have.filter((k) => k.startsWith('L:'));
+    const wantKeys = new Set([...want.map((m) => m.key), ...life]);
+    if (have.length === wantKeys.size && have.every((k) => wantKeys.has(k))) return;
+    const MODEL = lifeModels();
+    scene.syncCity([...want, ...life.map((k) => ({ key: k, model: MODEL[k] }))], { silent: true });
+    syncLevels(false);
+  } catch (e) { console.warn('[game] reconcileCity', e); }
+}
+/** test hook (not part of the lobby contract): the city the engine wants vs the one on screen, the position and the turn */
+export function cityAudit() {
+  if (!S) return null;
+  const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k)).sort();
+  const want = [...new Set([...E.cityModels(S).map((m) => m.key), ...have.filter((k) => k.startsWith('L:'))])].sort();
+  let pawnTile = S.pos; try { const u = scene.boardUx?.(); if (u) pawnTile = u.pawnTile; } catch (e) { /* ignore */ }
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -648,6 +708,8 @@ async function startInner(cfg, my) {
   try {
     scene.buildWorld(W);
     scene.placePawn(S.pos);
+    try { scene.markTile?.('dest', null); scene.markTile?.('current', S.pos); } catch (e) { console.warn(e); }   // wave 1 (G6)
+    ui.turnChip?.(null);
     scene.syncCity(E.cityModels(S), { silent: true });
     syncLevels(false);
     OV.hideLoading();
@@ -740,6 +802,7 @@ function render(animate = true) {
   const wi = m.worldIndicators || {};
   ui.historyStrip(wi.indexHist ? wi.indexHist.map((x) => ({ index: x })) : S.ui.hist, wi.ymText ? wi : null);
   syncLifeCity(m);
+  reconcileCity();   // wave 1 (A2 G-03): after every applied decision / roll the city equals cityModels(S) (+ L:*)
 }
 /** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
 function track(m) {
@@ -752,9 +815,13 @@ function track(m) {
   if (wi.ymText) { (u.hist ||= []).push({ ym: wi.ym, index: wi.index }); if (u.hist.length > 240) u.hist.shift(); }
 }
 /* life models in the city: family house, university, pension island, index-fund building */
+const LIFE_MODEL = { 'L:home': 'life/home_family', 'L:wedding': 'life/wedding', 'L:uni': 'life/university', 'L:pension': 'life/pension', 'L:index': 'life/index_fund', 'L:side': 'life/side_hustle', 'L:hospital': 'life/hospital' };
+const lifeModels = () => LIFE_MODEL;
 function syncLifeCity(m) {
   const L = m.life; if (!L) return;
   const fam = L.family || {};
+  // A2 G-09 (display only): the wedding age is set BEFORE L:home reads it — an old save without it showed home + wedding together
+  if (fam.partner === 'married') S.ui.weddingAge ??= L.age;
   const want = {
     'L:home': (fam.kids || 0) > 0 || (fam.partner === 'married' && (L.age - (S.ui.weddingAge || 0)) > 0.5),
     'L:wedding': fam.partner === 'married' && !(fam.kids > 0) && (L.age - (S.ui.weddingAge ??= L.age)) <= 0.5,
@@ -766,7 +833,7 @@ function syncLifeCity(m) {
   };
   if (fam.partner !== 'married') delete S.ui.weddingAge;
   if (!want['L:hospital'] && L.plan !== 'rest') S.ui.burnSeen = (S.life && S.life.burnouts) || 0;
-  const MODEL = { 'L:home': 'life/home_family', 'L:wedding': 'life/wedding', 'L:uni': 'life/university', 'L:pension': 'life/pension', 'L:index': 'life/index_fund', 'L:side': 'life/side_hustle', 'L:hospital': 'life/hospital' };
+  const MODEL = LIFE_MODEL;
   const LABEL = { 'L:home': 'הבית של המשפחה', 'L:wedding': 'מזל טוב!', 'L:uni': 'לומד!', 'L:pension': 'קרן הפנסיה', 'L:index': 'קרן מחקה מדד', 'L:side': 'העסק הצדדי', 'L:hospital': 'מנוחה והחלמה' };
   for (const [k, on] of Object.entries(want)) {
     if (on && !scene.hasKey(k)) scene.spawn(k, MODEL[k], { label: busy || ui.isEventOpen() ? LABEL[k] : null, color: 'gold', silent: !S.ui.lifeSeen });
@@ -1040,7 +1107,8 @@ async function turnBody(my) {
       showNoEnergy(en); return;
     }
   }
-  try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); return; }
+  ui.turnChip?.('זורקים…');   // §13 turn state
+  try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
   persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
   flowTick++;
   const faces = Array.isArray(out.dice) && out.dice.length ? out.dice : [out.die];
@@ -1054,6 +1122,10 @@ async function turnBody(my) {
   ui.landDice(faces);
   if (faces.length === 2 && faces[0] === faces[1]) { sfx('golden'); ui.vibrate([12, 30, 12]); }
   if (my !== gen) return;
+  // wave 1 (B1 G6): the destination is marked before the first hop; the current-tile outline leaves with the pawn
+  const dest = out.steps.length ? out.steps[out.steps.length - 1] : S.pos;
+  try { scene.markTile?.('current', null); scene.markTile?.('dest', dest); } catch (e) { console.warn(e); }
+  ui.turnChip?.(out.steps.length === 1 ? 'זזים צעד אחד' : `זזים ${out.steps.length} צעדים`, { quiet: true });   // #dieSr already says the total
   await pause(180);
   let cash = m0.cash;
   for (let i = 0; i < out.steps.length; i++) {
@@ -1066,6 +1138,7 @@ async function turnBody(my) {
     if (pd) { cash += pd.amount; paydayFx(pd, cash); }
   }
   rolling = false;
+  landed(S.pos);
   // remaining roll results: news (exits, signals), auto-loans, achievements…
   const skip = (out.paydays || []).map((p) => (p.amount >= 0 ? 'coin' : 'loss'));
   await applyOut(out, { skipSounds: ['roll', ...skip], skipPawnCash: true });
