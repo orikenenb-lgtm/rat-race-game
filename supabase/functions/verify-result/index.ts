@@ -13,9 +13,9 @@
 //   Until migration 20261120_t15_verify_result.sql is applied the function runs in DRY-RUN mode: same checks and answer, `stored:false`.
 // GET → health. verify_jwt = false on purpose: players have no Supabase auth session; the function authenticates them itself.
 import postgres from 'npm:postgres@3.4.5';
-import { ENGINE_SHA256, ENGINE_FILES } from './engine_pin.js';
-import { loadEngine } from './engine_loader.js';
-import { parseRequest, verifyGame, sha256Hex, clientEngine, VerifyError, MAX_BODY, MAX_BUNDLE } from './verify_core.js';
+import { ENGINE_SHA256, ENGINE_FILES, WORLD_PACKS } from './engine_pin.js';
+import { loadEngine, loadWorldPack } from './engine_loader.js';
+import { parseRequest, verifyGame, sha256Hex, clientEngine, VerifyError, MAX_BODY, MAX_BUNDLE, MAX_PACK, packFor } from './verify_core.js';
 
 const ENGINE_BASE = (Deno.env.get('RR_ENGINE_BASE_URL') ?? 'https://orikenenb-lgtm.github.io/rat-race-game/js/').replace(/\/?$/, '/');
 const MAX_ATTEMPTS = 5;            // stored mode: verification attempts per result
@@ -43,19 +43,32 @@ const pgCode = (e: unknown) => String((e as any)?.message ?? '');
 
 // ---------------------------------------------------------------- engine (cached per instance)
 let engineMod: any = null; let engineSource = ''; let siteTried = 0;
-async function canonicalFromSite(): Promise<string> {
+async function canonicalFromSite(list: Record<string, string> = ENGINE_FILES, entry = 'engine.js'): Promise<string> {
   const files: Record<string, string> = {};
-  await Promise.all(Object.keys(ENGINE_FILES).map(async (p) => {
+  await Promise.all(Object.keys(list).map(async (p) => {
     const r = await fetch(ENGINE_BASE + p, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error(`${p}: HTTP ${r.status}`);
     files[p] = await r.text();
   }));
   const sorted: Record<string, string> = {}; for (const k of Object.keys(files).sort()) sorted[k] = files[k];
-  return JSON.stringify({ entry: 'engine.js', files: sorted });  // same canonical text as tools/build-edge.mjs bundleText()
+  return JSON.stringify({ entry, files: sorted });  // same canonical text as tools/build-edge.mjs bundleText()
 }
+let coreText = '';
 async function useBundle(text: string, source: string) {
   if (text.length > MAX_BUNDLE || await sha256Hex(text) !== ENGINE_SHA256) return false; // never execute unpinned code
-  engineMod = await loadEngine(text); engineSource = source; return true;
+  engineMod = await loadEngine(text); engineSource = source; coreText = text; return true;
+}
+// worlds wave 0: a lazy world's pinned pack (world file + mechanic modules), loaded on top of the core for the rows of that world only
+const packTried: Record<string, number> = {};
+async function worldPack(E: any, worldId: string, reqPack?: unknown) {
+  const pin = packFor(worldId, WORLD_PACKS) as any; if (!pin || E.isLoaded(worldId)) return;
+  const use = async (text: string) => { if (text.length > MAX_PACK || await sha256Hex(text) !== pin.sha256) return false; await loadWorldPack(E, coreText, text); return true; };
+  if (typeof reqPack === 'string' && await use(reqPack)) return;
+  if (Date.now() - (packTried[worldId] ?? 0) > 60_000) {
+    packTried[worldId] = Date.now();
+    try { if (await use(await canonicalFromSite(pin.files, pin.entry))) return; } catch (e) { console.warn('pack from site:', worldId, String(e)); }
+  }
+  throw new VerifyError('engine_unavailable', 503);
 }
 async function engine(reqBundle?: unknown) {
   if (engineMod) return engineMod;
@@ -115,6 +128,7 @@ async function handleVerify(req: Request, body: any) {
   if (!actions) throw new VerifyError('no_actions', 422);
   // 2. engine (503 = not the player's fault: nothing stored, no attempt used)
   const E = await engine(body.engine_bundle);
+  await worldPack(E, row.world, body.world_pack);       // worlds wave 0: core + the played world's pack only (CPU and MAX_BUNDLE stay per world)
   // 3. replay + compare
   const t0 = performance.now();
   const out = verifyGame(E, row, actions);
@@ -148,7 +162,7 @@ Deno.serve(async (req: Request) => {
   try {
     if (req.method === 'GET') {
       // health never loads anything (no work for anonymous callers): engineLoaded = this instance already has the pinned engine
-      return json(200, { ok: true, engine: ENGINE_SHA256, engineLoaded: !!engineMod, engineSource: engineSource || null,
+      return json(200, { ok: true, engine: ENGINE_SHA256, packs: Object.fromEntries(Object.entries(WORLD_PACKS).map(([k, v]: [string, any]) => [k, v.sha256])), engineLoaded: !!engineMod, engineSource: engineSource || null,
         store: await storeMode().catch(() => null) });
     }
     if (req.method !== 'POST') return json(405, { ok: false, error: 'method_not_allowed' });

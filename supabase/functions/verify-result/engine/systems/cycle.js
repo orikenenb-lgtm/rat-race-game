@@ -34,6 +34,13 @@ export const MULT = Object.freeze({
 const BASE = { dealCost: 1, cfRent: 1, cfOther: 1, loanAdd: 0, loanCap: 1, idxAnnual: 0.04, idxCrash: 1, grow: 1 };
 
 export function cycleCfg(worldId) { return CFG[worldId] || NORMAL; }
+/** Worlds wave 0 (I4): a later world's cycle table from its config — a preset name ('GENTLE' | 'NORMAL' | 'HARD') or an object
+ *  merged over NORMAL. w1–w4 / h keep the table above (never overwritten). */
+export const PRESETS = Object.freeze({ GENTLE, NORMAL, HARD: { ...NORMAL, amp: 1.2 } });
+export function registerWorldCfg(worldId, spec) {
+  if (CFG[worldId] && ['w1', 'w2', 'w3', 'w4', 'h'].includes(worldId)) return;
+  CFG[worldId] = typeof spec === 'string' ? PRESETS[spec] || NORMAL : { ...NORMAL, ...(spec || {}) };
+}
 
 const invCdf = (ps, r) => { let acc = 0; for (let i = 0; i < ps.length; i++) { acc += ps[i]; if (r < acc) return i; } return ps.length - 1; };
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));

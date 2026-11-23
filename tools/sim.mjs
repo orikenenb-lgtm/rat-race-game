@@ -6,6 +6,8 @@
 //        node tools/sim.mjs --perf [w]                  describe / impactFor p95 and games/sec
 // Policies carry a mentor level (default 'hint'); the T2 policies decide from E.publicView only (tools/policies.mjs).
 import * as E from '../js/engine.js';
+import '../js/worlds/all.js'; // worlds wave 0 (I8): every lazy world registered (w5 …)
+import { seedFrom } from '../js/rng.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { facade, claimedNet, adaptiveFocus, runFocus, ddRule, medianDown, archPolicy } from './policies.mjs';
 import { collect, bundleText, sha256 } from './build-edge.mjs';
@@ -15,13 +17,19 @@ export const ENGINE_SHA = sha256(bundleText(collect()));
 
 const args = process.argv.slice(2);
 const N = +(args.find((a) => /^\d+$/.test(a)) || 600);
-const ONLY = args.find((a) => /^w\d$/.test(a));
+const ONLY = args.find((a) => /^w\d+$/.test(a)); // I8: w10–w12 too (was /^w\d$/)
 const MD = args.includes('--md') ? args[args.indexOf('--md') + 1] : null;
 const QUIET = args.includes('--quiet');
 // ablation switches for the smart policy (for checking that each mechanic's decisions matter): ABL=noHedge,alwaysVar,...
 const ABL = new Set((process.env.ABL || '').split(',').filter(Boolean));
 /** SIM_RULES=3|4|5 plays every sim game under that rule set (before/after comparisons); unset = the engine's current rules (5). */
-const SIM_RULES = [3, 4, 5].includes(+process.env.SIM_RULES) ? +process.env.SIM_RULES : undefined;
+const SIM_RULES = E.RULE_SETS.includes(+process.env.SIM_RULES) ? +process.env.SIM_RULES : undefined;
+/** I8: the per-world seed base. w1–w4 keep the legacy formula (their reports stay identical); later worlds hash their id
+ *  ('w10'.charCodeAt(1) collided with w1, w11, w12). */
+export const LEGACY_SEED_WORLDS = ['w1', 'w2', 'w3', 'w4', 'h'];
+export const worldSeed = (wid) => (LEGACY_SEED_WORLDS.includes(wid) ? wid.charCodeAt(1) * 100003 : (seedFrom('sim:' + wid) % 42000) * 100003); // < 2³² (createGame keeps uint32 seeds)
+/** I8: the worlds a sweep covers — the core four (unchanged reports) unless one is named. */
+const SWEEP = () => E.WORLDS.map((w) => w.id);
 
 /* ---------- tiny local PRNG for the random policy (never touches game RNG) */
 function prng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -301,6 +309,17 @@ Object.assign(POLICIES, {
 /** The E1 strategy table's policy set (BRIEF §12–§13, §29): references + every "always X" strategy. */
 export const E1_SET = ['smart', 'guideTapper', 'f:frugal', 'e1:maxDebt', 'e1:noDebt', 'e1:buyAll', 'e1:sideAlways', 'e1:overtimeAlways', 'e1:saveOnly', 'e1:career', 'diversified', 'saver', 'founder'];
 const has2 = has; void has2;
+/* ---------- I8: per-mechanic policy plug-ins (tools/policies/<mechanic>.mjs). A plug-in exports make(ctx) → {policyName: policy}; those
+   names override / extend POLICIES for the worlds of that mechanic only (w1–w4 never load one, so their reports are unchanged). */
+const PLUGINS = {};
+for (const mech of ['season']) {
+  const mod = await import(`./policies/${mech}.mjs`);
+  PLUGINS[mech] = mod.make({ E, POLICIES, ddRule, facade, claimedNet, runFocus, firstEnabled, ABL });
+}
+/** The policy object a world plays `pol` with (a plug-in's version first). */
+export function policyFor(wid, pol) { const w = E.getWorld(wid); const pl = PLUGINS[w.mechanic]; return (pl && pl[pol]) || POLICIES[pol]; }
+/** Every policy name a world can play (base + its plug-in's extras). */
+export function policyNames(wid) { const w = E.getWorld(wid); const pl = PLUGINS[w.mechanic]; return [...new Set([...Object.keys(POLICIES), ...Object.keys(pl || {})])]; }
 
 function betweenCommon(st, bufMonths, smart = false) {
   const m = E.metrics(st);
@@ -444,7 +463,7 @@ function greedyLike(st, ev, ctx, smart, o2 = {}) {
 const QUIZ_SKILL = { random: 0.33, cautious: 0.8, greedy: 0.7, smart: 0.95, reckless: 0.4, tapper: 0.5 };
 export function play(worldId, charId, seed, pol, capMonths, opts = {}) {
   const { log, onRoll, onLanding, ...gameOpts } = opts;
-  const P = POLICIES[pol];
+  const P = policyFor(worldId, pol);
   const st = E.createGame({ worldId, charId, seed, mode: 'free', mentor: P.mentor || 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}), ...gameOpts });
   const r = prng(seed * 7919 + pol.length);
   const skill = QUIZ_SKILL[P.quiz || pol] ?? 0.7;
@@ -510,7 +529,7 @@ export function runWorld(worldId, n = N, pols = Object.keys(POLICIES)) {
     const happy = []; let burn = 0, blocked = 0;
     const months = [], turnsWin = [], turnsAll = []; let wins = 0, winsLim = 0, auto = 0, bankrupt = 0, bad = 0, stars = [0, 0, 0, 0], loanMax = [];
     for (let i = 0; i < n; i++) {
-      const seed = 1000 + i * 7 + worldId.charCodeAt(1) * 100003;
+      const seed = 1000 + i * 7 + worldSeed(worldId);
       const { st, end } = play(worldId, ch.id, seed, pol, cap);
       turnsAll.push(st.turn);
       if (st.stats.autoLoans > 0) auto++;
@@ -563,7 +582,7 @@ export function storiesWorld(wid, n, pols = ['blindTapper', 'guideTapper', 'smar
   for (const pol of pols) for (let i = 0; i < n; i++) {
     const ch = w.characters[i % w.characters.length]; const T = E.starThresholds(w, ch.id); const cap = T.maxMonths; // T3 review M8: rates of a time-limited game (the spec's mode), not 1.6× free play
     const seen = new Map(); let maxOpen = 0, maxChains = 0;
-    const { st, end } = play(wid, ch.id, 1000 + i * 7 + wid.charCodeAt(1) * 100003, pol, cap, { onRoll: (x) => {
+    const { st, end } = play(wid, ch.id, 1000 + i * 7 + worldSeed(wid), pol, cap, { onRoll: (x) => {
       for (const it of x.story.inbox) if (!seen.has(it.id)) seen.set(it.id, { kind: it.kind, m: it.createdM, chain: it.chain, step: it.step, assetId: it.assetId });
       maxOpen = Math.max(maxOpen, x.story.inbox.length); maxChains = Math.max(maxChains, Object.entries(x.story.chains).filter(([id, c]) => id !== 'crisis' && !['idle', 'done'].includes(c.stage)).length);
     } });
@@ -599,7 +618,7 @@ const T2_CORE = ['guideTapper', 'blindTapper', 'naive', 'smart', 'adaptive', 'ca
 const T2_FOCUS = ['f:none', 'f:scout', 'f:debt', 'f:ops', 'f:frugal', 'f:network', 'f:research'];
 const T2_DD = ['dd:never', 'dd:always', 'dd:borderline'];
 const T2_ABL = { 'abl:noCycle': { _dev: { noCycle: true } }, 'abl:noDD': { _dev: { noDD: true } }, 'abl:noRival': { _dev: { noRival: true } } }; // T6 §16 G7: noRival
-export const seedOf = (wid, i) => 1000 + i * 7 + wid.charCodeAt(1) * 100003;
+export const seedOf = (wid, i) => 1000 + i * 7 + worldSeed(wid);
 /** One world: every policy × character × N seeds, tagged with the seed's cycle bucket. Compact records. */
 export function matrixWorld(wid, n, pols = [...T2_CORE, ...T2_FOCUS, ...T2_DD, ...Object.keys(T2_ABL), 'life:cheap', 'life:dear'], onRow) {
   const w = E.getWorld(wid); const recs = []; const t0 = Date.now();
@@ -654,7 +673,7 @@ export function gates(byWorld) {
 export function dominance(wid, n) {
   const w = E.getWorld(wid); const tally = {}; const ALLOW = (type, id, ev) => id === 'save' || (type === 'doodad' && id === 'skip');
   for (const ch of w.characters) for (let i = 0; i < n; i++) {
-    const st = E.createGame({ worldId: wid, charId: ch.id, seed: seedOf(wid, i) + 77, mode: 'free', mentor: 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}) }); const P = POLICIES.smart; const r = prng(i + 3);
+    const st = E.createGame({ worldId: wid, charId: ch.id, seed: seedOf(wid, i) + 77, mode: 'free', mentor: 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}) }); const P = policyFor(wid, 'smart'); const r = prng(i + 3);
     const lim = Math.round(E.starThresholds(w, ch.id).maxMonths * 1.6);
     for (let g = 0; g < 4000 && !st.over && st.month <= lim; g++) {
       P.between(st, { r }); if (st.over) break;
@@ -686,7 +705,7 @@ export function dominance(wid, n) {
 export function strategiesWorld(wid, n, pols = E1_SET) {
   const w = E.getWorld(wid); const recs = [];
   for (const pol of pols) for (let i = 0; i < n; i++) {
-    const ch = w.characters[i % w.characters.length]; const seed = 9000 + i * 13 + wid.charCodeAt(1) * 100003; const P = POLICIES[pol];
+    const ch = w.characters[i % w.characters.length]; const seed = 9000 + i * 13 + worldSeed(wid); const P = policyFor(wid, pol);
     const st = E.createGame({ worldId: wid, charId: ch.id, seed, mode: 'free', mentor: P.mentor || 'hint', ...(SIM_RULES ? { rules: SIM_RULES } : {}) });
     const r = prng(seed * 7919 + pol.length); const lim = E.starThresholds(w, ch.id, st.rules).maxMonths; const cap = Math.round(lim * 1.6);
     let end = null;
@@ -739,7 +758,7 @@ export function perf(wid = null, n = 6) {
   return { states: sts.length, describe: { p50: p(dsc, 0.5), p95: p(dsc, 0.95) }, impactFor: { n: imp.length, p50: p(imp, 0.5), p95: p(imp, 0.95) }, sim: { games, secs: (Date.now() - t0) / 1000, gamesPerSec: +(games / ((Date.now() - t0) / 1000)).toFixed(2) } };
 }
 
-if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--strategies') || args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories') || args.includes('--rivals'))) {
+if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--world-gates') || args.includes('--strategies') || args.includes('--matrix') || args.includes('--dominance') || args.includes('--perf') || args.includes('--report') || args.includes('--stories') || args.includes('--rivals'))) {
   const nArg = +(args.find((a) => /^\d+$/.test(a)) || 0);
   mkdirSync('tools/balance-data', { recursive: true });
   if (args.includes('--stories')) {
@@ -770,8 +789,76 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--strateg
   if (args.includes('--rivals')) { const out = { engineSha: ENGINE_SHA }; for (const wid of ONLY ? [ONLY] : E.WORLDS.map((w) => w.id)) out[wid] = rivalsCalib(wid, nArg || 20); writeFileSync(`tools/balance-data/rivals${ONLY ? '-' + ONLY : ''}.json`, JSON.stringify(out) + '\n'); console.log(JSON.stringify(out).slice(0, 400)); }
   if (args.includes('--perf')) { const pf = { engineSha: ENGINE_SHA, ...perf(ONLY, nArg || 6) }; writeFileSync('tools/balance-data/perf.json', JSON.stringify(pf) + '\n'); console.log(JSON.stringify(pf)); }
   if (args.includes('--report')) t2Report();
+  if (args.includes('--world-gates')) {
+    const wid = ONLY || 'w5'; const n = nArg || 36; const t0 = Date.now(); const w = E.getWorld(wid);
+    const plug = PLUGINS[w.mechanic] || {}; const spec = plug.__gates || {};
+    const recs = worldGatesRun(wid, n, spec.policies || []);
+    const gates = worldGates(wid, recs, spec);
+    const file = process.env.SIM_OUT || `tools/balance-data/gates-${wid}.json`;
+    writeFileSync(file, JSON.stringify({ world: wid, n, rules: SIM_RULES || E.RULES_CURRENT, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'turns', 'bankrupt', 'pwMet', 'forcedLoans'], gates, recs }) + '\n');
+    const pol = [...new Set(recs.map((r) => r[0]))];
+    console.log(`| policy | in time | won | median months | bankrupt |\n|---|---|---|---|---|\n` + pol.map((p) => { const rs = recs.filter((r) => r[0] === p); const c = cellStats(rs); return `| ${p} | ${(c.inTime * 100).toFixed(0)}% | ${(rs.filter((r) => r[4]).length / rs.length * 100).toFixed(0)}% | ${Number.isFinite(c.med) ? c.med : '—'} | ${(rs.filter((r) => r[9]).length / rs.length * 100).toFixed(0)}% |`; }).join('\n'));
+    console.log('\n| gate | status | numbers |\n|---|---|---|\n' + gates.map((g) => `| ${g.id} ${g.what} | ${g.status} | ${g.text} |`).join('\n'));
+    console.log(`wrote ${file} (${recs.length} games, ${Math.round((Date.now() - t0) / 1000)} s)`);
+  }
   process.exit(0);
 }
+/* ---------- worlds wave 0: the per-world balance gates of a module world (DESIGN §5.3) — `node tools/sim.mjs --world-gates N wX`
+   Every policy below × character × N seeds (seedOf), free mode, cap 1.6× the limit; a winner plays 24 more months under the same policy
+   (continueAfterWin) for G-durable. Records: [pol, char, i, bucket, won, inTime, months, stars, turns, bankrupt, pwMet, forcedLoans]. */
+export function worldGatePols() { return ['guideTapper', 'blindTapper', 'naive', 'smart', 'saver', 'founder', 'diversified', 'gambler', 'f:frugal', 'f:none', 'maxDebt']; }
+export function worldGatesRun(wid, n, extra = []) {
+  const w = E.getWorld(wid); const recs = []; const t0 = Date.now();
+  const pols = [...worldGatePols(), ...extra];
+  for (const ch of w.characters) {
+    const lim = E.starThresholds(w, ch.id, E.RULES_CURRENT).maxMonths; const cap = Math.round(lim * 1.6);
+    const buckets = Array.from({ length: n }, (_, i) => E.CY.cycleBucket(E.cyclePath(seedOf(wid, i), wid, lim), lim));
+    for (const pol of pols) {
+      for (let i = 0; i < n; i++) {
+        const { st, end } = play(wid, ch.id, seedOf(wid, i), pol, cap);
+        const won = !!(end && end.status === 'won'); let pw = null;
+        if (won && E.continueAfterWin(st).ok !== false) { const P = policyFor(wid, pol); const r = prng(i + 101); const m0 = st.month; let g = 0;
+          while (!st.over && st.month < m0 + 24 && g++ < 3000) { P.between(st, { r }); if (st.over) break; if (st.pending) { let ev = E.currentEvent(st); let k = 0; while (ev && k++ < 12) { const c = k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); const res = E.choose(st, ev, c[0], c[1]); ev = res.event; } if (st.over) break; }
+            E.rollDice(st); let ev = E.landing(st); let k = 0; while (ev && !st.over) { const c = ev.auto ? [ev.options[0].id] : k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); let res = E.choose(st, ev, c[0], c[1]); if (!res.ok) res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id); ev = res.event; k++; } }
+          pw = E.metrics(st).goalHold.met && !st.flags.bankrupt ? 1 : 0; }
+        recs.push([pol, ch.id, i, buckets[i], won ? 1 : 0, won && end.months <= lim ? 1 : 0, won ? end.months : null, end ? end.stars || 0 : 0, end ? end.turns : st.turn, end && end.reason === 'bankrupt' ? 1 : 0, pw, st.stats.forcedLoans]);
+      }
+      if (!QUIET) console.log(`${wid} ${ch.id} ${pol} (${Math.round((Date.now() - t0) / 1000)}s)`);
+    }
+  }
+  return recs;
+}
+/** The gate table of a world-gates record set (DESIGN §5.3 + the world's own `gates` extras). → [{id, what, status, text}] */
+export function worldGates(wid, recs, extra = {}) {
+  const P = (x) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).toFixed(0) + '%');
+  const of = (pol, f = () => true) => recs.filter((r) => r[0] === pol && f(r)); const S = (rs) => cellStats(rs);
+  const chars = [...new Set(recs.map((r) => r[1]))]; const pool = (pol) => S(of(pol));
+  const G = []; const st = (b) => (b ? 'met' : 'NOT met'); const add = (id, what, ok, text) => G.push({ id, what, status: st(ok), text });
+  const gt = pool('guideTapper'); const worstG = Math.min(...chars.map((c) => S(of('guideTapper', (r) => r[1] === c)).inTime));
+  add('G-guide', 'guideTapper in time ≥ 60 % pooled, worst character ≥ 50 %', gt.inTime >= 0.6 && worstG >= 0.5, `${P(gt.inTime)} · worst ${P(worstG)} · ${chars.map((c) => `${c} ${P(S(of('guideTapper', (r) => r[1] === c)).inTime)}`).join(' ')}`);
+  const bl = pool('blindTapper'); add('G-blind', 'blindTapper in time ≤ 8 %', bl.inTime <= 0.08, P(bl.inTime));
+  const sm = pool('smart'), nv = pool('naive'); add('G-smart', 'smart ≥ naive + 5 pp and smart median months < naive', sm.inTime >= nv.inTime + 0.05 && sm.med < nv.med, `smart ${P(sm.inTime)} med ${sm.med} · naive ${P(nv.inTime)} med ${Number.isFinite(nv.med) ? nv.med : '—'}`);
+  const reach = chars.map((c) => [c, S(of('smart', (r) => r[1] === c)).inTime]); add('G-reach', 'every character: smart in time ≥ 40 %', reach.every(([, x]) => x >= 0.4), reach.map(([c, x]) => `${c} ${P(x)}`).join(' · '));
+  const lossN = of('naive'), lossD = of('maxDebt'); const lossRate = (rs) => (rs.length ? rs.filter((r) => r[9] || !r[5]).length / rs.length : 0); const smLose = of('smart').filter((r) => !r[5]).length / Math.max(1, of('smart').length);
+  add('G-loss', 'naive or maxDebt bankrupt / out of time ≥ 15 % AND smart loses ≥ 5 %', Math.max(lossRate(lossN), lossRate(lossD)) >= 0.15 && smLose >= 0.05, `naive ${P(lossRate(lossN))} (bankrupt ${P(lossN.filter((r) => r[9]).length / Math.max(1, lossN.length))}) · maxDebt ${P(lossRate(lossD))} (bankrupt ${P(lossD.filter((r) => r[9]).length / Math.max(1, lossD.length))}) · smart loses ${P(smLose)}`);
+  // G-dom: best-policy share over character × cycle-bucket cells (≥ 8 games), the module ablations vs smart
+  // A4 (DESIGN §5.3 "best-cell share ≤ 60 % for every archetype"): cells = character × cycle bucket with ≥ 8 games; the share of cells in
+  // which each ARCHETYPE (saver / founder / diversified / gambler) is the best of the four. smart is the reference, reported beside it.
+  const A4 = ['saver', 'founder', 'diversified', 'gambler'].filter((p) => of(p).length);
+  const cells = []; for (const c of chars) for (const b of [...new Set(recs.map((r) => r[3]))]) if (of('saver', (r) => r[1] === c && r[3] === b).length >= 8) cells.push({ c, b });
+  const share = Object.fromEntries(A4.map((p) => [p, 0]));
+  for (const cell of cells) { const sx = A4.map((p) => ({ p, s: S(of(p, (r) => r[1] === cell.c && r[3] === cell.b)) })); const top = sx.filter((x) => !sx.some((y) => better(y.s, x.s))); for (const t of top) share[t.p] += 1 / top.length; }
+  const maxShare = Math.max(...Object.values(share).map((x) => (cells.length ? x / cells.length : 0)));
+  const abl = (extra.ablations || []).map((p) => ({ p, s: pool(p) })).filter((x) => x.s.n);
+  add('G-dom', 'no archetype best in > 60 % of cells (A4); every module ablation loses to smart by ≥ 5 pp', maxShare <= 0.6 && abl.every((x) => sm.inTime - x.s.inTime >= 0.05), `cells ${cells.length}: ${Object.entries(share).map(([p, x]) => `${p} ${P(cells.length ? x / cells.length : 0)}`).join(' ')} · ablations: ${abl.map((x) => `${x.p} ${P(x.s.inTime)} (Δ ${((sm.inTime - x.s.inTime) * 100).toFixed(0)} pp)`).join(' · ')}`);
+  const fr = pool('f:frugal'); add('G-frugal', 'f:frugal is not the best (it does not beat smart by > 5 pp)', fr.inTime <= sm.inTime + 0.05, `f:frugal ${P(fr.inTime)} vs smart ${P(sm.inTime)} · f:none ${P(pool('f:none').inTime)}`);
+  const pw = recs.filter((r) => ['smart', 'guideTapper'].includes(r[0]) && r[4] && r[10] != null); add('G-durable', '≥ 85 % of winners (smart, guide) still meet the goal 24 months after the win', pw.length > 0 && pw.filter((r) => r[10]).length / pw.length >= 0.85, `${pw.filter((r) => r[10]).length}/${pw.length} = ${P(pw.length ? pw.filter((r) => r[10]).length / pw.length : NaN)}`);
+  const turns = recs.filter((r) => ['smart', 'guideTapper'].includes(r[0]) && r[4]).map((r) => r[8]); const mt = turns.length ? q(turns, 0.5) : NaN;
+  add('G-time', 'median won rolls (smart + guide) 60–100', mt >= 60 && mt <= 100, `median ${mt} rolls (p10 ${turns.length ? q(turns, 0.1) : '—'}, p90 ${turns.length ? q(turns, 0.9) : '—'}) · median won months smart ${sm.med} guide ${gt.med}`);
+  for (const g of extra.gates || []) { const r = g(of, S, P); G.push(r); }
+  return G;
+}
+
 /** T6 §16 sim gates G1–G9 from the matrix records (rivalLost / played columns, the abl:noRival ablation), the --dominance G5 tallies and
  *  the --rivals calibration. Cells = world × character × cycle bucket with ≥ 15 games (as A4). → [{id, what, status, text}] where status is
  *  'met' | 'not met' | 'accepted' (a director-accepted known limit, non-blocking) | 'report' | 'not run'. Shared by the report and tests/balance_gates.mjs. */

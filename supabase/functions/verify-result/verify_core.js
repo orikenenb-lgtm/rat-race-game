@@ -2,15 +2,19 @@
 // E = the engine module namespace (loaded from the pinned bundle). row = the server-side result row as index.ts selects it.
 
 export const MAX_ACTIONS = 6000;          // a 60-month game is ~300–700 actions; generous cap keeps replay < 1 s CPU
-export const MAX_BUNDLE = 900000;         // chars — an optional pinned engine bundle in the request (bootstrap / tests)
+export const MAX_BUNDLE = 900000;         // chars — the pinned engine CORE bundle (bootstrap / tests); never raised: worlds ship as packs
+export const MAX_PACK = 200000;           // chars — one lazy world's pinned pack (worlds wave 0: world file + its mechanic modules)
 export const MAX_BODY = 1000000;           // chars — normal calls are ~5–20 KB (the action log)
-export const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X']); // = the cases of engine.js replay() (Q = T3 story inbox, K = T4 practice, W/X = T6 continue after win / retire — K, W, X are refused in ranked replays)
+export const CODES = new Set(['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X', 'Z']); // = the cases of engine.js replay() (Q = T3 story inbox, K = T4 practice, W/X = T6 continue after win / retire — K, W, X are refused in ranked replays; Z = worlds wave 0 module action, validated by the world's module)
 /** Israel date (YYYY-MM-DD) of the first day the v4 engine is live. Set at release. Earlier ranked games replay with rules 3.
  *  MUST equal js/systems/rules.js RULES4_FROM (the client creates ranked games with the same rule — CR-29; tested equal). */
 export const RULES4_FROM = '2026-12-07'; // a Monday (review B1): a weekly never straddles the cut-over
 /** First Israel date of rules 5 (E1 economy fixes). PLACEHOLDER — the owner confirms it at release.
  *  MUST equal js/systems/rules.js RULES5_FROM (tested equal). A Monday, like RULES4_FROM. */
 export const RULES5_FROM = '2026-12-21';
+/** First Israel date of rules 6 (worlds wave 0: module worlds, stream `world`, action `Z`; ≡ rules 5 in w1–w4). PLACEHOLDER = RULES5_FROM.
+ *  MUST equal js/systems/rules.js RULES6_FROM (tested equal). */
+export const RULES6_FROM = RULES5_FROM;
 // ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
 function daysFromCivil(y, m, d) {
   y -= m <= 2 ? 1 : 0;
@@ -48,7 +52,14 @@ export function isoDay(v) {
  */
 export function rulesFor(row) {
   const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
-  return !day ? 5 : day < RULES4_FROM ? 3 : day < RULES5_FROM ? 4 : 5;
+  return !day ? 6 : day < RULES4_FROM ? 3 : day < RULES5_FROM ? 4 : day < RULES6_FROM ? 5 : 6;
+}
+/** The rule set the next cut-over brings after `r` (3 → 4, 4 → 5 or 6 when RULES6_FROM = RULES5_FROM, 5 → 6) and its first day. */
+export function nextCutover(r) {
+  if (r === 3) return { rules: 4, from: RULES4_FROM };
+  if (r === 4) return { rules: RULES6_FROM === RULES5_FROM ? 6 : 5, from: RULES5_FROM };
+  if (r === 5) return { rules: 6, from: RULES6_FROM };
+  return null;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -91,6 +102,7 @@ export function configFor(E, row) {
   if (!['daily', 'weekly', 'challenge'].includes(row.mode)) throw new VerifyError('unsupported_mode', 422);
   let world; try { world = E.getWorld(row.world); } catch (e) { world = null; }
   if (!world || world.id !== row.world) throw new VerifyError('bad_world', 422);
+  if (world.minRules && rulesFor(row) < world.minRules) throw new VerifyError('bad_world', 422); // a module world did not exist before its rules' cut-over
   let charId;
   const prof = String(row.profession || '');
   if (prof.startsWith('idx:')) charId = dailyCharId(world, parseInt(prof.slice(4), 10));
@@ -127,9 +139,9 @@ export function verifyGame(E, row, actions) {
   // the next rule set (3 → 4 in the RULES4_FROM week, 4 → 5 in the RULES5_FROM week). Never backwards (4 → 3, 5 → 4). T3 review m3:
   // a newer rule set is NOT always harder, so best-of-two is a real option — the retry is allowed only for a result FINISHED in the
   // cut-over week of THAT next rule set (FROM … FROM + 6 days).
-  const nextRules = cfg.rules === 3 ? 4 : cfg.rules === 4 ? 5 : null;
-  if (first.ok || !nextRules || !inCutoverWeek(row.finished_day, nextRules === 4 ? RULES4_FROM : RULES5_FROM)) return first;
-  const second = replayCompare(E, { ...cfg, rules: nextRules }, row, actions);
+  const nx = nextCutover(cfg.rules);
+  if (first.ok || !nx || !inCutoverWeek(row.finished_day, nx.from)) return first;
+  const second = replayCompare(E, { ...cfg, rules: nx.rules }, row, actions);
   return second.ok ? { ...second, rulesFallback: true } : first;
 }
 /** Is this (Israel) date inside the cut-over week [from, from + 6] (default RULES4_FROM)? (missing date → false) */
@@ -168,3 +180,6 @@ export function clientEngine(ua) {
   if (/Safari\//.test(ua) || /AppleWebKit/.test(ua)) return 'jsc';
   return 'other';
 }
+
+/** Worlds wave 0: the pinned pack a result row's world needs — null for the core worlds (w1–w4). packs = engine_pin.js WORLD_PACKS. */
+export function packFor(worldId, packs) { return packs && Object.prototype.hasOwnProperty.call(packs, worldId) ? packs[worldId] : null; }

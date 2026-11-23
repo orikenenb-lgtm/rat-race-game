@@ -5,8 +5,12 @@
 // API
 //   getProgress()                → copy of the progress object
 //   totalStars(p?) / title(p?) / nextTitle(p?) → {name, need} | null
-//   isUnlocked(worldId)          → w1 always; wN when w(N-1) is unlocked and has ≥1★ (stars won in a locked world via the
-//                                   daily challenge are banked — they count once the chain reaches that world)
+//   isUnlocked(worldId)          → the world's unlock rule from js/worlds/meta.js (a DAG: all clauses hold; a referenced world counts only
+//                                   when it is itself unlocked, so stars banked in a locked world via a daily challenge count once the
+//                                   chain reaches it). w1 always; w2–w4 unchanged (★ in the previous world). setUnlockAll(true) = owner override.
+//   worldMap()                   → the map for the lobby: every world (playable + planned) with unlocked / stars / lock text — meta only
+//   ensureWorldRules(id)         → Promise: loads a lazy world's full rules before createGame / deserialize / resume / the character picker
+//   starThresholdsOf(id, charId) → ★ thresholds from meta (works before a lazy world's rules are loaded)
 //   nextGoal()                   → {text, sub, worldId}  ("המשימה הבאה")
 //   nextStarLine(worldId)        → short line about the next star in a world
 //   PAWNS, PAWN_COLORS, pawnUnlocked(id), setPawn(id), setPawnColor(hex)
@@ -20,12 +24,17 @@
 //   T4: setDream(id|null) · requestTutorialReplay() · consumeTutorialReplay() → bool · setLastMode(m) · setMentorPref(l)
 //       recordLearnGame(e) → {learn:true, wouldStars, worldId, …} · recordDream(e) · DREAM_IDS
 import { net } from './net.js';
-import { WORLDS, getWorld } from './worlds/index.js';
+import { WORLDS, getWorld, ensureWorld, isLoaded } from './worlds/index.js';
 import { starThresholds } from './engine.js';
 import { ACHIEVEMENTS, achievementById, checkMetaAchievements, titleFor, TITLES } from './achievements.js';
+import { WORLD_META, metaOf, isUnlockedBy, unlockText, playableMeta } from './worlds/meta.js';
 
 const KEY = 'rr2-progress';
-const WIDS = WORLDS.map((w) => w.id);
+/** Every playable world (core w1–w4 + released lazy worlds), map order — from meta, so the lobby never needs a lazy world's rules. */
+const WIDS = playableMeta().map((m) => m.id);
+/** Worlds whose stars the server profile already knows (ranked or core). Lazy, unranked worlds stay local until the DB migration. */
+const SYNC_IDS = WORLD_META.filter((m) => m.playable && (m.ranked || m.status === 'core')).map((m) => m.id);
+
 const LEARN_GAMES = 20;          // decision-quality history kept ("מה למדתי")
 const LEARN_WEIGHT_CAP = 30;     // old decisions count at most this much against a new game (recent play matters)
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -96,22 +105,42 @@ export function nextTitle(p = P) {
   return n ? { name: n.name, need: n.min - t, min: n.min } : null;
 }
 export function isUnlocked(worldId) {
-  const i = WIDS.indexOf(worldId);
-  if (i <= 0) return i === 0;
-  return isUnlocked(WIDS[i - 1]) && (P.stars[WIDS[i - 1]] || 0) >= 1;
+  if (!WIDS.includes(worldId)) return false;
+  return isUnlockedBy(worldId, P.stars, { all: !!P.unlockAll });
 }
 export function unlockedWorlds() { return WIDS.filter(isUnlocked); }
+/** Owner / admin override: every playable world unlocked on this device (local only, never synced). */
+export function setUnlockAll(on) { const v = !!on; if (!!P.unlockAll !== v) { P.unlockAll = v; changed(); } return v; }
+/** ★ thresholds of a character from meta (lazy worlds too). Same numbers as engine starThresholds for a loaded world. */
+export function starThresholdsOf(worldId, charId) {
+  if (isLoaded(worldId)) { try { return starThresholds(getWorld(worldId), charId, 6); } catch (e) { /* fall through to meta */ } }
+  const m = metaOf(worldId) || {}; const c = (m.characters || []).find((x) => x.id === charId) || (m.characters || [])[0] || {};
+  return { maxMonths: c.maxMonths4 || c.maxMonths || m.maxMonths, happy: 60, fundMonths: 3, ...(m.stars || {}), ...(c.stars || {}) };
+}
+/** Load a world's full rules (a no-op for w1–w4). Call before createGame / deserialize / resume / the character picker of a lazy world. */
+export function ensureWorldRules(worldId) { return ensureWorld(worldId); }
+/**
+ * The world map (meta only): [{id, order, tier, name, tagline, learn, newHere, diff, estMin, status, playable, ranked, unlocked, stars, best,
+ * lockText, characters}] — planned worlds included (playable:false, a "בקרוב" pin). The lobby can render the tiered DAG from this.
+ */
+export function worldMap() {
+  return WORLD_META.map((m) => ({ id: m.id, order: m.order, tier: m.tier, name: m.name, tagline: m.tagline, learn: m.learn || null, newHere: m.newHere || null, diff: m.diff || null,
+    estMin: m.estMin ?? null, status: m.status, playable: !!m.playable, ranked: !!m.ranked, roomOk: !!m.roomOk, unlock: m.unlock, unlocked: m.playable ? isUnlocked(m.id) : false,
+    stars: P.stars[m.id] || 0, best: P.best[m.id] ?? null, lockText: unlockText(m.id), characters: m.characters || [] }));
+}
+/** The line a lobby shows before a private room in a world this player has not unlocked (BRIEF-worlds §8). */
+export const ROOM_LOCKED_NOTE = 'תשחק בעולם שעוד לא פתחת. התוצאה לא תיספר להתקדמות.';
 
 /* ---------------- Hebrew helpers for world names */
 export const inW = (name) => 'ב' + String(name).replace(/^ה/, '');   // בשכונה, בעיר הגדולה, בעמק העתיד
 export const fromW = (name) => 'מ' + name;                            // מהשכונה, מעמק העתיד
 export const toW = (name) => 'ל' + String(name).replace(/^ה/, '');   // לשכונה, לעיר הגדולה
 
-/** Thresholds for the character the player last used in a world (stars are per character), else the first one. */
+/** Thresholds for the character the player last used in a world (stars are per character), else the first one. Meta-based (lazy worlds too). */
 function thresholdsFor(worldId) {
-  const w = getWorld(worldId);
-  const c = w.characters.find((x) => x.id === P.lastChar[worldId]) || w.characters[0];
-  let T; try { T = starThresholds(w, c.id); } catch (e) { T = { maxMonths: w.maxMonths, ...w.stars }; }
+  const m = metaOf(worldId) || { characters: [] };
+  const c = m.characters.find((x) => x.id === P.lastChar[worldId]) || m.characters[0] || { id: null, name: '' };
+  let T; if (isLoaded(worldId) && WORLDS.some((w) => w.id === worldId)) { const w = getWorld(worldId); try { T = starThresholds(w, c.id); } catch (e) { T = { maxMonths: w.maxMonths, ...w.stars }; } } else T = starThresholdsOf(worldId, c.id);
   return { ...T, charName: c.name };
 }
 /** One line about the next star in a world (thresholds of the last character played there). */
@@ -130,16 +159,17 @@ export function nextGoal() {
   const nt = nextTitle();
   const sub = nt ? `עוד ${nt.need === 1 ? '★ אחד' : nt.need + '★'} לדרגת ${nt.name}` : 'הגעת לדרגה הכי גבוהה. עכשיו תנצח את החברים.';
   if (lockedIdx > 0) {
-    const prev = getWorld(WIDS[lockedIdx - 1]); const next = getWorld(WIDS[lockedIdx]);
+    const next = metaOf(WIDS[lockedIdx]); const c = (next.unlock || [])[0] || { any: [WIDS[lockedIdx - 1]] };
+    const prev = metaOf(c.any.find((x) => isUnlocked(x) && !(P.stars[x] > 0)) || c.any[0]);
     return { text: `עוד ★ אחד ${inW(prev.name)} כדי לפתוח את ${next.name}`, sub, worldId: prev.id };
   }
   const notMax = WIDS.find((w) => (P.stars[w] || 0) < 3);
   if (notMax) {
-    const w = getWorld(notMax); const s = P.stars[notMax] || 0; const T = thresholdsFor(notMax);
+    const w = metaOf(notMax); const s = P.stars[notMax] || 0; const T = thresholdsFor(notMax);
     const lim = s === 1 ? T.t2 : T.t3;
     return { text: `${s === 1 ? '★★' : '★★★'} ${inW(w.name)}: לצאת תוך ${lim} חודשים עם ${T.charName}`, sub, worldId: w.id };
   }
-  return { text: 'אגדה! כל 12 הכוכבים שלך.', sub: 'עכשיו תוכיח את זה באתגר היומי — אותן קוביות לכולם.', worldId: null };
+  return { text: `אגדה! כל ${WIDS.length * 3} הכוכבים שלך.`, sub: 'עכשיו תוכיח את זה באתגר היומי — אותן קוביות לכולם.', worldId: null };
 }
 
 /* ---------------- pawns */
@@ -269,7 +299,9 @@ export function recordGame(e = {}) {
   const unlockedBefore = unlockedWorlds(); const pawnsBefore = unlockedPawns();
   const wasUnlocked = isUnlocked(wid);
   const prevStars = P.stars[wid] || 0;
-  const got = won ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0;
+  // BRIEF-worlds §8: a private room played in a world this player has not unlocked gives no stars, unlocks or titles
+  const roomGuest = e.access === 'room' && !wasUnlocked;
+  const got = won && !roomGuest ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0;
   P.stars[wid] = Math.max(prevStars, got);
   P.gamesPlayed += 1;
   const prevBest = P.best[wid] ?? null;
@@ -296,7 +328,7 @@ export function recordGame(e = {}) {
   lastResult = {
     worldId: wid, prevStars, newStars: P.stars[wid], earned: got, gained: P.stars[wid] - prevStars, unlockedWorld, newPawns, newAchievements,
     titleBefore, titleAfter: titleFor(totalAfter), totalBefore, totalAfter, best: P.best[wid] ?? null, prevBest, newBest,
-    bankedLocked: !wasUnlocked && got > prevStars,
+    bankedLocked: !wasUnlocked && got > prevStars, roomGuest,
   };
   return lastResult;
 }
@@ -429,16 +461,18 @@ export function mergeProfile(prof) {
 }
 function serverBehind(prof) {
   if (!prof) return true;
-  for (const w of WIDS) if ((P.stars[w] || 0) > (+((prof.stars || {})[w]) || 0)) return true;
+  for (const w of SYNC_IDS) if ((P.stars[w] || 0) > (+((prof.stars || {})[w]) || 0)) return true;
   const have = new Set(prof.achievements || []);
   if (P.achievements.some((id) => !have.has(id))) return true;
   if (P.pawnChosenAt && prof.pawn !== P.pawn) return true;
   const m = prof.meta || {};
   if (P.gamesPlayed > (+m.games || 0) || P.wins > (+m.wins || 0)) return true;
-  for (const [w, v] of Object.entries(P.best)) if (v != null && !(+((m.best || {})[w]) <= v)) return true;
+  for (const [w, v] of Object.entries(P.best)) if (SYNC_IDS.includes(w) && v != null && !(+((m.best || {})[w]) <= v)) return true;
   return false;
 }
-const metaOf = () => ({ games: P.gamesPlayed, wins: P.wins, best: { ...P.best } });
+const profileMeta = () => ({ games: P.gamesPlayed, wins: P.wins, best: Object.fromEntries(Object.entries(P.best).filter(([w]) => SYNC_IDS.includes(w))) });
+/** Stars the server profile receives: the worlds it knows (lazy unranked worlds stay local until the DB migration — DRAFT 2026112x_worlds). */
+const syncStars = () => Object.fromEntries(Object.entries(P.stars).filter(([w]) => SYNC_IDS.includes(w)));
 let timer = null; let inflight = null;
 export function scheduleSync(delay = 1500) {
   if (!P.dirty) { P.dirty = true; save(); }
@@ -451,7 +485,7 @@ async function pushSync() {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const prof = await net.syncProgress({ stars: P.stars, achievements: P.achievements, pawn: P.pawn, meta: metaOf() });
+      const prof = await net.syncProgress({ stars: syncStars(), achievements: P.achievements, pawn: P.pawn, meta: profileMeta() });
       P.dirty = false; save();
       mergeProfile(prof);
       return true;

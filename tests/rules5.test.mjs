@@ -26,25 +26,28 @@ function toNextPayday(st) {
 }
 
 /* ------------------------------------------------------------------ gate */
-test('gate: RULES5_FROM is one Monday in the client and the verifier; free → 5; ranked by date (3 / 4 / 5); no date → 5', () => {
+// worlds wave 0: rules 6 (≡ rules 5 in w1–w4) starts on RULES6_FROM — a placeholder equal to RULES5_FROM, so a date ≥ RULES5_FROM gives 6 then.
+const R5D = E.RULES6_FROM === E.RULES5_FROM ? 6 : 5; // the rule set of a ranked day ≥ RULES5_FROM
+test('gate: RULES5_FROM is one Monday in the client and the verifier; free → current; ranked by date (3 / 4 / 5|6); no date → current', () => {
   assert.equal(E.RULES5_FROM, R5c); assert.equal(E.RULES4_FROM, R4c);
   const [y, m, d] = R5c.split('-').map(Number); assert.equal(new Date(Date.UTC(y, m - 1, d)).getUTCDay(), 1, 'Monday');
   assert.ok(R5c > R4c);
-  assert.equal(E.createGame({ worldId: 'w1', seed: 1 }).rules, 5, 'free');
-  assert.equal(E.createGame({ worldId: 'w1', seed: 1, learn: true }).rules, 5, 'learning');
-  assert.equal(E.createGame({ worldId: 'w1', seed: 1, mode: 'free', dateKey: '2026-12-01' }).rules, 5, 'a free game ignores date keys');
+  assert.equal(E.createGame({ worldId: 'w1', seed: 1 }).rules, E.RULES_CURRENT, 'free');
+  assert.equal(E.createGame({ worldId: 'w1', seed: 1, learn: true }).rules, E.RULES_CURRENT, 'learning');
+  assert.equal(E.createGame({ worldId: 'w1', seed: 1, mode: 'free', dateKey: '2026-12-01' }).rules, E.RULES_CURRENT, 'a free game ignores date keys');
+  assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 5 }).rules, 5);
   assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 4 }).rules, 4); assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 3 }).rules, 3);
   const day = (k) => E.rulesForDay(k);
-  assert.equal(day('2026-12-06'), 3); assert.equal(day('2026-12-07'), 4); assert.equal(day('2026-12-20'), 4); assert.equal(day(R5c), 5); assert.equal(day('2027-01-04'), 5); assert.equal(day(null), 5);
-  assert.equal(day('2026-W51'), 4, 'the week of Mon 14.12'); assert.equal(day('2026-W52'), 5, 'RULES5_FROM is the Monday of W52');
+  assert.equal(day('2026-12-06'), 3); assert.equal(day('2026-12-07'), 4); assert.equal(day('2026-12-20'), 4); assert.equal(day(R5c), R5D); assert.equal(day('2027-01-04'), R5D); assert.equal(day(null), E.RULES_CURRENT);
+  assert.equal(day('2026-W51'), 4, 'the week of Mon 14.12'); assert.equal(day('2026-W52'), R5D, 'RULES5_FROM is the Monday of W52');
   for (const k of ['2026-12-06', '2026-12-07', '2026-12-20', '2026-12-21', '20261221', '2026-W51', '2026-W52', null, 'junk']) {
     assert.equal(day(k), rulesFor({ daily_key: k }), 'client ≡ verifier ' + k);
   }
-  assert.equal(rulesFor({ weekly_start: '2026-12-14' }), 4); assert.equal(rulesFor({ challenge_day: '2026-12-22' }), 5); assert.equal(rulesFor({}), 5);
+  assert.equal(rulesFor({ weekly_start: '2026-12-14' }), 4); assert.equal(rulesFor({ challenge_day: '2026-12-22' }), R5D); assert.equal(rulesFor({}), E.RULES_CURRENT);
   for (const [mode, key] of [['daily', '2026-12-20'], ['daily', '2026-12-21'], ['weekly', '2026-W52'], ['challenge', '2026-12-08']]) {
     assert.equal(E.createGame({ worldId: 'w2', seed: 3, mode, dateKey: key }).rules, E.rulesForDay(key), mode + ' ' + key);
   }
-  assert.equal(E.dailyConfig('2026-12-20').rules, 4); assert.equal(E.dailyConfig('2026-12-21').rules, 5);
+  assert.equal(E.dailyConfig('2026-12-20').rules, 4); assert.equal(E.dailyConfig('2026-12-21').rules, R5D);
 });
 
 test('gate: the verifier replays rules 5 by date, falls back 4 → 5 only in the RULES5_FROM week, never 5 → 4', () => {
@@ -55,7 +58,7 @@ test('gate: the verifier replays rules 5 by date, falls back 4 → 5 only in the
   const end = st.result;
   const row = { mode: 'daily', world: 'w1', profession: 'idx:2', seed: 5151, max_months: 24, status: end.status, months: Math.max(1, Math.min(200, Math.round(end.months))), passive: Math.round(end.passive),
     expenses: Math.max(0, Math.round(end.expenses)), net_worth: Math.round(end.netWorth), claim_stars: end.stars || 0, claim_progress: end.progress };
-  const ok5 = verifyGame(Local, { ...row, daily_key: '2026-12-22' }, st.actions); assert.ok(ok5.ok, ok5.error); assert.equal(ok5.cfg.rules, 5); assert.ok(!ok5.rulesFallback);
+  const ok5 = verifyGame(Local, { ...row, daily_key: '2026-12-22' }, st.actions); assert.ok(ok5.ok, ok5.error); assert.equal(ok5.cfg.rules, R5D, 'replayed with rules 6 when RULES6_FROM = RULES5_FROM — the same outcome in w1'); assert.ok(!ok5.rulesFallback);
   // dated rules 4 (the day before), finished in the cut-over week → one retry with 5
   const fb = verifyGame(Local, { ...row, daily_key: '2026-12-20', finished_day: R5c }, st.actions);
   const same4 = E.replay({ worldId: 'w1', charId, seed: 5151, mode: 'daily', maxMonths: 24, tutorial: false, bailout: false, mentor: 'hint', rules: 4 }, st.actions);

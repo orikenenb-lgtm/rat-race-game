@@ -15,7 +15,7 @@
 export const CORE_VERSION = 1;
 export const WORLDS = ['w1', 'w2', 'w3', 'w4'];            // the history world 'h' needs real data — never in rooms
 /** Intent codes a seat may send. 'l' is implicit after 'r'; M (mentor) is fixed by the settings; K/W/X are practice/after-win only. */
-export const ALLOWED = new Set(['r', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'Q']);
+export const ALLOWED = new Set(['r', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'Q', 'Z']); // Z = a world module action (worlds wave 0) — a seat's own intent, never the autopilot's
 export const LIMITS = Object.freeze({
   minSeats: 2, maxSeats: 4, turnSecs: [60, 300], defTurnSecs: 90, graceSecs: 15, maxRounds: [10, 120], defMaxRounds: 80,
   awayAfter: 3, forfeitAfter: 10, strictForfeitAfter: 3, actionsPerMin: 120, maxActions: 6000, autopilotSteps: 12,
@@ -291,6 +291,7 @@ export function applyIntent(E, st, code, args) {
       case 'F': r = E.setFocus(st, args[0], args[1] ?? 0); break;
       case 'H': r = E.requestHint(st); break;
       case 'Q': r = E.resolveStory(st, args[0], args[1]); break;
+      case 'Z': if (typeof E.worldAction !== 'function') fail('bad_action'); r = E.worldAction(st, String(args[0] ?? ''), args[1] == null ? null : String(args[1])); break;
       default: fail('bad_action');
     }
   } catch (e) {
@@ -447,7 +448,7 @@ export function autopilot(E, st, { roll = true, budget = LIMITS.autopilotSteps }
 /** Ids that never spend, borrow or risk money, in preference order (BRIEF §23: never choose a risky investment silently). */
 export const SAFE_IDS = ['pass', 'skip', 'ok', 'done', 'decline', 'no', 'later', 'stay', 'keep', 'rest', 'local', 'public', 'modest', 'fix', 'pay', 'go', 'a0'];
 /** Option ids / kinds the autopilot must NEVER pick. */
-export const RISKY = /^(buy|buyVar|buyFix|buyHedge|inv(:|$)|start|offer:|up:|invest|lend|guarantee|credit|inst|sub|spread|loan|bigger|new|big|take|counter|insure|hedge|give:|pledge|sell|biz:|q:|plan:|save|raise|course|refi|prepay|report|auto:|withdraw|yes|private|object|registry|bus|smaller|abroad|monthly|once)/;
+export const RISKY = /^(buy|buyVar|buyFix|buyHedge|inv(:|$)|start|offer:|up:|invest|lend|guarantee|credit|inst|sub|spread|loan|bigger|new|big|take|counter|accept|insure|hedge|give:|pledge|sell|biz:|q:|plan:|save|raise|course|refi|prepay|report|auto:|withdraw|yes|private|object|registry|bus|smaller|abroad|monthly|once)/; // accept: a module offer (w5 allotment) is a decision, never a timeout's
 export function safeDefault(ev) {
   if (!ev || !Array.isArray(ev.options)) return null;
   const en = ev.options.filter((o) => o.enabled);

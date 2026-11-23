@@ -49,6 +49,13 @@ const CFG = {
 };
 /** → {enabled, roiCuts:[lo, hi], pN:{weak, mid, strong, golden}, close:{1:[p1,p2,p3,pNever], 2:…, 3:…}} */
 export function rivalCfg(worldId) { return CFG[worldId] || CFG.w1; }
+/** Worlds wave 0 (I4): a later world's rival table — a preset name ('GENTLE' | 'HARD' | 'HARD_W4') or {preset, roiCuts, enabled}. */
+const PRESETS = { GENTLE, HARD, HARD_W4 };
+export function registerWorldCfg(worldId, spec) {
+  if (['w1', 'w2', 'w3', 'w4', 'h'].includes(worldId)) return;
+  const o = typeof spec === 'string' ? { preset: spec } : (spec || {});
+  CFG[worldId] = { enabled: o.enabled !== false, roiCuts: o.roiCuts || [10, 20], ...(PRESETS[o.preset] || HARD) };
+}
 
 const TIERS = ['weak', 'mid', 'strong', 'golden'];
 /** pub = {kind, rent, golden, cfClaim, down, warn} (public card data only) → 'weak'|'mid'|'strong'|'golden' */

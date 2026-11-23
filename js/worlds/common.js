@@ -20,6 +20,8 @@ export const TILE_TYPES = {
   T: { type: 'tax', name: 'מס הכנסה', color: '#64748b', ink: '#ffffff', icon: 'tax' },
   I: { type: 'index', name: 'קרן מדד ופנסיה', color: '#0f766e', ink: '#ffffff', icon: 'piggy' },
   K: { type: 'business', name: 'העסק שלך', color: '#b45309', ink: '#ffffff', icon: 'shop' },
+  // worlds wave 1 (w5): a module tile — its type is the module's (js/worlds/mech/season.js tiles.N)
+  N: { type: 'allot', name: 'מפעיל תיירות', color: '#0ea5a4', ink: '#ffffff', icon: 'plane' },
 };
 
 /** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */

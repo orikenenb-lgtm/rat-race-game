@@ -56,8 +56,8 @@ function dealState(worldId, card, o = {}) { // a deal pending built by hand (rul
 }
 
 /* ------------------------------------------------------------------ T1 streams */
-test('T1 STREAMS = 15 names (append-only; T3 appended story); makeStreams for indexes 0–9 equals the v3 fixture', () => {
-  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story']);
+test('T1 STREAMS = 16 names (append-only; T3 appended story, worlds wave 0 appended world); makeStreams for indexes 0–9 equals the v3 fixture', () => {
+  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story', 'world']);
   const fx = JSON.parse(readFileSync(FIX('v3-streams.json'), 'utf8'));
   for (const [seed, s] of Object.entries(fx)) { const now = makeStreams(+seed); for (const k of OLD_STREAMS) assert.equal(now[k], s[k], `seed ${seed} ${k}`); }
   assert.equal(Object.keys(fx).length, 20);
@@ -125,7 +125,7 @@ test('T4 replay(replayConfig(st), st.actions) is byte-identical with F/H/M/inspe
 test('T5 config: replayConfig carries mentor + rules; ranked forces hint, tutorial guide; ranked M and rules-3 F are refused and not logged', () => {
   const a = E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', mentor: 'guide' }); assert.equal(a.mentor, 'hint'); assert.equal(a.rules, E.RULES_CURRENT); // no date key → the current rules (5)
   const c = E.replayConfig(a); assert.equal(c.mentor, 'hint'); assert.equal(c.rules, E.RULES_CURRENT);
-  assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', rules: 4 }).rules, 4); assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'free' }).rules, 5);
+  assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', rules: 4 }).rules, 4); assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'free' }).rules, E.RULES_CURRENT);
   assert.equal(E.createGame({ worldId: 'w2', seed: 1, mode: 'free', tutorial: true, mentor: 'pro' }).mentor, 'guide');
   assert.equal(E.createGame({ worldId: 'w1', seed: 1 }).mentor, 'guide'); assert.equal(E.createGame({ worldId: 'w2', seed: 1 }).mentor, 'hint');
   assert.equal(E.createGame({ worldId: 'w2', seed: 1, mentor: 'pro' }).mentor, 'pro');

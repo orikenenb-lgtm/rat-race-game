@@ -39,7 +39,7 @@ function randomGame(cfg, r, { maxRolls = 900, afterWin = true } = {}) {
 }
 
 test('AC-1 streams: order unchanged; rival +4 on every deal / mystery landing (rules 4), 0 elsewhere; rules 3 never; listing never', () => {
-  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story']);
+  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story', 'world']);
   let deals = 0;
   for (const rules of [4, 3]) for (const w of WORLDS) {
     const st = E.createGame({ worldId: w, seed: 77, rules }); const l0 = st.rng.listing; const r = prng(5);
@@ -317,7 +317,7 @@ test('AC-14 continue after win: W only after a free win, the goal no longer ends
   // ranked
   const d = E.createGame({ worldId: 'w1', seed: 2, mode: 'daily' }); E.rollDice(d);
   assert.throws(() => E.replay(E.replayConfig(d), [...d.actions, ['W']]), /replay_mismatch/); assert.throws(() => E.replay(E.replayConfig(d), [...d.actions, ['X']]), /replay_mismatch/);
-  assert.deepEqual([...CODES].sort(), ['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X'].sort());
+  assert.deepEqual([...CODES].sort(), ['r', 'l', 'c', 'L', 'R', 'C', 'P', 'A', 'I', 'S', 'T', 'F', 'H', 'M', 'Q', 'K', 'W', 'X', 'Z'].sort()); // worlds wave 0: Z = a world module action
   assert.equal(typeof E.OUTCOME_REV, 'number'); assert.equal(E.RIVALS.saver.name, 'רותם');
 });
 

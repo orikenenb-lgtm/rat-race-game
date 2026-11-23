@@ -131,5 +131,7 @@ export function checkMetaAchievements(progress = {}) {
 export const TITLES = [
   { min: 0, name: 'עכבר' }, { min: 2, name: 'חוסך' }, { min: 4, name: 'משקיע' },
   { min: 7, name: 'טייקון' }, { min: 10, name: 'מיליונר' }, { min: 12, name: 'אגדה' },
+  // worlds wave 0 (DESIGN §1.3): new titles past 12 ★ — the existing ones keep their names and thresholds
+  { min: 16, name: 'בעל אימפריה קטנה' }, { min: 21, name: 'איל הון' }, { min: 27, name: 'מגנט' }, { min: 36, name: 'אגדה כלכלית' },
 ];
 export function titleFor(totalStars) { let t = TITLES[0]; for (const x of TITLES) if (totalStars >= x.min) t = x; return t.name; }

@@ -7,7 +7,9 @@
 import { next, int, shuffle, weighted, makeStreams, STREAMS, mix32 } from './rng.js';
 import * as BK from './finance/bank.js';
 import * as IV from './finance/invest.js';
-import { WORLDS, getWorld } from './worlds/index.js';
+import { WORLDS, getWorld, registerWorld, ensureWorld, isLoaded, loadedWorlds, onRegister } from './worlds/index.js';
+import { GOALS } from './worlds/goals.js';
+import { money, moneyCard, moneyShort, moneyTiny, moneyFull } from './money.js';
 import { checkAchievements, achievementById } from './achievements.js';
 import * as BIZ from './finance/business.js';
 import { TAX, slip, grossFromNet, marginalRate, PLANS, PLAN_IDS, LIFE_CFG, LIFE_EVENTS, LIFE_QUIET, LESSONS as LIFE_LESSONS, creditBand } from './life.js';
@@ -17,7 +19,7 @@ import * as MN from './systems/mentor.js';
 import * as FC from './systems/focus.js';
 import * as DD from './systems/dd.js';
 import * as CY from './systems/cycle.js';
-import { RULES4_FROM, RULES5_FROM, rulesForDay, dayOf } from './systems/rules.js';
+import { RULES4_FROM, RULES5_FROM, RULES6_FROM, rulesForDay, dayOf } from './systems/rules.js';
 import * as CH from './systems/chains.js';
 import * as RV from './systems/rivals.js';
 import * as DR from './systems/dreams.js';
@@ -34,7 +36,9 @@ export const OUTCOME_REV = 1;
 /** T4 E-2: the first N rolls of a brand-new player's first game cost no ⚡ (st.tutorialFree). */
 export const TUTORIAL_FREE_ROLLS = 10;
 /** CR-29: the rule set a ranked game is created (and verified) with, from its date key — shared with verify_core.js rulesFor. */
-export { RULES4_FROM, RULES5_FROM, rulesForDay, dayOf as rulesDayOf };
+export { RULES4_FROM, RULES5_FROM, RULES6_FROM, rulesForDay, dayOf as rulesDayOf };
+/** Worlds wave 0: the registry (lazy worlds), the map meta and the one money formatter (js/money.js). */
+export { registerWorld, ensureWorld, isLoaded, loadedWorlds, money, moneyShort, moneyTiny, moneyFull }; // the map meta: js/worlds/meta.js (via js/progress.js)
 export const cyclePath = CY.cyclePath;
 
 /** T2 rules gate: 3 = exact v3 behaviour (in-flight ranked games, rollback), 4 = due diligence, cycle, focus, new option sets. */
@@ -42,8 +46,13 @@ const R4 = (st) => (st.rules || 3) >= 4;
 /** Full-upgrade rules gate (E1 B1/B2/A1 + balance C1/C2, J1 E7): 5 = new free/learning games and ranked games from RULES5_FROM. Rules 3/4 stay
  *  byte-identical (golden fixtures); no new RNG draws in rules 5 (every stream keeps its fixed draw count). */
 const R5 = (st) => (st.rules || 3) >= 5;
+/** Worlds wave 0 rules gate: 6 = the world mechanic modules (js/worlds/mech/*), stream `world`, action `Z`, new goal types. For w1–w4 rules 6
+ *  is IDENTICAL to rules 5 (no rule reads R6 in a world without a module; tools/replay-corpus.mjs proves it). New worlds have minRules 6. */
+const R6 = (st) => (st.rules || 3) >= 6;
+void R6;
 /** The newest rule set (free and learning games start with it). */
-export const RULES_CURRENT = 5;
+export const RULES_CURRENT = 6;
+export const RULE_SETS = [3, 4, 5, 6];
 const RANKED_MODES = ['daily', 'weekly', 'challenge'];
 
 /** The lessons library: life lessons + the business module's lessons (ids biz_…). */
@@ -70,13 +79,7 @@ const groups = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 /** ₪1,234 / −₪1,234 (v1 style, U+2212 minus). */
 export function fmt(n) { const r = Math.round(n); return (r < 0 ? '−' : '') + '₪' + groups(Math.abs(r)); }
 /** Like fmt but ≥ ₪1M becomes "₪1.25 מיליון". */
-export function fmtM(n) {
-  const a = Math.abs(n);
-  if (a < 1e6) return fmt(n);
-  const v = a / 1e6;
-  const s = (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-  return (n < 0 ? '−' : '') + '₪' + s + ' מיליון';
-}
+export function fmtM(n) { return moneyCard(n); } // js/money.js: byte-identical below ₪999.5M, then "₪1 מיליארד" (was "₪1000 מיליון")
 /** +₪700 / −₪900 */
 export function sgn(n) { return (Math.round(n) > 0 ? '+' : '') + fmtM(n); }
 /** Share prices: ₪0.05 / ₪15 / ₪1,234.5 */
@@ -109,7 +112,7 @@ export function createGame(o = {}) {
   const ch = w.characters.find((c) => c.id === o.charId) || w.characters[0];
   const seed = ((o.seed ?? 1) >>> 0) || 1;
   const mode0 = history ? 'history' : (o.mode || 'free');
-  const rules0 = RANKED_MODES.includes(mode0) && o.dateKey != null ? rulesForDay(o.dateKey) : ([3, 4, 5].includes(o.rules) ? o.rules : RULES_CURRENT);
+  const rules0 = Math.max(RANKED_MODES.includes(mode0) && o.dateKey != null ? rulesForDay(o.dateKey) : (RULE_SETS.includes(o.rules) ? o.rules : RULES_CURRENT), w.minRules || 0); // a module world never runs under older rules
   let scen = null;
   if (history) { if (!hasRealData()) throw new Error('history data not loaded'); scen = scenarioById(o.scenarioId); }
   const st = {
@@ -140,6 +143,7 @@ export function createGame(o = {}) {
   if (w.mechanic === 'fx') { st.world.usdHist = [st.world.usd]; }
   if (w.mechanic === 'angel') { st.world.impact = st.world.impact || 0; }
   if (ch.impact) st.world.impact = ch.impact;
+  if (mechsOf(w).length) { st.rules = rules0; for (const M of mechsOf(w)) if (M.init) M.init(st, w, ch, MCTX); } // worlds wave 0: module state (0 'world' draws; w1–w4 untouched)
   updateDerivedPrices(st);
   for (const a of ch.assets || []) addAsset(st, a, { start: true, fixed: a.fixedRate != null });
   for (const [tk, q] of Object.entries(ch.holdings || {})) {
@@ -227,6 +231,7 @@ function v4Defaults(st) {
   if (st.afterWin === undefined) st.afterWin = null;
   if (st.self === undefined) st.self = null;
   if (!Array.isArray(st.bizPast)) st.bizPast = [];
+  for (const M of mechs(st)) if (M.defaults) M.defaults(st, MCTX); // worlds wave 0: idempotent module fields (save compatibility)
   return st;
 }
 
@@ -344,7 +349,7 @@ export function deserialize(json) {
   if (st.v === 1) migrateV2(st);
   if (st.v === 3) migrateV3(st);
   if (st.v !== SAVE_VERSION) throw new Error('save_incompatible');
-  try { getWorld(st.worldId); v4Defaults(st); } catch (e) { throw new Error('save_incompatible'); }
+  try { getWorld(st.worldId); v4Defaults(st); } catch (e) { if (/^world_not_loaded/.test(e && e.message)) throw new Error("world_not_loaded " + st.worldId); throw new Error("save_incompatible"); } // worlds wave 0: a lazy world's save needs ensureWorld(id) first
   return st;
 }
 /**
@@ -392,6 +397,21 @@ function migrateV2(st) {
 
 /* ============================================================ economy core */
 const W = (st) => getWorld(st.worldId);
+/* ---------------------------------------------------------------- worlds wave 0: mechanic modules (js/worlds/mech/*, DESIGN §4.2) */
+const NO_MECH = [];
+/** The mechanic modules of a world (w.mech: an array of module objects attached by the world file). [] for w1–w4 / h. */
+const mechsOf = (w) => (w && Array.isArray(w.mech) ? w.mech : NO_MECH);
+const mechs = (st) => mechsOf(W(st));
+/** The module that owns a hook (first one that defines it), or null. */
+const mechWith = (st, key) => { for (const M of mechs(st)) if (M[key]) return M; return null; };
+// Systems config of a registered later world (I4): world data first, then the system's own table, then a named preset.
+onRegister((w) => {
+  const S = w.systems || {};
+  if (S.cycle) CY.registerWorldCfg(w.id, S.cycle);
+  if (S.dd) DD.registerWorldCfg(w.id, S.dd);
+  if (S.rivals) RV.registerWorldCfg(w.id, S.rivals);
+  if (S.focus) FC.registerWorldCfg(w.id, S.focus);
+});
 const loanUnit = (st) => W(st).loan.unit;
 const autoUnit = (st) => W(st).loan.autoUnit || W(st).loan.unit;
 /** Monthly cost of bank loans in % of the balance. w2: base + rateMult × current interest rate. */
@@ -462,8 +482,9 @@ function usdFor(st, a) {
 
 /** Current monthly net cashflow of one asset (after its mortgage). */
 export function assetCf(st, a) { return a.biz ? (a.bizDraw || 0) : assetCfRaw(st, a); }
-/** Owner-run managed businesses: last month's draw (net) — active income, not passive. */
-function activeBizOf(st) { let x = 0; for (const a of st.assets) if (a.biz && !a.biz.manager) x += a.bizDraw || 0; return x; }
+/** Owner-run managed businesses: last month's draw (net) — active income, not passive. Worlds wave 0: a module asset flagged `active`
+ *  (an owner-run operation, e.g. w5 restaurants before a manager) is a job too. */
+function activeBizOf(st) { let x = 0; for (const a of st.assets) { if (a.biz && !a.biz.manager) x += a.bizDraw || 0; else if (a.active) x += assetCf(st, a); } return x; }
 const managedOf = (st) => st.assets.filter((a) => a.biz && !a.biz.closed);
 const isRent = (st, a) => !!(a.k && (W(st).kinds[a.k] || {}).rent);
 /** Deal-card yield chip: gross vs net yield (invest.js realEstateYield — "תשואה נטו ולא רק שכירות"). */
@@ -490,6 +511,7 @@ function grossRent(st, a) {
   return Math.max(0, Math.round((a.cf || 0) + (a.debt || 0) * BK.BANK.mortgage.fixedRate / 12));
 }
 function assetCfRaw(st, a, neutral = false) {
+  if (a.op) { const M = mechWith(st, 'asset'); if (M) return M.asset.cf(st, a, MCTX, neutral); } // worlds wave 0: a module-owned asset kind
   let cf;
   const cm = !neutral && st.econ && R4(st) ? CY.mult(st.econ, st.worldId, isRent(st, a) ? 'cfRent' : 'cfOther') : 1; // T2 §8.5 (multiplier only)
   const cyc = (x) => (cm === 1 ? x : x >= 0 ? x * cm : x * (2 - cm)); // a recession never makes a money-losing line better
@@ -518,7 +540,7 @@ function tickerDiv(st, tk) {
 
 function passiveOf(st) {
   let p = -rentTaxOf(st);
-  for (const a of st.assets) { if (a.biz) { if (a.biz.manager) p += a.bizDraw || 0; continue; } p += assetCf(st, a); } // an owner-run business is a job, not passive income
+  for (const a of st.assets) { if (a.biz) { if (a.biz.manager) p += a.bizDraw || 0; continue; } if (a.active) continue; p += assetCf(st, a); } // an owner-run business is a job, not passive income
   for (const tk of Object.keys(st.holdings)) p += st.holdings[tk].qty * tickerDiv(st, tk);
   return Math.round(p);
 }
@@ -531,18 +553,20 @@ function goalPassiveOf(st) {
   const p = passiveOf(st); if (!R5(st)) return p;
   let over = 0;
   for (const a of st.assets) if (a.biz && a.biz.manager && !a.biz.closed) over += Math.max(0, (a.bizDraw || 0) - BIZ.sustainableDraw(a.biz));
-  return p - over;
+  const M = mechWith(st, 'goalAccrual'); // worlds wave 0: income earned this month but paid earlier (w5: the allotment's up-front half) counts in its own month
+  return M ? p - over + M.goalAccrual(st, MCTX) : p - over;
 }
 /**
  * The goal hold (paydays in a row) — one place for every rule set. E1 C3 (a 3-payday hold in w2) was measured for rules 5 and NOT adopted:
  * it cost the guide player ~5 pp in w2 (below the ≥ 60 % keep line) for a within-noise durability gain (tools/balance-report.md).
  */
-function goalHoldOf(st) { void st; return GOAL_HOLD; }
+function goalHoldOf(st) { const g = W(st).goal; return g.hold ?? GOAL_HOLD; } // worlds wave 0: a goal may set its own hold (w1–w4: none → 2)
 function expensesOf(st) {
   let e = studyCost(st);
   for (const x of st.expenses) if ((!x.until || x.until >= st.month) && (!x.from || x.from <= st.month)) e += x.amount;
   for (const x of st.subs) e += x.amount;
   for (const x of st.pledges) e += x.amount;
+  const M = mechWith(st, 'expense'); if (M) e += M.expense(st, MCTX); // worlds wave 0: a module's own monthly charge (w5: the seasonal line's interest)
   return e + loanPay(st) + creditPay(st);
 }
 function holdingsValue(st) {
@@ -554,6 +578,7 @@ function angelPaper(st) { return st.angels.filter((x) => x.status === 'active').
 function netWorthOf(st) {
   let nw = st.cash + (st.savings || 0) - st.loans - st.credit + holdingsValue(st) + angelPaper(st);
   for (const a of st.assets) nw += assetValue(st, a) - a.debt;
+  const M = mechWith(st, 'liability'); if (M) nw -= M.liability(st, MCTX); // worlds wave 0: module debts (w5: the seasonal credit line)
   return Math.round(nw);
 }
 
@@ -571,6 +596,7 @@ export const GOAL_HOLD = 2; // "החופש צריך להחזיק": 2 consecutive
 /** Is the world goal met right now (before the goal hold)? */
 function goalMet(st) {
   const g = W(st).goal; if (g.type === 'benchmark') return false;
+  if (GOALS[g.type]) return GOALS[g.type].met(st, g, GCTX); // worlds wave 0: registered goal types (js/worlds/goals.js)
   if (g.type === 'passive') { const p = goalPassiveOf(st); return p > 0 && p >= expensesOf(st); }
   const nw = netWorthOf(st);
   if (g.type === 'netWorth') return nw >= g.target;
@@ -621,6 +647,10 @@ function goalOf(st, netWorth, passive, expenses) {
   const w = W(st); const g = w.goal; const L0 = st.life;
   let goalProgress, goalText, goalParts;
   const holdCap = (x) => (x >= 1 && (L0.goalStreak || 0) < goalHoldOf(st) ? 0.99 + 0.003 * (L0.goalStreak || 0) : x); // 1 only once the goal held
+  if (GOALS[g.type]) { // worlds wave 0: a registered goal type (passive12, modValue, all …)
+    const G = GOALS[g.type];
+    return { goalProgress: holdCap(G.progress(st, g, GCTX)), goalText: G.text(st, g, GCTX), goalParts: G.parts(st, g, GCTX) };
+  }
   if (g.type === 'benchmark') {
     const bench = benchNW(st);
     goalProgress = bench > 0 ? clamp(netWorth / bench, 0, 1) * 0.999 : 0;
@@ -692,6 +722,7 @@ function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, ac
   if (w.mechanic === 'fx') { wi.usd = st.world.usd; wi.usdHist = st.world.usdHist.slice(-12); wi.usdRef = w.fx.ref; wi.gold = st.prices.GOLD; wi.insuredUntil = st.world.insuredUntil || 0; wi.exposure = fxExposure(st); }
   if (w.mechanic === 'angel') { wi.impact = Math.floor(st.world.impact || 0); wi.impactPending = Math.round((st.world.vesting || []).reduce((s, v) => s + v.left, 0)); wi.impactPerMonth = round2(st.pledges.reduce((s, p) => s + p.impact, 0) + st.assets.reduce((s, a) => s + (a.impact || 0), 0) + (st.world.vesting || []).reduce((s, v) => s + Math.min(v.left, v.perMonth), 0)); wi.impactTarget = w.goal.impact; wi.angelsActive = st.angels.filter((x) => x.status === 'active').length; wi.angelPaper = angelPaper(st); }
   if (w.mechanic === 'history' && st.history) { const H = st.history; Object.assign(wi, { ym: H.ym, ymText: ymText(H.ym), index: st.prices.IDX, indexHist: H.idxHist.slice(-24), rate: st.world.rate, rateHist: st.world.rateHist.slice(-12), cpi: round2(st.life.cpi), home: round2(homeRatio(st)), usd: round2(seriesAt('usdIls', H.ym) || 0), headline: H.headline, benchmark: benchNW(st), scenario: H.name, reality: H.index === 'sp500' ? '🌍 המדד האמריקאי נמדד בדולרים; בקרן שקלית גם שער הדולר משנה (למשל 2007–2012: הדולר ירד מ־4.25 ל־3.92).' : null }); }
+  { const M = mechWith(st, 'indicators'); if (M) Object.assign(wi, M.indicators(st, MCTX)); } // worlds wave 0: module chips + the generic panel descriptor
   const L = st.life; const band = bandOf(st); const idxH = st.holdings.IDX;
   const life = {
     age: round2(L.age), ageText: ageText(L.age), energy: Math.round(L.energy), happiness: Math.round(happyNow(st)), happinessBase: Math.round(L.happiness),
@@ -781,6 +812,7 @@ function addAsset(st, card, o = {}) {
   if (card.grow) a.grow = card.grow;
   if (o.golden) a.golden = true;
   if (o.hedge) a.hedge = { rate: st.world.usd, until: st.month + w.fx.hedgeMonths - 1 };
+  if (card.op) { const M = mechWith(st, 'asset'); if (M) M.asset.create(st, a, card, MCTX); } // worlds wave 0: module asset state (rooms, profile, price plan …)
   st.assets.push(a);
   return a;
 }
@@ -800,6 +832,7 @@ export function cityModels(st) {
   }
   for (const x of st.angels) if (x.status === 'active') out.push({ key: 'v' + x.id, assetId: 'v' + x.id, model: w.models.angel, label: x.n, kind: 'angel' });
   if (w.mechanic === 'angel' && (st.stats.given > 0 || st.pledges.length)) out.push({ key: 'f', assetId: 'f', model: w.models.giving, label: 'הקרן שלך', kind: 'foundation' });
+  { const M = mechWith(st, 'cityModels'); if (M) M.cityModels(st, out, MCTX); } // worlds wave 0: module pieces (and per-asset render hints, e.g. w5 occupancy)
   return out.filter((m) => m.model);
 }
 function holdingModelDiff(st, before, out) {
@@ -972,6 +1005,7 @@ function paydayImpl(st, out, step, landed) {
   }
   // emergency fund (bank.js savingsMonth: interest − 15% tax)
   if (st.savings > 0) { const sv = BK.savingsMonth({ balance: st.savings, annualRate: savingsRate(st) }); st.savings = sv.newBalance; st.taxes.savings += sv.tax; }
+  { const g = w.goal; const G = GOALS[g.type]; if (G && G.onPayday) G.onPayday(st, g, m0.goalPassive, GCTX); } // worlds wave 0: e.g. passive12's ring of the month just paid
   // "החופש צריך להחזיק": the goal must hold on goalHoldOf(st) consecutive paydays
   const held = goalMet(st); const HOLD = goalHoldOf(st);
   L.goalStreak = held ? (L.goalStreak || 0) + 1 : 0;
@@ -1374,6 +1408,7 @@ function monthlyWorld(st, out) {
       if (st.month >= x.revealAt) revealAngel(st, x, out);
     }
   }
+  for (const M of mechsOf(w)) if (M.monthly) M.monthly(st, out, MCTX); // worlds wave 0: the module's month (its declared fixed 'world' draws)
 }
 /** מכונת הזמן: one real month passes — rate, home prices, dollar, headlines, the benchmark investor. */
 function historyMonth(st, out) {
@@ -1454,7 +1489,8 @@ export function landing(st) {
       break;
     case 'market': p = w.mechanic === 'history' ? historyMarket(st) : createMarket(st); break;
     case 'crisis': p = { type: 'crisis', card: clone(drawCard(st, 'crisis', w.crises, 'crisis')) }; if ((st.tutorial && st.turn <= 3) || (R4(st) && !st.history && st.month < CRISIS_GRACE)) p.skipped = true; // playtest B6: no month-without-pay before there was a month to build a cushion
-      if (!st.history && !p.skipped) { const X = LIFE_CFG.idx; st.prices.IDX = Math.max(1, round2(st.prices.IDX * (1 + X.crisisHit))); st.life.lastCrash = st.month; p.indexHit = X.crisisHit; } break;
+      if (!st.history && !p.skipped) { const X = LIFE_CFG.idx; st.prices.IDX = Math.max(1, round2(st.prices.IDX * (1 + X.crisisHit))); st.life.lastCrash = st.month; p.indexHit = X.crisisHit; }
+      if (p.card.mk && !p.skipped) { const M = mechWith(st, 'crisis'); if (M) M.crisis.create(st, p, MCTX); } break; // worlds wave 0: a module crisis (e.g. w5's regional tourism slump)
     case 'mystery': p = createMystery(st); break;
     case 'bank': p = createBank(st); break;
     case 'upgrade': p = { type: 'upgrade', card: clone(drawCard(st, 'upgrade', w.upgrades, 'special')) }; break;
@@ -1467,7 +1503,10 @@ export function landing(st) {
     case 'edu': p = { type: 'edu' }; break;
     case 'tax': p = { type: 'tax', refund: st.life.taxRefund, bill: st.life.sideTaxDue }; break;
     case 'index': p = tradePending(st, 'IDX', null, 'קרן מחקה מדד ופנסיה', 'קונים קצת מכל השוק. המחיר זז כל חודש — לפעמים חזק. כאן אפשר גם להגדיר הוראת קבע.', 'index'); break;
-    default: throw new Error('unknown tile type ' + tile.type);
+    default: { // worlds wave 0: a module tile (its create() consumes its declared fixed 'world' draws, whatever the player then does)
+      const T = mechTile(st, ch); if (!T) throw new Error('unknown tile type ' + tile.type);
+      p = T.create(st, MCTX); p.type = 'mech'; p.mt = ch; break;
+    }
   }
   p.id = st.nextEventId++; p.tile = ch; p.pos = st.pos; p.month = st.month;
   p.k0 = st.actions.length; // T6 §4.4: the card start (replay of actions.slice(0, k0) has this card open, nothing chosen)
@@ -1559,6 +1598,7 @@ function createMarket(st) {
   if (card.k === 'price') return tradePending(st, card.tk, card.p, card.n, card.d, 'market');
   if (card.k === 'gold') { st.world.goldUsd = Math.round(st.world.goldUsd * (1 + card.pct / 100)); updateDerivedPrices(st); return tradePending(st, 'GOLD', null, card.n, card.d, 'market'); }
   const p = { type: 'market', card };
+  if (card.mk) { const M = mechWith(st, 'market'); if (M) M.market.create(st, p, MCTX); } // worlds wave 0: a module market card (applied at the landing, decision-independent)
   if (card.k === 'rate') { p.from = st.world.rate; setRate(st, st.world.rate + card.delta); p.to = st.world.rate; }
   if (card.k === 'fx') { p.from = st.world.usd; setUsd(st, st.world.usd + card.delta); updateDerivedPrices(st); p.to = st.world.usd; }
   if (card.k === 'reval') { p.changed = []; for (const a of st.assets) if (!card.kind || a.k === card.kind) { const v0 = a.value; a.value = Math.round(a.value * card.mult); p.changed.push({ id: a.id, from: v0, to: a.value }); } }
@@ -1809,6 +1849,8 @@ const scoutOn = (st) => !!(R4(st) && st.life.focus && st.life.focus.id === 'scou
 const focusOn = (st, id) => !!(R4(st) && st.life && st.life.focus && st.life.focus.id === id);
 
 const DESCRIBE = {
+  /** Worlds wave 0: a module tile (js/worlds/mech/*). The module fills title / text / data / options (each option a plain opt()). */
+  mech(st, p, ev) { const T = mechTile(st, p.mt); T.describe(st, p, ev, MCTX); },
   payday(st, p, ev) {
     const pd = p.pd || { amount: 0, salary: 0, passive: 0, expenses: 0, month: st.month };
     const w = W(st);
@@ -1816,7 +1858,7 @@ const DESCRIBE = {
     ev.text = `משכורת ${fmtM(pd.salary)}, הכנסה פסיבית ${sgn(pd.passive)}, הוצאות ${fmtM(-pd.expenses)}.`;
     ev.data = { ...pd, cashflow: pd.amount };
     const ratio = pd.expenses ? pd.passive / pd.expenses : 0;
-    ev.mentor = w.goal.type === 'passive'
+    ev.mentor = passiveGoal(w)
       ? (pd.passive <= 0 ? mentorLine(st, 'payday0', {}) : mentorLine(st, 'paydayN', { pct: Math.round(ratio * 100) + '%' }))
       : mentorLine(st, 'paydayNW', { nw: fmtM(netWorthOf(st)), target: fmtM(w.goal.target) });
     // v3: the monthly plan (time & energy) + a raise request
@@ -2024,7 +2066,7 @@ const DESCRIBE = {
         : `תשואה ${roiE}% בשנה, בלי הלוואה`;
     // the card's own default (the guide primary uses the evaluator; this is its tie-break): buy only when it adds money
     // every month (and, in net-worth worlds, is not overpriced / declining) and the one cushion rule (§10.2) is met
-    const nwOk = w.goal.type === 'passive' || ((value - c.cost) + (c.grow || 0) * value * 24 >= 0 && (value >= c.cost || cfShown * 24 >= c.cost - value));
+    const nwOk = passiveGoal(w) || ((value - c.cost) + (c.grow || 0) * value * 24 >= 0 && (value >= c.cost || cfShown * 24 >= c.cost - value));
     const cush = cushionCheck(pubCtxLite(st), -c.down, best ? best.loanAmount : 0, best ? best.net : 0);
     d.cushionAfter = round2(cush.after);
     if (best && cush.flagged) d.warning = 'אחרי הקנייה יישאר לך פחות מחודש הוצאות. משבר אחד — והבנק יחליט בשבילך.';
@@ -2063,6 +2105,7 @@ const DESCRIBE = {
       if (p.rv.n >= 1) for (const o of ev.options) if (o.kind === 'inspect' || o.kind === 'offer') o.rivalRisk = h;
     }
     if (c.usdLinked) d.usdLinked = true;
+    if (c.op) { const M = mechWith(st, 'deal'); if (M) M.deal.describe(st, p, ev, MCTX); } // worlds wave 0: a module asset card (w5: the 12-month strip)
     d.reality = dealReality(st, c, d);
     ev.sound = p.golden ? 'golden' : 'card';
   },
@@ -2187,6 +2230,7 @@ const DESCRIBE = {
     } else if (c.k === 'quiet') {
       ev.mentor = mentorLine(st, 'cryptoDead', {}); ev.auto = true; ev.toastText = c.n;
     }
+    if (c.mk) { const M = mechWith(st, 'market'); if (M) M.market.describe(st, p, ev, MCTX); } // worlds wave 0: a module market card (d.amount is charged by CHOOSE.market)
   },
 
   crisis(st, p, ev) {
@@ -2487,7 +2531,7 @@ function buyAsset(st, p, out, o) {
   if (p.golden) out.effects.push({ type: 'sparkle', at: 'a' + a.id });
   cashFx(out, -(c.down + fee), null);
   if (ddInfo) {
-    const D = ddInfo; const nwW = w.goal.type === 'passive' ? 0.25 : 1;
+    const D = ddInfo; const nwW = passiveGoal(w) ? 0.25 : 1;
     a.dd = { claimedCf: D.claimedCf, claimedValue: D.claimedValue, level: D.level, repair: D.repair };
     if (D.repair) { st.cash -= D.repair; st.stats.ddRepairs += D.repair; cashFx(out, -D.repair, `תיקון ${fmtM(D.repair)}`); out.news.push({ kind: 'dd', text: D.level === 2 ? `התיקון שהבדיקה מצאה: ${fmtM(D.repair)}.` : `הפתעה: ${fmtM(D.repair)} תיקונים שלא ידעת עליהם.`, amount: -D.repair }); }
     addLuck(st, 'dd', (cf - D.cfExp) * 24 + nwW * (a.value - D.valueExp) - (D.repair - D.repExp));
@@ -2525,7 +2569,7 @@ function buyAsset(st, p, out, o) {
 // and answers requestHint (scoreOptions), so the highlight never contradicts the evaluator.
 const DQ_PRINC = { deal: ['cashflow'], doodad: ['opportunity_cost'], trade: ['risk_size'], market: ['cashflow'], bank: ['rate_risk'], upgrade: ['cashflow'], fx: ['diversification'],
   pitch: ['risk_size', 'diversification'], giving: [], life: ['cushion', 'opportunity_cost'], payday: ['time'], edu: ['time'], business: ['cashflow', 'risk_size'], mystery: ['knowledge'], tax: ['fees_tax'], shipping: ['cushion'], focus: ['time'] };
-const DQ_WHY = { noCushion: 'כמעט לא נשארה לך כרית ביטחון', // J1 E3: a full clause (it was subject-less: 'השאיר אותך בלי כרית'); presentation only, every rule set
+const DQ_WHY = { noRunway: 'לא נשאר מספיק מזומן לחודשים החלשים של העסקים', noCushion: 'כמעט לא נשארה לך כרית ביטחון', // J1 E3: a full clause (it was subject-less: 'השאיר אותך בלי כרית'); presentation only, every rule set
   dsr: 'החזרי החובות עברו 40% מההכנסה', gamble: 'הימור עם תוחלת שלילית', panicSell: 'מכירה בהפסד אחרי ירידה', concentrated: 'הרבה כסף במקום אחד', burnout: 'סכנת שחיקה', debt: 'חוב יקר', best: 'הכי משתלם לפי מה שראית', near: 'כמה אפשרויות סבירות — כולן בסדר',
   values: 'טרייד־אוף של סגנון חיים — אין כאן תשובה אחת', noUse: 'המוקד הזה לא ינוצל החודש', inspectFirst: 'היה עדיף: לבדוק קודם' };
 function pitchEV(worldId, card) {
@@ -2537,7 +2581,7 @@ function pitchEV(worldId, card) {
 }
 /** The public context of a decision (§10.0): only what the player can see. optionU never touches st. */
 function pubCtx(st) {
-  const L = st.life; const E = Math.max(1, expensesOf(st)); const g = W(st).goal.type;
+  const L = st.life; const E = Math.max(1, expensesOf(st)); const g = passiveGoal(W(st)) ? 'passive' : W(st).goal.type; // worlds wave 0: passive12 scores like passive
   return { cash: st.cash, savings: st.savings || 0, E, energy: L.energy, happiness: happyNow(st), happyBase: L.happiness, loans: st.loans, credit: st.credit,
     netWorth: netWorthOf(st), baseNet: baseNet(st), goalType: g, nwWeight: g === 'passive' ? 0.25 : 1,
     study: { done: L.study.done, months: L.study.months, need: L.study.need, raiseNet: R5(st) && !L.study.done ? studyRaiseNet(st) : null, left: st.mode === 'free' ? 999 : st.maxMonths - st.month }, idxPeak: L.idxPeak || st.prices.IDX, idxPrice: st.prices.IDX,
@@ -2600,9 +2644,11 @@ function dealBuy(ctx, ev, o, cut = 0) {
   const money = (cf, vf, rep) => (cf + cfAdd - loanM) * H + ctx.nwWeight * (value0 * vf - cost) + grow - rep;
   const flags = []; const cush = cushionCheck(ctx, -(d.down - downCut), o.loanAmount, o.net + cfAdd);
   if (cush.flagged) flags.push('noCushion');
+  let runPen = 0; // worlds wave 0: a module may name the cash a deal needs left over (w5: the winter's fixed costs) — the shortfall in months of expenses
+  if (d.runwayNeed != null) { const left = ctx.cash + ctx.savings - (d.down - downCut) + (o.loanAmount || 0); if (left < d.runwayNeed) { flags.push('noRunway'); runPen = Math.min(40, (d.runwayNeed - left) / ctx.E); } }
   if (o.loanAmount) flags.push('debt');
   if ((d.debt || 0) > 3 * Math.max(1, d.down) && o.net <= 0) flags.push('concentrated');
-  const pen = flags.reduce((a, f) => a + (DQ_PEN[f] || 0), 0);
+  const pen = flags.reduce((a, f) => a + (DQ_PEN[f] || 0), 0) + runPen;
   const vfE = b.vf ?? 1; const repE = b.rep ?? 0;
   const U = money(b.cf, vfE, repE) / ctx.E - pen;
   let evi2 = 0;
@@ -2731,6 +2777,7 @@ function scorePool(ev, o) {
  */
 export function scoreOptions(st, ev) {
   ev = ev || currentEvent(st);
+  if (ev && ev.type === 'mech') { const T = mechTile(st, st.pending && st.pending.mt); return T && T.score && !ev.auto ? T.score(st, ev, MCTX) : []; } // worlds wave 0
   const pool = scorePool(ev, null); if (!pool) return [];
   const ctx = pubCtx(st);
   return pool.map((x) => { const u = optionU(ctx, ev, x, x.needsQty ? { qty: 1 } : undefined); return { id: x.id, U: u.U, flags: u.flags, reasons: u.reasons }; });
@@ -3003,6 +3050,8 @@ function applyLife(st, p, E, o, eff, out) {
 }
 
 const CHOOSE = {
+  /** Worlds wave 0: a module tile's choice → close? (the module never draws here: its draws were taken in create()). */
+  mech(st, p, o, params, out) { const T = mechTile(st, p.mt); return T.choose(st, p, o, params, out, MCTX); },
   payday(st, p, o, params, out) {
     out.mentor = null;
     if (o.id === 'raise') { askRaise(st, p, out); return true; }
@@ -3577,7 +3626,7 @@ function ensureStoryState(st) {
 /** Exactly 2 'story' draws every payday of a rules-4 game (also history, also with no chain active). */
 function storyDraw(st) { const a = next(st.rng, 'story'), b = next(st.rng, 'story'); if (st.story) st.story.r = [a, b]; }
 /** T3 §6.2 calendar: history = the real month; otherwise game month 1 = January. */
-function calOf(st) { if (st.history && st.history.ym) { const m = +String(st.history.ym).slice(5, 7); if (m >= 1 && m <= 12) return m; } return ((st.month - 1) % 12 + 12) % 12 + 1; }
+function calOf(st) { if (st.history && st.history.ym) { const m = +String(st.history.ym).slice(5, 7); if (m >= 1 && m <= 12) return m; } const c = W(st).calendar; const s0 = (c && c.startMonth) || 1; return ((st.month - 1 + s0 - 1) % 12 + 12) % 12 + 1; } // worlds wave 0: a world may start in another month (w5: October)
 function calendarOf(st) {
   const m = calOf(st); const own = managedOf(st);
   const season = own.map((a) => (BIZ.SEASONS[a.biz.type] || {})[m]).find(Boolean);
@@ -3590,7 +3639,7 @@ const openChains = (st) => CH.CHAIN_IDS.filter((id) => id !== 'crisis' && chainO
 /** Can chain `id` start a new run now (not open, cooldown over, runs left, ≤ 2 open chains — crisis exempt)? */
 function chainCanStart(st, id) {
   const C = CH.CHAINS[id]; const c = chainOf(st, id);
-  if (!C.worlds.includes(st.worldId)) return false;
+  if (!chainWorldOk(st, C)) return false;
   if (c && chainOpen(c)) return false;
   if (c && (c.run || 0) >= C.maxRuns) return false;
   if (c && c.stage === 'done' && st.month < (c.endM || 0) + C.cooldown) return false;
@@ -4007,7 +4056,7 @@ function storyMonth(st, out, o) {
 function storyTriggers(st, out, o) {
   const S = st.story; const L = st.life; const W0 = st.worldId;
   // crisis (w1–w4, not history): recession signal, a crisis tile, or a monthly index drop ≤ −8%
-  if (!st.history && CH.CHAINS.crisis.worlds.includes(W0) && chainCanStart(st, 'crisis')) {
+  if (!st.history && chainWorldOk(st, CH.CHAINS.crisis) && chainCanStart(st, 'crisis')) {
     // [TUNE] a crisis tile starts the chain at this payday's sealed story odds: every tile and every −8% month starting it put it in ~97% of games
     const TG = CH.TRIGGER; const lb = econLabel(st); const trig = (lb === 'מיתון' && S.lastEcon !== 'מיתון' && S.lastEcon != null && S.r[0] < TG.crisisSignal) || (st.stats.crises > S.crisesSeen && S.r[0] < TG.crisisTile) || (S.idxDropM === st.month && st.prices.IDX <= 0.85 * (L.idxPeak || st.prices.IDX) && S.r[0] < TG.crisisIndex); // [TUNE] tile 30%; a monthly drop counts once the index is ≥ 15% under its peak // (a crisis tile also marks lastCrash: only the market's own monthly drop counts here)
     if (trig) { const c = startChain(st, 'crisis', 'wait'); c.data.trig = lb === 'מיתון' && S.lastEcon !== 'מיתון' ? 'signal' : S.idxDropM === st.month ? 'index' : 'tile'; c.data.idxAtStart = st.prices.IDX; c.data.peakAtStart = L.idxPeak || st.prices.IDX; createChainItem(st, 'crisis', 'c1', out); return; }
@@ -4480,6 +4529,7 @@ function shadowOf(st, o = {}) {
     if (p.dd && p.type === 'deal' && R4(sh) && !p.dd.starter && p.dd.level < 2) { const B = ddBasis(st, st.pending); p.dd.base = B.base; p.dd.val = B.value; p.dd.repair = B.rep; p.dd.f = 1; p.dd.vf = 1; p.dd.jitter = 0.5; p.dd.risk = 0; }
     if (p.negR != null) p.negR = o.negR ?? 0.5;
     if (p.raiseR != null) p.raiseR = o.raiseR ?? 0.5;
+    if (Array.isArray(p.wr)) p.wr = p.wr.map(() => 0.5); // worlds wave 0: a module tile's sealed landing draws never reach a dry run
     if (p.r != null) p.r = o.r ?? 0.5;
     if (p.hidden) p.hidden = { mult: 1, revealIn: 99, signalIn: 99, signalMult: 1 };
     if (p.rv) { p.rv.close = o.rvClose || 0; p.rv.taker = o.rvClose ? (p.rv.who[0] || 'other') : null; } // T6: sealed close / taker never reach a dry run
@@ -4887,6 +4937,7 @@ function replayStep(st, a, i) {
       case 'K': r = answerPractice(st, a[1], a[2]); break;
       case 'W': r = continueAfterWin(st); break;
       case 'X': r = retire(st); break;
+      case 'Z': r = worldAction(st, a[1], a.length > 2 ? a[2] : null); break; // worlds wave 0: a module action between rolls
       default: throw new Error('unknown action');
     }
   } catch (e) { throw new Error(`replay_mismatch at ${i} (${JSON.stringify(a)}): ${e.message}`); }
@@ -5084,6 +5135,7 @@ function nearMiss(st, w, m, res) {
   }
   if (res.reason === 'bankrupt') return { text: 'החובות בלעו את התזרים. בפעם הבאה: לא לקנות "נכסים" שמוציאים כסף, ולא להשאיר הלוואות פתוחות.' };
   if (w.goal.type === 'passive') { const gap = m.expenses - m.passive; return { text: `היית רק ${fmtM(gap)} בחודש מהחופש.`, gap }; }
+  if (GOALS[w.goal.type]) { const pt = m.goalParts[0] || {}; const gap = Math.max(0, (pt.target || 0) - (pt.value || 0)); return { text: `חסרו לך ${fmtM(gap)} ב${pt.label || 'יעד'}.`, gap }; } // worlds wave 0
   const gapNW = Math.max(0, w.goal.target - m.netWorth);
   const gapI = w.goal.type === 'netWorthImpact' ? Math.max(0, w.goal.impact - Math.floor(st.world.impact || 0)) : 0;
   if (gapNW && gapI) return { text: `חסרו לך ${fmtM(gapNW)} בשווי ו־${gapI} נקודות השפעה.`, gap: gapNW, gapImpact: gapI };
@@ -5104,6 +5156,7 @@ function tipFor(st, res) {
   if (w.mechanic === 'rate' && s.upgrades + s.trims === 0) return 'בפעם הבאה: נסה את משבצות השדרוג — שיפוץ טוב או קיצוץ הוצאה מקצרים את הדרך.';
   if (w.mechanic === 'fx' && !s.hedges) return 'בפעם הבאה: כשאתה חשוף לדולר והשער נוח — תגדר. ביטוח זול כשאין סערה.';
   if (w.mechanic === 'angel' && s.angels < 4) return 'בפעם הבאה: הרבה צ\'קים קטנים. ככה תופסים את הסטארט־אפ האחד שעושה פי 50.';
+  { const M = mechWith(st, 'recapHint'); const t = M ? M.recapHint(st, res, MCTX) : null; if (t) return t; } // worlds wave 0
   if (leak) return TIPS[leak.key];
   return res.status === 'won' ? 'משחק נקי. נסה דמות אחרת וראה כמה זה משנה.' : 'בפעם הבאה: תחפש נכסים עם תזרים חיובי מוקדם יותר.';
 }
@@ -5112,7 +5165,7 @@ function tipFor(st, res) {
 /** Opening mentor line + goal text for a fresh game (or a "welcome back" line on resume). */
 export function intro(st, resumed = false) {
   const w = W(st); const m = metrics(st);
-  const goal = w.goal.type === 'passive' ? `הכנסה פסיבית שעוברת את ההוצאות (${fmtM(m.expenses)} בחודש)` : w.goal.type === 'netWorth' ? fmtM(w.goal.target) : `שווי נקי של ${fmtM(w.goal.target)} ו־${w.goal.impact} נקודות השפעה`;
+  const goal = GOALS[w.goal.type] ? w.goalLabel : w.goal.type === 'passive' ? `הכנסה פסיבית שעוברת את ההוצאות (${fmtM(m.expenses)} בחודש)` : w.goal.type === 'netWorth' ? fmtM(w.goal.target) : `שווי נקי של ${fmtM(w.goal.target)} ו־${w.goal.impact} נקודות השפעה`;
   const seeded = st.mode !== 'free';
   const limit = seeded ? ` יש לך ${st.maxMonths} חודשים, וכולם מקבלים אותן קוביות ואותם קלפים — ההחלטות שלך קובעות.` : '';
   const mentor = resumed ? `חזרת לחודש ${st.month}. נמשיך מאיפה שעצרנו.` : tpl(w.mentor.start, { who: st.charName, cf: sgn(m.cashflow), goal }) + limit;
@@ -5162,3 +5215,52 @@ export function characterCard(w, c) {
     age: c.age || 30, family: c.family ? familyText({ partner: c.family.partner || 'none', kids: c.family.kids || 0 }) : null };
 }
 export { achievementById };
+
+/* ============================================================ worlds wave 0: module plumbing (DESIGN §4.2) */
+/** Goal-passive income counts toward a "passive" goal in these goal types (deal defaults, the evaluator's horizon, payday lines). */
+function passiveGoal(w) { return w.goal.type === 'passive' || w.goal.type === 'passive12'; }
+/** May a life chain run in this world? Its own list (w1–w4, h), or any later world that does not exclude it (w.chains.exclude). */
+function chainWorldOk(st, C) { if (C.worlds.includes(st.worldId)) return true; const w = W(st); return !!(w.mech && w.mech.length) && !((w.chains && w.chains.exclude) || []).includes(C.id); }
+/** The module tile handler for a board character, or null. */
+function mechTile(st, ch) { for (const M of mechs(st)) if (M.tiles && M.tiles[ch]) return M.tiles[ch]; return null; }
+/**
+ * One module action between rolls (action code `Z`): worldAction(st, name, param?) → out ({ok, error?, effects, news, mentor, end}).
+ * param is one short string (≤ 40 chars, e.g. "12:premium:budget"); the module validates it. Logged ['Z', name, param] only when it
+ * applied, so a replay re-applies exactly the accepted actions. Allowed at any time the game is not over (like takeLoan). Never applied by
+ * a room timeout (O1 safe defaults).
+ */
+export function worldAction(st, name, param = null) { return withK(st, () => worldActionImpl(st, name, param)); }
+function worldActionImpl(st, name, param) {
+  if (st.over) throw new Error('game over');
+  const out = newOut();
+  const M = typeof name === 'string' ? mechs(st).find((x) => x.act && Object.prototype.hasOwnProperty.call(x.act, name)) : null;
+  if (!M) return { ...out, ok: false, error: 'unknown_action', end: null };
+  const p = param == null || param === '' ? null : String(param);
+  if (p != null && p.length > 40) return { ...out, ok: false, error: 'bad_param', end: null };
+  const r = M.act[name](st, p, out, MCTX);
+  if (r === false || out.ok === false) return { ...out, ok: false, error: out.error || 'not_allowed', end: null };
+  act(st, p == null ? ['Z', name] : ['Z', name, p]);
+  out.mentor = gz(st, out.mentor);
+  dreamTickSt(st, out); goalTick(st, out);
+  const end = endIfIdle(st, out);
+  return { ...out, event: currentEvent(st), end };
+}
+/** The module actions available now (ids, labels, enabled + reason) — the panel descriptor lists them; [] in w1–w4. */
+export function worldActions(st) { const M = mechWith(st, 'actions'); return M ? M.actions(st, MCTX) : []; }
+/** Engine helpers handed to modules (a module never imports engine.js: no cycle, Node-importable, part of a world's pinned pack). */
+const MCTX = Object.freeze({
+  draw: (st) => next(st.rng, 'world'),                  // THE module stream (index 15); modules declare their fixed counts (draws)
+  fmtM: (n) => fmtM(n), money: (n, f) => money(n, f), sgn: (n) => sgn(n), pct: (x, d) => pct(x, d), tpl: (t, v) => tpl(t, v), heMonths: (n) => heMonths(n),
+  mentorLine: (st, k, v) => mentorLine(st, k, v), gz: (st, t) => gz(st, t), opt: (id, label, enabled, extra) => opt(id, label, enabled, extra),
+  cashFx: (out, amount, label, at) => cashFx(out, amount, label, at), sound: (out, name) => sound(out, name),
+  lesson: (st, out, id, extra) => lesson(st, out, id, extra), addLuck: (st, part, amount) => addLuck(st, part, amount),
+  ensureCash: (st, out, why) => ensureCash(st, out, why), mark: (st, kind, amount, label) => mark(st, kind, amount, CUR_K, label || ''),
+  assetCf: (st, a) => assetCf(st, a), assetValue: (st, a) => assetValue(st, a), netWorth: (st) => netWorthOf(st), expenses: (st) => expensesOf(st),
+  goalPassive: (st) => goalPassiveOf(st), passive: (st) => passiveOf(st), cashflow: (st) => cashflowOf(st), salary: (st) => salaryNow(st),
+  loanPct: (st) => loanPct(st), loanUnit: (st) => loanUnit(st), calOf: (st) => calOf(st), focusOn: (st, id) => focusOn(st, id),
+  econMult: (st, key) => (st.econ && R4(st) ? CY.mult(st.econ, st.worldId, key) : 1), econLabel: (st) => econLabel(st),
+  R: (st, n) => (st.rules || 3) >= n, clamp, r10, r100, round2, world: (st) => W(st), modelFor: (st, k) => modelFor(st, k),
+  creditScore: (st, d) => creditScore(st, d), logDecision: (st, card, option, v) => logDecision(st, card, option, v), ach: (st, out, type, payload) => ach(st, out, type, payload),
+});
+/** Goal registry context (js/worlds/goals.js). */
+const GCTX = Object.freeze({ goalPassive: (st) => goalPassiveOf(st), fmt: (n) => fmtM(n), mod: (st, key) => { const M = mechWith(st, 'goalValue'); return M ? M.goalValue(st, key, MCTX) : 0; } });

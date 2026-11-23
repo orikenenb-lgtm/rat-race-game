@@ -15,18 +15,34 @@ function b64(s) {
   return btoa(bin);
 }
 
-/** bundle: object or JSON text. Returns the engine module namespace (same exports as js/engine.js). */
-export async function loadEngine(bundle) {
-  const b = typeof bundle === 'string' ? JSON.parse(bundle) : bundle;
+/** Module data: URLs for `files` (static imports must resolve; a DYNAMIC import of a module the bundle leaves out — js/data/real.js, history
+ *  mode only — is kept as written and would only fail if called, which a ranked replay never does). Same sources ⇒ same URLs ⇒ the same
+ *  module instances across calls (the core modules a world pack imports are the core's own instances). */
+function urlsFor(files) {
   const urls = {}; const visiting = new Set();
   const urlOf = (p) => {
     if (urls[p]) return urls[p];
-    if (b.files[p] == null) throw new Error('engine bundle: missing module ' + p);
+    if (files[p] == null) throw new Error('engine bundle: missing module ' + p);
     if (visiting.has(p)) throw new Error('engine bundle: import cycle at ' + p);
     visiting.add(p);
-    const src = b.files[p].replace(SPEC, (_m, pre, q, rel) => pre + q + urlOf(join(p, rel)) + q);
+    const src = files[p].replace(SPEC, (m, pre, q, rel) => { const t = join(p, rel); if (files[t] == null && /import\s*\(/.test(pre)) return m; return pre + q + urlOf(t) + q; });
     visiting.delete(p);
     return (urls[p] = 'data:text/javascript;base64,' + b64(src));
   };
-  return import(urlOf(b.entry));
+  return urlOf;
+}
+/** bundle: object or JSON text. Returns the engine module namespace (same exports as js/engine.js). */
+export async function loadEngine(bundle) {
+  const b = typeof bundle === 'string' ? JSON.parse(bundle) : bundle;
+  return import(urlsFor(b.files)(b.entry));
+}
+/**
+ * Worlds wave 0: load a lazy world's pack on top of a loaded core and register it. core / pack: objects or JSON texts ({entry, files}).
+ * The pack's imports of core modules (worlds/common.js …) resolve to the core's data: URLs = the very modules the core engine uses.
+ * Returns the world config (E.registerWorld's result).
+ */
+export async function loadWorldPack(E, core, pack) {
+  const c = typeof core === 'string' ? JSON.parse(core) : core; const p = typeof pack === 'string' ? JSON.parse(pack) : pack;
+  const ns = await import(urlsFor({ ...c.files, ...p.files })(p.entry));
+  return E.registerWorld(ns.default);
 }
