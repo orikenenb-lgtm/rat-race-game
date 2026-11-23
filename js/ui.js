@@ -505,7 +505,7 @@ export function debtChip(d) {
   if (r && r.width) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.left = Math.round(r.left + r.width / 2) + 'px'; }
   el.innerHTML = `<span aria-hidden="true">🏦</span> ${escI(d.text)}`;
   el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
-  el.onclick = () => debtChip(null);   // a tap clears it early; otherwise it stays until the next roll (game.js) — never a timed dismissal
+  // no timed dismissal: it stays until the next roll (game.js) or the next card (openEvent); it never takes taps
 }
 
 /* ============================================================ v3 life row (age · energy · happiness · credit · inflation) */
@@ -969,6 +969,7 @@ const ddLevel = (ev) => (ev && ev.data && ev.data.dd ? ev.data.dd.level : -1);
 export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
   if (gpOpen) goalPanel(false);   // wave 2: the card wins over the goal panel
+  debtChip(null);                 // … and over the new-debt chip (the card is the next thing to read)
   evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() } };
   if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); stickyAside(); } // phones: the new card wins
   renderEvent(true);
