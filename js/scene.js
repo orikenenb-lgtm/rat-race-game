@@ -257,7 +257,7 @@ export function renderStats() { let objs = 0, meshes = 0; scene.traverse((o) => 
 export function cameraState() {
   const off = camera.position.clone().sub(controls.target);
   return { mode: camMode, target: controls.target.toArray().map((x) => +x.toFixed(2)), pos: camera.position.toArray().map((x) => +x.toFixed(2)), focus: focus.toArray(), followDist, overviewDist, goal: camGoal.target.toArray(),
-    az: +Math.atan2(off.x, off.z).toFixed(3), az0: +Math.atan2(camGoal.dir.x, camGoal.dir.z).toFixed(3), user: !!userDir, zoom: userZoom, azRange: [+controls.minAzimuthAngle.toFixed(3), +controls.maxAzimuthAngle.toFixed(3)] };
+    az: +Math.atan2(off.x, off.z).toFixed(3), az0: +Math.atan2(camGoal.dir.x, camGoal.dir.z).toFixed(3), user: !!userDir, zoom: userZoom, moving: camMoving, homing, interacting, azRange: [+controls.minAzimuthAngle.toFixed(3), +controls.maxAzimuthAngle.toFixed(3)] };
 }
 /** 'follow' | 'overview' — smooth transition. */
 export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; applyCamGoal(true); }
