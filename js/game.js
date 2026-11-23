@@ -24,6 +24,8 @@ import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data be
 import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
 import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
 import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/tiles.js';
+import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
+import { nextMilestone, moneyHubModel } from './hudgoal.js';
 import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
 
 const STR = OV.STR, SS = saves.STR;
@@ -154,7 +156,7 @@ function checkpoint() {
   if (!S || !ranked()) return;
   S.ui.seq = (S.ui.seq || 0) + 1;
   persist();
-  ckNext = { rid: CFG.resultId, seq: S.ui.seq, state: JSON.parse(JSON.stringify(S)) };
+  ckNext = { rid: CFG.resultId, seq: S.ui.seq, state: packCheckpoint(S) };   // wave 3a (ONLINE §13): key-order safe (js/ckcodec.js)
   pumpCheckpoint();
 }
 async function pumpCheckpoint() {
@@ -191,7 +193,7 @@ export function savedGame(k) {
   return out;
 }
 export function clearSave(k) { saves.clear(keyOf(k)); }
-export function hasActiveGame() { return !!(S && !S.over); }
+export function hasActiveGame() { return !!(S && !S.over && !summarized); }   // wave 3a: a summarised run has ended (E.endNow)
 export function activeConfig() { return CFG ? { ...CFG } : null; }
 
 /* ============================================================ init */
@@ -292,7 +294,8 @@ async function initRenderer() {
     scene.onContextLost(onContext);
   } else { lifeP = Promise.resolve(); lifeSettled = true; }
   const cam = $('#camBtn'); if (cam) { cam.hidden = scene.kind !== '3d'; cam.dataset.kind = scene.kind; }
-  ui.boardTools({ onHome: homeView, onList: () => openTileList() }); ui.turnChip();   // wave 1: "מבט ראשי", the tile list, the turn chip
+  ui.boardTools({ onHome: homeView, onList: () => openTileList() }); ui.turnChip();
+  ui.moneyHubBtn?.(() => openMoneyHub());   // wave 3a (J1 P0-4): one "💼 ניהול כסף" entry   // wave 1: "מבט ראשי", the tile list, the turn chip
   lastRect = ''; frame();
   syncLiteBtn();
   scene.setPaused(!$('#start').hidden);
@@ -373,7 +376,7 @@ function wireUI() {
   bus.on('energy:change', () => updateRollEnergy());
   setInterval(() => { if (!document.hidden && S && usesEnergy() && $('#start').hidden) updateRollEnergy(); }, 1000);
   $('#camBtn').innerHTML = ui.ICON.overview;
-  const lb = $('#liteBtn'); if (lb) lb.onclick = () => { sfx('click'); setLite(scene.kind === '3d'); }; // T1: מצב קל
+  const lb = $('#liteBtn'); if (lb) lb.onclick = () => { if (outPending) { ui.toast('אפשר לעבור למצב קל כשהחייל עוצר'); return; } sfx('click'); setLite(scene.kind === '3d'); }; // T1: מצב קל (wave 3a MINOR-4: not mid-roll)
   $('#camBtn').onclick = () => { const o = scene.getCameraMode() !== 'overview'; scene.setCameraMode(o ? 'overview' : 'follow'); $('#camBtn').setAttribute('aria-pressed', String(o)); $('#camBtn').title = o ? 'חזרה למצלמה שעוקבת אחרי החייל' : 'מבט על כל הלוח'; sfx('click'); };
   $('#homeBtn').onclick = () => { sfx('click'); goLobby(); };
   $('#turboBtn').onclick = () => { settings.turbo = !settings.turbo; writeSettings({ turbo: settings.turbo }); applySettings(); sfx('click'); ui.toast(settings.turbo ? 'טורבו פועל: הכל זז פי 2' : 'מהירות רגילה'); };
@@ -408,7 +411,7 @@ function wireUI() {
   // T1 verify D-1: the HUD's second row (life chips) and the mentor bar settle after the first paint and change height without a
   // window resize — re-frame the board whenever their size changes (2D needs it; 3D only re-fits). Only a changed free rect counts.
   if (typeof ResizeObserver === 'function') {
-    let raf = 0; const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (S) frame(false); }); });
+    let raf = 0; const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (!S) return; frame(false); try { ui.placeBoardUi?.(null, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); } }); });
     for (const id of ['hud', 'bar']) { const el = document.getElementById(id); if (el) ro.observe(el); }
   }
 }
@@ -417,7 +420,7 @@ function frame(force = true) {
   const r = ui.freeRect(); const k = [r.x0, r.y0, r.x1, r.y1].map(Math.round).join(',');
   if (!force && k === lastRect) return;
   lastRect = k; scene.frame(r);
-  try { ui.placeBoardUi?.(r, { kind: scene.kind, show: scene.kind !== 'none' }); } catch (e) { console.warn(e); }
+  try { ui.placeBoardUi?.(r, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); }   // wave 3a (NIT-3): the list is the board's text alternative — also with no renderer
 }
 /** wave 1 (B1 G7): "מבט ראשי" — the follow camera at its starting angle and distance (the overview toggle goes back to off) */
 function homeView() {
@@ -433,11 +436,12 @@ function onTilePick(i) {
   if (!S || busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || coach) return;
   const tiles = boardTiles(); const t = tiles[i]; if (!t) return;
   sfx('click');
-  ui.tileSheet?.(tileSheet(t, i, S.pos, tiles.length), { onList: () => openTileList() });
+  ui.tileSheet?.(tileSheet(t, i, S.pos, tiles.length, W), { onList: () => openTileList() });   // wave 3a (MAJOR-2): the world's own decks
 }
 /** the text alternative of the board (3D canvas and 2D): every tile in play order → its sheet */
 async function openTileList() {
-  if (!S || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden) return;
+  // wave 3a (review MAJOR-1): never during a move or under / over a card — the list would stack with the landing card
+  if (!S || busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || document.querySelector('#coach:not([hidden])')) return;
   const tiles = boardTiles(); const pos = S.pos;
   const items = tiles.map((t, i) => { const tx = tileText(t); return { index: i, name: tx.name, emoji: tx.emoji, where: whereText(stepsTo(pos, i, tiles.length)) }; });
   const i = await ui.tileList?.(items, { pos });
@@ -456,7 +460,9 @@ const DEV_KEY = /^(fx|perf)/;
 let cityGen = -1;   // the gen whose world + city the scene shows (startGame); reconcile only then
 function cityWant() { return [...E.cityModels(S)]; }
 function reconcileCity() {
-  if (!S || cityGen !== gen || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
+  // wave 3a (review MINOR-3): never between E.rollDice and applyOut(out) of that roll — the roll already changed cityModels(S), the
+  // exit / despawn animation is still to play; the render() right after applyOut reconciles
+  if (!S || outPending || cityGen !== gen || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
   try {
     const want = cityWant(); const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k));
     const life = have.filter((k) => k.startsWith('L:'));
@@ -507,6 +513,12 @@ function onAssetPick(key) {
   if (info) ui.assetInfo?.(key, info, { world: W, opsOpen: !!(m.focus && m.focus.opsOpen) });
 }
 bus.on('asset:ops', () => openOps());
+let outPending = false;   // wave 3a (MINOR-3 / MINOR-4): a roll's out is drawn but not applied yet (dice, hops, applyOut)
+/** while a roll is in flight: no city reconcile, and 🪶 waits (the roll's payday fx / news / bailout payload would be dropped) */
+function setOutPending(v) {
+  outPending = !!v;
+  const b = $('#liteBtn'); if (b) { b.disabled = outPending; b.setAttribute('aria-disabled', String(outPending)); }
+}
 let rolling = false;   // T5 CR-B3: dice / hops are animating — a tap or Space / Enter skips the animation (never the outcome)
 
 /* ============================================================ start */
@@ -618,6 +630,7 @@ async function startInner(cfg, my) {
   const key = saveKeyFor(cfg);
   const isRanked = !!cfg.resultId;
   let st = null, srcCfg = null, srcUi = null, note = null;
+  if (cfg.state != null) { cfg.state = unpackCheckpoint(cfg.state); if (!cfg.state) return rankedFail(); }   // wave 3a: v2 wrapper or the old bare state
   if (cfg.state || cfg.resume) {
     let lr = saves.load(key);
     if (lr.status === 'backup_failed') {
@@ -668,7 +681,7 @@ async function startInner(cfg, my) {
     st.ui = saves.normalizeUi({});
     cfg.charId = st.charId;
   }
-  cfg.resume = false;
+  cfg.resume = false; summarized = false;
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
   ui.setGender(S.gender);   // T3 verify D4: the UI's own strings in the player's gender
@@ -792,7 +805,8 @@ function render(animate = true) {
   { const ds = debtSnap(m); const nd = newDebt(debtPrev, ds); debtPrev = ds; if (nd && typeof ui.debtChip === 'function') ui.debtChip(nd); }   // wave 2 (G-07)
   if (typeof ui.worldTag === 'function') ui.worldTag(!!(CFG && CFG.learn));       // T4 S-M7
   const goalOn = !!(m.nextGoal && !m.nextGoal.done);
-  if (typeof ui.renderNext === 'function') ui.renderNext(m.nextGoal || null, { show: onboard.isRevealed('next') });   // T4 §4.3 `next`
+  // T4 §4.3 `next` (the tutorial chain); wave 3a (J1 P0-2): after it — and in every other world / mode — the near-goal ladder's next rung
+  if (typeof ui.renderNext === 'function') ui.renderNext(goalOn ? m.nextGoal : nextMilestone(m), { show: goalOn ? onboard.isRevealed('next') : !S.afterWin });
   if (typeof ui.renderDream === 'function') ui.renderDream(goalOn ? null : m.dream || null);      // T4 §6.4: the dream card replaces #hNext once the goal chain is done
   // T2: an "ops" focus from the agenda is ready → offer to open the business panel between rolls (once per month)
   const ops = !!(m.focus && m.focus.opsOpen);
@@ -801,6 +815,8 @@ function render(animate = true) {
   const wi = m.worldIndicators || {};
   ui.historyStrip(wi.indexHist ? wi.indexHist.map((x) => ({ index: x })) : S.ui.hist, wi.ymText ? wi : null);
   syncLifeCity(m);
+  try { ui.placeBoardUi?.(null, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); }   // wave 3a (MINOR-1): the HUD rows may have grown
+  if (typeof ui.sumRunBtn === 'function') ui.sumRunBtn(canSummarize(), () => summarizeRun(false));   // wave 3a (J1 P0-1)
   reconcileCity();   // wave 1 (A2 G-03): after every applied decision / roll the city equals cityModels(S) (+ L:*)
 }
 /** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
@@ -1086,12 +1102,12 @@ function wireHold() {
 
 /* ============================================================ turn */
 async function turn() {
-  if (stuck || busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
+  if (stuck || busy || !S || S.over || summarized || ui.isEventOpen() || !$('#start').hidden) return;
   const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.(); ui.clearStickyNews?.();
   flows++; flowTick++;
   try { await turnBody(my); }
   catch (e) { if (my === gen && !stuck) enterStuck(e, 'turn'); }
-  finally { flows--; flowTick++; rolling = false; }
+  finally { flows--; flowTick++; rolling = false; setOutPending(false); }
 }
 async function turnBody(my) {
   const m0 = E.metrics(S);
@@ -1109,6 +1125,7 @@ async function turnBody(my) {
   ui.turnChip?.('זורקים…');   // §13 turn state
   ui.debtChip?.(null);          // wave 2 (G-07): the new-debt chip stays until the next roll (no timed dismissal)
   try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
+  setOutPending(true);
   persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
   flowTick++;
   const faces = Array.isArray(out.dice) && out.dice.length ? out.dice : [out.die];
@@ -1142,6 +1159,7 @@ async function turnBody(my) {
   // remaining roll results: news (exits, signals), auto-loans, achievements…
   const skip = (out.paydays || []).map((p) => (p.amount >= 0 ? 'coin' : 'loss'));
   await applyOut(out, { skipSounds: ['roll', ...skip], skipPawnCash: true });
+  setOutPending(false);
   render();
   persist();
   flowTick++;
@@ -1156,6 +1174,7 @@ async function turnBody(my) {
   busy = false;
   if (S.over) return;
   ui.setRollEnabled(true); ui.focusRoll();
+  if (await offerSummary(my)) return;   // wave 3a (J1 P0-1): the ★ month limit just passed in a free run
   await onboard.afterTurn(hooks(my)); // T4 IR-T4-3
 }
 
@@ -1165,7 +1184,7 @@ function paydayFx(pd, runningCash) {
   scene.floatLabel((pos ? 'משכורת ' : '') + E.sgn(pd.amount), pos ? 'green' : 'red', 'pawn');
   if (pos) { ui.flyCoins(scene.project('pawn'), 7); sfx('coin'); ui.vibrate(12); } else sfx('loss');
   ui.setCash(runningCash, true);
-  ui.setMonth(pd.month, S.mode === 'free' ? 0 : S.maxMonths);
+  ui.setMonth(pd.month, S.mode === 'free' ? 0 : S.maxMonths, starLimit());
 }
 
 /** Resolve the landing event(s) of this turn (or of a resumed save). A broken flow → recover bar (callers check `stuck`). */
@@ -1405,6 +1424,16 @@ function doLoan(act) {
   if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
 }
 
+/* ============================================================ wave 3a (J1 P0-4): the money hub — a menu over the existing actions */
+async function openMoneyHub() {
+  if (!S || S.over || summarized) return;
+  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לנהל את הכסף בין תורות'); return; }
+  const act = await ui.moneyHub?.(moneyHubModel(E.metrics(S)));
+  if (!act || !S || S.over || busy || ui.isEventOpen()) return;
+  if (act === 'plan' || act === 'focus') { lifeChip(act); return; }
+  sheetAction(act);   // save / unsave / loan / repay / credit / invest — the same flows as the report's buttons
+}
+
 /* ============================================================ index fund any time (E.invest / E.setAutoInvest) */
 async function indexModal() {
   if (typeof E.invest !== 'function') { ui.toast('אפשר להשקיע בקרן במשבצת "קרן מדד ופנסיה"'); return; }
@@ -1573,6 +1602,43 @@ function t6End(end) {
     persist();
   } catch (e) { console.warn('t6 end', e); }
   return out;
+}
+
+/* ============================================================ wave 3a (J1 P0-1, brief §17): summarise a free run after the ★ limit */
+// In a free game nothing happens at the month limit (engine checkEnd ends on time only outside free mode), so a losing run never
+// reached the end screen: 18–34 more months without a decision that changes the outcome, or a new game that deletes the save (no
+// summary, no "רגעי החלטה"). Once the ★ limit (S.maxMonths) passes, the player may end the run here: E.endNow(S) (pure, the
+// engine's own 'capped' result: recap, graph, learning — state untouched) goes through the normal endGame path, so the end screen,
+// the summary and rr2-last-game (rewind) are the usual ones. Nothing new in the save: "offered once" lives in rr2-sum-offered.
+let summarized = false;
+const SUM_KEY = 'rr2-sum-offered';
+/** the ★ limit shown in the HUD in a free game with stars ("★ עד חודש N"); 0 elsewhere (ranked shows month / max already) */
+function starLimit() { return S && S.mode === 'free' && !S.afterWin && !(CFG && CFG.learn) && S.worldId !== 'h' && S.maxMonths > 0 ? S.maxMonths : 0; }
+function canSummarize() { return !!(S && !S.over && !summarized && CFG && !CFG.resultId && CFG.slot !== 'branch' && starLimit() && S.month > S.maxMonths && typeof E.endNow === 'function'); }
+const runId = () => `${S.worldId}|${S.charId}|${S.seed >>> 0}`;
+function offeredRuns() { try { const v = JSON.parse(localStorage.getItem(SUM_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function markOffered() { try { const v = offeredRuns().filter((x) => x !== runId()); v.push(runId()); localStorage.setItem(SUM_KEY, JSON.stringify(v.slice(-30))); } catch (e) { /* storage full / blocked: offered again next time */ } }
+/** after a turn: the one-time offer (true when the run was summarised — the caller stops) */
+async function offerSummary(my) {
+  if (!canSummarize() || offeredRuns().includes(runId()) || ui.isEventOpen() || !$('#gm').hidden) return false;
+  markOffered();
+  const v = await ui.summaryOffer?.({ limit: S.maxMonths, month: S.month, gender: S.gender });
+  if (my !== gen || !S) return true;
+  if (v === 'sum') { await summarizeRun(true); return true; }
+  return false;
+}
+async function summarizeRun(confirmed = false) {
+  if (!canSummarize()) return;
+  if (busy || ui.isEventOpen()) { ui.toast('אפשר לסכם את הריצה בין תורות'); return; }
+  if (!confirmed) {
+    const v = await ui.summaryOffer?.({ limit: S.maxMonths, month: S.month, gender: S.gender });
+    if (v !== 'sum' || !canSummarize() || busy || ui.isEventOpen()) return;
+  }
+  let end = null; try { end = E.endNow(S); } catch (e) { console.warn('endNow', e); }
+  if (!end) { ui.toast('לא אפשרי עכשיו'); return; }
+  summarized = true; ui.sumRunBtn?.(false);
+  persist(); const my = gen; busy = true; ui.setRollEnabled(false);
+  await endGame(end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); });
 }
 
 /* ============================================================ end of game */

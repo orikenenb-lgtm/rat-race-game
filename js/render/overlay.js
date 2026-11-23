@@ -4,6 +4,14 @@
 export const RENDERER_TIMEOUT_MS = 20000, GLB_TIMEOUT_MS = 15000, SLOW_HINT_MS = 8000, BOOT_SLOW_MS = 20000,
   CONTEXT_RESTORE_WAIT_MS = 3000, STUCK_CHECK_MS = 1500, RECOVER_WINDOW_MS = 120000;
 
+/** wave 3a (NIT-2): a long GPU string is cut at a word, its open brackets closed (not "…(SwiftShader Device (Subzero) (…") */
+export function shortGpu(g, max = 60) {
+  const s = String(g || ''); if (s.length <= max) return s;
+  let t = s.slice(0, max - 1); const sp = t.lastIndexOf(' '); if (sp > max / 2) t = t.slice(0, sp);
+  t = t.replace(/[\s,·(]+$/, '');
+  let open = 0; for (const ch of t) { if (ch === '(') open++; else if (ch === ')') open = Math.max(0, open - 1); }
+  return t + '…' + ')'.repeat(open);   // the open brackets are closed after the cut
+}
 export const STR = {
   L0: 'פותחים את המשחק…',
   L1: 'מכינים את התצוגה',
@@ -29,7 +37,7 @@ export const STR = {
   N3: 'התלת־ממד לא הצליח לעלות בדפדפן הזה, אז עברנו למצב קל. המשחק עצמו זהה.',
   N8: 'התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה.',
   // the code + GPU string is Latin: one LTR isolate (U+2066…U+2069) keeps its brackets in order inside the Hebrew line
-  tech: (code, gpu) => `פרטים טכניים: \u2066${code}${gpu ? ' · ' + (gpu.length > 60 ? gpu.slice(0, 59) + '…' : gpu) : ''}\u2069`,
+  tech: (code, gpu) => `פרטים טכניים: \u2066${code}${gpu ? ' · ' + shortGpu(gpu) : ''}\u2069`,
   N4: 'מצב קל פועל: לוח שטוח ומהיר, אותו משחק בדיוק.',
   N5: 'לא הצלחנו להציג את הלוח, אבל אפשר להמשיך לשחק: הקוביות, הכרטיסים והדוח עובדים כרגיל.',
   N6: 'חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק.',

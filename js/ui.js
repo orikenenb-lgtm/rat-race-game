@@ -2,7 +2,8 @@
 // toasts, achievement toast, coach marks, flying coins. Generic helpers (toast/modal/confirmBox/achievementToast)
 // are also used by the lobby.
 import { fmt, fmtM, sgn, fmtP, genderize, starThresholds } from './engine.js';
-import { goalPanelModel } from './hudgoal.js';   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
+import { goalPanelModel } from './hudgoal.js';
+import { displayLesson } from './data/lessons-meta.js';   // wave 3a: misleading lesson titles → display overrides   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
@@ -315,20 +316,25 @@ export function setCash(v, animate = true) {
   } else el.textContent = money(v);
 }
 export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; goalPanel(false); debtChip(null); }
-export function setMonth(month, max) {
+export function setMonth(month, max, star = 0) {
   const el = $('#hMonth'); if (!el) return;
-  el.innerHTML = max ? `${month}<small>/${max}</small>` : String(month);
+  // wave 3a (J1 P0-1): a free game shows its ★ limit ("★ עד חודש N"; after it: "★ עבר") — the month itself never ends a free game
+  const st = star ? `<small class="mstar${month > star ? ' past' : ''}">${month > star ? `★ עבר (${star})` : `★ עד <span class="ml">חודש </span>${star}`}</small>` : '';
+  el.innerHTML = max ? `${month}<small>/${max}</small>` : `${month}${st}`;
+  el.closest('.stat')?.setAttribute('aria-label', star ? `חודש ${month}. ${month > star ? `עבר מועד הכוכבים (חודש ${star})` : `כוכבים: לצאת מהמירוץ עד חודש ${star}`}` : `חודש ${month}${max ? ` מתוך ${max}` : ''}`);
   if (shownMonth != null && month !== shownMonth) { const st = el.closest('.stat'); st.classList.remove('tick'); void st.offsetWidth; st.classList.add('tick'); }
   shownMonth = month;
 }
 export function bumpCash() { const st = $('#hCash')?.closest('.stat'); if (!st) return; st.classList.remove('bump'); void st.offsetWidth; st.classList.add('bump'); }
 
+/** the ★ month limit of a free game with stars (not learning, not history, not after the win) — 0 when none */
+function starOf(m, ctx) { return m.mode === 'free' && !m.afterWin && !(ctx && ctx.cfg && ctx.cfg.learn) && !(ctx && ctx.world && ctx.world.id === 'h') && m.maxMonths > 0 ? m.maxMonths : 0; }
 /** ctx: {world, st} */
 export function renderHUD(m, ctx, { animate = true } = {}) {
   const w = ctx.world;
   setCash(m.cash, animate);
   const cf = $('#hCf'); cf.textContent = moneyS(m.cashflow); cf.className = 'num ' + cls(m.cashflow);
-  setMonth(m.month, m.mode === 'free' ? 0 : m.maxMonths);
+  setMonth(m.month, m.mode === 'free' ? 0 : m.maxMonths, starOf(m, ctx));
   // world indicator
   const wi = m.worldIndicators || {}; const box = $('#hInd');
   let key = null, v = null, text = '', goodUp = 0, extra = '';
@@ -459,9 +465,12 @@ function goalPanelHtml(M) {
   const hold = M.hold ? `<p class="gp-row"><span><span aria-hidden="true">⏳</span> ${esc(M.hold.text)}</span><b class="num">${esc(M.hold.status)}</b>${gpTick(M.hold.ok ? true : null)}</p>` : '';
   const starLi = (s) => `<li><span class="gp-s" aria-label="${s.n === 1 ? 'כוכב אחד' : s.n === 2 ? 'שני כוכבים' : 'שלושה כוכבים'}">${'★'.repeat(s.n)}</span><span class="gp-t">${escI(s.text)}${s.now ? ` <small>${escI(s.now)}</small>` : ''}</span>${gpTick(s.ok)}` +
     (s.gates && s.gates.length ? `<ul class="gp-gates">${s.gates.map((x) => `<li><span class="gp-t">${x.key === 'fund' ? '<span aria-hidden="true">🛟</span> ' : '<span aria-hidden="true">🙂</span> '}${escI(x.text)} <small class="num">${esc(x.now)}${x.note ? ` · ${esc(x.note)}` : ''}</small></span>${gpTick(x.ok)}</li>`).join('')}</ul>` : '') + '</li>';
+  // wave 3a (J1 P0-2): the near-goal ladder — every rung with ✓ / ✗, the next one marked with its numbers
+  const ni = M.ladder && M.ladder.length ? M.ladder.findIndex((x) => !x.met) : -1;
+  const ladder = M.ladder && M.ladder.length ? `<h3>הדרך ליעד</h3><ol class="gp-ladder">${M.ladder.map((x, i) => `<li class="${x.met ? 'ok' : i === ni ? 'next' : ''}"${i === ni ? ' aria-current="step"' : ''}><span class="gp-t"><span aria-hidden="true">${esc(x.icon)}</span> ${escI(x.title)}${i === ni && M.next ? ` <small class="num">${escI(M.next.valText)}</small>` : ''}${i === ni ? ' <small>· היעד הקרוב</small>' : ''}</span>${gpTick(x.met ? true : i === ni ? null : false)}</li>`).join('')}</ol>` : '';
   const stars = M.stars ? `<h3>כוכבים</h3><ul class="gp-stars">${M.stars.map(starLi).join('')}</ul>` : '';
   const T = M.totals;
-  return `<p class="gp-rule">${escI(M.rule)}</p>${parts}${gaps}${M.pending ? `<p class="gp-note">${esc(M.pending)}</p>` : ''}${hold}${stars}${M.starsNote ? `<p class="gp-note">${esc(M.starsNote)}</p>` : ''}` +
+  return `<p class="gp-rule">${escI(M.rule)}</p>${parts}${gaps}${M.pending ? `<p class="gp-note">${esc(M.pending)}</p>` : ''}${hold}${ladder}${stars}${M.starsNote ? `<p class="gp-note">${esc(M.starsNote)}</p>` : ''}` +
     `<h3>נכסים וחובות</h3><dl class="gp-tot"><div><dt>סך הנכסים</dt><dd class="num">${escI(T.assetsText)}</dd></div><div><dt>סך החובות</dt><dd class="num ${T.liabilities > 0 ? 'neg' : ''}">${escI(T.liabilitiesText)}</dd></div><div><dt>שווי נקי</dt><dd class="num">${escI(T.netWorthText)}</dd></div></dl>` +
     '<p class="gp-note">הפירוט המלא — בדוח הכספי.</p>';
 }
@@ -860,7 +869,11 @@ export function landDice(faces) {
 }
 export function shakeDomDice(on) { const box = $('#dice'); if (box) box.classList.toggle('shaking', !!on); }
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-export function setRollEnabled(b) { const r = $('#roll'); if (r) { r.disabled = !b; r.classList.toggle('ready', !!b); } }
+export function setRollEnabled(b) {
+  const r = $('#roll'); if (r) { r.disabled = !b; r.classList.toggle('ready', !!b); }
+  // wave 3a (review MAJOR-1): the tile list waits while the roll waits (a move, a card, the end) — it can never stack with a card
+  const l = $('#tilesBtn'); if (l) { l.disabled = !b; l.setAttribute('aria-disabled', String(!b)); }
+}
 export function focusRoll() { const r = $('#roll'); if (r && !r.disabled && $('#evm').hidden && $('#gm').hidden && !lobbyOpen()) r.focus({ preventScroll: true }); }
 
 /* ============================================================ flying coins */
@@ -1181,25 +1194,53 @@ function effectChips(e = {}, { odds = false } = {}) {
   else if (R && typeof R === 'object' && !odds) c.push(`<em class="fx neg">⚠ ${R.label ? escI(R.label) : `סיכון ${iso(fmtM(R.amount || 0))}`}</em>`);
   return c.join('');
 }
-/** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile. */
-function planPicker(ev) {
+/** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile.
+ *  wave 3a (J1 P0-3): compact tiles (icon, name, ONE number); the fund deposit stays inline; the raise and the month's focus are
+ *  under "עוד החלטות לחודש"; every tile's full chips + note are in "פירוט" (planDetails). ≤ 8 buttons on screen. */
+function planEffects(o, ev) {
+  const e0 = o.effects || {}; return { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
+}
+function planLabel(o, ev) { return o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label; }
+function planId(o, ev) { return o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5)); }
+/** the one number of a compact tile: ₪ a month when the plan changes the money, else its 🔋 */
+function planChip(e) {
+  if (e.net) return `<em class="fx ${cls(e.net)}">${iso(sgn(e.net))} בחודש</em>`;
+  if (e.energy) return `<em class="fx ${cls(e.energy)}">🔋 ${iso((e.energy > 0 ? '+' : '−') + Math.abs(Math.round(e.energy)))}</em>`;
+  return '<em class="fx">בלי שינוי</em>';
+}
+function planPicker(ev, focusHtml = '', compact = true) {
   const cur = ev.options.find((o) => o.id === 'ok');
   const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
   const raise = ev.options.find((o) => o.id === 'raise');
   const save = ev.options.find((o) => o.id === 'save');
   const rest = ev.options.filter((o) => !o.id.startsWith('plan:') && o.id !== 'ok' && o.id !== 'raise' && o.id !== 'save');
   const tile = (o) => {
-    const id = o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5));
-    const lbl = o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label;
-    const e0 = o.effects || {}; const e = { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
+    const id = planId(o, ev); const e = planEffects(o, ev);
+    const tag = o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מתאים לכוח שלך</small>' : '';
     return `<button class="plan ${o.id === 'ok' ? 'cur' : ''} ${o.primary ? 'rec' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}>
-      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(lbl)}</b>${o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מתאים לכוח שלך עכשיו</small>' : ''}
-      <span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
+      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(planLabel(o, ev))}</b>${tag}<span class="fxs">${compact ? planChip(e) : effectChips(e)}</span>${!compact && e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
   };
-  return `<div class="plans">${plans.map(tile).join('')}</div>` +
-    (save ? `<button class="raise save ${save.primary ? 'primary' : ''}" data-o="save" ${save.enabled ? '' : 'disabled'}><span>🛟 ${escI(save.label)}</span><small>${save.effects && save.effects.months != null ? `אחרי זה: ${iso(String(save.effects.months))} חודשי הוצאות בצד (היעד: 3) · ` : ''}התוכנית נשארת ${escI(ev.data.planLabel || '')}</small></button>` : '') +
-    (raise ? `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>` : '') +
-    (rest.length ? optButtons({ ...ev, options: rest }) : '') + (cur ? '' : '');
+  if (!compact) {   // the education card keeps the full tiles (its plans ARE the decision)
+    const extra = (save ? saveBtn0(save, ev) : '') + (raise ? raiseBtn0(raise) : '');
+    return `<div class="plans">${plans.map(tile).join('')}</div>` + extra + (rest.length ? optButtons({ ...ev, options: rest }) : '');
+  }
+  const saveBtn = save ? saveBtn0(save, ev, true) : '';
+  const raiseBtn = raise ? raiseBtn0(raise) : '';
+  const moreBits = [raise ? `📈 העלאה${raise.primary ? ' (מומלץ)' : ''}` : '', focusHtml ? '🎯 מוקד החודש' : ''].filter(Boolean);
+  const more = moreBits.length ? `<details class="pdmore"${raise && raise.primary ? ' open' : ''}><summary>עוד החלטות לחודש: ${moreBits.join(' · ')}</summary>${raiseBtn}${focusHtml}</details>` : '';
+  return `<div class="plans compact">${plans.map(tile).join('')}</div>` + saveBtn + (rest.length ? optButtons({ ...ev, options: rest }) : '') + more + (cur ? '' : '');
+}
+function saveBtn0(save, ev, compact = false) {
+  return `<button class="raise save ${save.primary ? 'primary' : ''}" data-o="save" ${save.enabled ? '' : 'disabled'}><span>🛟 ${escI(save.label)}</span><small>${save.effects && save.effects.months != null ? `אחרי זה: ${iso(String(save.effects.months))} חודשי הוצאות בצד (היעד: 3)${compact ? '' : ' · '}` : ''}${compact ? '' : `התוכנית נשארת ${escI(ev.data.planLabel || '')}`}</small></button>`;
+}
+function raiseBtn0(raise) {
+  return `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>`;
+}
+/** "פירוט" of a payday card: the full payslip, every plan's full trade-offs, and the impact panel */
+function planDetails(ev, impactHtml0) {
+  const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
+  const li = (o) => { const e = planEffects(o, ev); return `<li><b><span aria-hidden="true">${PLAN_ICON[planId(o, ev)] || '📅'}</span> ${escI(planLabel(o, ev))}</b><span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</li>`; };
+  return `<details class="pddet"><summary>פירוט: התלוש המלא, כל תוכנית במספרים${impactHtml0 ? ', מה זה עושה לי' : ''}</summary><h4>🧾 התלוש</h4>${payslipFull}<h4>📅 התוכניות</h4><ul class="pdplans">${plans.map(li).join('')}</ul>${impactHtml0}</details>`;
 }
 /** Life-event dilemmas, T3 chain cards (tile L with data.chain) and inbox story cards (type 'story'): each option is a card
  *  with its consequences (chips), one 12/24-month total line and the "במשחק" odds; the default of an inbox item is marked and
@@ -1329,15 +1370,19 @@ function renderEvent(first) {
     : ev.type === 'market' && ev.data.kind === 'sell' && ev.data.offers.length ? optButtons(ev, (o) => o.kind !== 'sell') // sales are buttons inside the list
     : ev.type === 'business' && ev.data.mode === 'manage' ? bizActions(ev)
     : ev.type === 'business' && ev.data.mode === 'offer' && Array.isArray(ev.data.setups) && ev.data.setups.length ? bizOfferActions(ev)
-    : hasPlans ? planPicker(ev)
+    : hasPlans ? planPicker(ev, ev.type === 'payday' && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '', ev.type === 'payday')
     : hasEffects ? effectChoices(ev)
     : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id) && !inDd(o), '', ev.type === 'doodad' || ev.type === 'tax');
   const bizM = ev.type === 'business' && ev.data.mode === 'manage';
-  const focus = (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
+  const focus = !(hasPlans && ev.type === 'payday') && (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
+  const pdCompact = hasPlans && ev.type === 'payday';   // wave 3a (J1 P0-3): impact panel + payslip + plan numbers under "פירוט"
   // T3 UI-3: an inbox item can wait — no timer, the default applies at its payday
   const later = ev.type === 'story' && ctx.api && ctx.api.later ? `<button type="button" class="linkbtn later" data-later>אחר כך${ev.data && ev.data.dueText ? ` · ${esc(ev.data.dueText)}` : ''}</button>` : '';
-  const hev = bizM && ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1)) ? { ...ev, text: '' } : ev;   // T3: L1 says the numbers once
-  c.innerHTML = head(hev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + impactPanelHtml(ev, M) + '<p class="err" role="alert"></p>' + actions + later + focus;
+  const hev = (bizM && ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1))) || pdCompact ? { ...ev, text: '' } : ev;   // T3: L1 says the numbers once (payday: the summary line does)
+  const imp = impactPanelHtml(ev, M);
+  const keepOpen = first ? [] : [...c.querySelectorAll('details.pdmore[open], details.pddet[open]')].map((d) => d.classList[0]);   // wave 3a: a re-render keeps them open
+  c.innerHTML = head(hev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + (pdCompact ? '' : imp) + '<p class="err" role="alert"></p>' + actions + later + focus + (pdCompact ? planDetails(ev, imp) : '');
+  for (const k of keepOpen) c.querySelector('details.' + k)?.setAttribute('open', '');
   markHint(c, ev);
   if (first) c.scrollTop = 0;
 }
@@ -1409,6 +1454,7 @@ function introActions(ev) {
   return `<div class="${d.step === 'glitch' ? 'choices' : 'acts col'}">${main.map(btn).join('')}</div>${d.step === 'glitch' ? `<p class="note">${escI(d.note || 'אין כאן תשובה נכונה אחת. כל דרך עולה משהו אחר.')}</p>` : ''}${skip ? `<button class="linkbtn" data-o="skip" data-intro-opt="skip">${escI(skip.label)}</button>` : ''}`;
 }
 
+let payslipFull = '';   // the payday card's full payslip (BODY.payday → the "פירוט" box of the same render)
 /* ---------- per-type bodies */
 const BODY = {
   intro(ev) {   // T4 §4.2 with the engine's real fields: data.payslip {net, expenses, cashflow, cash}, data.result, data.goal
@@ -1431,7 +1477,12 @@ const BODY = {
     const ps = d.payslip;
     const rows = [d.gross ? row('ברוטו', sgn(d.gross)) : null, ps && ps.incomeTax ? row('מס הכנסה', fmtM(-ps.incomeTax), 'neg') : null, ps && ps.bl ? row('ביטוח לאומי ובריאות', fmtM(-ps.bl), 'neg') : null, ps && ps.pensionEmployee ? row('פנסיה (שלך)', fmtM(-ps.pensionEmployee), 'neg') : null,
       row(d.gross ? 'משכורת נטו' : 'משכורת', sgn(d.net ?? d.salary), 'pos'), row('הכנסה פסיבית', sgn(d.passive), cls(d.passive)), row('הוצאות', fmtM(-d.expenses), 'neg'), `<div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div>`];
-    return grid(rows) + (plans ? '<h3 class="ph">איך תעביר את החודש הבא?</h3>' : '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>');
+    if (!plans) return grid(rows) + '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>';
+    // wave 3a (J1 P0-3, brief §18): one phone screen — the bottom line + one summary line; the full payslip is under "פירוט"
+    payslipFull = grid(rows);
+    const parts = [`נטו ${fmtM(d.net ?? d.salary ?? 0)}`, d.passive ? `פסיבי ${sgn(d.passive)}` : '', `הוצאות ${fmtM(d.expenses ?? 0)}`].filter(Boolean);
+    return `<div class="pdsum"><div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div><p class="pdline">${escI(parts.join(' · '))}</p></div>` +
+      `<h3 class="ph">איך ${gw('תעביר', 'תעבירי')} את החודש הבא?</h3>`;
   },
   life(ev) {
     const d = ev.data || {};
@@ -1891,7 +1942,7 @@ export function renderRollEnergy(g, msNext) {
 
 /* ============================================================ v3: lessons unlocked */
 export function lessonToast(list, onOpen) {
-  (list || []).forEach((l, i) => {
+  (list || []).map(displayLesson).forEach((l, i) => {   // wave 3a: display overrides (js/data/lessons-meta.js LESSON_DISPLAY)
     const text = `📚 שיעור חדש בספרייה: ${l.title}`; const action = onOpen ? { label: 'לקרוא', fn: () => onOpen(l) } : null;
     if (!phoneQ()) { setTimeout(() => toast(text, { kind: 'gold', action, keep: true }), i * 1400); return; }   // §4.7: lessons are never dropped
     // phones: one floating thing at a time (the lesson waits for a coach / achievement / verdict to clear)
@@ -1903,6 +1954,7 @@ export function lessonToast(list, onOpen) {
 /** One lesson as a reading card (in-game). T4 CR-U-T4-10: S-B2 (long text → עוד ▾), S-B3 example, S-B4 where you learned it,
  *  S-B5 the game's simplification, S-B6 practice — from library.js (lobby lane; loaded lazily, every line optional). */
 export async function lessonCard(l) {
+  l = displayLesson(l);
   let LIB = null, PR = null;
   try { [LIB, PR] = await Promise.all([import('./library.js'), import('./practice.js').catch(() => null)]); } catch (e) { LIB = null; }
   const m = (LIB && LIB.meta && LIB.meta(l.id)) || {}; const ctx = l.ctx || (LIB && LIB.contextOf && LIB.contextOf(l.id)) || null;
@@ -2391,11 +2443,14 @@ export function renderNext(g, { show = true } = {}) {
   if (!g || g.done || !anchor || !show) { if (el) el.hidden = true; return; }
   if (!el) { el = document.createElement('div'); el.id = 'hNext'; el.className = 'hcard hnext'; el.setAttribute('role', 'status'); anchor.insertAdjacentElement('afterend', el); }
   const pct = g.target ? Math.max(2, Math.min(100, Math.round(((g.value || 0) / g.target) * 100))) : 0;
-  const val = g.target ? (g.unit === '₪' ? `${money(g.value || 0)} / ${money(g.target)}` : `${N(g.value || 0)} / ${N(g.target)}`) : '';
-  const sig = `${g.id}|${g.title}|${val}`; if (el.dataset.sig === sig && !el.hidden) return; el.dataset.sig = sig;
-  el.hidden = false;
-  el.innerHTML = `<span aria-hidden="true">🎯</span><span class="nt"><b>${esc(g.title || '')}</b>${val ? `<small class="num">${esc(val)}</small>` : ''}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
-  el.setAttribute('aria-label', `המטרה הבאה: ${g.title || ''}${val ? `, ${val}` : ''}`);
+  const val = g.valText || (g.target ? (g.unit === '₪' ? `${money(g.value || 0)} / ${money(g.target)}` : `${N(g.value || 0)} / ${N(g.target)}`) : '');
+  const ms = g.step != null && g.of;   // wave 3a: a rung of the near-goal ladder (js/hudgoal.js nextMilestone) — tap opens the goal panel
+  const sig = `${g.id}|${g.title}|${val}|${g.step}`; if (el.dataset.sig === sig && !el.hidden) return; el.dataset.sig = sig;
+  el.hidden = false; el.classList.toggle('ms', !!ms);
+  const sub = ms ? `<small><span class="nk">היעד הקרוב</span> · ${escI(g.valNum || val)}${g.valUnit ? ' ' + esc(g.valUnit) : ''} · שלב ${g.step} מתוך ${g.of}</small>` : val ? `<small class="num">${esc(val)}</small>` : '';
+  el.innerHTML = `<span aria-hidden="true">${esc(g.icon || '🎯')}</span><span class="nt"><b>${esc(g.title || '')}</b>${sub}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
+  el.setAttribute('aria-label', `${ms ? `היעד הקרוב (שלב ${g.step} מתוך ${g.of})` : 'המטרה הבאה'}: ${g.title || ''}${val ? `, ${val}` : ''}`);
+  if (ms && !el._wired) { el._wired = true; el.addEventListener('click', () => { if (el.classList.contains('ms') && typeof goalPanel === 'function') goalPanel(!goalPanelOpen(), { focus: true }); }); }
 }
 
 /* ============================================================ 3D upgrade wave 1 (team ג): tile sheet, tile list, board tools, turn chip */
@@ -2435,12 +2490,57 @@ export function boardTools({ onHome, onList } = {}) {
   if (onList) l.onclick = () => { sfx('click'); onList(); };
   return box;
 }
-/** Place the board tools and the turn chip inside the free board rect (game.js frame()). */
+/** Place the board tools and the turn chip inside the free board rect (game.js frame()). r = null keeps the last rect (HUD resize).
+ *  wave 3a (review MINOR-1): the tools never sit under the HUD, the mentor bar or the report — a landscape phone has a short free
+ *  rect, so the first free spot of a few candidates is used (bottom corner → just under the HUD → the other corner → beside it). */
+const BLOCKERS = '#hud, #bar, #sheet, #hLifeMore, #goalPanel';
+const COVERS = '#start, #evm, #gm, #loading, #coach, #story, #recover';
+let dockT = 0, dockN = 0;
 export function placeBoardUi(r, { kind = '3d', show = true } = {}) {
   const box = $('#boardTools'); const s = document.documentElement.style;
   if (r) { s.setProperty('--fr-x0', Math.round(r.x0) + 'px'); s.setProperty('--fr-x1', Math.round(r.x1) + 'px'); s.setProperty('--fr-y0', Math.round(r.y0) + 'px'); s.setProperty('--fr-y1', Math.round(r.y1) + 'px'); }
-  if (box) { box.hidden = !show; box.dataset.kind = kind; const h = $('#homeViewBtn'); if (h) h.hidden = kind !== '3d'; }
+  if (!box) return;
+  box.hidden = !show; box.dataset.kind = kind; const h = $('#homeViewBtn'); if (h) h.hidden = kind !== '3d';
+  if (show) { dockN = 0; dockTools(box); }
 }
+function dockTools(box) {
+  try {
+    const cs = getComputedStyle(document.documentElement); const px = (k, d) => { const v = parseFloat(cs.getPropertyValue(k)); return Number.isFinite(v) ? v : d; };
+    const x0 = px('--fr-x0', 0), x1 = px('--fr-x1', innerWidth), y0 = px('--fr-y0', 0), y1 = px('--fr-y1', innerHeight);
+    const n = [...box.querySelectorAll('.ibtn')].filter((b) => !b.hidden).length || 1; const W = n * 44 + (n - 1) * 8, H = 44;
+    const prev = box.style.visibility; box.style.visibility = 'hidden';   // elementFromPoint skips the tools themselves
+    let covered = false;
+    const hits = (x, y) => {   // how many of 5 probe points of the tools' box at (x, y) land on the HUD / bar / report (5 = off screen)
+      if (x < 0 || y < 0 || x + W > innerWidth || y + H > innerHeight) return 5;
+      let k = 0;
+      for (const [px2, py2] of [[x + 2, y + 2], [x + W - 2, y + 2], [x + 2, y + H - 2], [x + W - 2, y + H - 2], [x + W / 2, y + H / 2]]) {
+        const e = document.elementFromPoint(px2, py2); if (e && e.closest(COVERS)) covered = true;
+        if (e && e.closest(BLOCKERS)) k++;
+      }
+      return k;
+    };
+    const blocked = (x, y) => hits(x, y) > 0;
+    const hudB = Math.max(0, ...[...document.querySelectorAll('#hud > *')].filter((e) => e.offsetParent).map((e) => { const q = e.getBoundingClientRect(); return q.right > x0 && q.left < x0 + 10 + W + 54 ? q.bottom : 0; }));
+    const cands = [[x0 + 10, y1 - 52], [x0 + 10, hudB + 6], [x1 - 10 - W, y1 - 52], [x1 - 10 - W, hudB + 6], [x0 + 10, y0 + 6], [x0 + 10 + 54 * 2, hudB + 6]];
+    // a landscape phone leaves no 44 px band between the HUD rows and the bar: beside the HUD's own tool row is free board
+    const ht = document.querySelector('#hud .htools'); if (ht && ht.offsetParent) { const q = ht.getBoundingClientRect(); cands.push([q.right + 8, q.top + (q.height - H) / 2], [q.left - 8 - W, q.top + (q.height - H) / 2]); }
+    let pick = cands.find(([x, y]) => y >= 0 && !blocked(x, y));
+    if (!pick) { let best = 9; for (const c of cands) { const k = hits(c[0], c[1]); if (k < best) { best = k; pick = c; } } pick = pick || cands[0]; }
+    box.style.visibility = prev;
+    // a lobby / card / dialog / loading screen covers the board: the HUD under it cannot be measured — try again shortly
+    if (covered) { clearTimeout(dockT); if (dockN++ < 40) dockT = setTimeout(() => dockTools(box), 500); return; }
+    dockN = 0;
+    box.style.left = Math.round(pick[0]) + 'px'; box.style.top = Math.round(pick[1]) + 'px';
+    box.dataset.dock = String(cands.indexOf(pick));
+  } catch (e) { box.style.visibility = ''; }
+}
+/* wave 3a (review MAJOR-1): Esc closes the tile list / tile sheet wherever focus is (they are always the top dialog) */
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const c = $('#gmCard'); const m = $('#gm');
+  if (!m || m.hidden || !c || !(c.classList.contains('tlistc') || c.classList.contains('tinfo')) || m.contains(document.activeElement)) return;
+  c.querySelector('.acts button[data-i="0"]')?.click();
+});
 let chipT = 0;
 /** §13 the short turn state: "זורקים…" / "זזים N צעדים" / "נחתת על …". role=status, aria-live polite (always in the DOM, so it is
  *  announced); `quiet` updates the text without announcing it (the dice and the landing already have their own announcements).
@@ -2455,4 +2555,46 @@ export function turnChip(text, { quiet = false, ms = 0 } = {}) {
   el.textContent = text; el.classList.add('on');
   if (ms) chipT = setTimeout(() => turnChip(null), ms);
   return el;
+}
+
+/* ============================================================ wave 3a (J1 P0-1): summarise a free run after the ★ limit */
+/** the one-time offer (and the confirm of the HUD 🏁 button) → 'sum' | 'go' | undefined */
+export function summaryOffer({ limit, month } = {}) {
+  return modal({ tag: '🏁 הכוכבים', color: '#b45309', title: `עבר מועד הכוכבים (חודש ${limit})`,
+    html: `<p class="d">${escI(`עכשיו חודש ${month}. מכאן כבר אי אפשר לקבל כוכבים בריצה הזאת — אבל אפשר להמשיך לנסות לצאת מהמירוץ.`)}</p>
+      <p class="d">רוצה לסכם עכשיו ולראות מה למדת? הסיכום מראה את הגרף, את ההחלטות שהשפיעו ואת "רגעי ההחלטה" — ו<b>מסיים את הריצה הזאת</b>.</p>`,
+    actions: [{ label: '🏁 לסכם את הריצה', cls: 'primary', v: 'sum' }, { label: 'להמשיך לשחק', v: 'go' }], dismissable: true, cls: 'sumoffer' });
+}
+/** the HUD's 🏁 button (in the tool row) while a summary is possible; hidden otherwise */
+export function sumRunBtn(show, onClick) {
+  let b = $('#sumRunBtn');
+  if (!show) { if (b) b.hidden = true; return; }
+  const row = $('#hud .htools'); if (!row) return;
+  if (!b) { b = document.createElement('button'); b.id = 'sumRunBtn'; b.type = 'button'; b.className = 'ibtn'; b.textContent = '🏁'; b.setAttribute('aria-label', 'לסכם את הריצה (עבר מועד הכוכבים)'); b.title = 'לסכם את הריצה'; row.insertBefore(b, row.firstChild); }
+  b.hidden = false; b.onclick = () => { sfx('click'); onClick && onClick(); };
+}
+
+/* ============================================================ wave 3a (J1 P0-4, brief §18): "💼 ניהול כסף" — one entry for the money actions */
+/** the hub button beside "הדוח שלי" in the control bar (always on screen, never behind "⋯") */
+export function moneyHubBtn(onClick) {
+  let b = $('#hubBtn');
+  if (!b) {
+    const at = $('#sheetBtn'); if (!at) return null;
+    b = document.createElement('button'); b.id = 'hubBtn'; b.type = 'button'; b.className = 'chip hubbtn';
+    b.innerHTML = '<span aria-hidden="true">💼</span> ניהול כסף'; b.setAttribute('aria-haspopup', 'dialog');
+    at.insertAdjacentElement('afterend', b);
+  }
+  b.onclick = () => { sfx('click'); onClick && onClick(); };
+  return b;
+}
+/** the hub sheet (model: js/hudgoal.js moneyHubModel) → the chosen act id, or undefined */
+export function moneyHub(H) {
+  let chosen;
+  const row = (r) => `<li class="mh-row" data-row="${esc(r.id)}"><div class="mh-h"><span class="mh-i" aria-hidden="true">${esc(r.icon)}</span><div><b>${esc(r.title)}</b><small>${escI(r.value)}</small></div></div>
+    <div class="mh-acts">${r.acts.map((a) => `<button type="button" class="chip" data-hub="${esc(a.act)}" ${a.on ? '' : 'disabled'}>${escI(a.label)}</button>`).join('')}</div></li>`;
+  return modal({ tag: '💼 ניהול כסף', color: '#0f766e', title: 'הכסף שלך', cls: 'mhub',
+    html: `<p class="d">מזומן עכשיו: <b class="num">${escI(H.cashText)}</b>. כל פעולה פותחת את החשבון שלה לפני שהיא קורית.</p><ul class="mh-list">${H.rows.map(row).join('')}</ul>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    onExtra: (e) => { const b = e.target.closest('button[data-hub]'); if (!b || b.disabled) return; chosen = b.dataset.hub; sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
+    .then(() => chosen);
 }

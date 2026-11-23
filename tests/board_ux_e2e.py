@@ -14,7 +14,7 @@ BASE = OPT.get('base') or f"http://localhost:{int(os.environ.get('PORT_BASE', '9
 SHOTS = OPT.get('shots'); TAG = OPT.get('tag', 'after'); SHOTS_ONLY = 'shots-only' in OPT
 ONLY = set(OPT['only'].split(',')) if OPT.get('only') else None
 SIZES = OPT.get('sizes', 'desk,phone,small').split(',')
-VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}}
+VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}, 'land': {'width': 844, 'height': 390}}
 ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'])
 SEED = "localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true}));"
 RESULTS = []; ERRS = []; SINKS = []
@@ -187,6 +187,7 @@ async def run_3d(b, size):
             chip = await pg.evaluate("() => document.querySelector('#turnChip')?.textContent || ''")
             check(sc, 'destination marked before the pawn arrives', mk['dest'] is not None and mk['current'] is None, mk)
             check(sc, 'turn chip says "זזים N צעדים" during the move', 'זזים' in chip or 'זורקים' in chip, chip)
+            await mid_move_tools(pg, sc)
         else: await pg.wait_for_timeout(5200)
         await pg.wait_for_timeout(900)
         await shot(pg, f'{size}_3d_move')
@@ -198,6 +199,8 @@ async def run_3d(b, size):
             check(sc, 'after landing: destination cleared, current marker on the pawn tile', mk['dest'] is None and mk['current'] == pos, (mk, pos))
             live = await pg.evaluate("() => (window.__live || []).join(' | ')")
             check(sc, 'landing announced "נחתת על …" in the live region', 'נחתת על' in live, live)
+            await card_tools(pg, sc)
+            await esc_list(pg, sc)
     # --- city after buying an asset
     bad, got = await play_until_city(pg, sc)
     if not SHOTS_ONLY:
@@ -212,6 +215,59 @@ async def run_3d(b, size):
         await pg.evaluate("import('/js/scene.js').then(s => s.setCameraMode('follow'))")
     if not SHOTS_ONLY and size == 'desk':
         await watchdog(pg, sc)
+    await ctx.close()
+
+TOOLS = """() => { const q = (id) => document.getElementById(id); const l = q('tilesBtn'), h = q('homeViewBtn'), lite = q('liteBtn');
+  const shown = (e) => !!e && !e.hidden && !!e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
+  return { list: shown(l), listDis: !!(l && l.disabled), home: shown(h), liteDis: !!(lite && lite.disabled), gm: !q('gm').hidden, card: !q('evm').hidden }; }"""
+
+async def mid_move_tools(pg, sc):
+    """wave 3a (review MAJOR-1 / MINOR-4): during a move the tile list cannot open (disabled + guarded) and 🪶 waits."""
+    t = await pg.evaluate(TOOLS)
+    check(sc, 'mid-move: the tile list button is disabled', t['listDis'], t)
+    check(sc, 'mid-move: 🪶 (מצב קל) is disabled until the pawn stops', t['liteDis'], t)
+    await pg.evaluate("() => { const b = document.getElementById('tilesBtn'); b.disabled = false; b.click(); }")   # even a forced click is refused (busy guard)
+    await pg.wait_for_timeout(400)
+    t = await pg.evaluate(TOOLS)
+    check(sc, 'mid-move: a forced tap on 📋 opens nothing (no list under the coming card)', not t['gm'], t)
+    await pg.evaluate("() => { const b = document.getElementById('liteBtn'); b.disabled = false; b.click(); }")
+    await pg.wait_for_timeout(300)
+    r = await pg.evaluate("() => document.body.dataset.renderer || (document.querySelector('#board2d:not([hidden])') ? '2d' : '3d')")
+    check(sc, 'mid-move: a forced tap on 🪶 does not switch the renderer', r != '2d', r)
+
+async def card_tools(pg, sc):
+    s = await pg.evaluate(STATE)
+    t = await pg.evaluate(TOOLS)
+    if s['card']: check(sc, 'a card is open: the board tools are hidden (no list over / under it)', not t['list'] and not t['home'], t)
+    else: check(sc, 'at rest: the tile list button is enabled again', t['list'] and not t['listDis'] and not t['liteDis'], t)
+
+async def esc_list(pg, sc):
+    s = await idle(pg)
+    if s['card']: await answer(pg, s); s = await idle(pg)
+    if not s['roll']: return
+    await pg.click('#tilesBtn'); await pg.wait_for_selector('#gmCard.tlistc', timeout=5000)
+    await pg.evaluate("() => { document.activeElement && document.activeElement.blur(); document.body.focus(); }")
+    await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+    check(sc, 'Esc closes the tile list even when focus left it', await pg.is_hidden('#gm'))
+
+async def run_land(b, kind):
+    """wave 3a (review MINOR-1): a landscape phone (844×390) — every board tool is tappable (nothing of the HUD / bar on top)."""
+    sc = f'land-{kind}'
+    ctx, pg = await page(b, sc, VP['land'], q='?ff=board2d:on' if kind == '2d' else '', mobile=True)
+    await start(pg, 'w1'); await pg.wait_for_timeout(2500)
+    s = await idle(pg)
+    if s['card']: await answer(pg, s); s = await idle(pg)
+    await pg.wait_for_timeout(800)
+    hit = await pg.evaluate("""() => [...document.querySelectorAll('#boardTools .ibtn')].filter(b => !b.hidden && b.getClientRects().length).map(b => { const r = b.getBoundingClientRect();
+      const pts = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 4, r.top + 4], [r.right - 4, r.bottom - 4]];
+      return { id: b.id, r: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], ok: pts.every(([x, y]) => { const e = document.elementFromPoint(x, y); return !!e && b.contains(e); }) }; })""")
+    check(sc, 'landscape phone: every board tool is on top where it is drawn (tappable)', hit and all(x['ok'] for x in hit), hit)
+    check(sc, 'landscape phone: the tools are inside the viewport', hit and all(x['r'][0] >= 0 and x['r'][1] >= 0 and x['r'][2] <= 844 and x['r'][3] <= 390 for x in hit), hit)
+    if hit:
+        await pg.click('#tilesBtn'); await pg.wait_for_timeout(500)
+        check(sc, 'landscape phone: a tap on 📋 opens the tile list', await pg.is_visible('#gmCard.tlistc'))
+        await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+    await shot(pg, f'land_{kind}')
     await ctx.close()
 
 async def watchdog(pg, sc):
@@ -276,12 +332,16 @@ async def run_2d(b, size):
         if not SHOTS_ONLY:
             await pg.wait_for_function("() => document.querySelector('#board2d .b2d-dest')", timeout=20000)
             check(sc, '2D: destination tile marked during the move', True)
+            dl = await pg.evaluate("() => document.querySelector('#board2d .b2d-dest')?.getAttribute('aria-label') || ''")
+            check(sc, '2D: the destination tile says "לכאן זזים" in its name', 'לכאן זזים' in dl, dl)
         await shot(pg, f'{size}_2d_move')
         s = await idle(pg)
         if not SHOTS_ONLY:
             d = await pg.evaluate("() => ({ dest: document.querySelectorAll('#board2d .b2d-dest').length, cur: [...document.querySelectorAll('#board2d .b2d-cur')].map(e => +e.dataset.i) })")
             pos = await pg.evaluate("import('/js/game.js').then(g => g.cityAudit().pos)")
             check(sc, '2D: after landing the destination mark is cleared and the current tile follows', d['dest'] == 0 and d['cur'] == [pos], (d, pos))
+            a = await pg.evaluate("() => ({ cur: [...document.querySelectorAll('#board2d [aria-current=location]')].map(e => [+e.dataset.i, e.getAttribute('aria-label')]), lbl: [...document.querySelectorAll('#board2d .b2d-tile')].filter(e => /אתה כאן|לכאן זזים/.test(e.getAttribute('aria-label'))).length })")
+            check(sc, '2D: the current tile has aria-current=location and "אתה כאן" (only it)', len(a['cur']) == 1 and a['cur'][0][0] == pos and 'אתה כאן' in a['cur'][0][1] and a['lbl'] == 1, a)
     bad, got = await play_until_city(pg, sc)
     if not SHOTS_ONLY:
         check(sc, '2D: scene keys == cityModels keys after every decision', not bad, bad[:2])
@@ -302,6 +362,8 @@ async def main():
         for size in SIZES:
             if want('d3') or (want('phone') and size != 'desk'): await run_3d(b, size)
             if want('d2'): await run_2d(b, size)
+        if want('land'):
+            for kind in ('3d', '2d'): await run_land(b, kind)
         await b.close()
     for s in SINKS: FB.assert_clean(s)
     fails = [r for r in RESULTS if not r[2]]

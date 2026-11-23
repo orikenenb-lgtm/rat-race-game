@@ -134,7 +134,7 @@ export function buildWorld(w) {
       d.style.gridColumn = String(gx + 1); d.style.gridRow = String(gz + 1);
       d.style.background = t.color || '#ddd'; d.style.color = t.ink || '#222';
       d.dataset.i = String(i); d.tabIndex = i === 0 ? 0 : -1;
-      d.setAttribute('aria-label', `${tx.name}, משבצת ${i + 1} מתוך ${tiles.length}`);
+      d.dataset.label = `${tx.name}, משבצת ${i + 1} מתוך ${tiles.length}`; d.setAttribute('aria-label', d.dataset.label);
       hidden(el('span', 'b2d-ti', d, tileIcon(t.icon)));
       const nm = hidden(el('span', 'b2d-tn', d, tx.short)); nm.dir = 'rtl';
       nm.style.setProperty('--len', String(Math.max(3, ...tx.short.split(/\s+/).map((x) => x.length))));
@@ -216,13 +216,21 @@ export function markTile(kind, i) {
     for (const t of gridEl.querySelectorAll('.' + cls)) t.classList.remove(cls);
     marks[kind] = i == null || i < 0 ? null : Number(i);
     const t = marks[kind] != null ? tileEl(marks[kind]) : null; if (t) t.classList.add(cls);
+    // wave 3a (review MINOR-2): the marks are spoken too — aria-current + "אתה כאן" / "לכאן זזים" in the tile's name
+    for (const x of gridEl.querySelectorAll('.b2d-tile')) {
+      const cur = x.classList.contains('b2d-cur'), dst = x.classList.contains('b2d-dest');
+      if (cur) x.setAttribute('aria-current', 'location'); else x.removeAttribute('aria-current');
+      const base = x.dataset.label || x.getAttribute('aria-label') || '';
+      x.setAttribute('aria-label', base + (cur ? ' · אתה כאן' : dst ? ' · לכאן זזים' : ''));
+    }
     if (kind === 'current' && marks.current != null && !(gridEl.contains(document.activeElement))) { focusTile = marks.current; rove(); }
   } catch (e) { warn(e); }
 }
 export function cityKeys() { return [...city.keys()]; }
 export function homeView() {}
+const LIFE_MARK = (k) => /^L:/.test(String(k)) && k !== 'L:pension' && k !== 'L:index';   // = scene.js isLifeMarker
 function updateEmpty() {
-  if (!emptyEl) return; const e = city.size === 0;
+  if (!emptyEl) return; const e = ![...city.keys()].some((k) => !LIFE_MARK(k));   // wave 3a (NIT-1): life markers alone keep the empty state
   emptyEl.hidden = !e; if (capEl) capEl.hidden = e; if (cityEl) cityEl.classList.toggle('b2d-none', e);
 }
 

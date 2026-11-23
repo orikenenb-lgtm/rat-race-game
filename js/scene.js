@@ -718,7 +718,7 @@ function buildEmptyLots() {
 }
 /** the city became empty / non-empty: swap the centre between the empty lots and the city grid */
 function updateEmpty() {
-  const e = city.size === 0; if (e === emptyShown) return;
+  const e = ![...city.keys()].some((k) => !isLifeMarker(k)); if (e === emptyShown) return;   // wave 3a (NIT-1): life markers are not assets
   emptyShown = e; drawCenter(gridN); if (emptyGroup) emptyGroup.visible = e; invalidate();
 }
 function plankTexture(base) {

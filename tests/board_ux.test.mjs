@@ -1,6 +1,9 @@
 // 3D upgrade wave 1 (team ג) — Node checks for the board UX layer. Run: node tests/board_ux.test.mjs
-//  T-opt   : SCENE_OPTIONAL (markTile, onTilePick, cityKeys, homeView) is exported by null.js, board2d.js and scene.js; game.js calls
-//            them only as scene.name?.(…) (an older renderer without them never throws); SCENE_API itself is unchanged (48).
+//  T-opt   : SCENE_OPTIONAL (markTile, onTilePick, cityKeys, homeView) is exported by null.js and board2d.js and callable before
+//            init; SCENE_API itself is unchanged (48). (wave 3a, review MINOR-5: the scene.js / game.js source-regex checks are gone —
+//            markers, the watchdog and the camera are behaviour-tested in tests/board_ux_e2e.py on a real page.)
+//  T-deck  : (wave 3a, review MAJOR-2) the market / deal tile text of every world names only effects whose card kind exists in that
+//            world's own deck, and every card kind of the deck is named.
 //  T-tiles : every tile of every world has a short name ≤ 10 chars (never "…") and a one-line description; the steps / "אתה כאן" text.
 //  T-pin   : the engine files stay pinned (tools/build-edge.mjs --check) and no pinned file imports the render layer.
 //  T-saves : the wave adds nothing to S.ui (no display data in saves: no new S.ui.<key> writes in game.js).
@@ -23,24 +26,15 @@ const OPT = nul.SCENE_OPTIONAL;
 ok(Array.isArray(OPT) && Object.isFrozen(OPT), 'SCENE_OPTIONAL frozen');
 for (const f of ['markTile', 'onTilePick', 'cityKeys', 'homeView']) ok(OPT.includes(f), 'SCENE_OPTIONAL has ' + f);
 ok(nul.SCENE_API.length === 48 && OPT.every((f) => !nul.SCENE_API.includes(f)), 'SCENE_API unchanged (48) and disjoint from SCENE_OPTIONAL');
-const scene = src('js/scene.js'); const game = src('js/game.js');
+const game = src('js/game.js');
 for (const f of OPT) {
   ok(typeof nul[f] === 'function', 'null.js exports ' + f);
   ok(typeof b2d[f] === 'function', 'board2d.js exports ' + f);
-  ok(new RegExp(`export (async )?function ${f}\\b`).test(scene), 'scene.js exports ' + f);
-  ok(!new RegExp(`\\bscene\\.${f}\\(`).test(game), `game.js calls scene.${f} only optionally (scene.${f}?.(…))`);
 }
-ok(/scene\.markTile\?\.\('dest', dest\)/.test(game) && /scene\.markTile\?\.\('current', pos\)/.test(game), 'game.js marks the destination before the hops and the current tile after landing');
 ok(nul.cityKeys().length === 0 && typeof nul.onTilePick(() => {}) === 'function' && nul.markTile('dest', 3) === undefined, 'null scene: no-op defaults');
-ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0, 'board2d: callable before init (no DOM at import)');
-// the watchdog exists and is wall-clock based (G10): every awaited tween is armed, cleared when the loop finishes it
-ok(/function armWatch\(tw, ms = tw\.dur \+ WATCH_MARGIN_MS\)/.test(scene) && /tweens\.push\(tw\); armWatch\(tw\)/.test(scene) && /clearTimeout\(tw\.wd\); tw\.res\(\)/.test(scene), 'scene.js: tween watchdog armed per tween, cleared on finish');
-ok(/if \(pageHidden \|\| paused \|\| covered\(\)\) \{ armWatch\(tw, 1000\); return; \}/.test(scene), 'scene.js: the watchdog waits (re-arms) while hidden / paused / covered');
-// camera (G7): resize keeps the user's orbit; azimuth limits; homeView resets
-ok(/addScaledVector\(userDir \|\| dir, userDir \? goalDist\(\) : goalD\)/.test(scene), 'scene.js: resize keeps the user orbit');
-ok(/controls\.minAzimuthAngle = az0 - AZ_RANGE; controls\.maxAzimuthAngle = az0 \+ AZ_RANGE/.test(scene) && /maxPolarAngle = 1\.36/.test(scene), 'scene.js: azimuth ±60°, the under-board limit kept');
-ok(/export function resetCamera\(\) \{[^}]*userDir = null/.test(scene), 'resetCamera (new game) forgets the user orbit');
+ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0 && b2d.markTile('current', 2) === undefined, 'board2d: callable before init (no DOM at import)');
 
+const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
 for (const wid of ['w1', 'w2', 'w3', 'w4', 'h']) {
@@ -51,6 +45,7 @@ for (const wid of ['w1', 'w2', 'w3', 'w4', 'h']) {
     ok(x.short && x.short.length <= T.SHORT_MAX, `${wid}[${t.index}] short ≤ ${T.SHORT_MAX}: "${x.short}"`);
     ok(!/…|\.\.\./.test(x.short + x.name), `${wid}[${t.index}] no ellipsis`);
     ok(x.desc && x.desc.length >= 20 && x.desc.length <= 160, `${wid}[${t.index}] one-line description (${t.type})`);
+    const xw = T.tileText(t, W(wid)); ok(xw.desc && xw.desc.length >= 20 && xw.desc.length <= 180 && xw.short === x.short, `${wid}[${t.index}] per-world description (${t.type}, ${xw.desc.length})`);
     ok(x.name === t.name, `${wid}[${t.index}] the full name is the world data name`);
     ok(x.emoji && x.emoji !== '⭐', `${wid}[${t.index}] has an icon (${t.icon})`);
   }
@@ -63,6 +58,30 @@ ok(T.whereText(0) === 'אתה כאן' && T.whereText(1) === 'עוד צעד אח�
 const sh = T.tileSheet({ type: 'deal', name: 'הזדמנות', icon: 'trend' }, 12, 0, 40);
 ok(sh.where === 'עוד 12 צעדים' && sh.index === 12 && sh.emoji === '📈' && !sh.here, 'tileSheet data');
 ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת על יום משכורת', 'landing text');
+
+/* T-deck (MAJOR-2): words ↔ the world's own cards */
+const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'h']) {
+  const w = W(wid);
+  for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, T.DEAL_WORDS], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
+    const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
+    const desc = T.tileText(tile, w).desc;
+    const have = new Set(deck.map(kindOf));
+    for (const [k, v] of Object.entries(WORDS)) {
+      const word = typeof v === 'string' ? v : v.t;
+      if (tile.name === 'כותרות') continue;   // the history market tile is the real-headline card (its own text)
+      const named = desc.includes(word) && !Object.entries(WORDS).some(([k2, v2]) => k2 !== k && (typeof v2 === 'string' ? v2 : v2.t).includes(word) && desc.includes(typeof v2 === 'string' ? v2 : v2.t) && have.has(k2));
+      if (named) ok(have.has(k), `${wid} ${type}: "${word}" is named and the deck has a "${k}" card`);
+    }
+    if (tile.name !== 'כותרות') for (const k of have) ok(WORDS[k] && desc.includes(typeof WORDS[k] === 'string' ? WORDS[k] : WORDS[k].t), `${wid} ${type}: deck kind "${k}" is named in the tile text`);
+    if (type === 'market' && tile.name !== 'כותרות') ok(/לקנות או למכור|קונים או מוכרים/.test(desc) === [...have].some((k) => WORDS[k] && WORDS[k].trade), `${wid} market: "buy or sell" only when a card lets you trade`);
+  }
+}
+// the review's concrete false claims are gone
+ok(!/ריבית|הדולר/.test(T.tileText(Object.values(W('w1').tiles).find((t) => t.type === 'market'), W('w1')).desc), 'w1 market: no rate / dollar (the w1 deck has neither)');
+ok(!/דירות/.test(T.tileText(Object.values(W('w3').tiles).find((t) => t.type === 'deal'), W('w3')).desc), 'w3 deal: no apartments');
+ok(!/מניות|קריפטו/.test(T.tileText(Object.values(W('h').tiles).find((t) => t.type === 'deal'), W('h')).desc), 'h deal: no shares / crypto (filtered deck)');
+ok(T.tileText({ type: 'deal', name: 'הזדמנות' }).desc === T.TILE_TEXT.deal.desc, 'no world → the shared wording (makes no deck claim)');
 
 /* T-pin */
 let pin = ''; try { pin = execFileSync('node', [resolve(ROOT, 'tools/build-edge.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { pin = 'ERR ' + (e.stdout || '') + (e.stderr || ''); }

@@ -914,6 +914,10 @@ body.hlife-more-open .hud{z-index:45}
 #boardTools[hidden],#boardTools [hidden]{display:none}
 #boardTools .ibtn{pointer-events:auto;font-size:20px;line-height:1;width:44px;height:44px}
 body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boardTools{display:none}
+/* wave 3a (review MAJOR-1): no board tools over or under a card; the list waits while a move / card runs (disabled, still visible) */
+body:has(#evm:not([hidden])) #boardTools{display:none}
+#boardTools .ibtn:disabled{opacity:.45;cursor:default}
+#liteBtn:disabled{opacity:.45;cursor:default}
 /* the turn state chip: bottom centre of the free board rect (the toasts live at the top) */
 #turnChip{position:fixed;z-index:3;margin:0;top:calc(var(--fr-y1, 100vh) - 46px);left:calc((var(--fr-x0, 0px) + var(--fr-x1, 100vw)) / 2);transform:translate(-50%,6px);
   padding:6px 14px;border-radius:999px;background:var(--paper,#fffaf0);color:var(--ink,#1d1a2b);font:700 15px/1.2 var(--font,Rubik,sans-serif);
@@ -1036,3 +1040,44 @@ body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boa
 /* 44 × 44 touch targets (A2 G-12) for the phone HUD: the tools, the home button and the goal toggle (row 2 grows by a few px) */
 @media (max-width:600px){ .htools .ibtn{width:44px;min-width:44px} .htools{gap:4px} .hstats .stat{padding-inline:5px} .hgoal{min-height:44px} }   /* the 4 px the wider tools take come out of the stats' padding, not their numbers */
 @media (max-width:380px){ .hbtn{width:44px} .htools{gap:3px} .htools .ibtn{width:44px;height:44px} .hstats .stat{padding-inline:4px} }
+/* ============================================================ wave 3a: ★ limit in the month stat, near-goal rung, summary offer */
+#hMonth .mstar{display:block;font:700 12px/1.15 var(--font,Rubik,sans-serif);color:var(--mut);white-space:nowrap;margin-top:1px}
+#hMonth .mstar.past{color:var(--neg,#c0392b)}
+.hnext.ms{cursor:pointer}
+.hnext .nk{font-weight:700;color:var(--mut)}
+.gp-ladder{list-style:none;margin:4px 0 8px;padding:0;display:grid;gap:3px}
+.gp-ladder li{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:var(--mut)}
+.gp-ladder li.ok{color:inherit}
+.gp-ladder li.next{color:inherit;font-weight:800;background:light-dark(#fff4d6,#3a2f12);border-radius:8px;padding:3px 6px}
+.gp-ladder small{font-weight:600;color:var(--mut)}
+/* wave 3a: the money hub */
+.hubbtn{white-space:nowrap}
+#gmCard.mhub{max-width:min(520px,calc(100vw - 24px))}
+.mh-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.mh-row{display:grid;gap:6px;padding:8px 10px;border-radius:12px;background:light-dark(#f7f1e3,#2f2817)}
+.mh-h{display:flex;gap:10px;align-items:center}
+.mh-h .mh-i{font-size:22px}
+.mh-h div{display:flex;flex-direction:column;min-width:0}
+.mh-h small{color:var(--mut);font-size:13px}
+.mh-acts{display:flex;flex-wrap:wrap;gap:6px}
+.mh-acts .chip{min-height:44px}
+.hnext.ms{flex-basis:300px}
+.hnext.ms .nt b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.hnext .nk{font-weight:800}
+@media (max-width:600px){ #hMonth .mstar .ml{display:none} }
+/* wave 3a (J1 P0-3): the compact payday card — one phone screen */
+.pdsum{display:grid;gap:2px;margin:6px 0 4px}
+.pdsum .row{display:flex;justify-content:space-between;align-items:baseline}
+.pdsum .pdline{margin:0;font-size:13px;color:var(--mut)}
+.plans.compact{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px}
+.plans.compact .plan{padding:8px 8px;min-height:44px;gap:2px}
+.plans.compact .plan .pi{font-size:20px}
+.plans.compact .plan b{font-size:14px}
+.plans.compact .plan .fxs{margin-top:2px}
+.pdmore,.pddet{margin-top:8px;border-radius:12px;background:light-dark(#f7f1e3,#2f2817);padding:4px 10px}
+.pdmore>summary,.pddet>summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:800;font-size:14px}
+.pdmore .raise{width:100%;margin:6px 0}
+.pddet h4{margin:8px 0 4px;font-size:14px}
+.pdplans{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.pdplans li{display:grid;gap:2px}
+.pdplans .pn{color:var(--mut);font-size:12px}

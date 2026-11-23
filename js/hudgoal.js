@@ -83,8 +83,9 @@ export function goalPanelModel(m, o = {}) {
     stars = [row(1, max), row(2, th.t2 ?? max), { ...row(3, th.t3 ?? max), gates }];
     if (m.mode === 'free') starsNote = 'במשחק חופשי הזמן לא נגמר — אבל הכוכבים נמדדים לפי החודש שבו יוצאים.';
   }
+  const ladder = bench ? [] : milestoneLadder(m);   // wave 3a: the near-goal ladder (metrics values only)
   return {
-    goalType, rule: ruleText(goalType, parts), parts, gaps, met: allMet, hold, stars, starsNote, month,
+    goalType, rule: ruleText(goalType, parts), parts, gaps, met: allMet, hold, stars, starsNote, month, ladder, next: bench ? null : nextMilestone(m),
     pending: goalType === 'netWorthImpact' && o.impactPending ? `עוד ${pts(nf(o.impactPending))} בדרך (מתבשלות)` : null,
     totals: { assets: m.totalAssets, liabilities: m.totalLiabilities, netWorth: m.netWorth,
       assetsText: fmtM(m.totalAssets || 0), liabilitiesText: fmtM(m.totalLiabilities || 0), netWorthText: fmtM(m.netWorth || 0) },
@@ -108,4 +109,71 @@ export function newDebt(before, after) {
   if (!(amount > 0)) return null;
   const monthly = Math.max(0, Math.round(after.monthly - before.monthly));
   return { amount, monthly, text: `חוב חדש ${fmtM(amount)}${monthly ? ` · ${fmtM(monthly)} בחודש` : ''}` };
+}
+
+/* ---------- wave 3a (J1 P0-2, brief §8 "יעד קרוב"): the near-goal milestone ladder for every world and mode.
+ * Built ONLY from E.metrics(S) values (emergency.months / target, assets[].cf, goalParts value / target, goalHold) — comparisons, no new
+ * rule, nothing saved. The rungs, in order: 🛟 one month in the fund → a first asset that brings money every month → 🛟 the fund target
+ * (★★★) → each goal part at ¼, ½ and ¾ of its target → the goal itself → the goal holding its paydays. The next unmet rung is shown in
+ * the HUD (#hNext) once the tutorial goal chain (metrics().nextGoal) is done; null when everything is met (or for the benchmark race). */
+const QUARTER = [[0.25, 'רבע'], [0.5, 'חצי'], [0.75, 'שלושה רבעים']];
+const mo1 = (x) => Math.round((+x || 0) * 10) / 10;
+export function milestoneLadder(m) {
+  const out = [];
+  const E = m.emergency || null; const fundT = E && E.target ? E.target : 3;
+  if (E) out.push({ id: 'fund1', icon: '🛟', title: 'חודש הוצאות בקרן החירום', value: mo1(E.months), target: 1, unit: 'mo', met: (+E.months || 0) >= 1 });
+  const cfAssets = (m.assets || []).filter((a) => (+a.cf || 0) > 0).length;
+  out.push({ id: 'asset1', icon: '🏠', title: 'נכס ראשון שמכניס כסף כל חודש', value: Math.min(1, cfAssets), target: 1, unit: 'n', met: cfAssets >= 1 });
+  if (E && fundT > 1) out.push({ id: 'fund' + fundT, icon: '🛟', title: `${fundT} חודשי הוצאות בקרן (ל־★★★)`, value: mo1(E.months), target: fundT, unit: 'mo', met: (+E.months || 0) >= fundT });
+  const parts = (m.goalParts || []).filter((p) => p.key !== 'benchmark');
+  for (const p of parts) {
+    const v = +p.value || 0, t = +p.target || 0; if (!(t > 0)) continue;
+    for (const [f, word] of QUARTER) {
+      const goal = t * f;
+      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : `שווי נקי של ${fmtM(goal)}`;
+      out.push({ id: `${p.key}${Math.round(f * 100)}`, icon: p.key === 'impact' ? '💗' : p.key === 'passive' ? '💸' : '📈', title, value: v, target: p.key === 'impact' ? Math.ceil(goal) : Math.round(goal), unit: p.key === 'impact' ? 'n' : '₪', met: v >= goal && (p.key !== 'passive' || v > 0) });
+    }
+  }
+  if (parts.length) {
+    const all = parts.every((p) => (+p.value || 0) >= (+p.target || 0) && (p.key !== 'passive' || (+p.value || 0) > 0));
+    out.push({ id: 'goal', icon: '🏁', title: m.goalType === 'passive' ? 'הכנסה פסיבית שמכסה את כל ההוצאות' : 'היעד של העולם', value: parts.length === 1 ? +parts[0].value || 0 : parts.filter((p) => (+p.value || 0) >= (+p.target || 0)).length,
+      target: parts.length === 1 ? +parts[0].target || 0 : parts.length, unit: parts.length === 1 ? (parts[0].key === 'impact' ? 'n' : '₪') : 'n', met: all });
+    const H = m.goalHold; if (H && H.need) out.push({ id: 'hold', icon: '⏳', title: `היעד מחזיק ${paydays(H.need)} ברצף`, value: Math.min(H.streak || 0, H.need), target: H.need, unit: 'n', met: (H.streak || 0) >= H.need });
+  }
+  return out;
+}
+/** the next unmet rung as the #hNext card data ({id, title, value, target, unit, valText, step, of}) — null when none is left */
+export function nextMilestone(m) {
+  if (!m || m.goalType === 'benchmark') return null;
+  const L = milestoneLadder(m); const i = L.findIndex((x) => !x.met); if (i < 0) return null;
+  const x = L[i];
+  // "X מתוך Y" (words, not a slash: a fraction inside a Hebrew line reads in either order)
+  const valNum = x.unit === '₪' ? `${fmtM(x.value)} מתוך ${fmtM(x.target)}` : x.unit === 'mo' ? `${x.value} מתוך ${x.target}` : `${nf(x.value)} מתוך ${nf(x.target)}`;
+  const valUnit = x.unit === 'mo' ? 'חודשים' : '';
+  return { id: 'ms:' + x.id, icon: x.icon, title: x.title, value: Math.max(0, x.value), target: x.target, unit: x.unit === '₪' ? '₪' : '', valNum, valUnit,
+    valText: valUnit ? `${valNum} ${valUnit}` : valNum, step: i + 1, of: L.length, done: false };
+}
+
+/* ---------- wave 3a (J1 P0-4, brief §18): one "💼 ניהול כסף" hub — the model (engine values only; every action is an existing call) */
+/**
+ * m = E.metrics(S). Rows in the order fund → loans → index → plan → focus; each row: current value text + its actions
+ * (act ids game.js already handles: save / unsave → E.moveSavings, loan / repay / credit → E.takeLoan / repayLoan / payCredit,
+ * invest → E.invest / E.setAutoInvest, plan → E.setPlan, focus → E.setFocus). `on` mirrors the engine's own enable flags.
+ */
+export function moneyHubModel(m) {
+  const E = m.emergency || { months: 0, target: 3, balance: 0 };
+  const ix = m.index || null; const L = m.life || {}; const F = m.focus || null;
+  const loans = +m.loans || 0, card = +m.credit || 0; const monthly = debtMonthly(m);
+  const planLabel = ((L.plans || []).find((p) => p.id === L.plan) || {}).label || '';
+  const rows = [
+    { id: 'fund', icon: '🛟', title: 'קרן חירום', value: `${Math.round((+E.months || 0) * 10) / 10} מתוך ${E.target || 3} חודשי הוצאות · ${fmtM(+E.balance || 0)}`,
+      acts: [{ act: 'save', label: 'להפקיד', on: (+m.cash || 0) > 0 }, { act: 'unsave', label: 'למשוך', on: (+E.balance || 0) > 0 }] },
+    { id: 'loans', icon: '🏦', title: 'הלוואות ואשראי', value: loans || card ? `הלוואות ${fmtM(loans)}${card ? ` · אשראי ${fmtM(card)}` : ''}${monthly ? ` · ריבית ${fmtM(monthly)} בחודש` : ''}` : 'אין חובות',
+      acts: [{ act: 'loan', label: `לקחת ${fmtM(+m.loanUnit || 0)}`, on: m.canBorrow !== false }, { act: 'repay', label: `להחזיר ${fmtM(+m.loanUnit || 0)}`, on: !!m.canRepay }, ...(card ? [{ act: 'credit', label: 'לסגור אשראי', on: !!m.canPayCredit }] : [])] },
+  ];
+  if (ix) rows.push({ id: 'index', icon: '📊', title: 'קרן מדד', value: `${nf(ix.qty)} יחידות · ${fmtM(+ix.value || 0)}${ix.autoInvest ? ` · הוראת קבע ${fmtM(ix.autoInvest)} בחודש` : ' · בלי הוראת קבע'}`,
+    acts: [{ act: 'invest', label: 'לקנות / למכור · הוראת קבע', on: true }] });
+  if (L.plans && L.plans.length) rows.push({ id: 'plan', icon: '📅', title: 'התוכנית החודשית', value: planLabel || L.plan || '', acts: [{ act: 'plan', label: 'לשנות', on: true }] });
+  if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
+  return { rows, cash: +m.cash || 0, cashText: fmtM(+m.cash || 0) };
 }
