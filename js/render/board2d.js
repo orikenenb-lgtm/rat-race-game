@@ -265,6 +265,7 @@ function paintLevel(it, L) {
   for (const x of c.querySelectorAll('.b2d-pips,.b2d-corner-b,.b2d-annex,.b2d-act')) x.remove();
   if (L) {
     hidden(el('span', 'b2d-pips', c, pipsText(L)));
+    if (L.kind === 'occ' && (L.closed || L.wing)) hidden(el('span', 'b2d-corner-b', c, L.closed ? '⛔' : '◧'));   // w5: closed asset / closed wing
     if (L.kind === 'biz') {
       const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');
       hidden(el('span', 'b2d-corner-b', c, corner));

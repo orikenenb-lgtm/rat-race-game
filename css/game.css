@@ -63,6 +63,7 @@
 body[data-world=w2]{--accent-ink:light-dark(#9d1784,#ff4fd8)}
 body[data-world=w3]{--accent-ink:light-dark(#0b5f78,#38bdf8)}
 body[data-world=w4]{--accent-ink:light-dark(#6d28d9,#22d3ee)}
+body[data-world=w5]{--accent-ink:light-dark(#9a3412,#ff9f7f)}
 body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--accent2:#c8a24a}
 
 /* ============================================================ base */

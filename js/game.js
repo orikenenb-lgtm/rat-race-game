@@ -23,7 +23,7 @@ import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coach
 import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data behind a tapped city item (reads metrics only)
 import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
 import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
-import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/tiles.js';
+import { tileSheet, tileText, whereText, stepsTo, landedText, prepareWorldText } from './render/tiles.js';
 import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
 import { nextMilestone, moneyHubModel } from './hudgoal.js';
 import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
@@ -487,12 +487,20 @@ export function cityAudit() {
   const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k)).sort();
   const want = [...new Set([...E.cityModels(S).map((m) => m.key), ...have.filter((k) => k.startsWith('L:'))])].sort();
   let pawnTile = S.pos; try { const u = scene.boardUx?.(); if (u) pawnTile = u.pawnTile; } catch (e) { /* ignore */ }
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile };
+  // worlds wave 1: the city-piece levels the game set (w5 occupancy: {kind:'occ', n, closed, wing}) beside the engine's own hints
+  const levels = Object.fromEntries([...prevLevels].filter(([, L]) => L));
+  const occ = Object.fromEntries(E.cityModels(S).filter((m) => m.occDecile != null || m.closed).map((m) => [m.key, { decile: m.occDecile ?? 0, closed: !!m.closed }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
 const prevLevels = new Map();
 function levelOf(entry, m) {
+  // w5 (season.js cityModels): occupancy decile / closed on the asset's own city piece; a closed wing from the panel rows
+  if (entry.occDecile != null || entry.closed) {
+    const row = (((m.worldIndicators || {}).panel || {}).rows || []).find((r) => r.assetId === entry.key);
+    return { kind: 'occ', n: entry.occDecile ?? 0, of: 10, occ: entry.occ ?? null, closed: !!entry.closed, wing: !!(row && row.wing) };
+  }
   const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
   const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
   if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
@@ -505,7 +513,7 @@ function syncLevels(animate) {
   for (const e of E.cityModels(S)) {
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined }); } catch (x) { console.warn(x); }
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && L.kind === 'occ') }); } catch (x) { console.warn(x); }   // w5 occupancy changes every month: no bump
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -521,6 +529,7 @@ function onAssetPick(key) {
   if (info) ui.assetInfo?.(key, info, { world: W, opsOpen: !!(m.focus && m.focus.opsOpen) });
 }
 bus.on('asset:ops', () => openOps());
+bus.on('world:panel', () => openWorldPanel());
 let outPending = false;   // wave 3a (MINOR-3 / MINOR-4): a roll's out is drawn but not applied yet (dice, hops, applyOut)
 /** while a roll is in flight: no city reconcile, and 🪶 waits (the roll's payday fx / news / bailout payload would be dropped) */
 function setOutPending(v) {
@@ -590,6 +599,13 @@ async function startInner(cfg, my) {
   };
   if (!cfg.room) D = null;   // wave 3b: only a room start keeps the driver
   if (cfg.seed == null) cfg.seed = (Math.floor(Math.random() * 2147483646) + 1) >>> 0;
+  // worlds wave 0: a lazy world (w5 …) needs its rules before createGame / resume / deserialize. The lobby loads them first; this covers
+  // every other way in (main.js resume after a 2D → 3D reload, a room start, the fallback lobby).
+  if (cfg.worldId && cfg.worldId !== 'h' && typeof E.ensureWorld === 'function' && typeof E.isLoaded === 'function' && !E.isLoaded(cfg.worldId)) {
+    try { await E.ensureWorld(cfg.worldId); }
+    catch (e) { console.warn('world rules', e); if (my !== gen) return false; busy = false; OV.hideLoading(); ui.toast('לא הצלחנו לטעון את העולם. בדוק את החיבור ונסה שוב.', { kind: 'bad', ms: 6000 }); bus.emit('lobby:open', {}); return false; }
+    if (my !== gen) return false;
+  }
   let Wt = null; try { Wt = E.getWorld(cfg.worldId); } catch (e) { Wt = null; }
   const pawnKey = (cfg.pawn || 'classic') + '|' + (cfg.pawnColor || '#e2483d');
 
@@ -694,6 +710,8 @@ async function startInner(cfg, my) {
   cfg.resume = false; summarized = false;
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
+  try { await prepareWorldText(W); } catch (e) { /* the number-free tile wording stays */ }   // w5: module tile texts from the module's constants
+  if (my !== gen) return false;
   ui.setGender(S.gender);   // T3 verify D4: the UI's own strings in the player's gender
   ui.applyTheme(W);
   t6Start();
@@ -1248,7 +1266,10 @@ function resolveCard(ev, my) {
     // T2 card API: the UI asks, the engine answers (no finance math in ui.js). A hint is an action (['H']): saved like a decision.
     const api = {
       mentor: () => (S ? E.metrics(S).mentor : null),
-      hint: D ? undefined : () => {   // wave 3b: a room's hint is an intent (async) — the room screen's 💡 asks for it
+      hint: D ? async () => {   // rooms polish: the in-card 💡 works in a room too — the hint is a server intent (code H), answered async
+        if (working || my !== gen) return null;
+        try { return await mut('requestHint'); } catch (e) { return { ok: false, error: (e && e.message) || 'אין כאן רמז' }; }
+      } : () => {
         if (working || my !== gen || typeof E.requestHint !== 'function') return null;
         const r = E.requestHint(S);
         if (r && r.ok !== false) { persist(); checkpoint(); }
@@ -1401,6 +1422,7 @@ function sheetAction(act) {
 function sheetBody(act) {
   if (!S || S.over || busy || ui.isEventOpen()) { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
   if (act === 'invest') { indexModal(); return; }
+  if (act === 'world') { ui.toggleSheet(false); openWorldPanel(); return; }   // w5: the season box in the report
   if (act === 'save' || act === 'unsave') { savingsModal(act === 'save'); return; }
   if (act === 'report') {
     if (typeof E.setSideReport !== 'function') return;
@@ -1446,8 +1468,37 @@ async function openMoneyHub() {
   const act = await ui.moneyHub?.(H);
   if (!act || !S || S.over || busy || ui.isEventOpen()) return;
   if (act === 'summarize') { summarizeRun(false); return; }
+  if (act === 'world') { openWorldPanel(); return; }
   if (act === 'plan' || act === 'focus') { lifeChip(act); return; }
   sheetAction(act);   // save / unsave / loan / repay / credit / invest — the same flows as the report's buttons
+}
+
+/* ============================================================ worlds wave 1: the world panel (metrics().worldIndicators.panel) + E.worldAction
+   Between rolls only (like the money hub). In a room the action goes to the server as code Z (RemoteDriver ROOM_CODE.worldAction). */
+function panelData() {
+  if (!S) return null;
+  const m = E.metrics(S); const wi = m.worldIndicators || {};
+  const part = (m.goalParts || [])[0] || {};
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
+}
+async function openWorldPanel() {
+  if (!S || S.over || summarized) return;
+  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לפתוח את לוח העולם בין תורות'); return; }
+  if (!panelData() || typeof ui.worldPanel !== 'function') return;
+  await ui.worldPanel(panelData, (a) => worldAct(a.id, a.param));
+  render(false);
+}
+/** one module action (E.worldAction) → {ok, error?, toast?}; applies the out like every other between-roll action */
+async function worldAct(id, param) {
+  if (!S || S.over || busy || typeof E.worldAction !== 'function') return { ok: false, error: 'לא אפשרי עכשיו' };
+  let out;
+  try { out = await mut('worldAction', id, param ?? null); } catch (e) { console.error(e); return { ok: false, error: (e && e.message) || 'לא אפשרי עכשיו' }; }
+  if (!out || out.ok === false) { sfx('loss'); return { ok: false, error: (out && out.error) || 'לא אפשרי עכשיו' }; }
+  const toast = out.toast || null; out.toast = null;   // the panel shows it in place (applyOut would raise it as a warning toast)
+  await applyOut(out); render(); persist(); checkpoint();
+  if (out.mentor) ui.mentor(out.mentor);
+  if (out.end) { document.querySelector('#gmCard.wpanel .acts button.primary')?.click(); closeCard(); ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
+  return { ok: true, toast };
 }
 
 /* ============================================================ index fund any time (E.invest / E.setAutoInvest) */
@@ -1511,7 +1562,8 @@ function t6Start() {
 function t6Hud() {
   if (!S || S.over) return null;
   const aw = S.afterWin ? { n: Math.max(0, (S.month | 0) - (S.afterWin.m | 0)) } : null;
-  return { rivals: ghosts.enabledFor(S) && ghosts.status().state !== 'unavailable', moments: !!(CFG && rewind.allowed(CFG)), afterWin: aw && flagFor('afterwin', CFG) ? aw : null };
+  // rooms polish: in a room the opponents are real (the room screen lists them) — no 👥 ghost-rivals chip (ghosts never start there)
+  return { rivals: !D && ghosts.enabledFor(S) && ghosts.status().state !== 'unavailable', moments: !!(CFG && rewind.allowed(CFG)), afterWin: aw && flagFor('afterwin', CFG) ? aw : null };
 }
 function rivalsData() {
   const m = E.metrics(S); const parts = m.goalParts || [];
@@ -1614,7 +1666,7 @@ function t6End(end) {
     // RW.allowed (learning games only); a branch's end never offers a rewind (its log is not the last game)
     out.rewindAllowed = !branch && rewind.endAllowed(CFG);
     out.afterwinAllowed = end.status === 'won' && !S.afterWin && !end.afterWin && typeof E.continueAfterWin === 'function' && flagFor('afterwin', CFG) && CFG.mode === 'free';
-    if (ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
+    if (!D && ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
     if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; out.branchCmp = branchCmp(d, end); }
     else if (out.rewindAllowed) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: { ...endLite(end, out), ...cmpSide(end) }, ghostsKey: out.ghostsKey || null });
     persist();

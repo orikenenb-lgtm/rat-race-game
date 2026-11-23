@@ -1,7 +1,7 @@
 // מירוץ העכברים 2.0 — DOM layer: HUD, statement sheet, event cards (incl. the v1.1 trade window), mentor, dice,
 // toasts, achievement toast, coach marks, flying coins. Generic helpers (toast/modal/confirmBox/achievementToast)
 // are also used by the lobby.
-import { fmt, fmtM, sgn, fmtP, genderize, starThresholds } from './engine.js';
+import { fmt, fmtM, sgn, fmtP, genderize, starThresholds, money as moneyOf } from './engine.js';
 import { goalPanelModel } from './hudgoal.js';
 import { displayLesson } from './data/lessons-meta.js';   // wave 3a: misleading lesson titles → display overrides   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
@@ -40,6 +40,13 @@ export const gw = (m, f) => (uiG === 'f' ? f : m);
 const num = (s, c = '') => (HEB.test(String(s)) ? `<span class="num rtl ${c}">${iso(s)}</span>` : `<span class="num ${c}">${s}</span>`);
 const pctTxt = (x) => `${Math.round(x * 100) / 100}%`;
 const usdTxt = (u) => `₪${Number(u).toFixed(2)}`;
+/* w5 (season): month / band words for the HUD chip and the world panel */
+const MONTH_HE = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const MONTH_S = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+const BAND_HE = { peak: 'עונה', mid: 'רגיל', off: 'שפל' };
+const BAND_IC = { peak: '☀️', mid: '🌤️', off: '🌧️' };
+const tourTxt = (t) => '×' + (Math.round((+t || 0) * 100) / 100).toFixed(2);
+const mS = (n) => moneyOf(Math.round(+n || 0), 'short');   // ₪850 אלף / ₪12.5 מיליון — panel numbers (E.money, wave 0 I6)
 let speed = 1;
 export function setSpeed(f) { speed = f; }
 const vibrate = (p = 12) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { /* ignore */ } };
@@ -347,6 +354,12 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const insured = (wi.insuredUntil || 0) >= m.month;
     if (hedged || insured) extra = `<span class="hedge" title="${hedged ? 'יש נכסים מגודרים' : 'המשלוחים מבוטחים'}">${ICON.shield}${hedged ? 'מגודר' : 'מבוטח'}</span>`;
   } else if (w.mechanic === 'angel') { key = 'impact'; v = wi.impact; text = `השפעה ${num(`${wi.impact}/${wi.impactTarget}`)}`; goodUp = 1; }
+  else if (wi.season) {   // w5: the month's season and the city's demand — a button that opens the world panel (עונות ותפוסה)
+    const se = wi.season; key = 'tour'; v = se.tour; goodUp = 1;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח העולם')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} ${esc(MONTH_HE[se.cal - 1] || '')} · ${esc(BAND_HE[se.band] || '')} · ביקוש ${num(tourTxt(se.tour))}</button>`;
+    if (se.festival) extra = '<span class="hedge" title="פסטיבל החודש">🎪</span>';
+  }
+  else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
   if (key) {
     if (ind.key === key && ind.v != null && v !== ind.v) { ind.dir = Math.sign(v - ind.v); ind.good = goodUp ? ind.dir * goodUp : 0; ind.t = performance.now(); }
     if (ind.key !== key) { ind.dir = 0; }
@@ -355,6 +368,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const arrow = fresh ? `<i class="arr ${ind.good > 0 ? 'pos' : ind.good < 0 ? 'neg' : 'neu'}" aria-label="${ind.dir > 0 ? 'עלייה' : 'ירידה'}">${ind.dir > 0 ? ICON.up : ICON.down}</i>` : '';
     box.innerHTML = `${text}${arrow}${extra}`;
     box.hidden = false;
+    const wb = box.querySelector('#worldPanelBtn'); if (wb) wb.onclick = () => { sfx('click'); bus.emit('world:panel'); };
   } else { box.innerHTML = ''; box.hidden = true; }
   $('#hWorld').classList.toggle('noind', !key);
   renderLife(m, ctx);
@@ -362,7 +376,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   const cv = $('#c'); if (cv) { const n = (m.assets || []).length; const t = n ? `לוח המשחק. בעיר שלך ${n === 1 ? 'נכס אחד' : n + ' נכסים'}. פרטים על כל נכס בדוח הכספי.` : 'לוח המשחק. עדיין אין נכסים בעיר.'; if (cv.getAttribute('aria-label') !== t) cv.setAttribute('aria-label', t); }
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
-  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : 'יעד העולם';
+  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : 'יעד העולם';
   const parts = m.goalParts || [];
   const pc = shownPct(m);
   const sig = m.goalType + parts.length;
@@ -728,7 +742,7 @@ export function renderSheet(m, ctx) {
   const top = el.scrollTop;
   const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד העולם';
   const hold = m.goalType !== 'benchmark' && m.goalHold && m.goalHold.need > 1 ? ` היעד צריך להחזיק ${m.goalHold.need} ימי משכורת ברצף.` : '';
-  const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה ש${gw('אתה חייב', 'את חייבת')}.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
+  const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה ש${gw('אתה חייב', 'את חייבת')}.` : m.goalType === 'passive12' ? `היעד: ${escI(goalWords(w.goalLabel))}. נמדד בממוצע של 12 ימי משכורת: הקיץ צריך לממן את החורף.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
   let world = '';
   if (w.mechanic === 'rate') {
     world = `<div class="wbox"><div class="wl"><span>ריבית במשק</span><b class="num">${pctTxt(wi.rate)}</b></div>${spark(wi.rateHist, { color: 'var(--accent)' })}
@@ -742,6 +756,12 @@ export function renderSheet(m, ctx) {
     world = `<div class="wbox"><div class="wl"><span>נקודות השפעה</span><b class="num">${wi.impact}/${wi.impactTarget}</b></div>
       <div class="track"><i style="width:${Math.min(100, (wi.impact / Math.max(1, wi.impactTarget)) * 100)}%"></i></div>
       <p class="note">${wi.impactPerMonth ? `+${wi.impactPerMonth} בחודש` : 'עוד אין השפעה חודשית'}${wi.impactPending ? ` · עוד ${wi.impactPending} בדרך` : ''}. ${wi.angelsActive ? `${wi.angelsActive} סטארט־אפים פעילים, שווי על הנייר ${fmtM(wi.angelPaper)}.` : 'עוד לא השקעת בסטארט־אפים.'}</p></div>`;
+  }
+  else if (wi.season) {   // w5: the season box; the full panel (strip, ring, rows, actions) opens from here, the HUD chip and 💼
+    const se = wi.season; const rw = (wi.panel && (wi.panel.gauges || []).find((g) => g.id === 'runway')) || null;
+    world = `<div class="wbox"><div class="wl"><span>${BAND_IC[se.band] || '🌴'} ${esc(MONTH_HE[se.cal - 1] || '')} · ${esc(BAND_HE[se.band] || '')}</span><b class="num">ביקוש ${esc(tourTxt(se.tour))}</b></div>
+      <p class="note">${rw && rw.value != null ? `כרית לחורף: ${num(String(Math.round(rw.value * 10) / 10))} חודשי עלויות קבועות. ` : ''}${se.line ? `קו עונתי: ${num(fmtM(se.line))} (נסגר עד אוגוסט). ` : ''}${se.fixedMonth ? `עלויות קבועות של הנכסים: ${num(fmtM(se.fixedMonth))} בחודש.` : 'עוד אין נכסים עונתיים.'}</p>
+      <div class="loans"><button data-act="world">🌴 ${esc((wi.panel && wi.panel.title) || 'לוח העולם')}</button></div></div>`;
   }
   else if (wi.ymText) {
     world = `<div class="wbox"><div class="wl"><span>🗞️ ${esc(wi.ymText)}</span>${wi.index != null ? `<b class="num">מדד ${Math.round(wi.index)}</b>` : ''}</div>${spark(wi.indexHist, { color: 'var(--accent)' })}
@@ -1060,10 +1080,13 @@ function hintable(ev, M) {
   if (ev.auto || ev.type === 'trade' || ev.type === 'intro' || ev.type === 'story' || (ev.type === 'mystery' && ev.data && ev.data.kind === 'quiz')) return false;
   return !!M.canHint;
 }
-function askHint() {
-  const st = evState; if (!st) return;
+async function askHint() {
+  const st = evState; if (!st || st.hintBusy) return;
   let r = null;
-  try { r = st.ctx.api.hint(); } catch (e) { console.error(e); }
+  st.hintBusy = true;
+  try { r = await st.ctx.api.hint(); } catch (e) { console.error(e); }   // wave 3b + worlds: in a room the hint is a server intent (async)
+  st.hintBusy = false;
+  if (evState !== st) return;   // the card changed while the room answered
   if (!r || r.ok === false || !r.hint) { const e = $('#evCard .err'); if (e) e.textContent = (r && r.error) || 'אין כאן רמז'; return; }
   st.hint = { id: st.ev.id, dd: ddLevel(st.ev), res: r };
   sfx('click');
@@ -1456,7 +1479,31 @@ function introActions(ev) {
 
 let payslipFull = '';   // the payday card's full payslip (BODY.payday → the "פירוט" box of the same render)
 /* ---------- per-type bodies */
+/* ---------- w5 (season): an op-asset deal's year at a glance (engine: data.op {next12, avg, best, worst, profileLabel, planned, closedFor},
+   data.runwayNeed / runwayAfter) and the tour operator's allotment card (type 'mech', data from season.js tiles.N.describe) */
+function miniStrip(list, label) {
+  const top = Math.max(1, ...list.map((x) => Math.abs(+x.v || 0)));
+  return `<ol class="wp-strip mini12" aria-label="${esc(label)}">${list.map((x) => { const v = +x.v || 0; const h = Math.max(2, Math.round((Math.abs(v) / top) * 30));
+    return `<li class="b-${esc(x.band || 'mid')} ${v < 0 ? 'neg' : 'pos'}"><span class="wp-bar" aria-hidden="true"><i style="height:${h}px"></i></span><b class="num">${esc(moneyOf(v, 'tiny'))}</b><small>${esc(x.m)}</small><span class="sr">${esc(x.full || x.m)}: ${esc(mS(v))}</span></li>`; }).join('')}</ol>`;
+}
+function opStripHtml(d) {
+  const O = d.op; const n12 = O.next12 || [];
+  const strip = miniStrip(n12.map((x) => ({ v: x.cf, band: x.band, m: MONTH_S[(x.cal || 1) - 1], full: MONTH_HE[(x.cal || 1) - 1] })), '12 החודשים הבאים של הנכס');
+  return `<div class="mini opmini"><p class="mh">🌴 ${esc(O.profileLabel || '')}: איך נראית שנה עם הנכס הזה</p>${strip}
+    <p class="note">ממוצע ${num(mS(O.avg))} בחודש · החודש הכי חלש ${num(mS(O.worst), cls(O.worst))}${O.planned != null && O.planned !== O.avg ? ` · עם תוכנית מחירים לפי עונה בערך ${num(mS(O.planned))}` : ''}${O.closedFor ? ` · סגור ${num(String(O.closedFor))} חודשים ראשונים` : ''}${O.owner ? ` · ${gw('אתה מנהל', 'את מנהלת')} בעצמך — הכנסה מעבודה עד שיש מנהל` : ''}${O.locked ? ' · הרשת קובעת את המחירים' : ''}.</p>
+    ${d.runwayNeed != null ? `<p class="note">🛟 כרית לחורף: החודשים החלשים צריכים בערך ${num(mS(d.runwayNeed))}; אחרי הקנייה יישארו ${num(mS(Math.max(0, d.runwayAfter || 0)))}.</p>` : ''}</div>`;
+}
 const BODY = {
+  mech(ev) {   // a world module's tile card — w5 'N' (allotment); any other module card shows its text + options only
+    const d = ev.data || {}; if (d.share == null || d.upfront == null) return '';
+    const rows = [row('הנכס', esc(d.name || '')), row('החדרים שהמפעיל לוקח', iso(Math.round(d.share * 100) + '%') + ` ל־${esc(d.months)} חודשים`), row('ההנחה', iso(Math.round(d.disc * 100) + '%')),
+      `<div class="row"><b>מקבלים עכשיו</b>${big(d.upfront, 'pos')}</div>`,
+      `<div class="row"><span>הערכה לחצי השנה (עם מול בלי)</span><b class="num ${cls(d.delta)}">${sgn(d.delta)}</b></div>`];
+    if (!d.countered && d.counter) rows.push(row('הצעה נגדית', iso(`${Math.round(d.counter.disc * 100)}% הנחה · סיכוי ${Math.round(d.counter.chance * 100)}%`)), row('אם המפעיל יסכים', `${mS(d.counter.upfront)} מראש · ${moneyOf(d.counter.delta, 'short').replace(/^(?=[₪])/, d.counter.delta > 0 ? '+' : '')}`, cls(d.counter.delta)));
+    if (d.runway != null) rows.push(row('כרית לחורף עכשיו', `${Math.round(d.runway * 10) / 10} חודשי עלויות קבועות`, d.runway < 3 ? 'neg' : ''));
+    const dm = Array.isArray(d.deltaMonths) && d.forecast ? `<div class="mini"><p class="mh">ההפרש החודשי בחצי השנה (תחזית לפי קצב ההזמנות)</p>${miniStrip(d.deltaMonths.map((v, k) => ({ v, band: (d.forecast[k] || {}).tour < 0.9 ? 'off' : 'mid', m: MONTH_S[((d.forecast[k] || {}).cal || 1) - 1], full: MONTH_HE[((d.forecast[k] || {}).cal || 1) - 1] })), 'ההפרש בכל חודש')}</div>` : '';
+    return grid(rows) + dm + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+  },
   intro(ev) {   // T4 §4.2 with the engine's real fields: data.payslip {net, expenses, cashflow, cash}, data.result, data.goal
     const d = ev.data || {}; const P = d.payslip || {};
     if (d.step === 'salary') return grid([row('נטו לחשבון', fmtM(P.net ?? 0)), row('הוצאות קבועות', fmtM(-(P.expenses ?? 0)), 'neg'), `<div class="row"><b>נשאר בסוף החודש</b>${big(P.cashflow ?? 0)}</div>`]);
@@ -1523,6 +1570,7 @@ const BODY = {
       extra += `<div class="mini"><p class="mh">כמה הנכס מכניס בכל ריבית?</p><div class="mt">${d.cfAt.map((x) => `<div class="${Math.abs(x.rate - d.rate) < 1 ? 'cur' : ''}"><small>${pctTxt(x.rate)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b></div>`).join('')}</div>
         <p class="note">משתנה = התזרים זז עם הריבית. קבועה = נעול, בלי הפתעות, אבל קצת יקר יותר היום.</p></div>`;
     }
+    if (d.op) extra += opStripHtml(d);   // w5: an op-asset's 12 months (strip), its weakest month and the winter runway
     if (d.cfAtUsd) {
       const imp = d.sens < 0;
       extra += `<div class="mini"><p class="mh">${d.usdLinked ? 'השווי צמוד לדולר.' : imp ? 'יבואן: משלם לספקים בדולרים — דולר חזק פוגע.' : 'יצואן: מוכר בדולרים — דולר חזק עוזר.'}</p><div class="mt">${d.cfAtUsd.map((x, i) => `<div class="${i === 1 ? 'cur' : ''}"><small>דולר ${usdTxt(x.usd)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b><small>שווי ${fmtC(x.value)}</small></div>`).join('')}</div>
@@ -2598,3 +2646,100 @@ export function moneyHub(H) {
     onExtra: (e) => { const b = e.target.closest('button[data-hub]'); if (!b || b.disabled) return; chosen = b.dataset.hub; sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
     .then(() => chosen);
 }
+
+/* ============================================================ worlds wave 1: the generic world panel (metrics().worldIndicators.panel)
+   DESIGN §4.2: a module describes its panel (gauges, a 12-month strip, a ring, rows, actions with ids / labels / enabled / reason /
+   suggested); this renders ANY such descriptor without world-specific rules. w5 = "עונות ותפוסה". Actions go through E.worldAction
+   (game.js passes onAct); the sheet stays open and redraws from a fresh descriptor after each action. */
+const TIER_HE = { budget: 'זול', standard: 'רגיל', premium: 'יוקרה' };
+const PROF_HE = { beach: 'חוף', winterSun: 'שמש חורף', flat: 'כל השנה', waterpark: 'פארק מים', mixed: 'חוף + כנסים' };
+function gaugeHtml(g) {
+  const has = g.value != null && Number.isFinite(+g.value);
+  const min = g.min ?? 0, max = g.max ?? Math.max(g.ref ? g.ref * 2 : 1, has ? +g.value : 1);
+  const pos = (x) => Math.max(0, Math.min(100, ((x - min) / Math.max(1e-9, max - min)) * 100));
+  const txt = !has ? 'אין עדיין' : g.id === 'tour' ? tourTxt(g.value) : g.id === 'runway' ? `${Math.round(+g.value * 10) / 10} חודשים` : String(Math.round(+g.value * 100) / 100);
+  const low = has && g.ref != null && +g.value < g.ref;
+  return `<div class="wp-g${low ? ' low' : ''}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(txt)}</b></div>
+    <div class="wp-gbar" aria-hidden="true"><i style="width:${has ? pos(+g.value) : 0}%"></i>${g.ref != null ? `<s style="inset-inline-start:${pos(g.ref)}%"></s>` : ''}</div>
+    ${g.ref != null ? `<small>${g.id === 'tour' ? `רגיל = ${esc(tourTxt(g.ref))}` : `כדאי לפחות ${esc(String(g.ref))}`}${low ? ' · נמוך' : ''}</small>` : ''}</div>`;
+}
+function stripHtml(S) {
+  const ms = (S && S.months) || []; if (!ms.length) return '';
+  const top = Math.max(1, ...ms.map((x) => Math.abs(+x.cf || 0)));
+  return `<section class="wp-sec"><h3>${esc(S.label || '12 החודשים הבאים')}</h3><ol class="wp-strip">${ms.map((x, i) => {
+    const v = +x.cf || 0; const h = Math.max(3, Math.round((Math.abs(v) / top) * 46));
+    return `<li class="b-${esc(x.band || 'mid')} ${v < 0 ? 'neg' : 'pos'}${i === 0 ? ' now' : ''}"><span class="wp-bar" aria-hidden="true"><i style="height:${h}px"></i></span><b class="num">${esc(moneyOf(v, 'tiny'))}</b><small>${esc(MONTH_S[(x.cal || 1) - 1])}${i === 0 ? ' · עכשיו' : ''}</small><span class="sr">${esc(MONTH_HE[(x.cal || 1) - 1])}: ${esc(mS(v))}, ${esc(BAND_HE[x.band] || '')}</span></li>`;
+  }).join('')}</ol><p class="wp-legend"><span class="b-peak">☀️ עונה</span><span class="b-mid">🌤️ רגיל</span><span class="b-off">🌧️ שפל</span></p></section>`;
+}
+function ringHtml(R, target) {
+  if (!R) return '';
+  const n = R.window || 12; const vals = (R.values || []).slice(-n); const sum = vals.reduce((s, x) => s + (+x || 0), 0); const avg = Math.round(sum / n);
+  const top = Math.max(1, target || 0, ...vals.map((x) => Math.abs(+x || 0)));
+  const segs = []; const r = 42, cx = 50, cy = 50, gap = 0.06;
+  for (let i = 0; i < n; i++) {
+    const v = i < vals.length ? +vals[i] || 0 : null; const a0 = -Math.PI / 2 + (i / n) * Math.PI * 2 + gap, a1 = -Math.PI / 2 + ((i + 1) / n) * Math.PI * 2 - gap;
+    const p = (a, rr) => `${(cx + Math.cos(a) * rr).toFixed(2)} ${(cy + Math.sin(a) * rr).toFixed(2)}`;
+    const k = v == null ? 0 : Math.max(0.15, Math.min(1, Math.abs(v) / top));
+    segs.push(`<path d="M${p(a0, r)} A${r} ${r} 0 0 1 ${p(a1, r)}" class="${v == null ? 'empty' : v < 0 ? 'neg' : target && v >= target ? 'met' : 'pos'}" style="opacity:${v == null ? 1 : (0.35 + 0.65 * k).toFixed(2)}"/>`);
+  }
+  return `<section class="wp-sec wp-ringsec"><h3>${esc(R.label || 'ממוצע 12 החודשים')}</h3><div class="wp-ring"><svg viewBox="0 0 100 100" aria-hidden="true">${segs.join('')}</svg>
+    <div class="wp-rc"><b class="num">${esc(mS(avg))}</b><small>${target ? `מתוך ${esc(mS(target))}` : 'בחודש'}</small></div></div>
+    <p class="note">${vals.length < n ? `נספרו ${vals.length} מתוך ${n} חודשים — חודש שעוד לא היה נספר כאפס.` : `ממוצע ${n} ימי המשכורת האחרונים.`} כל חודש נכנס לממוצע — גם החורף.</p></section>`;
+}
+function rowsHtml(rows) {
+  if (!rows || !rows.length) return '<p class="empty">עוד אין לך נכסים עונתיים. מלון, ספא או מרכז כנסים יופיעו כאן עם התפוסה שלהם.</p>';
+  return `<section class="wp-sec"><h3>הנכסים שלך החודש</h3><ul class="wp-rows">${rows.map((r) => {
+    const pct = r.closed ? 0 : Math.round((+r.occ || 0) * 100); const k = Math.round((r.closed ? 0 : (+r.occDecile || 0)) / 2);
+    const badges = [r.closed ? '<em class="b warn">סגור עכשיו</em>' : '', r.wing ? '<em class="b warn">אגף סגור</em>' : '', r.locked ? '<em class="b">חוזה ניהול</em>' : '',
+      r.owner ? `<em class="b warn">${gw('אתה מנהל', 'את מנהלת')} בעצמך</em>` : '', r.allot ? `<em class="b ok">הקצאה ${Math.round((r.allot.share || 0) * 100)}% עד חודש ${esc(r.allot.until)}</em>` : ''].join('');
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}"><div class="wp-rh"><b>${esc(r.name)}</b>${badges}</div>
+      <div class="wp-rm"><span class="wp-occ" aria-label="תפוסה ${pct}%"><span aria-hidden="true">${r.closed ? '🔒' : '▮'.repeat(k) + '▯'.repeat(5 - k)}</span> <b class="num">${pct}%</b></span>
+      <span>${esc(PROF_HE[r.profile] || r.profile || '')}</span><span>מחיר עכשיו: ${esc(TIER_HE[r.tier] || r.tier || '')}</span><span>מוניטין <b class="num">${esc(r.rep)}</b></span><span>${r.staff === 'seasonal' ? 'צוות עונתי' : 'צוות קבוע'}</span>
+      <span>תוכנית: עונה ${esc(TIER_HE[r.peak] || '')} · שפל ${esc(TIER_HE[r.off] || '')}</span><span class="${cls(r.cfNow)}">החודש ${num(sgn(r.cfNow))}</span></div></li>`;
+  }).join('')}</ul></section>`;
+}
+function actionsHtml(acts, rows) {
+  if (!acts || !acts.length) return '';
+  const name = (id) => ((rows || []).find((r) => r.assetId === id) || {}).name || '';
+  const groups = new Map();
+  for (const a of acts) { const g = a.assetId || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(a); }
+  const btn = (a, i) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${a.current ? ' cur' : ''}" data-wact="${i}" ${a.enabled ? '' : 'disabled'} ${a.current ? 'aria-pressed="true"' : ''}${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.current ? '✓ ' : a.suggested ? '💡 ' : ''}${escI(a.assetId && name(a.assetId) ? a.label.replace(name(a.assetId) + ': ', '') : a.label)}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
+  const idx = new Map(acts.map((a, i) => [a, i]));
+  return `<section class="wp-sec"><h3>מה אפשר לעשות עכשיו</h3>${[...groups].map(([g, list]) => `<div class="wp-ag"><h4>${esc(g ? name(g) : 'כל העסק')}</h4><div class="wp-acts">${list.map((a) => btn(a, idx.get(a))).join('')}</div></div>`).join('')}
+    <p class="note">💡 = מה שהמנטור היה בוחר עכשיו. כל פעולה נכנסת לחודש הזה מיד (בלי להטיל קוביות).</p></section>`;
+}
+/** the season HUD numbers (w5 worldIndicators.season) as one line on top of the panel */
+function seasonLine(se) {
+  if (!se) return '';
+  return `<p class="wp-now">${BAND_IC[se.band] || ''} <b>${esc(MONTH_HE[se.cal - 1] || '')}</b> · ${esc(BAND_HE[se.band] || '')} · ביקוש בעיר ${num(tourTxt(se.tour))}${se.festival ? ' · 🎪 פסטיבל החודש' : ''}${se.line ? ` · קו עונתי ${num(fmtM(se.line))} מתוך ${num(fmtM(se.lineMax))}` : ''}${(se.shocks || []).length ? ` · ${se.shocks.map((x) => esc(x.n)).filter(Boolean).join(' · ')}` : ''}</p>`;
+}
+export function worldPanelHtml(P, { season = null, target = 0 } = {}) {
+  if (!P) return '';
+  return `${seasonLine(season)}<div class="wp-gauges">${(P.gauges || []).map(gaugeHtml).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${rowsHtml(P.rows)}${actionsHtml(P.actions, P.rows)}`;
+}
+/**
+ * Open the world panel. get() → {panel, season, target} (fresh each time); onAct(action) → Promise<{ok, error?, toast?}>.
+ * Resolves when the player closes it.
+ */
+export function worldPanel(get, onAct) {
+  let D = get(); if (!D || !D.panel) return Promise.resolve();
+  let busyAct = false;
+  const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
+  return modal({ tag: D.panel.title || 'לוח העולם', color: '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
+    html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead
+    onOpen: (c) => setTimeout(() => { const h = c.querySelector('#gmTitle'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } c.scrollTop = 0; }, 80),
+    onExtra: async (e) => {
+      const b = e.target.closest('button[data-wact]'); if (!b || b.disabled || busyAct) return;
+      const a = (D.panel.actions || [])[+b.dataset.wact]; if (!a) return;
+      busyAct = true; sfx('click');
+      let r = null; try { r = await onAct(a); } catch (x) { r = { ok: false, error: x && x.message }; }
+      busyAct = false;
+      const c = $('#gmCard'); if (!c || !c.classList.contains('wpanel')) return;
+      D = get() || D; draw(c);
+      const msg = c.querySelector('.wp-msg'); if (msg) { msg.textContent = r && r.ok === false ? (r.error || 'לא אפשרי עכשיו') : (r && r.toast) || 'בוצע'; msg.className = 'wp-msg ' + (r && r.ok === false ? 'neg' : 'pos'); }
+      const same = c.querySelector(`button[data-wact="${b.dataset.wact}"]`); (same && !same.disabled ? same : c.querySelector('.acts button.primary'))?.focus();
+    } });
+}
+export const worldPanelOpen = () => !!document.querySelector('#gm:not([hidden]) #gmCard.wpanel');

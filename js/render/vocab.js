@@ -26,6 +26,10 @@ export const WORLD_STYLE = Object.freeze({
   w2: { name: 'העיר הגדולה', mood: 'dusk neon', sky: ['#1e2a4a', '#ff7e67'], board: '#3b4252', edge: '#1f2433', center: '#2e3440', decor: 'skyline', accent: '#ff4fd8', accent2: '#22d3ee', accentInk: ['#9d1784', '#ff4fd8'], rim: '#ff4fd8', rimGlow: true, motif: 'neon', caption: 'העיר שלך' },
   w3: { name: 'הנמל הגלובלי', mood: 'noon by the sea', sky: ['#7dd3fc', '#e0f2fe'], board: '#e9d5a8', edge: '#8b5e34', center: '#f3e3bf', decor: 'sea', accent: '#0ea5e9', accentInk: ['#0b5f78', '#38bdf8'], rim: '#0ea5e9', rimGlow: false, motif: 'waves', caption: 'הנמל שלך' },
   w4: { name: 'עמק העתיד', mood: 'night aurora', sky: ['#050816', '#1b1f4b'], board: '#e8f1ff', edge: '#94a3b8', center: '#dbeafe', decor: 'stars', accent: '#22d3ee', accent2: '#a78bfa', accentInk: ['#6d28d9', '#22d3ee'], rim: '#22d3ee', rimGlow: true, motif: 'stars', caption: 'העמק שלך' },
+  // worlds wave 1 — w5 עיר התיירות (docs/full-upgrade/worlds/w5-tourism.md "Visual language"): golden-hour beach, sky #ffd6a5 → #48cae4,
+  // coral accent #ff7a59, ink #9a3412, palms, 🌴. The doc's sand #f3e2c0 is ΔE76 7.6 from w3's sand and 9.6 from h (rule: ≥ 10), so
+  // the board is the warmer peach sand #fdd5b8 (ΔE 11.1 to w3, 12.6 to h, 17.1 to w1); the engine theme's #f3e2c0 is legacy only.
+  w5: { name: 'עיר התיירות', mood: 'golden hour beach', sky: ['#ffd6a5', '#48cae4'], board: '#fdd5b8', edge: '#9a3412', center: '#fbe9c9', decor: 'palms', accent: '#ff7a59', accent2: '#48cae4', accentInk: ['#9a3412', '#ff9f7f'], rim: '#ff7a59', rimGlow: false, motif: 'palms', caption: 'המפרץ שלך', sea: '#2ec4d6' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -41,6 +45,7 @@ export const CHAR_STYLE = Object.freeze({
   lawyer: '#4b5563', chef: '#e8833a', pm: '#2a9df4',
   importer: '#c2410c', exporter: '#4d7c0f', captain: '#0e7490',
   founder: '#db2777', engineer: '#64748b', social: '#16a34a',
+  hotelier: '#0e7490', restaurateur: '#e8833a', promoter: '#c026d3',   // w5
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -59,8 +64,11 @@ export const ACTIVITY_ORDER = Object.freeze(['trouble', 'breakdown', 'stockout',
 /** City model name → 2D emoji (moved unchanged from board2d.js CITY_ICON, T1§2.4). Keys may carry 'dir/'. */
 export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', stock: '📈', crypto: '🪙', bank: '🏦', tower: '🏙️', mall: '🛍️', hotel: '🏨', ship: '🚢', warehouse: '📦',
   factory: '🏭', gold: '🥇', campus: '🏫', datacenter: '🖥️', rocket: '🚀', foundation: '💗', home_family: '🏡', wedding: '💍', university: '🎓', pension: '🏝️',
-  index_fund: '📊', side_hustle: '🛠️', hospital: '🏥', skyline: '🏙️', crane: '🏗️', turbine: '🌬️', time_machine: '🕰️', ticker_board: '📊' });
+  index_fund: '📊', side_hustle: '🛠️', hospital: '🏥', skyline: '🏙️', crane: '🏗️', turbine: '🌬️', time_machine: '🕰️', ticker_board: '📊',
+  // w5 model keys (procedural stand-ins in 3D, js/render/kit3d.js RESORT_KIT; no .glb files)
+  hotel_beach: '🏨', resort: '🏝️', spa: '♨️', conference: '🏛️', waterpark: '🌊', apartments: '🏘️', restaurant: '🍽️', dive_center: '🤿', staff_housing: '🏢' });
 export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
+
 
 /** Kind labels for city entries that are not world `kinds` (holdings, angels, the foundation, life items). */
 export const KIND_FALLBACK = Object.freeze({ holding: 'השקעה', angel: 'השקעת אנג׳ל', foundation: 'קרן', life: 'חיים' });
@@ -83,23 +91,32 @@ export function normLevel(level) {
     const of = Math.max(1, Math.min(6, int(level.of, 2)));
     return { kind: 'upgrade', n: Math.max(0, Math.min(of, int(level.n))), of, activity: null, trouble: false };
   }
+  if (level.kind === 'occ') {   // w5: occupancy decile of an op-asset (season.js cityModels), a closed asset, a closed wing
+    const closed = !!level.closed;
+    const n = closed ? 0 : Math.max(0, Math.min(10, int(level.n, 0)));
+    const pct = closed ? 0 : Math.max(0, Math.min(100, Number.isFinite(Number(level.occ)) ? Math.round(Number(level.occ) * 100) : n * 10));
+    return { kind: 'occ', n, of: 10, pct, occ: pct / 100, closed, wing: !!level.wing, activity: null, trouble: false };   // occ kept: normLevel(normLevel(x)) = normLevel(x)
+  }
   return null;
 }
 /** T5-L0/L1/L2 */
 export function levelText(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'upgrade') return `שדרוגים: ${L.n} מתוך ${L.of}`;
+  if (L.kind === 'occ') return L.closed ? 'סגור עכשיו' : `תפוסה ${L.pct}%${L.wing ? ' · אגף סגור' : ''}`;
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
 /** T5-H0…H3 / T5-HU */
 export function levelHint(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'upgrade') return L.n < L.of ? HINT_UP : '';
+  if (L.kind === 'occ') return L.closed ? 'סגור החודש: אין הכנסה, אבל חלק מהעלויות הקבועות ממשיכות.' : 'החלונות הדלוקים = התפוסה. בעונה המלון מתמלא; בשפל מחיר נמוך ממלא חדרים.';
   return HINTS[L.n];
 }
 /** '●●○' — 2D pips (visual only, aria-hidden). */
 export function pipsText(level) {
   const L = normLevel(level); if (!L) return '';
+  if (L.kind === 'occ') { if (L.closed) return '🔒'; const k = Math.round(L.n / 2); return '▮'.repeat(k) + '▯'.repeat(5 - k); }   // 5 windows, each 2 deciles
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -122,6 +139,7 @@ export function kitParts(level) {
   const L = normLevel(level); const p = { scaffold: false, cone: false, sign: false, annex: false, flag: false, glow: false, band: false, dome: false, people: 0, scale: 1, signBig: false };
   if (!L) return p;
   if (L.kind === 'upgrade') { p.band = L.n >= 1; p.dome = L.n >= 2; return p; }
+  if (L.kind === 'occ') { p.windows = L.n; p.closed = L.closed; p.wing = L.wing; return p; }   // drawn on the model itself (standins3d.js)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }
   if (L.n >= 1) p.sign = true;

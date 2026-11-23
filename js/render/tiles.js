@@ -22,6 +22,9 @@ export const TILE_TEXT = Object.freeze({
   tax: { short: 'מס הכנסה', desc: 'פעם בשנה עושים סדר עם מס הכנסה: לפעמים מקבלים החזר, ולפעמים משלמים מס על הכנסה נוספת.' },
   index: { short: 'קרן מדד', desc: 'קונים או מוכרים קרן מחקה מדד (קצת מכל השוק). אפשר גם להגדיר הוראת קבע.' },
   business: { short: 'העסק שלך', desc: 'אירוע בעסק שלך, או הצעה לפתוח עסק אם עוד אין לך.' },
+  // w5 עיר התיירות — tile N (js/worlds/mech/season.js tiles.N). Number-free until prepareWorldText() built the text from the module's
+  // real constants (MODULE_TEXT below).
+  allot: { short: 'הקצאה', desc: 'מפעיל תיירות רוצה חלק מהחדרים של המלון שלך לכמה חודשים בהנחה, ומשלם חלק מראש. אפשר לקבל, להציע הנחה קטנה יותר, או לוותר.' },
 });
 
 /** Per-world name overrides from the world data (js/worlds/w*.js tilesFor(...)) → their own short name / description. */
@@ -32,7 +35,30 @@ const BY_NAME = Object.freeze({
   'חורף': { short: 'חורף', desc: '"חורף" בהייטק: הכסף מתייבש והשווי יורד. מי שיש לו כרית עובר אותו בשקט.' },
   'פיתוי': { short: 'פיתוי', desc: 'משהו נוצץ לקנות, או הוצאה שאי אפשר לדחות. כסף שיוצא ולא חוזר.' },
   'כותרות': { short: 'כותרות', desc: 'כותרת אמיתית מהתקופה, ואפשר לקנות או למכור קרן מחקה מדד במחיר של אז.' },
+  // w5: the crisis tile (w5.crises: a regional slump on the beach, an operation, a city-wide outage)
+  'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
+/* ---------- worlds wave 1: module tiles get their text from the module's own constants (no copied numbers that drift) */
+const pctW = (x) => `${Math.round(x * 100)}%`;
+const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
+/** mechanic id → (its module namespace) → { tile type: {short, desc} } */
+const MODULE_TEXT = {
+  season: (M) => (M && M.ALLOT ? { allot: { short: 'הקצאה', desc: `מפעיל תיירות רוצה חלק מהחדרים של המלון שלך ל־${M.ALLOT.months} חודשים, ב־${pctW(M.ALLOT.disc)} הנחה, ו${partW(M.ALLOT.upfront)} מראש. אפשר לקבל, להציע ${pctW(M.ALLOT.counterDisc)} הנחה במקום, או לוותר.` } } : {}),
+};
+const MOD_TYPE = {};   // tile type → {short, desc}, filled by prepareWorldText
+/**
+ * Build the module tile texts of a loaded world from its mechanic modules' exported constants. The module file is already in the
+ * browser's module map (the world file imports it), so this costs no request. Idempotent; resolves to the types it filled.
+ */
+export async function prepareWorldText(world) {
+  const done = [];
+  for (const m of (world && world.mech) || []) {
+    const id = m && m.id; if (!id || !MODULE_TEXT[id]) continue;
+    let M = null; try { M = await import(`../worlds/mech/${id}.js`); } catch (e) { M = null; }
+    const t = MODULE_TEXT[id](M); Object.assign(MOD_TYPE, t); done.push(...Object.keys(t));
+  }
+  return done;
+}
 /** A tile name that is already short is shown as-is. */
 export const SHORT_MAX = 10;
 
@@ -41,7 +67,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -52,7 +78,8 @@ export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, 
 export const DEAL_WORDS = Object.freeze({
   re: 'דירות', biz: 'עסקים קטנים', tower: 'דירות ובניינים', mall: 'חנויות ומרכזים מסחריים', hotel: 'מלונות וצימרים',
   ship: 'ספינות', warehouse: 'יבואנים ומחסנים', factory: 'מפעלים', datacenter: 'חוות שרתים', campus: 'קמפוסים ומשרדים',
-  'tk:GOLD': 'זהב', 'tk:USD': 'דולרים', 'tk:MADAD': 'קרן מדד', 'tk:INDX': 'מדד החדשנות', 'tk:AGAH': 'אג"ח ממשלתי', stock: 'מניות', crypto: 'קריפטו',
+  resort: 'ריזורטים', spa: 'ספא', conference: 'כנסים', waterpark: 'פארקי מים', apts: 'דירות נופש', housing: 'מגורי עובדים', restaurant: 'מסעדות', dive: 'צלילה',   // w5
+  'tk:GOLD': 'זהב', 'tk:USD': 'דולרים', 'tk:MADAD': 'קרן מדד', 'tk:INDX': 'מדד החדשנות', 'tk:IDX': 'קרן מדד', 'tk:AGAH': 'אג"ח ממשלתי', stock: 'מניות', crypto: 'קריפטו',
 });
 /** market card kind → what it does (short phrase). `trade` marks kinds where the card lets you buy or sell. */
 export const MARKET_WORDS = Object.freeze({
@@ -60,8 +87,9 @@ export const MARKET_WORDS = Object.freeze({
   repair: { t: 'תיקון יקר' }, bonus: { t: 'בונוס של חודש טוב' }, div: { t: 'דיבידנד' }, rate: { t: 'שינוי בריבית' },
   loss: { t: 'חודש של הפסדים' }, reval: { t: 'שווי הנכסים משתנה' }, fx: { t: 'הדולר זז' }, gold: { t: 'מחיר הזהב זז', trade: true },
   exitwave: { t: 'גל אקזיטים' }, markdown: { t: 'ירידת שווי לסטארט־אפים' }, match: { t: 'קרן שמכפילה השקעה' },
+  tourism: { t: 'התיירים באים יותר או פחות' },   // w5: demand shocks, a new flight line, a storm, a mega-resort
 });
-const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH']);
+const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH', 'IDX']);
 /** deal card → DEAL_WORDS key */
 export function dealKind(c) { return !c ? '' : c.crypto ? 'crypto' : c.tk ? (KNOWN_TK.has(c.tk) ? 'tk:' + c.tk : 'stock') : c.k || ''; }
 /** market card → MARKET_WORDS key */
@@ -91,7 +119,7 @@ export function deckDesc(world, type) {
  * world (optional, the world data with its decks): market / deal descriptions name only what that world's cards do.
  */
 export function tileText(tile, world = null) {
-  const t = tile || {}; const name = String(t.name || ''); const base = TILE_TEXT[t.type] || { short: name, desc: '' };
+  const t = tile || {}; const name = String(t.name || ''); const base = MOD_TYPE[t.type] || TILE_TEXT[t.type] || { short: name, desc: '' };
   const over = BY_NAME[name];
   const short = over ? over.short : (name && name.length <= SHORT_MAX ? name : base.short) || name;
   const desc = (over && over.desc) || (world && deckDesc(world, t.type)) || base.desc;

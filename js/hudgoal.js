@@ -8,7 +8,7 @@ import { fmtM } from './engine.js';
 const nf = (n) => Math.round(+n || 0);
 const paydays = (n) => (n === 1 ? 'משכורת אחת' : n === 2 ? 'שתי משכורות' : `${n} משכורות`);
 const pts = (n) => (n === 1 ? 'נקודת השפעה אחת' : `${n} נקודות השפעה`);
-const PART_LABEL = { passive: 'הכנסה פסיבית מול הוצאות', netWorth: 'שווי נקי', impact: 'נקודות השפעה', benchmark: 'שווי מול "קנה והחזק"' };
+const PART_LABEL = { passive: 'הכנסה פסיבית מול הוצאות', netWorth: 'שווי נקי', impact: 'נקודות השפעה', benchmark: 'שווי מול "קנה והחזק"', passive12: 'ממוצע 12 חודשים: הכנסה מהנכסים' };
 
 /** One goal part with its gap (target − value of the engine's own part, never below 0). */
 function part(p) {
@@ -19,6 +19,7 @@ function part(p) {
     key: p.key, label: PART_LABEL[p.key] || p.label, value, target, gap, progress: Math.max(0, Math.min(1, +p.progress || 0)),
     met: p.key === 'passive' ? value > 0 && value >= target : value >= target,
     valueText: isPts ? String(nf(value)) : fmtM(value), targetText: isPts ? String(nf(target)) : fmtM(target),
+    note: p.note || null, months: p.months ?? null, window: p.window ?? null,
   };
 }
 /** The main "what is missing" line for a part (null when it is met). */
@@ -29,6 +30,7 @@ function gapText(p, goalType) {
     case 'netWorth': return `חסרים ${fmtM(p.gap)} לשווי נקי של ${fmtM(p.target)}`;
     case 'impact': return p.gap === 1 ? 'חסרה נקודת השפעה אחת' : `חסרות ${nf(p.gap)} נקודות השפעה`;
     case 'benchmark': return `השווי שלך נמוך ב־${fmtM(p.gap)} משל "קנה והחזק"`;
+    case 'passive12': return `חסרים ${fmtM(p.gap)} בחודש בממוצע השנתי (היעד: ${fmtM(p.target)} בחודש)`;
     default: return goalType ? `חסרים ${fmtM(p.gap)}` : null;
   }
 }
@@ -39,6 +41,7 @@ function ruleText(goalType, parts) {
     case 'netWorth': return `יוצאים מהמירוץ בשווי נקי (כל מה שיש לך פחות החובות) של ${nw ? nw.targetText : ''}.`;
     case 'netWorthImpact': return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} וגם ${im ? pts(nf(im.target)) : ''}. שני הפסים חייבים להתמלא.`;
     case 'benchmark': return 'בסוף התקופה השווי שלך צריך להיות גבוה משל משקיע שקנה את המדד והחזיק.';
+    case 'passive12': { const p = parts.find((x) => x.key === 'passive12'); return `יוצאים מהמירוץ כשהממוצע של 12 ימי המשכורת האחרונים — הכנסה מהנכסים, קיץ וחורף יחד — מגיע ל־${p ? p.targetText : ''} בחודש. חודש קיץ אחד לא מספיק.`; }
     default: return '';
   }
 }
@@ -86,7 +89,7 @@ export function goalPanelModel(m, o = {}) {
   const ladder = bench ? [] : milestoneLadder(m);   // wave 3a: the near-goal ladder (metrics values only)
   return {
     goalType, rule: ruleText(goalType, parts), parts, gaps, met: allMet, hold, stars, starsNote, month, ladder, next: bench ? null : nextMilestone(m),
-    pending: goalType === 'netWorthImpact' && o.impactPending ? `עוד ${pts(nf(o.impactPending))} בדרך (מתבשלות)` : null,
+    pending: goalType === 'netWorthImpact' && o.impactPending ? `עוד ${pts(nf(o.impactPending))} בדרך (מתבשלות)` : (parts.find((p) => p.note) || {}).note || null,
     totals: { assets: m.totalAssets, liabilities: m.totalLiabilities, netWorth: m.netWorth,
       assetsText: fmtM(m.totalAssets || 0), liabilitiesText: fmtM(m.totalLiabilities || 0), netWorthText: fmtM(m.netWorth || 0) },
     /** one line for the toggle's accessible name and the phone HUD (the first gap, or "the goal is met") */
@@ -130,8 +133,8 @@ export function milestoneLadder(m) {
     const v = +p.value || 0, t = +p.target || 0; if (!(t > 0)) continue;
     for (const [f, word] of QUARTER) {
       const goal = t * f;
-      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : `שווי נקי של ${fmtM(goal)}`;
-      out.push({ id: `${p.key}${Math.round(f * 100)}`, icon: p.key === 'impact' ? '💗' : p.key === 'passive' ? '💸' : '📈', title, value: v, target: p.key === 'impact' ? Math.ceil(goal) : Math.round(goal), unit: p.key === 'impact' ? 'n' : '₪', met: v >= goal && (p.key !== 'passive' || v > 0) });
+      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : p.key === 'passive12' ? `ממוצע שנתי של ${fmtM(goal)} בחודש מהנכסים` : `שווי נקי של ${fmtM(goal)}`;
+      out.push({ id: `${p.key}${Math.round(f * 100)}`, icon: p.key === 'impact' ? '💗' : p.key === 'passive' || p.key === 'passive12' ? '💸' : '📈', title, value: v, target: p.key === 'impact' ? Math.ceil(goal) : Math.round(goal), unit: p.key === 'impact' ? 'n' : '₪', met: v >= goal && (p.key !== 'passive' || v > 0) });
     }
   }
   if (parts.length) {
@@ -174,6 +177,13 @@ export function moneyHubModel(m) {
   if (ix) rows.push({ id: 'index', icon: '📊', title: 'קרן מדד', value: `${nf(ix.qty)} יחידות · ${fmtM(+ix.value || 0)}${ix.autoInvest ? ` · הוראת קבע ${fmtM(ix.autoInvest)} בחודש` : ' · בלי הוראת קבע'}`,
     acts: [{ act: 'invest', label: 'לקנות / למכור · הוראת קבע', on: true }] });
   if (L.plans && L.plans.length) rows.push({ id: 'plan', icon: '📅', title: 'התוכנית החודשית', value: planLabel || L.plan || '', acts: [{ act: 'plan', label: 'לשנות', on: true }] });
+  // worlds wave 1: a world with a panel descriptor (w5 "עונות ותפוסה") opens it from the hub too
+  const WI = m.worldIndicators || {};
+  if (WI.panel) {
+    const se = WI.season; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
+    const value = se ? `ביקוש ${(Math.round((+se.tour || 0) * 100) / 100).toFixed(2)}${g && g.value != null ? ` · כרית לחורף ${Math.round(g.value * 10) / 10} חודשים` : ''}${se.line ? ` · קו עונתי ${fmtM(se.line)}` : ''}` : (WI.panel.title || '');
+    rows.push({ id: 'world', icon: se ? '🌴' : '🧭', title: WI.panel.title || 'לוח העולם', value, acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : 'לפתוח', on: true }] });
+  }
   if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
   return { rows, cash: +m.cash || 0, cashText: fmtM(+m.cash || 0) };
 }

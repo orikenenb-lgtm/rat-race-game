@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON } from './render/vocab.js';
+import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
+import { hasStandin, buildStandin, paintWindows } from './render/standins3d.js';   // w5: procedural models, occupancy windows
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
@@ -456,7 +457,7 @@ export function worldModelNames(w) {
   for (const t of Object.values(w.tickers || {})) if (t.model) set.add(t.model);
   const dm = DECOR_MODEL[w.theme.decor]; if (dm) set.add(dm);
   if (w.mechanic === 'history' || w.id === 'h') for (const n of HISTORY_MODELS) set.add('history/' + n); // T5 CR-05: only for h
-  return [...set];
+  return [...set].filter((n) => !hasStandin(n));   // w5: stand-in models are built, never fetched (no 404)
 }
 const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine' };
 function landmarkNames(w) {
@@ -538,6 +539,7 @@ function inst(name, dir = assetDir(world)) {
   const g = ready.get(modelUrl(dir, name));
   if (g) return g.clone(true);
   let grp;
+  if (hasStandin(name)) { grp = buildStandin(name); grp.userData.ownTree = true; return grp; }   // w5: procedural, no GLB to swap in later
   if (dir === 'life' && LIFE_FALLBACK[name]) grp = LIFE_FALLBACK[name]();
   else {
     // placeholder so a missing model never breaks the game
@@ -652,10 +654,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -770,6 +772,7 @@ const LIGHTS = {
   skyline: { hemi: 0.95, sun: 1.8, exp: 1.0, env: 0.32, sunPos: [-13, 19, 10], fill: ['#ff4fd8', 9] },
   sea: { hemi: 1.15, sun: 2.7, exp: 1.04, env: 0.42, sunPos: [10, 24, 12] },
   stars: { hemi: 0.75, sun: 1.5, exp: 1.0, env: 0.36, sunPos: [-8, 20, 10], fill: ['#22d3ee', 10] },
+  palms: { hemi: 1.1, sun: 2.6, exp: 1.03, env: 0.4, sunPos: [16, 15, 8], fill: ['#ff9f7f', 4] },   // w5: golden hour, a low warm sun
 };
 
 function clearWorld() {
@@ -804,6 +807,9 @@ export function buildWorld(w) {
   clearWorld(); clearCity(); marks.current = marks.dest = null; if (markObj) placeMarks();
   releaseOtherWorlds(assetDir(w));
   world = w; theme = w.mechanic === 'history' ? HISTORY_THEME(w.theme) : w.theme; setBoardSize(w.board.length);
+  // worlds wave 1: later worlds take their look from WORLD_STYLE (render-side identity; the engine theme stays legacy data). w1–w4 / h
+  // are unchanged (their WORLD_STYLE board is their theme board).
+  if (!/^w[1-4]$/.test(w.id) && w.mechanic !== 'history' && WORLD_STYLE[w.id]) { const ST = WORLD_STYLE[w.id]; theme = { ...theme, sky: ST.sky, board: ST.board, boardEdge: ST.edge, center: ST.center, accent: ST.accent, decor: ST.decor || theme.decor, water: ST.sea || theme.water }; }
   const T = theme;
   const L = LIGHTS[T.decor] || LIGHTS.trees;
   scene.fog = new THREE.Fog(T.fog, 42, 130);
@@ -873,7 +879,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1065,6 +1071,60 @@ function island(radius, topMat, side = '#8a5a3a', rim = null, y = -0.72) {
   return top;
 }
 
+/** w5 עיר התיירות: a sandy island in a turquoise bay, palms, beach umbrellas and a few sailboats (golden hour). */
+function decorPalms(T) {
+  const W = cfg.updaters ? (lowPower ? 36 : 56) : 6;
+  const geo = new THREE.PlaneGeometry(220, 220, W, W);
+  const water = own(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: T.water || '#2ec4d6', roughness: 0.18, metalness: 0.15 })));
+  water.rotation.x = -Math.PI / 2; water.position.y = -1.05; water.receiveShadow = true; worldGroup.add(water);
+  if (cfg.updaters) {
+    const pos = geo.attributes.position; const base = Float32Array.from(pos.array); let fN = 0;
+    updaters.add((t) => { if (lowPower && (fN++ & 1)) return; for (let i = 0; i < pos.count; i++) { const x = base[i * 3], y = base[i * 3 + 1]; pos.array[i * 3 + 2] = Math.sin(x * 0.14 + t * 0.9) * 0.1 + Math.cos(y * 0.19 + t * 1.2) * 0.08; } pos.needsUpdate = true; geo.computeVertexNormals(); });
+  }
+  const lag = own(new THREE.Mesh(new THREE.PlaneGeometry(58, 58), new THREE.MeshBasicMaterial({ map: soft(), color: '#9be7e0', transparent: true, opacity: 0.55, depthWrite: false })));
+  lag.rotation.x = -Math.PI / 2; lag.position.y = -0.98; worldGroup.add(lag);
+  island(26, std('#f6dcb4', { roughness: 1 }), '#d9b483');
+  const prom = own(new THREE.Mesh(new THREE.RingGeometry(11.6, 13.8, 72), std('#efe2cf', { roughness: 0.95 })));   // the promenade
+  prom.rotation.x = -Math.PI / 2; prom.position.y = -0.7; prom.receiveShadow = true; worldGroup.add(prom);
+  // palms: curved trunks (3 tilted segments) + a crown of flat leaves, instanced
+  const pts = scatter(dn(34), 14.6, 24.5, { seed: 21 });
+  const segG = new THREE.CylinderGeometry(0.1, 0.14, 1, 6), leafG = new THREE.ConeGeometry(0.28, 1.7, 3);
+  const segs = new THREE.InstancedMesh(segG, std('#9b6b3f', { roughness: 1 }), pts.length * 3);
+  const leaves = new THREE.InstancedMesh(leafG, std('#ffffff', { flatShading: true, roughness: 0.9 }), pts.length * 6);
+  const d = new THREE.Object3D(); const greens = ['#2f8f4e', '#3fa45b', '#2a7f45', '#4cae63'];
+  let si = 0, li = 0;
+  pts.forEach((p) => {
+    const s = 0.9 + p.k * 0.7; const lean = 0.18 + p.k * 0.22; let x = p.x, y = -0.72, z = p.z; const dx = Math.sin(p.a), dz = Math.cos(p.a);
+    for (let k = 0; k < 3; k++) {
+      const tilt = lean * (k + 1) * 0.6; d.position.set(x + dx * Math.sin(tilt) * 0.5 * s, y + 0.5 * s, z + dz * Math.sin(tilt) * 0.5 * s);
+      d.rotation.set(dz * tilt, 0, -dx * tilt); d.scale.set(s * (1 - k * 0.15), s, s * (1 - k * 0.15)); d.updateMatrix(); segs.setMatrixAt(si++, d.matrix);
+      x += dx * Math.sin(tilt) * s; y += Math.cos(tilt) * s; z += dz * Math.sin(tilt) * s;
+    }
+    const col = new THREE.Color(greens[Math.floor(p.k * 97) % greens.length]);
+    for (let k = 0; k < 6; k++) {
+      const a = p.a + (k / 6) * Math.PI * 2; d.position.set(x + Math.sin(a) * 0.6 * s, y - 0.05 * s, z + Math.cos(a) * 0.6 * s);
+      d.rotation.set(Math.cos(a) * 1.25, 0, -Math.sin(a) * 1.25); d.scale.set(s, s, s * 0.25); d.updateMatrix(); leaves.setMatrixAt(li, d.matrix); leaves.setColorAt(li++, col);
+    }
+  });
+  segs.count = si; leaves.count = li;
+  [segs, leaves].forEach((m) => { m.castShadow = true; m.receiveShadow = true; own(m); worldGroup.add(m); });
+  // beach umbrellas on the promenade (coral / white / turquoise)
+  const ups = scatter(dn(14), 12.2, 13.4, { seed: 8 });
+  const poleG = new THREE.CylinderGeometry(0.03, 0.03, 1.1, 5), capG = new THREE.ConeGeometry(0.62, 0.3, 8);
+  const poles = new THREE.InstancedMesh(poleG, std('#f5f0e6'), ups.length), caps = new THREE.InstancedMesh(capG, std('#ffffff', { roughness: 0.8 }), ups.length);
+  const cols = ['#ff7a59', '#ffffff', '#2ec4d6', '#ffd166'];
+  ups.forEach((p, i) => { d.position.set(p.x, -0.15, p.z); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.updateMatrix(); poles.setMatrixAt(i, d.matrix); d.position.y = 0.45; d.updateMatrix(); caps.setMatrixAt(i, d.matrix); caps.setColorAt(i, new THREE.Color(cols[i % cols.length])); });
+  [poles, caps].forEach((m) => { m.castShadow = true; own(m); worldGroup.add(m); });
+  // sailboats out in the bay (bobbing)
+  const hullG = new THREE.BoxGeometry(1.6, 0.35, 0.55), sailG = new THREE.ConeGeometry(0.55, 1.8, 3);
+  disposables.push(hullG, sailG);
+  [[-30, 4, 0.6], [28, -9, -0.9], [-6, -36, 0.2], [34, 14, 1.4]].forEach(([x, z, r], i) => {
+    const b = new THREE.Group(); const h = new THREE.Mesh(hullG, std('#ffffff')); h.position.y = 0.17; b.add(h);
+    const sl = new THREE.Mesh(sailG, std(i % 2 ? '#ff7a59' : '#fff4e6', { roughness: 0.9 })); sl.position.set(0.1, 1.2, 0); sl.scale.set(1, 1, 0.08); b.add(sl);
+    b.position.set(x, -1.0, z); b.rotation.y = r; worldGroup.add(b);
+    if (cfg.updaters) updaters.add((t) => { b.position.y = -1.0 + Math.sin(t * 1.1 + i) * 0.1; b.rotation.z = Math.sin(t * 0.8 + i) * 0.04; });
+  });
+}
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
   const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.2, 64), std('#ead8b0', { roughness: 1 })));
@@ -1462,6 +1522,7 @@ export function bump(key) {
 
 /* ---------- T5 §5.2: levels (business stages, upgrades), pulses, activity badges */
 function applyLevelParts(it) {
+  if (it.level && it.level.kind === 'occ') { paintWindows(it.obj, it.level); return; }   // w5: lit windows = occupancy decile (no kit parts)
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1580,7 +1641,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {

@@ -141,7 +141,7 @@ export function createKit() {
         put(M.rim, it.x, top, it.z, r, 1, r, 0, it.highlight ? '#ffffff' : null);
         if (it.highlight && M.rim.instanceColor) { col.set(style ? style.rim : '#f2b632').multiplyScalar(1.9); M.rim.setColorAt(M.rim.count - 1, col); }
         if (tier === 'low') put(M.blob, it.x, y0 + 0.005, it.z, r * 1.25, 1, r * 1.25);
-        const L = it.level; if (!L) { sprite(it.key, 'sign', null); sprite(it.key, 'badge', it.badge, it.x, top + it.h + 0.45 * it.s, it.z, 0.62 * Math.max(0.6, it.s)); continue; }
+        const L = it.level; if (!L || L.kind === 'occ') { sprite(it.key, 'sign', null); sprite(it.key, 'badge', it.badge, it.x, top + it.h + 0.45 * it.s, it.z, 0.62 * Math.max(0.6, it.s)); continue; }   // w5 occupancy: the model's own windows show it (standins3d.js)
         // pips on the camera side of the plinth: filled gold discs vs hollow rings (shape, not only colour)
         const ps = Math.max(0.09, 0.15 * r), gap = ps * 2.3, z = it.z + r * 0.86;
         for (let i = 0; i < L.of; i++) { const x = it.x + (i - (L.of - 1) / 2) * gap; if (i < L.n) put(M.pipOn, x, top + 0.02, z, ps, ps, ps); else put(M.pipOff, x, top + 0.02, z, ps, ps, ps); }
