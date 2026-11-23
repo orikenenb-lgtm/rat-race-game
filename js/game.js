@@ -76,7 +76,7 @@ function enterStuck(err, where, variant = null) {
 function barLobby() { try { persist(); } catch (e) { /* ignore */ } OV.hideRecover(); bus.emit('lobby:open', {}); } // stuck stays true: resume-active recovers
 function showRecoverBar(v) {
   const lobby = { label: STR.Rlobby, fn: barLobby };
-  if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
+  if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, details: STR.tech('context-lost', rendererInfo && rendererInfo.gpu), actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
   else if (v === 'R2' && scene.kind !== '3d') OV.showRecover({ title: STR.R1t, body: STR.R2b2d, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, lobby] }); // already מצב קל / none: nothing lighter to offer
   else if (v === 'R2') OV.showRecover({ title: STR.R1t, body: STR.R2b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.Rsave, fn: () => recover() }, lobby] });
   else {
@@ -259,7 +259,7 @@ async function initRenderer() {
   scene = r.scene;
   try { scene.onPick?.(onAssetPick); } catch (e) { console.warn(e); }   // T5 CR-B2
   try { scene.onTilePick?.(onTilePick); } catch (e) { console.warn(e); }   // wave 1: tap / Enter on a board tile → the tile sheet
-  rendererInfo = { kind: r.kind, reason: r.reason };
+  rendererInfo = { kind: r.kind, reason: r.reason, gpu: r.gpu || '' };
   initPhase = 'models';
   emitInit({ type: 'renderer', kind: r.kind });
   try { scene.setSpeed(speed()); } catch (e) { console.error(e); }
@@ -339,22 +339,16 @@ function rendererNotice() {
   if (!rendererInfo) return;
   if (liteJustOn && scene.kind === '2d') { liteJustOn = false; ui.toast(STR.N4, { ms: 6000 }); return; }
   if (noticeDone) return;
-  const { kind, reason } = rendererInfo;
-  if (kind === 'none') { noticeDone = true; ui.toast(STR.N5, { ms: 6000 }); return; }
-  if (kind === '2d') {
-    noticeDone = true;
-    if (reason === 'no-webgl') ui.toast(STR.N1, { ms: 6000 });
-    else if (reason === 'three-failed' || reason === 'three-timeout') ui.toast(STR.N2, { ms: 6000, action: { label: STR.N2a, fn: () => reloadInto3D() } });
-    else if (reason === 'webgl-init-failed') ui.toast(STR.N3, { ms: 6000 });
-    return;
-  }
+  // team ב: one notice per real cause (render/overlay.js noticeFor) + a "פרטים טכניים" line
   let failed = [];
-  try { failed = scene.failedModels(); } catch (e) { failed = []; }
-  if (failed.length) { noticeDone = true; ui.toast(STR.N6, { ms: 6000 }); return; }
-  if (scene.lowPower && !settings.liteOffered && flag('board2d') !== 'off') {
-    noticeDone = true; settings.liteOffered = true; writeSettings({ liteOffered: true });
-    ui.toast(STR.N7, { ms: 6000, action: { label: STR.N7a, fn: () => setLite(true) } });
-  }
+  if (rendererInfo.kind === '3d') { try { failed = scene.failedModels(); } catch (e) { failed = []; } }
+  const n = OV.noticeFor({ ...rendererInfo, failed: failed.length, lowPower: !!scene.lowPower, liteOffered: !!settings.liteOffered, liteAllowed: flag('board2d') !== 'off' });
+  if (!n) return;
+  noticeDone = true;
+  if (!n.text) return;
+  if (n.id === 'N7') { settings.liteOffered = true; writeSettings({ liteOffered: true }); }
+  const fn = n.action === 'reload3d' ? () => reloadInto3D() : n.action === 'lite' ? () => setLite(true) : null;
+  ui.toast(n.text, { ms: n.ms, sub: n.sub, ...(fn ? { action: { label: n.actionLabel, fn } } : {}) });
 }
 function applySettings() {
   scene.setSpeed(speed()); ui.setSpeed(speed());
@@ -568,7 +562,7 @@ async function startInner(cfg, my) {
   busy = true; quotaWarned = false;
   closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
   // WebGL died while the lobby was up: this start uses the 2D board
-  if (ctxDead && scene.kind === '3d') { ctxDead = false; try { scene.dispose(); } catch (e) { /* ignore */ } scene = nullScene; initDone = false; initP = null; forced2d = 'webgl-init-failed'; }
+  if (ctxDead && scene.kind === '3d') { ctxDead = false; try { scene.dispose(); } catch (e) { /* ignore */ } scene = nullScene; initDone = false; initP = null; forced2d = 'context-lost'; noticeDone = false; }
   cfg = {
     worldId: 'w1', mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false,
     ...cfg,
