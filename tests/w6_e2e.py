@@ -201,7 +201,8 @@ async def run_play(b):
     check(sc, 'panel: 3 gauges (util / coverage / runway), one hazard bar + one row per line, maintenance + shift rows, actions',
           P['gauges'] == ['util', 'coverage', 'runway'] and P['bars'] == nl and P['rows'] == nl and nl >= 1 and P['segs'].count('תחזוקה') == P['segs'].count('משמרות') >= 1 and P['acts'] >= 8 and 'קווי ייצור' in P['title'], (nl, P))
     check(sc, 'opseng sees the exact breakdown chance in the bars', P['exact'], P)
-    if SHOTS: await pg.wait_for_timeout(3500)   # let a news toast pass before the picture
+    if SHOTS:   # a picture without the passing news / library toasts on top of the panel
+        await pg.wait_for_timeout(1500); await pg.add_style_tag(content='#toast{visibility:hidden !important}')
     await shot(pg, 'panel_desk')
     # a maintenance action through E.worldAction
     a1 = lines_of(st)[0]; tgt = 'run' if a1['op'].get('maint') != 'run' else 'basic'
@@ -286,7 +287,9 @@ async def run_2d(b):
         await pg.click('#worldPanelBtn'); await pg.wait_for_selector('#gmCard.wpanel', timeout=10000); await pg.wait_for_timeout(900)
         fit = await pg.evaluate("() => { const c = document.querySelector('#gmCard'); const r = c.getBoundingClientRect(); return { w: r.width, vw: innerWidth, over: document.documentElement.scrollWidth > innerWidth + 1, acts: [...c.querySelectorAll('button[data-wact]')].every((b) => b.getBoundingClientRect().height >= 43.5) }; }")
         check(sc, 'panel fits the width, every action button ≥ 44 px', fit['w'] <= fit['vw'] and not fit['over'] and fit['acts'], fit)
-        if vp != 'desk': await shot(pg, f'panel_{vp}')
+        if vp != 'desk':
+            if SHOTS: await pg.add_style_tag(content='#toast{visibility:hidden !important}')
+            await shot(pg, f'panel_{vp}')
         await pg.locator('#gmCard .acts button.primary').click()
         await ctx.close()
 
