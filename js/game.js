@@ -1107,6 +1107,7 @@ async function turnBody(my) {
     }
   }
   ui.turnChip?.('זורקים…');   // §13 turn state
+  ui.debtChip?.(null);          // wave 2 (G-07): the new-debt chip stays until the next roll (no timed dismissal)
   try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
   persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
   flowTick++;

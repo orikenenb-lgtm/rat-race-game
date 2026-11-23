@@ -1006,11 +1006,11 @@ body:has(#start:not([hidden])) #boardTools,body:has(#loading:not([hidden])) #boa
 .gp-tot>div{background:var(--paper2,light-dark(#f6eedc,#2a2433));border-radius:10px;padding:5px 8px;min-width:0}
 .gp-tot dt{font-size:12px;color:var(--mut)}.gp-tot dd{margin:0;font-weight:800;font-size:15px;overflow-wrap:anywhere}.gp-tot dd.neg{color:var(--red)}
 @media (max-width:380px){ .gpanel{padding:10px 12px 12px} .gp-head{margin-inline:-12px} .gp-tot{grid-template-columns:1fr 1fr} .gp-tot>div:last-child{grid-column:1/-1} }
-/* new debt (A2 G-07): a short chip under the money stats; never takes taps */
+/* new debt (A2 G-07): a short chip under the money stats, until the next roll (a tap clears it) */
 .debtc{position:fixed;z-index:8;top:70px;left:50%;transform:translate(-50%,-4px);margin:0;padding:5px 12px;border-radius:999px;pointer-events:none;opacity:0;
   background:light-dark(#fde2e1,#4a2323);color:light-dark(#8a1c14,#ffb4ac);border:1.5px solid var(--red);font-weight:800;font-size:14px;white-space:nowrap;box-shadow:var(--shadow-s);
   max-width:calc(100vw - 16px - var(--safe-l,0px) - var(--safe-r,0px));overflow:hidden;text-overflow:ellipsis;transition:opacity .2s,transform .2s}
-.debtc.on{opacity:1;transform:translate(-50%,0)}
+.debtc.on{opacity:1;transform:translate(-50%,0);pointer-events:auto;cursor:pointer}
 .debtc .num{color:inherit}
 @media (prefers-reduced-motion:reduce){ :root:not([data-motion=full]) .debtc{transition:none;transform:translate(-50%,0)} }
 :root[data-motion=reduce] .debtc{transition:none;transform:translate(-50%,0)}

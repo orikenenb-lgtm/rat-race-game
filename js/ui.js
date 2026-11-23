@@ -497,16 +497,15 @@ export const goalPanelOpen = () => gpOpen;
 
 /* ============================================================ wave 2 (A2 G-07, brief §15): new debt → a short chip under the money stats
    "חוב חדש ₪X · ₪Y בחודש": both numbers are differences of engine values (hudgoal.newDebt), computed by game.js between renders. */
-let debtT = 0;
 export function debtChip(d) {
   let el = $('#debtChip');
-  if (!d) { if (el) { el.classList.remove('on'); el.textContent = ''; } clearTimeout(debtT); return; }
+  if (!d) { if (el) { el.classList.remove('on'); el.textContent = ''; } return; }
   if (!el) { el = document.createElement('p'); el.id = 'debtChip'; el.className = 'debtc'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); ($('#hud') || document.body).appendChild(el); }   // inside the HUD landmark (fixed: placed below)
   const host = $('.hstats'); const r = host && host.getBoundingClientRect();
   if (r && r.width) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.left = Math.round(r.left + r.width / 2) + 'px'; }
   el.innerHTML = `<span aria-hidden="true">🏦</span> ${escI(d.text)}`;
   el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
-  clearTimeout(debtT); debtT = setTimeout(() => debtChip(null), 6500 * Math.max(0.6, speed));
+  el.onclick = () => debtChip(null);   // a tap clears it early; otherwise it stays until the next roll (game.js) — never a timed dismissal
 }
 
 /* ============================================================ v3 life row (age · energy · happiness · credit · inflation) */
