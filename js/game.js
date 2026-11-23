@@ -27,6 +27,14 @@ import { tileSheet, tileText, whereText, stepsTo, landedText } from './render/ti
 import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
 import { nextMilestone, moneyHubModel } from './hudgoal.js';
 import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
+/* wave 3b — live rooms: a RemoteDriver (js/remote.js) holds the game on the server. D = null → a local game, nothing changes.
+ * With D: every engine mutation is an intent (await), S is replaced in place by the server's redacted view, no saves/⚡/ghosts. */
+let D = null;
+export function setDriver(d) {
+  D = d || null;
+  if (D && D.on) D.on((k) => { if (D !== d || k !== 'change' || !S || !CFG || !CFG.room || busy || card) return; D.adopt(S); render(); ui.setRollEnabled(!S.over && D.canRoll()); });
+}
+const mut = (name, ...a) => (D ? D.call(name, S, ...a) : E[name](S, ...a));   // → the engine's result (a promise in a room)
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -130,7 +138,7 @@ export function saveKeyFor(cfg) {
 const keyOf = (k) => (typeof k === 'string' ? k : saveKeyFor(k));
 let quotaWarned = false;
 function persist() {
-  if (!S || !CFG) return;
+  if (!S || !CFG || D) return;
   const r = saves.write(saveKeyFor(CFG), CFG, S);
   // full (quota) or blocked storage (SecurityError, review m-2): tell the player once per game; a refused future-save
   // overwrite is not a storage failure (the future save is kept on purpose)
@@ -153,7 +161,7 @@ function toastWhenIdle(text, opts) { ui.toast(text, { ...opts, urgent: true }); 
 let ckBusy = false, ckNext = null, ckTimer = 0;
 const ranked = () => !!(CFG && CFG.resultId && CFG.mode && CFG.mode !== 'free' && (!net.hasMe || net.hasMe()));
 function checkpoint() {
-  if (!S || !ranked()) return;
+  if (!S || D || !ranked()) return;
   S.ui.seq = (S.ui.seq || 0) + 1;
   persist();
   ckNext = { rid: CFG.resultId, seq: S.ui.seq, state: packCheckpoint(S) };   // wave 3a (ONLINE §13): key-order safe (js/ckcodec.js)
@@ -580,6 +588,7 @@ async function startInner(cfg, my) {
     worldId: 'w1', mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false,
     ...cfg,
   };
+  if (!cfg.room) D = null;   // wave 3b: only a room start keeps the driver
   if (cfg.seed == null) cfg.seed = (Math.floor(Math.random() * 2147483646) + 1) >>> 0;
   let Wt = null; try { Wt = E.getWorld(cfg.worldId); } catch (e) { Wt = null; }
   const pawnKey = (cfg.pawn || 'classic') + '|' + (cfg.pawnColor || '#e2483d');
@@ -631,7 +640,8 @@ async function startInner(cfg, my) {
   const isRanked = !!cfg.resultId;
   let st = null, srcCfg = null, srcUi = null, note = null;
   if (cfg.state != null) { cfg.state = unpackCheckpoint(cfg.state); if (!cfg.state) return rankedFail(); }   // wave 3a: v2 wrapper or the old bare state
-  if (cfg.state || cfg.resume) {
+  if (D && cfg.room) st = D.adopt({ ui: {} });   // wave 3b: the server's view is the state (no local save)
+  else if (cfg.state || cfg.resume) {
     let lr = saves.load(key);
     if (lr.status === 'backup_failed') {
       const go = await noBackupModal(true);
@@ -875,7 +885,7 @@ function safeCall(o, fn, dflt) {
 const RANKED = new Set(['daily', 'weekly', 'challenge']);
 const TUTORIAL_FREE_ROLLS = typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORIAL_FREE_ROLLS : 10;
 const usesEnergy = () => {
-  if (!CFG || RANKED.has(CFG.mode) || CFG.resultId) return false;
+  if (!CFG || D || RANKED.has(CFG.mode) || CFG.resultId) return false;
   if (CFG.learn) return false; // T4 §7.1: learning mode never costs ⚡ (also before the engine's rollCost knows st.learn)
   // T4 D-9 (P1): the first 10 rolls of a brand-new player's first game are free (cfg.tutorialFree, set once per player by the lobby;
   // a replayed tutorial does not get it — review M-2); the engine's rollCost takes over once it exports the constant
@@ -960,7 +970,7 @@ async function lifeChip(kind) {
     void v;
     if (chosenPlan && chosenPlan !== L.plan) {
       const id = chosenPlan; chosenPlan = null;
-      try { const out = E.setPlan(S, id); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי עכשיו'); return; } if (out && out.mentor) ui.mentor(out.mentor); }
+      try { const out = await mut('setPlan', id); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי עכשיו'); return; } if (out && out.mentor) ui.mentor(out.mentor); }
       catch (e) { console.error(e); return; }
       sfx('card'); render(); persist(); checkpoint(); ui.toast('התוכנית עודכנה — מהמשכורת הבאה');
     }
@@ -982,7 +992,7 @@ async function focusFlow({ inCard = false, cur = null, update = null } = {}) {
     if (!pick || my !== gen || !S || S.over) return;
     if (!inCard && (busy || ui.isEventOpen())) { ui.toast('אפשר לבחור מוקד בין תורות, או בכרטיס המשכורת'); return; }
     let out;
-    try { out = E.setFocus(S, pick.id, pick.slot); } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); return; }
+    try { out = await mut('setFocus', pick.id, pick.slot); } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); return; }
     if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו', { kind: 'bad' }); return; }
     sfx('card');
     await applyOut(out, { inCard });
@@ -996,7 +1006,7 @@ async function focusFlow({ inCard = false, cur = null, update = null } = {}) {
 /** 'ops' from the agenda: open the business panel once, between rolls (E.setFocus('ops', 0)). */
 async function openOps() {
   if (!S || S.over || busy || ui.isEventOpen() || typeof E.setFocus !== 'function') { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
-  let out; try { out = E.setFocus(S, 'ops', 0); } catch (e) { console.error(e); return; }
+  let out; try { out = await mut('setFocus', 'ops', 0); } catch (e) { console.error(e); return; }
   if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו'); return; }
   await applyOut(out); render(); persist(); checkpoint();
   if (S.pending) await runPending(gen);
@@ -1039,7 +1049,7 @@ function storyFlow(card0, my) {
       if (working || my !== gen) return;
       working = true; ctl.busy(true);
       let res;
-      try { res = E.resolveStory(S, cur.itemId, optId); }
+      try { res = await mut('resolveStory', cur.itemId, optId); }
       catch (e) { console.error(e); working = false; ctl.busy(false); ctl.error('לא אפשרי עכשיו'); return; }
       if (!res || res.ok === false) { working = false; ctl.busy(false); if (res && res.error === 'stale') { closeUi(); render(); resolve(null); return; } ctl.error((res && res.error) || 'לא אפשרי עכשיו'); sfx('loss'); return; }
       checkpoint(); closeUi();
@@ -1069,7 +1079,7 @@ async function autoInbox(my) {
 }
 /** T2 §15.1: the mentor level, from the ❓ menu (free and history games; ranked shows the fixed level). */
 async function mentorMenu() {
-  if (!S || S.over || typeof E.setMentorLevel !== 'function' || !E.MN) return;
+  if (!S || S.over || D || typeof E.setMentorLevel !== 'function' || !E.MN) return;   // a room's help level is a room setting
   const M = E.metrics(S).mentor; const locked = !(S.mode === 'free' || S.mode === 'history');
   const lv = await ui.mentorPicker(M, { locked, levels: E.MN.LEVEL_TEXT });
   if (!lv || !S || S.over) return;
@@ -1103,6 +1113,7 @@ function wireHold() {
 /* ============================================================ turn */
 async function turn() {
   if (stuck || busy || !S || S.over || summarized || ui.isEventOpen() || !$('#start').hidden) return;
+  if (D && !D.canRoll()) { ui.toast(D.waiting() ? 'סיימת את הסבב — מחכים ליריבים' : 'רגע…'); return; }
   const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.(); ui.clearStickyNews?.();
   flows++; flowTick++;
   try { await turnBody(my); }
@@ -1124,7 +1135,7 @@ async function turnBody(my) {
   }
   ui.turnChip?.('זורקים…');   // §13 turn state
   ui.debtChip?.(null);          // wave 2 (G-07): the new-debt chip stays until the next roll (no timed dismissal)
-  try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
+  try { out = D ? await D.roll(S) : E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
   setOutPending(true);
   persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
   flowTick++;
@@ -1173,8 +1184,8 @@ async function turnBody(my) {
   if (my !== gen || stuck) return;
   busy = false;
   if (S.over) return;
-  ui.setRollEnabled(true); ui.focusRoll();
-  if (await offerSummary(my)) return;   // wave 3a (J1 P0-1): the ★ month limit just passed in a free run
+  ui.setRollEnabled(!D || D.canRoll()); ui.focusRoll();
+  if (!D && await offerSummary(my)) return;   // wave 3a (J1 P0-1): the ★ month limit just passed in a free run
   await onboard.afterTurn(hooks(my)); // T4 IR-T4-3
 }
 
@@ -1195,7 +1206,7 @@ async function handleLanding(my) {
   finally { flows--; flowTick++; }
 }
 async function landingBody(my) {
-  let ev = E.landing(S) || E.currentEvent(S);
+  let ev = D ? D.landing(S) : (E.landing(S) || E.currentEvent(S));
   render(); // drawing a card can move the world (rate / dollar / prices) before any decision
   persist();
   if (ev) checkpoint();
@@ -1206,7 +1217,7 @@ async function landingBody(my) {
       // no card: routine payday (coins already flew) or an event that does not touch you (engine marks it auto)
       if (ev.auto) { ui.toast(ev.toastText || ev.title, { ms: 1300 * speed() + 200 }); sfx(ev.sound === 'loss' ? 'card' : ev.sound || 'card'); }
       const opt = ev.auto ? ev.options[0].id : 'ok';
-      const res = E.choose(S, ev, opt);
+      const res = D ? await D.choose(S, ev, opt) : E.choose(S, ev, opt);
       if (ev.mentor && !ev.auto) ui.mentor(ev.mentor);
       await applyOut(res, { noVerdict: true });
       render(); persist(); checkpoint(); flowTick++;
@@ -1237,7 +1248,7 @@ function resolveCard(ev, my) {
     // T2 card API: the UI asks, the engine answers (no finance math in ui.js). A hint is an action (['H']): saved like a decision.
     const api = {
       mentor: () => (S ? E.metrics(S).mentor : null),
-      hint: () => {
+      hint: D ? undefined : () => {   // wave 3b: a room's hint is an intent (async) — the room screen's 💡 asks for it
         if (working || my !== gen || typeof E.requestHint !== 'function') return null;
         const r = E.requestHint(S);
         if (r && r.ok !== false) { persist(); checkpoint(); }
@@ -1255,10 +1266,10 @@ function resolveCard(ev, my) {
       if (working || my !== gen) return;
       working = true; ctl.busy(true); flowTick++;
       let res;
-      try { res = E.choose(S, cur, optId, params || {}); }
+      try { res = D ? await D.choose(S, cur, optId, params || {}) : E.choose(S, cur, optId, params || {}); }
       catch (e) {
         console.error(e);
-        cur = E.currentEvent(S);
+        cur = D ? D.currentEvent(S) : E.currentEvent(S);
         if (!cur) { close(); resolve({ done: true, end: E.checkEnd(S) }); }
         else ctl.update(cur);
         working = false; ctl.busy(false); return;
@@ -1393,9 +1404,10 @@ function sheetBody(act) {
   if (act === 'save' || act === 'unsave') { savingsModal(act === 'save'); return; }
   if (act === 'report') {
     if (typeof E.setSideReport !== 'function') return;
-    let o; try { o = E.setSideReport(S, true); } catch (e) { console.error(e); return; }
-    if (o && o.ok === false) { ui.toast(o.error || 'לא אפשרי עכשיו'); return; }
-    applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
+    Promise.resolve(mut('setSideReport', true)).then((o) => {
+      if (o && o.ok === false) { ui.toast(o.error || 'לא אפשרי עכשיו'); return; }
+      applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
+    }).catch((e) => console.error(e));
     return;
   }
   if ((act === 'loan' || act === 'repay' || act === 'credit') && typeof E.impactFor === 'function') { loanWithImpact(act); return; }
@@ -1413,9 +1425,9 @@ async function loanWithImpact(act) {
   if (v !== 'go' || !S || S.over || busy || ui.isEventOpen()) return;
   try { doLoan(act); } catch (e) { if (!stuck) enterStuck(e, 'sheet'); }
 }
-function doLoan(act) {
+async function doLoan(act) {
   let out;
-  try { out = act === 'loan' ? E.takeLoan(S) : act === 'repay' ? E.repayLoan(S) : act === 'credit' ? E.payCredit(S) : null; }
+  try { out = act === 'loan' ? await mut('takeLoan') : act === 'repay' ? await mut('repayLoan') : act === 'credit' ? await mut('payCredit') : null; }
   catch (e) { console.error(e); return; }
   if (!out) return;
   if (out.ok === false) { ui.toast(out.error); sfx('loss'); return; }
@@ -1453,8 +1465,8 @@ async function indexModal() {
     actions: [{ label: 'לבצע', cls: 'primary', v: 'go', fn: () => { qty = Math.trunc(+document.getElementById('ixq').value || 0); const a = document.getElementById('ixa'); if (a) auto = Math.max(0, Math.round(+a.value || 0)); if (qty > maxBuy || -qty > maxSell) { document.getElementById('ixe').textContent = 'הכמות לא אפשרית'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
   if (v !== 'go') return;
   try {
-    if (qty) { const out = E.invest(S, qty > 0 ? 'buy' : 'sell', Math.abs(qty)); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); } else if (out) await applyOut(out); }
-    if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = E.setAutoInvest(S, auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
+    if (qty) { const out = await mut('invest', qty > 0 ? 'buy' : 'sell', Math.abs(qty)); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); } else if (out) await applyOut(out); }
+    if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = await mut('setAutoInvest', auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
   } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); }
   render(); persist(); checkpoint();
 }
@@ -1472,7 +1484,7 @@ async function savingsModal(deposit) {
       <label class="note" for="svq">סכום (₪) — עד ${ui.esc(E.fmtM(max))}</label><input id="svq" type="number" inputmode="numeric" dir="ltr" step="100" min="0" max="${max}" value="${sug > 0 ? sug : Math.min(max, 1000)}"><p class="err" id="sve"></p>`,
     actions: [{ label: deposit ? 'להפקיד' : 'למשוך', cls: 'primary', v: 'go', fn: () => { amt = Math.round(+document.getElementById('svq').value || 0); if (amt <= 0 || amt > max) { document.getElementById('sve').textContent = 'הסכום לא אפשרי'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
   if (v !== 'go' || !amt) return;
-  let out; try { out = E.moveSavings(S, deposit ? amt : -amt); } catch (e2) { console.error(e2); ui.toast('לא אפשרי עכשיו'); return; }
+  let out; try { out = await mut('moveSavings', deposit ? amt : -amt); } catch (e2) { console.error(e2); ui.toast('לא אפשרי עכשיו'); return; }
   if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); return; }
   await applyOut(out); render(); persist(); checkpoint();
 }
@@ -1486,13 +1498,13 @@ async function savingsModal(deposit) {
 function goLobby() {
   persist();
   ui.hideCoach(); onboard.hidePractice(); ui.toggleSheet(false); // IR-T4-9
-  bus.emit('lobby:open', {});
+  bus.emit('lobby:open', D && CFG && CFG.room ? { k: 'room', id: CFG.room } : {});   // wave 3b: back to the room screen
 }
 
 /* ============================================================ T6: ghosts, practice rewind, after the win (spec §2, §7, §9) */
 function t6Start() {
   try { if (E.RIVALS) ui.setPersonas?.(E.RIVALS); } catch (e) { /* ignore */ }
-  try { if (S && !S.over) ghosts.start(S); else ghosts.stop(); } catch (e) { console.warn('ghosts', e); }
+  try { if (S && !S.over && !D) ghosts.start(S); else ghosts.stop(); } catch (e) { console.warn('ghosts', e); }
   const br = S && S.ui && S.ui.branch;
   ui.branchBanner?.(br ? { back: () => backToOrigin(), compare: () => openCompare() } : null);
 }
@@ -1653,6 +1665,7 @@ async function endGame(end, my) {
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
   await scene.celebrate(win);
   if (my !== gen) return;
+  if (D && CFG && CFG.room) { busy = false; bus.emit('lobby:open', { k: 'room', id: CFG.room }); return; }   // wave 3b: the room's results are server-ranked
   // T6 §6.1: with the new summary (flag recap2) the life story is a section of the end screen, not an overlay
   if (end.lifeSummary && !flag('recap2')) { await ui.lifeStory(end.lifeSummary, { won: win }); if (my !== gen) return; }
   await pause(win ? 350 : 250);
