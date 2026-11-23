@@ -134,6 +134,15 @@ await test('ordered lines: 30 % deposit now, value = deposit and no debt until d
   if (st.assets.includes(a)) { assert.equal(a.debt, card.cost - card.down); assert.equal(a.op.readyAt, 0); assert.ok(a.value > card.down); }
 });
 
+await test('★★★ star gate (module starGates, generic in the engine): a safety-inspection stop in the last 12 months caps the win at ★★', () => {
+  const st = E.createGame({ worldId: 'w6', charId: 'trader', seed: 3 }); st.cash = 120e6; st.savings = 2e6; st.life.goalStreak = 5; st.life.happiness = 90; st.life.happinessBase = 90;
+  let r = E.checkEnd(st); assert.equal(r.status, 'won'); assert.equal(r.stars, 3); assert.equal(r.starsBlockedBy, undefined);
+  assert.equal(E.metrics(st).worldIndicators.plant.starGate.ok, true);
+  st.world.insp = [st.month - 3]; r = E.checkEnd(st); assert.equal(r.stars, 2); assert.equal(r.starsBlockedBy.id, 'inspect12'); assert.equal(E.metrics(st).worldIndicators.plant.inspectStop12, true);
+  st.world.insp = [st.month - 12]; r = E.checkEnd(st); assert.equal(r.stars, 3, 'a stop 12 months ago no longer counts');
+  const w1 = E.createGame({ worldId: 'w1', charId: 'teacher', seed: 3 }); assert.equal(E.checkEnd(w1), null);
+});
+
 await test('fuzz (G-big): integer money, no NaN, NW = assets − liabilities, condition in [0, 100], values format', () => {
   for (let i = 0; i < 8; i++) {
     play({ worldId: 'w6', charId: CH[i % 3], seed: 900 + i, mode: 'free' }, prng(700 + i), { zRate: 0.3, maxTurns: 150, onTurn: (s) => {

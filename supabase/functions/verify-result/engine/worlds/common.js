@@ -24,6 +24,8 @@ export const TILE_TYPES = {
   N: { type: 'allot', name: 'מפעיל תיירות', color: '#0ea5a4', ink: '#ffffff', icon: 'plane' },
   // worlds wave 2 (w6): a module tile — js/worlds/mech/plant.js tiles.C (a 24-month supply contract)
   C: { type: 'contract', name: 'חוזה אספקה', color: '#f97316', ink: '#ffffff', icon: 'doc' },
+  // worlds wave 3 (w7): a module tile — js/worlds/mech/chain.js tiles.R (a site for a new branch: open, franchise, survey or pass)
+  R: { type: 'site', name: 'מיקום לסניף', color: '#e63946', ink: '#ffffff', icon: 'shop' },
 };
 
 /** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */

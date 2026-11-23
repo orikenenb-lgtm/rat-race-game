@@ -113,3 +113,29 @@ by seed, and a well-maintained line simply has a lower hazard against the same d
 
 ## Size
 L. `mech/plant.js` ~800 lines, data ~350, tests ~450.
+
+## As built (rules 6 — commit 7c17553 + the housekeeping pass)
+
+Shipped values in `js/worlds/mech/plant.js` / `js/worlds/w6.js`; they replace the TUNE values above where they differ.
+
+| item | as built |
+|---|---|
+| draws (`world`) | 6 per payday (one per line slot, empty slots too), 3 per `C` landing, 0 at init |
+| maintenance cost (of line cost / month) | preventive 0.8% (opseng −25%) · basic 0.25% · run 0 |
+| wear (points / month at full use) | preventive 0.25 (cond capped at 95) · basic 1.0 · run 2.2; × max(0.3, utilisation) × shiftWear |
+| shifts | capacity 1.0 / 1.4 / 1.7 · wear 1.0 / 1.5 / 2.2 · fixed ×1.0 / 1.15 / 1.4 · 🔋 −1 / −2 per line (max −4) |
+| hazard (monthly) | cond 0 → 30%, 20 → 17%, 40 → 7.5%, 60 → 3%, 80 → 1%, 100 → 0.3% (linear between) |
+| breakdown | down 1–3 months and repair 4–10% of cost from the same draw; cond +20 (max 85) |
+| contract (`C` tile) | 24 months, 30–70% of one-shift capacity, price −15% (counter −8%, chance 45% / trader 65%), penalty **1.5 ×** margin per undelivered unit (spec 3 ×: bankrupted a stopped food plant in one month) |
+| valuation | normal-month profit × 12 × multiple (exp 6.4 / slow 6.0 / rec 5.4 / recov 5.8) × (0.6 + 0.4 cond/100), floor 30% × cost × cond; mothballed × 0.8 |
+| recovery | overhaul 8% of cost (1 month down, cond 95) · mothball fixed × 0.4 (restart 2%) · sell to a rival 70% of value · leaseback 25% of cost cash, rent 0.9%/mo of that · factoring 3% · renegotiate 50% (+20 pp trader) |
+| upgrades | automation max(₪1M, 20% cost), variable −8%, grant −20% · solar max(₪0.5M, 6% cost), fixed −8% |
+| characters | opseng cash ₪13M + CNC ₪8M (debt ₪3M, cond 90), ★ 80 / 64 / 50 · heir food plant ₪45M (debt ₪28M, cond 45, union +15% fixed, 18-month contract 50% at −5%, 12-month lock), cash ₪2.5M, ★ 72 / 60 / 46 · trader cash ₪15M, spot +5%, ★ 76 / 62 / 48 |
+| safety inspection | market card: lines with cond < 30 stop for the month; a stop is recorded (`world.insp`) |
+| ★★★ | months ≤ t3, happiness, 3-month fund **and no safety-inspection stop in the last 12 months** — the module star gate `starGates` (engine `buildEnd`, generic; result `starsBlockedBy: {id, label}`) |
+
+Balance (tools/balance-data/gates-w6.json, N = 36 per character, after the housekeeping pass): guide 64 % (worst opseng 58 %), blind 2 %,
+smart 67 % vs naive 1 %, every character ≥ 58 %, durable 99 %, median won rolls 87; maxDebt 66 % in time = smart − 1 pp (was +7 pp: smart now
+overhauls a worn line when the restored value is ≥ 2 × the overhaul, on a bank loan if needed; the panel badges an overhaul at ≥ 3 × with no
+contract running, or below cond 45). Ablations runToFailure −54, preventiveAlways −11, spotOnly −9, shift3Always −31, contractAll −3 pp.
+Open: A4 — the gambler archetype is best in 3/3 cells (not reachable without changing the shared archetypes); contractAll Δ 3 pp (< 5).

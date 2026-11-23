@@ -4,7 +4,7 @@
 // (byte-identical w1–w4 / h); every NEW goal type lives here as {onPayday?, met, progress, parts, text}. The engine calls
 // GOALS[type] only when the world's goal type is registered here.
 //
-// ctx = { goalPassive(st) → ₪ this month's goal-counted passive income, fmt(n) → card money text, mod(st, key) → a module value }
+// ctx = { goalPassive(st) → ₪ this month's goal-counted passive income, netWorth(st) → ₪, fmt(n) → card money text, mod(st, key) → a module value }
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
@@ -37,6 +37,23 @@ const modValue = {
   text(st, g, ctx) { return `${g.label || g.key} ${ctx.fmt(ctx.mod(st, g.key))} מתוך ${ctx.fmt(g.target)}`; },
 };
 
+/** nw — net worth ≥ target (a registered twin of the legacy netWorth type, for composite goals; module goalValue assets count as the engine
+ *  values them). g = {type:'nw', target}. */
+const nw = {
+  met(st, g, ctx) { return ctx.netWorth(st) >= g.target; },
+  progress(st, g, ctx) { const v = ctx.netWorth(st); return v >= g.target ? 1 : clamp(0.1 + 0.9 * v / g.target, 0, 0.999); },
+  parts(st, g, ctx) { const v = ctx.netWorth(st); return [{ key: 'netWorth', label: 'שווי נקי', value: v, target: g.target, progress: clamp(v / g.target, 0, 1) }]; },
+  text(st, g, ctx) { return `שווי נקי ${ctx.fmt(ctx.netWorth(st))} מתוך ${ctx.fmt(g.target)}`; },
+};
+/** liquidity — (cash + savings + liquid holdings) ÷ the module's monthly fixed costs ≥ months. The module reports the months as
+ *  goalValue(st, 'liqMonths') (2 decimals; 99 when there are no fixed costs). g = {type:'liquidity', months, label?}. */
+const liquidity = {
+  met(st, g, ctx) { return ctx.mod(st, 'liqMonths') >= g.months; },
+  progress(st, g, ctx) { const v = ctx.mod(st, 'liqMonths'); return v >= g.months ? 1 : clamp(0.05 + 0.95 * v / g.months, 0, 0.999); },
+  parts(st, g, ctx) { const v = ctx.mod(st, 'liqMonths'); return [{ key: 'liquidity', unit: 'months', label: g.label || 'נזילות (חודשי עלויות קבועות)', value: Math.min(v, 99), target: g.months, progress: clamp(v / g.months, 0, 1), liquid: ctx.mod(st, 'liquid'), fixedMonth: ctx.mod(st, 'fixedMonth') }]; },
+  text(st, g, ctx) { const v = ctx.mod(st, 'liqMonths'); return `נזילות ${v >= 99 ? 'מלאה' : (Math.floor(v * 10) / 10) + ' חודשים'} מתוך ${g.months}`; },
+};
+
 /** all — every sub-goal met; progress = the minimum part (composite goals of later worlds). Sub-goals must be registered types. */
 const all = {
   onPayday(st, g, value, ctx) { for (const s of g.of) { const T = GOALS[s.type]; if (T && T.onPayday) T.onPayday(st, s, value, ctx); } },
@@ -46,7 +63,7 @@ const all = {
   text(st, g, ctx) { return g.of.map((s) => GOALS[s.type].text(st, s, ctx)).join(' · '); },
 };
 
-export const GOALS = { passive12, modValue, all };
+export const GOALS = { passive12, modValue, nw, liquidity, all };
 /** Legacy types the engine evaluates itself (kept for the validator). */
 export const LEGACY_GOALS = ['passive', 'netWorth', 'netWorthImpact', 'benchmark'];
 export function goalType(g) { return g && GOALS[g.type] ? GOALS[g.type] : null; }

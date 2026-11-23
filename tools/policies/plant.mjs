@@ -30,6 +30,12 @@ export function make({ E, POLICIES, ddRule, firstEnabled, ABL }) {
       if (v.shift3) shift = 3; else { const s = acts.find((x) => x.id === 'shift' && x.assetId === r.assetId && x.suggested); shift = s ? +s.param.split(':')[1] : r.shift; }
       if (shift !== r.shift) Z(st, 'shift', `${id}:${shift}`);
     }
+    if (!v.noTouch && v.maint !== 'run') { // smart's own overhaul rule (public action data): restores ≥ 2× its cost in value and no contract is running — worth a bank loan
+      const rowsNow = panel(E.metrics(st)).rows;
+      for (const a of E.worldActions(st).filter((x) => x.id === 'overhaul' && x.gain >= 2 * x.cost)) { const r = rowsNow.find((y) => y.assetId === a.assetId); if (!r || r.contract || r.down || r.mothball) continue;
+        let k = 0; while (!st.over && st.cash < a.cost + E.metrics(st).expenses * 2 && k++ < 40) { if (E.takeLoan(st).ok === false) break; }
+        if (st.cash >= a.cost) Z(st, 'overhaul', a.param); }
+    }
     if (!v.noTouch) for (const a of E.worldActions(st).filter((x) => x.suggested && x.enabled && ['overhaul', 'automate', 'solar', 'renegotiate'].includes(x.id))) { if (v.maint === 'run' && a.id === 'overhaul') continue; Z(st, a.id, a.param); }
     m = E.metrics(st); const P = PI(m); const E0 = m.expenses;
     const keep = v.noRunway ? E0 * 2 : E0 * 4 + (P.fixedMonth || 0) * 1.5;

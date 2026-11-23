@@ -5014,7 +5014,7 @@ function buildEnd(st, o) {
   const won = !!o.won; const bankrupt = !!o.bankrupt;
   const months = st.month;
   const happy = Math.round(st.life.happiness);
-  let stars = 0, starsBlockedByHappiness = false, starsBlockedByFund = false;
+  let stars = 0, starsBlockedByHappiness = false, starsBlockedByFund = false, starsBlockedBy = null;
   if (g.type === 'benchmark') {
     if (!bankrupt) stars = (m.life.realNetWorth > st.history.startNW ? 1 : 0) + (won ? 1 : 0) + (won && happy >= LIFE_CFG.happyStar ? 1 : 0);
     starsBlockedByHappiness = won && happy < LIFE_CFG.happyStar;
@@ -5022,8 +5022,10 @@ function buildEnd(st, o) {
     stars = starsFor(w, months, st.maxMonths, st.charId);
     if (stars >= 3 && happy < starThresholds(w, st.charId).happy) { stars = 2; starsBlockedByHappiness = true; }
     if (stars >= 3 && m.emergency.months < starThresholds(w, st.charId).fundMonths) { stars = 2; starsBlockedByFund = true; } // freedom that survives a crisis
+    { const M = mechWith(st, 'starGates'); if (M) for (const gt of M.starGates(st, MCTX) || []) if (!gt.ok && stars >= gt.stars) { stars = gt.stars - 1; starsBlockedBy = { id: gt.id, label: gt.label }; } } // worlds: a module's extra star rule (w6 ★★★: no safety stop in 12 months)
   }
   const res = { status: won ? 'won' : 'lost', reason: won ? (g.type === 'benchmark' ? 'benchmark' : 'goal') : bankrupt ? 'bankrupt' : 'time', months, turns: st.turn, stars, starsBlockedByHappiness, starsBlockedByFund, netWorth: m.netWorth, passive: m.passive, expenses: m.expenses, cashflow: m.cashflow, impact: Math.floor(st.world.impact || 0), progress: m.goalProgress, stats: { ...st.stats }, lesson: w.lesson, worldId: w.id, charId: st.charId, nearMiss: null, tip: null };
+  if (starsBlockedBy) res.starsBlockedBy = starsBlockedBy; // only when a module gate blocked a star (w1–w5 results unchanged)
   if (aw) { // the continuation's result: never more stars than at the win
     res.status = aw === 'afterWinBroke' ? 'lost' : 'retired'; res.reason = aw; res.stars = A.stars; res.starsBlockedByHappiness = false; res.starsBlockedByFund = false;
     const n = st.month - A.m; const still = m.passive >= m.expenses;
@@ -5135,7 +5137,11 @@ function nearMiss(st, w, m, res) {
   }
   if (res.reason === 'bankrupt') return { text: 'החובות בלעו את התזרים. בפעם הבאה: לא לקנות "נכסים" שמוציאים כסף, ולא להשאיר הלוואות פתוחות.' };
   if (w.goal.type === 'passive') { const gap = m.expenses - m.passive; return { text: `היית רק ${fmtM(gap)} בחודש מהחופש.`, gap }; }
-  if (GOALS[w.goal.type]) { const pt = m.goalParts[0] || {}; const gap = Math.max(0, (pt.target || 0) - (pt.value || 0)); return { text: `חסרו לך ${fmtM(gap)} ב${pt.label || 'יעד'}.`, gap }; } // worlds wave 0
+  if (GOALS[w.goal.type]) { // worlds wave 0 (+ wave 3: the weakest part of a composite goal; a part in months says months)
+    const pt = (m.goalParts || []).reduce((b, x) => (b == null || (x.progress ?? 1) < (b.progress ?? 1) ? x : b), null) || {}; const gap = Math.max(0, (pt.target || 0) - (pt.value || 0));
+    if (pt.unit === 'months') return { text: `חסרו לך ${Math.ceil(gap * 10) / 10} חודשים ב${pt.label || 'יעד'}.`, gap, part: pt.key };
+    return { text: `חסרו לך ${fmtM(gap)} ב${pt.label || 'יעד'}.`, gap, ...((m.goalParts || []).length > 1 ? { part: pt.key } : {}) };
+  }
   const gapNW = Math.max(0, w.goal.target - m.netWorth);
   const gapI = w.goal.type === 'netWorthImpact' ? Math.max(0, w.goal.impact - Math.floor(st.world.impact || 0)) : 0;
   if (gapNW && gapI) return { text: `חסרו לך ${fmtM(gapNW)} בשווי ו־${gapI} נקודות השפעה.`, gap: gapNW, gapImpact: gapI };
@@ -5260,7 +5266,20 @@ const MCTX = Object.freeze({
   loanPct: (st) => loanPct(st), loanUnit: (st) => loanUnit(st), calOf: (st) => calOf(st), focusOn: (st, id) => focusOn(st, id),
   econMult: (st, key) => (st.econ && R4(st) ? CY.mult(st.econ, st.worldId, key) : 1), econLabel: (st) => econLabel(st),
   R: (st, n) => (st.rules || 3) >= n, clamp, r10, r100, round2, world: (st) => W(st), modelFor: (st, k) => modelFor(st, k),
+  buy: (st, card, out, o) => moduleBuy(st, card, out, o || {}), loanFor: (st, amount) => loanFor(st, amount), holdingsValue: (st) => holdingsValue(st), loanCap: (st) => loanCap(st), // worlds wave 3 (w7/w8)
   creditScore: (st, d) => creditScore(st, d), logDecision: (st, card, option, v) => logDecision(st, card, option, v), ach: (st, out, type, payload) => ach(st, out, type, payload),
 });
+/** worlds wave 3: a module tile buys a card it built (w7 branch openings, w8 land): the buy's bank loan as buyAsset (loanFor), addAsset,
+ *  the spawn + cash effect. → the new asset, or null when the bank refuses the loan (o.noLoan: never borrow). */
+function moduleBuy(st, card, out, o) {
+  const pay = Math.max(0, Math.round(card.down || 0)); const L = loanFor(st, pay);
+  if (L.need && (o.noLoan || !L.ok)) return null;
+  if (L.need) { st.loans += L.need; st.cash += L.need; st.stats.loansTaken += L.need; }
+  st.cash -= pay; const a = addAsset(st, card, { golden: !!o.golden }); st.stats.deals++;
+  const cf = assetCf(st, a);
+  out.spawn.push({ assetId: 'a' + a.id, key: 'a' + a.id, model: modelFor(st, a.k), label: o.label || (sgn(cf) + ' לחודש'), color: cf >= 0 ? 'green' : 'red', golden: !!o.golden });
+  sound(out, 'buy'); if (pay) cashFx(out, -pay, null);
+  return a;
+}
 /** Goal registry context (js/worlds/goals.js). */
-const GCTX = Object.freeze({ goalPassive: (st) => goalPassiveOf(st), fmt: (n) => fmtM(n), mod: (st, key) => { const M = mechWith(st, 'goalValue'); return M ? M.goalValue(st, key, MCTX) : 0; } });
+const GCTX = Object.freeze({ goalPassive: (st) => goalPassiveOf(st), netWorth: (st) => netWorthOf(st), fmt: (n) => fmtM(n), mod: (st, key) => { const M = mechWith(st, 'goalValue'); return M ? M.goalValue(st, key, MCTX) : 0; } });

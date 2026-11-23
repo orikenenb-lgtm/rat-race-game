@@ -61,11 +61,12 @@ so cutting the price fills rooms that would otherwise only cost fixed money.** A
    - Default standard/standard. The guide (beginner level) suggests premium/budget only when rep ≥ 60.
 2. **Staffing** (`Z:staff {assetId, core|seasonal}`): cheaper winters versus reputation that compounds.
 3. **Allotment tile `N` ("מפעיל תיירות")**, 4 per board.
-   - An operator offers to pre-buy 30–60% of an asset's rooms for the next 6 months at −25% ADR, paying 50% now.
+   - An operator offers to pre-buy 30–60% of an asset's rooms for the next 6 months at **−22% ADR** (as built; spec −25%), paying 50% now.
+   - Overlap 0.4: part of the operator's guests would have come anyway, so walk-in demand shrinks by 0.4 × the allotted share.
    - Shown: a **booking-pace forecast** of `tour` for the next 6 months (noisy). The research focus or the hotelier character narrows it.
    - Options:
      - `accept`: cash now. Allotted rooms ignore `tour` and season up to their share.
-     - `counter`: the negotiation mechanism, −15% instead of −25%. May fail, and the offer goes to a rival.
+     - `counter`: the negotiation mechanism, **−12% instead of −22%** (as built). Chance 50% (+25 pp for the promoter). May fail, and the offer goes to a rival.
      - `decline` (safe).
    - Landing draws: 2 from `world` (operator share, counter outcome), consumed whatever the choice.
 4. **Seasonal credit line** (bank 'B' tile option + `Z:line`):
@@ -73,7 +74,7 @@ so cutting the price fills rooms that would otherwise only cost fixed money.** A
    - Must be zero at the August payday, or it converts into a regular loan + 1 pp penalty.
    - Teaches seasonal working capital versus the forced loan.
 5. **Festival** (promoter character only, `Z:festival`):
-   - Costs ₪1.5M in an off month and adds +0.3 to `tour` that month **for the whole city, rivals included** (a public good).
+   - Costs ₪300k (as built; spec ₪1.5M) in an off month and adds +0.3 to `tour` that month **for the whole city, rivals included** (a public good).
 
 **Monthly world draws (`world` stream, fixed 2 per payday):**
 - [tour noise] ±0.04 + revert 0.1 to 1.0
@@ -174,3 +175,24 @@ so cutting the price fills rooms that would otherwise only cost fixed money.** A
 - `vocab.js` `WORLD_STYLE.w5`.
 - `kit3d.js` stand-ins.
 - `verify_core.js` (`Z` is added in wave 0).
+
+## As built (rules 6 — commits 05394e1, 7d7238b)
+
+Numbers below are the shipped values in `js/worlds/mech/season.js` / `js/worlds/w5.js`; they replace the TUNE values above where they differ.
+
+| item | as built |
+|---|---|
+| draws (`world`) | 2 per payday, 2 per `N` landing, 0 at init |
+| price tiers | budget ×0.9 price / ×1.235 demand · standard 1 / 1 · premium ×1.1 / ×0.826; premium with rep < 60: its demand × a further 0.6; occupancy cap 98% |
+| season bands | peak = profile ≥ 1.15, off = ≤ 0.80, mid between |
+| seasonal staff | fixed ×1.04 peak, ×0.9 off (core = 1) |
+| allotment | 6 months, **−22%** (counter **−12%**, chance 50% / promoter 75%), 50% up front, share 30–60%, overlap 0.4 |
+| tour index | 0.6–1.3, noise ±0.04, revert 0.1; viral review p 0.1, ±8 rep |
+| seasonal line | up to 2 months of fixed costs at loan pct − 1 pp; must be 0 at the August payday, else it converts (fee 1%) |
+| festival / convert / renovate / manager | ₪300k (+0.3 tour) · ₪3M · ₪6M (+15 rep) · ₪28k/mo wage + ₪60k hire |
+| goal-passive (owner income) | after interest on bank debt beyond a 2-month fixed-cost working-capital allowance |
+| characters | hotelier cash ₪1.8M, salary ₪45k, ★ 66 / 57 / 39 · restaurateur cash ₪4.5M, ₪18k, ★ 80 / 74 / 48 · promoter cash ₪8M, ₪25k, ★ 80 / 62 / 40 |
+
+Balance (tools/balance-data/gates-w5.json, N = 40 per character): guide 66% (worst 57%), blind 8%, smart 65% vs naive 18%, durable 91%,
+median won rolls 85; A4 founder 50% / gambler 50% of 4 cells; ablations standardAlways −25 pp, allotAlways −15 pp, allotNever −7 pp.
+Open: W5-corr (`beachOnly` + `maxDebt` bankrupt 8%, gate ≥ 10%).

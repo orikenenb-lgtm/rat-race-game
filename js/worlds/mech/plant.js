@@ -285,7 +285,11 @@ export const plant = {
     return null;
   },
   goalValue(st, key) { if (key === 'breakdowns') return W(st).breakdowns || 0; return 0; },
+  /** ★★★ also needs no safety-inspection stop in the last 12 months (spec "Goal and stars"); the engine applies it generically. */
+  starGates(st) { return [{ id: 'inspect12', stars: 3, ok: !recentStop(st), label: STAR_GATE_LABEL }]; },
 };
+const STAR_GATE_LABEL = '★★★ רק בלי עצירה בביקורת בטיחות ב־12 החודשים האחרונים';
+const recentStop = (st) => (W(st).insp || []).some((m) => m > st.month - 12);
 
 /* ---------------------------------------------------------------- contract tile (functions need module scope) */
 function contractChance(st) { return round2(Math.min(0.95, CONTRACT.counterP + (isTrader(st) ? CONTRACT.traderBonus : 0))); }
@@ -419,7 +423,11 @@ function actionList(st, ctx) {
     for (const m of ['preventive', 'basic', 'run']) out.push({ id: 'maint', param: `${a.id}:${m}`, assetId: 'a' + a.id, label: `${a.n}: תחזוקה ${MAINT_LABEL[m]}`, enabled: o.maint !== m, current: o.maint === m, suggested: !o.mothball && o.maint !== m && sg.maint === m });
     for (const s of [1, 2, 3]) { const blocked = s === 3 && (W(st).noShift3Until || 0) >= st.month; out.push({ id: 'shift', param: `${a.id}:${s}`, assetId: 'a' + a.id, label: `${a.n}: ${s === 1 ? 'משמרת אחת' : s === 2 ? 'שתי משמרות' : 'שלוש משמרות'}`, enabled: o.shift !== s && !blocked && !o.mothball, current: o.shift === s, reason: blocked ? 'אין עובדים למשמרת לילה' : undefined, suggested: !o.mothball && o.shift !== s && sg.shift === s }); }
     const oc = Math.round(o.cost * OVERHAUL.pct / 1000) * 1000;
-    out.push({ id: 'overhaul', param: String(a.id), assetId: 'a' + a.id, label: `${a.n}: שיפוץ כללי (${ctx.fmtM(oc)}, חודש השבתה, מצב 95)`, enabled: o.cond < 85 && st.cash >= oc, reason: o.cond >= 85 ? 'הקו במצב טוב' : st.cash < oc ? 'אין מספיק מזומן' : undefined, suggested: o.cond < 45 && st.cash >= oc + 3 * E0 && !o.mothball });
+    // housekeeping pass: the suggestion weighs the value an overhaul restores (the valuation's condition factor) against its cost — a worn big
+    // plant gains several times the overhaul in value, which only the max-debt strategy used to collect (it had the cash)
+    const vGain = o.cond < 85 ? Math.max(0, lineValue({ ...o, cond: OVERHAUL.cond }, phaseOf(st)) - a.value) : 0;
+    out.push({ id: 'overhaul', param: String(a.id), assetId: 'a' + a.id, label: `${a.n}: שיפוץ כללי (${ctx.fmtM(oc)}, חודש השבתה, מצב 95${vGain > oc ? `, שווי +${ctx.fmtM(vGain)}` : ''})`, enabled: o.cond < 85 && st.cash >= oc, reason: o.cond >= 85 ? 'הקו במצב טוב' : st.cash < oc ? 'אין מספיק מזומן' : undefined, cost: oc, gain: vGain,
+      suggested: !o.mothball && o.cond < 85 && st.cash >= oc + 2 * E0 && (o.cond < 45 || (vGain >= 3 * oc && !(o.contract && o.contract.until >= st.month))) && !(o.downUntil != null && o.downUntil >= st.month) });
     const m = lineMonth(o, a.debt, env);
     const losing = m.cf < 0 && !o.contract;
     out.push({ id: 'mothball', param: `${a.id}:${o.mothball ? 'off' : 'on'}`, assetId: 'a' + a.id, label: o.mothball ? `${a.n}: להפעיל מחדש (${ctx.fmtM(Math.round(o.cost * MOTHBALL.restart / 1000) * 1000)})` : `${a.n}: להשבית זמנית (עלויות קבועות −60%)`, enabled: o.mothball || ((o.lockUntil || 0) < st.month && !(o.contract && o.contract.until >= st.month)), suggested: false });
@@ -448,7 +456,7 @@ function indicatorsOf(st, ctx) {
   const utilAvg = capSum > 0 ? round2(util / capSum) : null;
   return {
     plant: { lines: ls.length, slots: SLOTS, utilisation: utilAvg, coverage, runway, fixedMonth: Math.round(fixed), cfMonth: r10(cf), breakdowns: w.breakdowns || 0, penalties: w.penalties || 0, repairs: w.repairs || 0,
-      noShift3Until: w.noShift3Until || 0, grant: (w.grantUntil || 0) >= st.month, inspections: (w.insp || []).length, factorDue: w.factorDue || 0, exactHazard: ops,
+      noShift3Until: w.noShift3Until || 0, grant: (w.grantUntil || 0) >= st.month, inspections: (w.insp || []).length, inspectStop12: recentStop(st), starGate: { id: 'inspect12', ok: !recentStop(st), label: STAR_GATE_LABEL }, factorDue: w.factorDue || 0, exactHazard: ops,
       shocks: (w.shocks || []).map((s) => ({ t: s.t, v: s.v, until: s.until, n: s.n || '' })) },
     panel: {
       id: 'plant', title: 'קווי ייצור',
