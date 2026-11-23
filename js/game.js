@@ -1564,7 +1564,9 @@ function backToOrigin() {
 }
 function openCompare() {
   const d = S ? rewind.compareData(S) : null;
-  if (!d || !d.originTl) { ui.toast('המשחק המקורי כבר לא זמין להשוואה'); return; }   // T6 review M2: the original changed or is gone
+  // T6 review M2: the original changed or is gone. The answer to a tap goes to the FRONT of the toast queue (urgent): behind a new branch's
+  // first-month toasts (focus, turbo, library) it waited > 15 s — the t6_e2e rewind failure after the branch-from-the-oldest-decision fix
+  if (!d || !d.originTl) { ui.toast('המשחק המקורי כבר לא זמין להשוואה', { urgent: true }); return; }
   ui.compareSheet({ branchTl: tlOf(S), originTl: d.originTl, month: S.month });
 }
 /** T6 §9.2: keep living after the win (engine W) — only when the engine exports it and the flag is on (free / learn) */

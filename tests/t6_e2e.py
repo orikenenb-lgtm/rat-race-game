@@ -210,6 +210,21 @@ async def t_rewind(b, F):
     h1 = await hashes(pg, ORIG)
     check(h1 == h0, f'AC-27: origin keys unchanged after create + {k} branch rolls')
     s = await st(pg)
+    if s['end']:
+        # root cause of the old failure (seen since rules 5): the suggestion's decision is close to the win, so its branch can end within
+        # a few rolls — the test then sat on the branch's END screen and looked for the lobby's world button. A quick branch end is a
+        # valid result: check it, then start a longer branch from the OLDEST decision of the original game for the compare checks.
+        bc = await pg.evaluate("() => !!document.querySelector('#endTop .t6-bcmp')")
+        check(bc, f'the suggested branch ended within {k} rolls and its end compares with the original')
+        await pg.click('[data-act="end-lobby"]'); await pg.wait_for_selector('.lb-home', timeout=30000)
+        await pg.evaluate("() => document.querySelector('[data-act=\"world\"][data-id=\"w1\"]').click()"); await pg.wait_for_selector('.lb-world')
+        await pg.click('[data-act=t6-last]'); await pg.wait_for_selector('#gm:not([hidden]) .t6mo-list button[data-k0]', timeout=30000)
+        await pg.evaluate("() => { const b = document.querySelectorAll('.t6mo-list button[data-k0]'); b[b.length - 1].click(); }")
+        # the quickly-ended branch still holds the branch slot: the game asks before replacing it (rewind STR.replaceQ)
+        await pg.wait_for_function("() => { const g = document.querySelector('#gm'); return g && !g.hidden && g.textContent.includes('להחליף'); }", timeout=30000)
+        await pg.click('#gm .acts button.primary')
+        check(await wait_ready(pg, 120), 'a second branch from the oldest decision started')
+        k = await rolls(pg, 3); s = await st(pg)
     if not s['end'] and not s['start']:
         for i in range(20):
             s = await st(pg)
