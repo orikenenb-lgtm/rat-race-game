@@ -42,7 +42,8 @@ insert into game.worlds (id, ord, ranked, nw_max, passive_max, expenses_max, min
   ('w10', 10, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A1: market + portfolio, rules 7 (unranked until approved)
   ('w11', 11, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A3: multinational, rules 7 (unranked until approved)
   ('w13', 13, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A2: league + auction, rules 7 (unranked until approved)
-  ('w15', 15, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A3: platform (market regimes), rules 7 (unranked until approved)
+  ('w15', 15, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A3: platform (market regimes), rules 7 (unranked until approved)
+  ('w16', 16, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A3: harvest adapter (crops, futures, margin), rules 7 (unranked until approved)
 
 create table game.world_rotation (
   kind text not null check (kind in ('daily', 'weekly')),

@@ -263,6 +263,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** opens w18 and counts for w23. Library: "גידור כמות", "קריאת מרווח של גידור".
 - **Choices:** hedge ratio per crop, crop mix (correlation), store vs sell at harvest, insure vs self-insure.
 - **Recovery:** roll the hedge (cost), sell silo stock forward, lease out a field, sell water rights, crop insurance payout.
+- **As built (wave A3, engine lane):** rule adapter `js/worlds/adapters/harvest.js` (season calendar, commodity regimes and futures margin re-implemented inside it), `modules: ['harvest']`, maxMonths 54; gates N = 36: the five required gates + G-dom met, G-durable (80 %) and W16-hedge (hedge0 Δ 4 pp) open — see `w16-fields.md`.
 
 ### w17 · גבעת המעבדות (tier 9, diff 4)
 - **סיפור:** "מתוך עשר מולקולות, אחת מגיעה למדף. את הסיכוי של כל שלב כולם יודעים. השאלה היא מתי להפסיק לשלם על חלום."

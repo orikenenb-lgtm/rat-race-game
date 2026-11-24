@@ -11,6 +11,7 @@ import w10 from './w10.js';
 import w11 from './w11.js';
 import w13 from './w13.js';
 import w15 from './w15.js';
+import w16 from './w16.js';
 
-export const LAZY = [w5, w6, w7, w8, w9, w10, w11, w13, w15];
+export const LAZY = [w5, w6, w7, w8, w9, w10, w11, w13, w15, w16];
 for (const w of LAZY) registerWorld(w);
