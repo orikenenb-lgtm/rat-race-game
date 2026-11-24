@@ -15,6 +15,9 @@ export const RULES5_FROM = '2026-12-21';
 /** First Israel date of rules 6 (worlds wave 0: module worlds, stream `world`, action `Z`; ≡ rules 5 in w1–w4). PLACEHOLDER = RULES5_FROM.
  *  MUST equal js/systems/rules.js RULES6_FROM (tested equal). */
 export const RULES6_FROM = RULES5_FROM;
+/** First Israel date of rules 7 (CATALOG-25: market + content pools; ≡ rules 6 in every world without them). PLACEHOLDER = RULES6_FROM.
+ *  MUST equal js/systems/rules.js RULES7_FROM (tested equal). */
+export const RULES7_FROM = RULES6_FROM;
 // ---- duplicate of js/systems/rules.js (dayOf / isoWeekStart), kept byte-equivalent in behaviour (tests/verify.test.mjs) ----
 function daysFromCivil(y, m, d) {
   y -= m <= 2 ? 1 : 0;
@@ -48,18 +51,21 @@ export function isoDay(v) {
 /**
  * The rule set of a ranked game. ONE Israel calendar date decides:
  * daily_key · weekly_start (Monday of the ISO week) · challenge_day (index.ts: created_at AT TIME ZONE 'Asia/Jerusalem').
- * day < RULES4_FROM → 3 (pre-T2) · day < RULES5_FROM → 4 (Next Level) · otherwise (or no date) → 5. Same as js/systems/rules.js rulesForDay.
+ * day < RULES4_FROM → 3 (pre-T2) · day < RULES5_FROM → 4 (Next Level) · < RULES6_FROM → 5 · < RULES7_FROM → 6 · otherwise (or no date) → 7.
+ * Same as js/systems/rules.js rulesForDay.
  */
 export function rulesFor(row) {
   const day = isoDay(row.daily_key) || isoDay(row.weekly_start) || isoDay(row.challenge_day); // see index.ts ROW
-  return !day ? 6 : day < RULES4_FROM ? 3 : day < RULES5_FROM ? 4 : day < RULES6_FROM ? 5 : 6;
+  return !day ? 7 : day < RULES4_FROM ? 3 : day < RULES5_FROM ? 4 : day < RULES6_FROM ? 5 : day < RULES7_FROM ? 6 : 7;
 }
-/** The rule set the next cut-over brings after `r` (3 → 4, 4 → 5 or 6 when RULES6_FROM = RULES5_FROM, 5 → 6) and its first day. */
+/** The rule set the next cut-over brings after `r` and its first day: 3 → 4; then the newest rule set that starts on the same day as the
+ *  next one (4 → 5, or 6 / 7 while RULES6_FROM / RULES7_FROM equal RULES5_FROM; 5 → 6 or 7; 6 → 7). Same-day cut-overs collapse into one. */
 export function nextCutover(r) {
-  if (r === 3) return { rules: 4, from: RULES4_FROM };
-  if (r === 4) return { rules: RULES6_FROM === RULES5_FROM ? 6 : 5, from: RULES5_FROM };
-  if (r === 5) return { rules: 6, from: RULES6_FROM };
-  return null;
+  const cuts = [[4, RULES4_FROM], [5, RULES5_FROM], [6, RULES6_FROM], [7, RULES7_FROM]];
+  const i = cuts.findIndex(([n]) => n > r); if (i < 0) return null;
+  const from = cuts[i][1]; let rules = cuts[i][0];
+  for (let j = i + 1; j < cuts.length; j++) if (cuts[j][1] === from) rules = cuts[j][0];
+  return { rules, from };
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

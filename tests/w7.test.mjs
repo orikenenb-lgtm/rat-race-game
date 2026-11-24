@@ -175,7 +175,7 @@ await test('verifier: core bundle + the w7 pack only; a w7 game verifies; dated 
     if (!st.over) continue;
     const row = { mode: 'challenge', world: 'w7', profession: ch, seed: String(seed), max_months: null, challenge_day: '2026-12-22', status: st.result.status, months: st.result.months, passive: Math.round(st.result.passive), expenses: Math.round(st.result.expenses), net_worth: Math.round(st.result.netWorth), claim_stars: st.result.stars || 0, claim_progress: st.result.progress };
     const a = performance.now(); const out = V.verifyGame(EE, row, st.actions); maxMs = Math.max(maxMs, performance.now() - a);
-    assert.ok(out.ok, `w7 game ${i} should verify: ${out.error}`); assert.equal(out.cfg.rules, 6); ok++;
+    assert.ok(out.ok, `w7 game ${i} should verify: ${out.error}`); assert.equal(out.cfg.rules, E.RULES_CURRENT); ok++;
     assert.equal(V.verifyGame(EE, { ...row, net_worth: row.net_worth + 1000 }, st.actions).ok, false);
     assert.throws(() => V.configFor(EE, { ...row, challenge_day: '2026-12-10' }), /bad_world/);
   }

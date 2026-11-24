@@ -5,6 +5,9 @@
 //   node tools/validate-worlds.mjs --json     the same, as JSON
 //
 // validate({metas, worlds, lazyIds, …}) is exported for tests/worlds_config.test.mjs (fixtures with each error class).
+// CATALOG-25 §6.4 additions: V-tier (meta.tier = 1 + max over clauses of the count-th smallest tier), V-mods (every module a world names
+// exists and is attached), V-adapter (js/worlds/adapters/*: ≤ 350 lines, `uses:`), M-fict (the companies pool: unique, fictional — the
+// denylist tools/data/real-names.txt), C-schema / C-free / C-band / C-draws (every content pool of every world), lazy-stream fuzz.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +19,10 @@ import { GOALS, LEGACY_GOALS } from '../js/worlds/goals.js';
 import { checkModule } from '../js/worlds/mech/index.js';
 import { TILE_TYPES } from '../js/worlds/common.js';
 import { ARCHETYPES } from '../js/finance/business.js';
-import { STREAMS } from '../js/rng.js';
+import { STREAMS, LAZY_STREAMS } from '../js/rng.js';
+import { checkPool, POOL_D, POOLS } from '../js/systems/content.js';
+import { COMPANIES, SECTORS } from '../js/worlds/data/companies.js';
+import { existsSync } from 'node:fs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** tile type → the world field holding its deck ('' = no deck needed). */
@@ -58,6 +64,10 @@ export function validate({ metas = WORLD_META, worlds = E.loadedWorlds(), lazyId
   const reach = new Set(); let grew = true;
   while (grew) { grew = false; for (const m of metas) if (!reach.has(m.id) && (m.unlock || []).every((c) => (c.any || []).filter((x) => reach.has(x)).length >= (c.count || 1))) { reach.add(m.id); grew = true; } }
   for (const m of metas) if (!reach.has(m.id)) err(m.id, 'not reachable from w1 (or the unlock graph has a cycle)');
+  // V-tier (CATALOG §0.3): tier(w) = 1 + max over clauses c of the count(c)-th smallest tier among c.any
+  { const T = {}; const tierOf = (id, seen = new Set()) => { if (T[id] != null) return T[id]; const m = byMeta[id]; if (!m || seen.has(id)) return 99; seen.add(id);
+      let t = 1; for (const c of m.unlock || []) { const ts = (c.any || []).map((x) => tierOf(x, seen)).sort((a, b) => a - b); t = Math.max(t, 1 + (ts[(c.count || 1) - 1] ?? 98)); } return (T[id] = t); };
+    for (const m of metas) if (m.tier != null && tierOf(m.id) !== m.tier) err(m.id, `V-tier: meta.tier ${m.tier} ≠ computed ${tierOf(m.id)}`); }
   // per world
   for (const w of worlds) {
     const m = byMeta[w.id]; const id = w.id;
@@ -72,6 +82,19 @@ export function validate({ metas = WORLD_META, worlds = E.loadedWorlds(), lazyId
       for (const c of w.characters) { const x = mc.find((y) => y.id === c.id); if (!x) continue; for (const k of ['name', 'maxMonths', 'maxMonths4']) if ((x[k] ?? null) !== (c[k] ?? null)) err(id, `character ${c.id}: meta.${k} ≠ config`); if (JSON.stringify(x.stars || null) !== JSON.stringify(c.stars || null)) err(id, `character ${c.id}: meta.stars ≠ config`); }
     } else err(id, 'no meta entry');
     if ((w.minRules || 3) > rulesCurrent) err(id, `minRules ${w.minRules} > RULES_CURRENT ${rulesCurrent}`);
+    // V-mods: a world that names modules has exactly those modules attached (and meta agrees)
+    if (w.modules) { const have = (w.mech || []).map((M) => M.id); for (const x of w.modules) if (!have.includes(x)) err(id, `V-mods: module '${x}' is named but not attached`); for (const x of have) if (!w.modules.includes(x)) err(id, `V-mods: module '${x}' is attached but not named`);
+      if (m && m.modules && JSON.stringify(m.modules) !== JSON.stringify(w.modules)) err(id, 'V-mods: meta.modules ≠ config.modules'); }
+    // lazy streams: only rules ≥ 7, only known names, and every module that draws one declares its counts
+    for (const nm of w.streams || []) { if (!LAZY_STREAMS.includes(nm)) err(id, `stream '${nm}' is not a lazy stream`); if ((w.minRules || 3) < 7) err(id, `stream '${nm}' needs minRules ≥ 7`); }
+    for (const M of w.mech || []) for (const nm of Object.keys(M.streams || {})) if (!(w.streams || []).includes(nm)) err(id, `module ${M.id} draws stream '${nm}' the world does not declare`);
+    // content pools (C-schema, C-free, C-band, C-draws, C-empty static): every pool valid; a tile pool has a non-empty legacy fallback deck
+    if (w.content) { if ((w.minRules || 3) < 7) err(id, 'content pools need minRules ≥ 7'); if (!(w.streams || []).includes('content')) err(id, 'content pools need the `content` stream');
+      for (const [pool, es] of Object.entries(w.content.data || {})) { if (!POOLS.includes(pool)) err(id, `C-schema: unknown pool '${pool}'`); for (const x of checkPool(pool, es)) err(id, 'C-schema ' + x);
+        for (const e of es) { if (e.worlds && !e.worlds.includes(id) && !e.worlds.includes('∞')) warn(id, `C-schema: ${e.id} is in the world's pool but not for it`);
+          const g = (e.gen || {}).cost; if (g && g[0] === 'band' && !(g[1] >= 0 && g[2] <= 1)) err(id, `C-band: ${e.id} cost band [${g[1]}, ${g[2]}] outside [0, 1] of econ.band.deal`); } }
+      for (const [ch, pool] of Object.entries(w.content.pools || {})) { if (!POOL_D[pool]) err(id, `C-draws: tile ${ch} → unknown pool ${pool}`); if (!(w.content.data || {})[pool]) err(id, `C-empty: tile ${ch} → pool ${pool} has no data`);
+        const t = (w.tiles || {})[ch]; if (!t) err(id, `content tile ${ch} is not on the board`); else if (DECK[t.type] && !(Array.isArray(w[DECK[t.type]]) && w[DECK[t.type]].length)) err(id, `C-empty: tile ${ch} needs a non-empty legacy ${DECK[t.type]} (the pool's fallback)`); } }
     // goal
     const g = w.goal || {};
     if (!LEGACY_GOALS.includes(g.type) && !GOALS[g.type]) err(id, `goal type '${g.type}' is not registered`);
@@ -126,6 +149,29 @@ export function validate({ metas = WORLD_META, worlds = E.loadedWorlds(), lazyId
   return { errors, warnings };
 }
 
+/** M-fict (CATALOG §3.1): the companies pool — names and tickers unique, ≥ 6 per sector, no real listed company (tools/data/real-names.txt). */
+export function checkCompanies(pool = COMPANIES, deny = readDeny()) {
+  const errors = []; const names = new Set(), tks = new Set(); const per = {};
+  for (const c of pool) {
+    if (names.has(c.name)) errors.push(`M-fict: duplicate name ${c.name}`); if (tks.has(c.tk)) errors.push(`M-fict: duplicate ticker ${c.tk}`); names.add(c.name); tks.add(c.tk);
+    if (!SECTORS[c.sector]) errors.push(`M-fict: ${c.key} unknown sector ${c.sector}`); per[c.sector] = (per[c.sector] || 0) + 1;
+    if (!/^[A-Z]{3,5}$/.test(c.tk)) errors.push(`M-fict: ${c.key} ticker ${c.tk} must be 3–5 capital letters`);
+    const words = c.name.split(/[\s־-]+/);
+    if (deny.has(c.name) || deny.has(c.tk) || words.some((x) => deny.has(x))) errors.push(`M-fict: ${c.key} (${c.name} / ${c.tk}) matches a real listed company`);
+    for (const k of ['beta', 'vol', 'div', 'q', 'px']) if (!Array.isArray(c[k]) || !(c[k][0] <= c[k][1])) errors.push(`M-fict: ${c.key}.${k} must be [lo ≤ hi]`);
+    if (!(c.q[0] >= 0 && c.q[1] <= 1)) errors.push(`M-fict: ${c.key}.q outside [0, 1]`);
+  }
+  for (const s of Object.keys(SECTORS)) if ((per[s] || 0) < 6) errors.push(`M-fict: sector ${s} has ${per[s] || 0} companies (≥ 6)`);
+  return errors;
+}
+function readDeny() { const f = join(ROOT, 'tools', 'data', 'real-names.txt'); if (!existsSync(f)) return new Set(); return new Set(readFileSync(f, 'utf8').split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('#'))); }
+/** V-adapter (CATALOG §2.1): a rule adapter (js/worlds/adapters/*.js) is ≤ 350 lines and declares `uses: [moduleIds]`. */
+export function checkAdapters(dir = join(ROOT, 'js', 'worlds', 'adapters')) {
+  const errors = []; if (!existsSync(dir)) return errors;
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.js'))) { const src = readFileSync(join(dir, f), 'utf8'); if (src.split('\n').length > 350) errors.push(`V-adapter: ${f} > 350 lines`); if (!/\buses\s*:\s*\[/.test(src)) errors.push(`V-adapter: ${f} declares no uses: [moduleIds]`); }
+  return errors;
+}
+
 /** Lint: module files use only exact arithmetic (no Math.pow / exp / log / random, no Date) — bit-identical in browser, Node and Deno. */
 export function lintModules(dir = join(ROOT, 'js', 'worlds', 'mech')) {
   const errors = [];
@@ -156,7 +202,7 @@ export function fuzzModules(worlds = E.loadedWorlds(), turns = 70) {
       let k = 0; while (ea && !A.over && k++ < 12) { const en = ea.options.filter((x) => x.enabled); const o = en.find((x) => x.kind === 'buy' || x.id === 'accept') || en.find((x) => ['ok', 'done', 'pass', 'decline', 'skip'].includes(x.id)) || en[0]; ea = E.choose(A, ea, o.id, o.needsQty ? { qty: 1 } : {}).event; }
       k = 0; while (eb && !B.over && k++ < 12) { const en = eb.options.filter((x) => x.enabled); const o = en.find((x) => ['pass', 'skip', 'ok', 'done', 'decline'].includes(x.id)) || en[0]; eb = E.choose(B, eb, o.id, o.needsQty ? { qty: 1 } : {}).event; }
       void w0; if (A.over || B.over) break;
-      for (const s of STREAMS) if (A.rng[s] !== B.rng[s]) { errors.push(`${w.id}/${ch.id}: stream ${s} diverged at turn ${t} (a draw depends on a decision)`); t = turns; break; }
+      for (const s of [...STREAMS, ...LAZY_STREAMS]) if (A.rng[s] !== B.rng[s]) { errors.push(`${w.id}/${ch.id}: stream ${s} diverged at turn ${t} (a draw depends on a decision)`); t = turns; break; }
     }
     worldDraws = A.rng.world;
     notes.push(`${w.id}/${ch.id}: ${landings} module landings, ${safeChecked} safe options checked, stream positions equal`);
@@ -168,7 +214,7 @@ export function fuzzModules(worlds = E.loadedWorlds(), turns = 70) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   let style = null; try { style = (await import('../js/render/vocab.js')).WORLD_STYLE; } catch (e) { style = null; }
   const r = validate({ worldStyle: style }); const lint = lintModules(); const fz = fuzzModules();
-  const errors = [...r.errors, ...lint, ...fz.errors];
+  const errors = [...r.errors, ...lint, ...fz.errors, ...checkCompanies(), ...checkAdapters()];
   if (process.argv.includes('--json')) console.log(JSON.stringify({ errors, warnings: r.warnings, notes: fz.notes }, null, 1));
   else {
     for (const x of r.warnings) console.log('⚠ ' + x);

@@ -38,7 +38,8 @@ insert into game.worlds (id, ord, ranked, nw_max, passive_max, expenses_max, min
   ('w6', 6, false, 10000000000, 1000000000, 1000000000, 6, null),
   ('w7', 7, false, 10000000000, 1000000000, 1000000000, 6, null),
   ('w8', 8, false, 20000000000, 1000000000, 1000000000, 6, null),
-  ('w9', 9, false, 10000000000, 1000000000, 1000000000, 6, null);
+  ('w9', 9, false, 10000000000, 1000000000, 1000000000, 6, null),
+  ('w10', 10, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A1: market + portfolio, rules 7 (unranked until approved)
 
 create table game.world_rotation (
   kind text not null check (kind in ('daily', 'weekly')),

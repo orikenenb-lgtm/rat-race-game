@@ -11,7 +11,7 @@ import { playOut, prng } from './lib/random-player.mjs';
 
 const GAMES = +(process.argv[2] || 120);
 /** Worlds wave 0: a ranked day ≥ RULES5_FROM is rules 6 while RULES6_FROM = RULES5_FROM (placeholder); rules 6 ≡ rules 5 in w1–w4. */
-const R5D = Local.RULES6_FROM === RULES5_FROM ? 6 : 5;
+const R5D = Local.RULES7_FROM === RULES5_FROM ? 7 : Local.RULES6_FROM === RULES5_FROM ? 6 : 5; // CATALOG-25: 7 while RULES7_FROM = RULES6_FROM = RULES5_FROM
 let passed = 0, failed = 0;
 async function test(name, fn) {
   const t0 = Date.now();

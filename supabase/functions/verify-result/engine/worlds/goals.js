@@ -29,12 +29,37 @@ const passive12 = {
   text(st, g, ctx) { return `ממוצע ${g.window || 12} חודשים ${ctx.fmt(passive12.avg(st, g))} מתוך ${ctx.fmt(g.target)} בחודש`; },
 };
 
-/** modValue — a world module's own number (operating income, liquidity months …) ≥ target. g = {type, key, target, label}. */
+/** modValue — a world module's own number (operating income, liquidity months …) ≥ target, or ≤ target with cmp:'le' (CATALOG-25 §2.5:
+ *  wage ratio, combined ratio, debt / GDP …; progress = target ÷ value). g = {type, key, target, label, cmp?: 'ge' | 'le'}. */
+const le = (g) => g.cmp === 'le';
+const ratioOf = (v, g) => (le(g) ? (v <= 0 ? 1 : g.target / v) : v / g.target);
 const modValue = {
-  met(st, g, ctx) { return ctx.mod(st, g.key) >= g.target; },
-  progress(st, g, ctx) { const v = ctx.mod(st, g.key); return v >= g.target ? 1 : clamp(0.05 + 0.95 * v / g.target, 0, 0.999); },
-  parts(st, g, ctx) { const v = ctx.mod(st, g.key); return [{ key: g.key, label: g.label || g.key, value: v, target: g.target, progress: clamp(v / g.target, 0, 1) }]; },
-  text(st, g, ctx) { return `${g.label || g.key} ${ctx.fmt(ctx.mod(st, g.key))} מתוך ${ctx.fmt(g.target)}`; },
+  met(st, g, ctx) { const v = ctx.mod(st, g.key); return le(g) ? v <= g.target : v >= g.target; },
+  progress(st, g, ctx) { const v = ctx.mod(st, g.key); return modValue.met(st, g, ctx) ? 1 : clamp(0.05 + 0.95 * ratioOf(v, g), 0, 0.999); },
+  parts(st, g, ctx) { const v = ctx.mod(st, g.key); return [{ key: g.key, label: g.label || g.key, value: v, target: g.target, cmp: g.cmp || 'ge', progress: clamp(ratioOf(v, g), 0, 1) }]; },
+  text(st, g, ctx) { return `${g.label || g.key} ${ctx.fmt(ctx.mod(st, g.key))} ${le(g) ? 'לכל היותר' : 'מתוך'} ${ctx.fmt(g.target)}`; },
+};
+/** noDefault — no event of kind `key` (default | regulator | margin | counterparty) in the last `months` paydays. The module reports the
+ *  payday of the last such event as goalValue(st, 'lastEvent:' + key) (0 = never). g = {type:'noDefault', months, key?, label?}. */
+const noDefault = {
+  key: (g) => g.key || 'default',
+  since(st, g, ctx) { const last = ctx.mod(st, 'lastEvent:' + noDefault.key(g)) || 0; return last ? Math.max(0, (st.stats.paydays || 0) - last) : (st.stats.paydays || 0); },
+  met(st, g, ctx) { return noDefault.since(st, g, ctx) >= g.months; },
+  progress(st, g, ctx) { const v = noDefault.since(st, g, ctx); return v >= g.months ? 1 : clamp(0.05 + 0.95 * v / g.months, 0, 0.999); },
+  parts(st, g, ctx) { const v = noDefault.since(st, g, ctx); return [{ key: 'noDefault:' + noDefault.key(g), unit: 'months', label: g.label || 'חודשים בלי אירוע', value: Math.min(v, g.months), target: g.months, progress: clamp(v / g.months, 0, 1) }]; },
+  text(st, g, ctx) { return `${Math.min(noDefault.since(st, g, ctx), g.months)} מתוך ${g.months} חודשים בלי אירוע`; },
+};
+/** maxDrawdown — the drop of net worth from its peak over a bounded ring (≤ 200 paydays) stays ≤ pct (continuation goals, §5.1).
+ *  g = {type:'maxDrawdown', pct, label?}. The ring lives in st.world.ddRing (bounded). */
+const DD_RING = 200;
+const maxDrawdown = {
+  ring(st) { const W = st.world || (st.world = {}); if (!Array.isArray(W.ddRing)) W.ddRing = []; return W.ddRing; },
+  onPayday(st, g, value, ctx) { const r = maxDrawdown.ring(st); r.push(Math.round(ctx.netWorth(st))); while (r.length > DD_RING) r.shift(); },
+  dd(st) { const r = maxDrawdown.ring(st); let peak = -Infinity, worst = 0; for (const x of r) { if (x > peak) peak = x; if (peak > 0) worst = Math.max(worst, 1 - x / peak); } return Math.round(worst * 1000) / 1000; },
+  met(st, g) { return maxDrawdown.ring(st).length > 0 && maxDrawdown.dd(st) <= g.pct; },
+  progress(st, g) { const d = maxDrawdown.dd(st); return d <= g.pct ? 1 : clamp(g.pct / d, 0, 0.999); },
+  parts(st, g) { const d = maxDrawdown.dd(st); return [{ key: 'maxDrawdown', label: g.label || 'ירידה מהשיא', value: d, target: g.pct, cmp: 'le', progress: clamp(d <= 0 ? 1 : g.pct / d, 0, 1) }]; },
+  text(st, g) { return `ירידה מהשיא ${Math.round(maxDrawdown.dd(st) * 100)}% (עד ${Math.round(g.pct * 100)}%)`; },
 };
 
 /** passiveTarget — the module's operating income (goalValue(st, g.key), default 'opIncome': w9's plant income after debt service) ≥ target.
@@ -73,7 +98,7 @@ const all = {
   text(st, g, ctx) { return g.of.map((s) => GOALS[s.type].text(st, s, ctx)).join(' · '); },
 };
 
-export const GOALS = { passive12, modValue, passiveTarget, nw, liquidity, all };
+export const GOALS = { passive12, modValue, passiveTarget, nw, liquidity, all, noDefault, maxDrawdown };
 /** Legacy types the engine evaluates itself (kept for the validator). */
 export const LEGACY_GOALS = ['passive', 'netWorth', 'netWorthImpact', 'benchmark'];
 export function goalType(g) { return g && GOALS[g.type] ? GOALS[g.type] : null; }

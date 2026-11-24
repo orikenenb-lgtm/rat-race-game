@@ -27,7 +27,7 @@ function toNextPayday(st) {
 
 /* ------------------------------------------------------------------ gate */
 // worlds wave 0: rules 6 (≡ rules 5 in w1–w4) starts on RULES6_FROM — a placeholder equal to RULES5_FROM, so a date ≥ RULES5_FROM gives 6 then.
-const R5D = E.RULES6_FROM === E.RULES5_FROM ? 6 : 5; // the rule set of a ranked day ≥ RULES5_FROM
+const R5D = E.RULES7_FROM === E.RULES5_FROM ? 7 : E.RULES6_FROM === E.RULES5_FROM ? 6 : 5; // the rule set of a ranked day ≥ RULES5_FROM (CATALOG-25: 7 while RULES7_FROM = RULES6_FROM = RULES5_FROM)
 test('gate: RULES5_FROM is one Monday in the client and the verifier; free → current; ranked by date (3 / 4 / 5|6); no date → current', () => {
   assert.equal(E.RULES5_FROM, R5c); assert.equal(E.RULES4_FROM, R4c);
   const [y, m, d] = R5c.split('-').map(Number); assert.equal(new Date(Date.UTC(y, m - 1, d)).getUTCDay(), 1, 'Monday');
@@ -58,7 +58,7 @@ test('gate: the verifier replays rules 5 by date, falls back 4 → 5 only in the
   const end = st.result;
   const row = { mode: 'daily', world: 'w1', profession: 'idx:2', seed: 5151, max_months: 24, status: end.status, months: Math.max(1, Math.min(200, Math.round(end.months))), passive: Math.round(end.passive),
     expenses: Math.max(0, Math.round(end.expenses)), net_worth: Math.round(end.netWorth), claim_stars: end.stars || 0, claim_progress: end.progress };
-  const ok5 = verifyGame(Local, { ...row, daily_key: '2026-12-22' }, st.actions); assert.ok(ok5.ok, ok5.error); assert.equal(ok5.cfg.rules, R5D, 'replayed with rules 6 when RULES6_FROM = RULES5_FROM — the same outcome in w1'); assert.ok(!ok5.rulesFallback);
+  const ok5 = verifyGame(Local, { ...row, daily_key: '2026-12-22' }, st.actions); assert.ok(ok5.ok, ok5.error); assert.equal(ok5.cfg.rules, R5D, 'replayed with the newest rule set starting on RULES5_FROM (7 while RULES7_FROM = RULES6_FROM = RULES5_FROM) — the same outcome in w1'); assert.ok(!ok5.rulesFallback);
   // dated rules 4 (the day before), finished in the cut-over week → one retry with 5
   const fb = verifyGame(Local, { ...row, daily_key: '2026-12-20', finished_day: R5c }, st.actions);
   const same4 = E.replay({ worldId: 'w1', charId, seed: 5151, mode: 'daily', maxMonths: 24, tutorial: false, bailout: false, mentor: 'hint', rules: 4 }, st.actions);

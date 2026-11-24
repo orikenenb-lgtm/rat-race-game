@@ -4,7 +4,7 @@
 // *what the player decides* — so in a seeded challenge everyone sees the same dice and the same cards.
 // See ENGINE.md for the full API contract.
 
-import { next, int, shuffle, weighted, makeStreams, STREAMS, mix32 } from './rng.js';
+import { next, int, shuffle, weighted, makeStreams, STREAMS, mix32, LAZY_STREAMS, lazyStreamSeed } from './rng.js';
 import * as BK from './finance/bank.js';
 import * as IV from './finance/invest.js';
 import { WORLDS, getWorld, registerWorld, ensureWorld, isLoaded, loadedWorlds, onRegister } from './worlds/index.js';
@@ -19,7 +19,8 @@ import * as MN from './systems/mentor.js';
 import * as FC from './systems/focus.js';
 import * as DD from './systems/dd.js';
 import * as CY from './systems/cycle.js';
-import { RULES4_FROM, RULES5_FROM, RULES6_FROM, rulesForDay, dayOf } from './systems/rules.js';
+import { RULES4_FROM, RULES5_FROM, RULES6_FROM, RULES7_FROM, rulesForDay, dayOf } from './systems/rules.js';
+import * as CT from './systems/content.js';
 import * as CH from './systems/chains.js';
 import * as RV from './systems/rivals.js';
 import * as DR from './systems/dreams.js';
@@ -36,7 +37,9 @@ export const OUTCOME_REV = 1;
 /** T4 E-2: the first N rolls of a brand-new player's first game cost no ⚡ (st.tutorialFree). */
 export const TUTORIAL_FREE_ROLLS = 10;
 /** CR-29: the rule set a ranked game is created (and verified) with, from its date key — shared with verify_core.js rulesFor. */
-export { RULES4_FROM, RULES5_FROM, RULES6_FROM, rulesForDay, dayOf as rulesDayOf };
+export { RULES4_FROM, RULES5_FROM, RULES6_FROM, RULES7_FROM, rulesForDay, dayOf as rulesDayOf };
+/** CATALOG-25 §4: the content-pool system (pure; pools are world data). */
+export { CT };
 /** Worlds wave 0: the registry (lazy worlds), the map meta and the one money formatter (js/money.js). */
 export { registerWorld, ensureWorld, isLoaded, loadedWorlds, money, moneyShort, moneyTiny, moneyFull }; // the map meta: js/worlds/meta.js (via js/progress.js)
 export const cyclePath = CY.cyclePath;
@@ -50,9 +53,12 @@ const R5 = (st) => (st.rules || 3) >= 5;
  *  is IDENTICAL to rules 5 (no rule reads R6 in a world without a module; tools/replay-corpus.mjs proves it). New worlds have minRules 6. */
 const R6 = (st) => (st.rules || 3) >= 6;
 void R6;
+/** CATALOG-25 rules gate: 7 = the lazy streams `exch` / `content` (created only for a world that declares them), the market module, content
+ *  pools on tiles. For every world without them rules 7 is IDENTICAL to rules 6 (no rule reads R7 there; tools/replay-corpus.mjs proves it). */
+const R7 = (st) => (st.rules || 3) >= 7;
 /** The newest rule set (free and learning games start with it). */
-export const RULES_CURRENT = 6;
-export const RULE_SETS = [3, 4, 5, 6];
+export const RULES_CURRENT = 7;
+export const RULE_SETS = [3, 4, 5, 6, 7];
 const RANKED_MODES = ['daily', 'weekly', 'challenge'];
 
 /** The lessons library: life lessons + the business module's lessons (ids biz_…). */
@@ -143,6 +149,8 @@ export function createGame(o = {}) {
   if (w.mechanic === 'fx') { st.world.usdHist = [st.world.usd]; }
   if (w.mechanic === 'angel') { st.world.impact = st.world.impact || 0; }
   if (ch.impact) st.world.impact = ch.impact;
+  if (rules0 >= 7 && Array.isArray(w.streams)) for (const nm of w.streams) if (LAZY_STREAMS.includes(nm)) st.rng[nm] = lazyStreamSeed(seed, nm); // CATALOG §3.8: lazy streams, only here
+  if (rules0 >= 7 && w.content && st.rng.content != null) CT.initContent(st, w.content, () => next(st.rng, 'content')); // §4.4: the seeded active packs (1 draw per pool)
   if (mechsOf(w).length) { st.rules = rules0; for (const M of mechsOf(w)) if (M.init) M.init(st, w, ch, MCTX); } // worlds wave 0: module state (0 'world' draws; w1–w4 untouched)
   updateDerivedPrices(st);
   for (const a of ch.assets || []) addAsset(st, a, { start: true, fixed: a.fixedRate != null });
@@ -193,6 +201,7 @@ function charMaxMonths(w, ch, rules) { return (rules >= 4 && ch && ch.maxMonths4
 function v4Defaults(st) {
   const fresh = makeStreams(st.seed);
   for (const k of STREAMS) if (st.rng[k] == null) st.rng[k] = fresh[k];
+  { const wd = BY_LOADED(st.worldId); if (wd && (st.rules || 0) >= 7 && Array.isArray(wd.streams)) for (const nm of wd.streams) if (LAZY_STREAMS.includes(nm) && st.rng[nm] == null) st.rng[nm] = lazyStreamSeed(st.seed, nm); } // CATALOG §3.8 (declared worlds only)
   if (st.rules == null) st.rules = 4;
   if (!MN.LEVELS.includes(st.mentor)) st.mentor = MN.defaultLevel({ mode: st.mode, tutorial: st.tutorial, worldId: st.worldId });
   if (st.econ === undefined) st.econ = null;
@@ -397,6 +406,7 @@ function migrateV2(st) {
 
 /* ============================================================ economy core */
 const W = (st) => getWorld(st.worldId);
+const BY_LOADED = (id) => (isLoaded(id) ? getWorld(id) : null);
 /* ---------------------------------------------------------------- worlds wave 0: mechanic modules (js/worlds/mech/*, DESIGN §4.2) */
 const NO_MECH = [];
 /** The mechanic modules of a world (w.mech: an array of module objects attached by the world file). [] for w1–w4 / h. */
@@ -579,6 +589,7 @@ function netWorthOf(st) {
   let nw = st.cash + (st.savings || 0) - st.loans - st.credit + holdingsValue(st) + angelPaper(st);
   for (const a of st.assets) nw += assetValue(st, a) - a.debt;
   const M = mechWith(st, 'liability'); if (M) nw -= M.liability(st, MCTX); // worlds wave 0: module debts (w5: the seasonal credit line)
+  for (const X of mechs(st)) if (X.worth) nw += X.worth(st, MCTX); // CATALOG §3: module-held value outside st.assets (w10: market holdings + claims)
   return Math.round(nw);
 }
 
@@ -722,7 +733,7 @@ function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, ac
   if (w.mechanic === 'fx') { wi.usd = st.world.usd; wi.usdHist = st.world.usdHist.slice(-12); wi.usdRef = w.fx.ref; wi.gold = st.prices.GOLD; wi.insuredUntil = st.world.insuredUntil || 0; wi.exposure = fxExposure(st); }
   if (w.mechanic === 'angel') { wi.impact = Math.floor(st.world.impact || 0); wi.impactPending = Math.round((st.world.vesting || []).reduce((s, v) => s + v.left, 0)); wi.impactPerMonth = round2(st.pledges.reduce((s, p) => s + p.impact, 0) + st.assets.reduce((s, a) => s + (a.impact || 0), 0) + (st.world.vesting || []).reduce((s, v) => s + Math.min(v.left, v.perMonth), 0)); wi.impactTarget = w.goal.impact; wi.angelsActive = st.angels.filter((x) => x.status === 'active').length; wi.angelPaper = angelPaper(st); }
   if (w.mechanic === 'history' && st.history) { const H = st.history; Object.assign(wi, { ym: H.ym, ymText: ymText(H.ym), index: st.prices.IDX, indexHist: H.idxHist.slice(-24), rate: st.world.rate, rateHist: st.world.rateHist.slice(-12), cpi: round2(st.life.cpi), home: round2(homeRatio(st)), usd: round2(seriesAt('usdIls', H.ym) || 0), headline: H.headline, benchmark: benchNW(st), scenario: H.name, reality: H.index === 'sp500' ? '🌍 המדד האמריקאי נמדד בדולרים; בקרן שקלית גם שער הדולר משנה (למשל 2007–2012: הדולר ירד מ־4.25 ל־3.92).' : null }); }
-  { const M = mechWith(st, 'indicators'); if (M) Object.assign(wi, M.indicators(st, MCTX)); } // worlds wave 0: module chips + the generic panel descriptor
+  for (const M of mechs(st)) if (M.indicators) Object.assign(wi, M.indicators(st, MCTX)); // worlds wave 0: module chips + the generic panel descriptor (every module, in order)
   const L = st.life; const band = bandOf(st); const idxH = st.holdings.IDX;
   const life = {
     age: round2(L.age), ageText: ageText(L.age), energy: Math.round(L.energy), happiness: Math.round(happyNow(st)), happinessBase: Math.round(L.happiness),
@@ -744,7 +755,7 @@ function metricsRest(st, w, g, ps, L0, salary, sideIncome, passive, expenses, ac
     savings: st.savings, emergency: emergencyOf(st, expenses), realWorldRates: realWorldRates(st),
     goalHold: { streak: L.goalStreak || 0, need: goalHoldOf(st), met: goalMet(st) }, goalPassive: goalPassiveOf(st),
     activeBizIncome: activeBiz, businesses: managedOf(st).map((a) => ({ assetId: 'a' + a.id, ...BIZ.summary(a.biz, a.bizRep || null) })),
-    totalAssets: totalAssetsOf(st), totalLiabilities: st.loans + st.credit + st.assets.reduce((x, a) => x + a.debt, 0),
+    totalAssets: totalAssetsOf(st), totalLiabilities: st.loans + st.credit + st.assets.reduce((x, a) => x + a.debt, 0) + modLiability(st), // + module debts (w10: the margin loan)
     cash: st.cash, salary, passive, expenses, cashflow, netWorth, loans: st.loans, credit: st.credit,
     goalProgress, goalText, goalParts, goalType: g.type,
     incomeLines, expenseLines, assets, liabilities, holdings, angels, worldIndicators: wi,
@@ -784,7 +795,9 @@ function emergencyOf(st, expenses) {
   const months = expenses > 0 ? Math.round((st.savings / expenses) * 10) / 10 : 0;
   return { balance: st.savings, months, target: 3, covered: months >= 3, rate: round2(savingsRate(st) * 100), text: heMonthFix(`קרן חירום: ${months} חודשי הוצאות`) };
 }
-function totalAssetsOf(st) { return Math.round(st.cash + (st.savings || 0) + holdingsValue(st) + angelPaper(st) + st.assets.reduce((x, a) => x + assetValue(st, a), 0)); }
+function totalAssetsOf(st) { let v = st.cash + (st.savings || 0) + holdingsValue(st) + angelPaper(st) + st.assets.reduce((x, a) => x + assetValue(st, a), 0); for (const X of mechs(st)) if (X.worth) v += X.worth(st, MCTX); return Math.round(v); } // + module-held value (w10: market holdings + claims)
+/** Module debts in the balance sheet (the same number netWorthOf subtracts). */
+function modLiability(st) { const M = mechWith(st, 'liability'); return M ? Math.round(M.liability(st, MCTX)) : 0; }
 /** ₪ change in monthly cashflow if the dollar moves +10% (unhedged assets + USD salary). Used by the w3 HUD. */
 function fxExposure(st) {
   const w = W(st); let cf = 0, value = 0;
@@ -832,7 +845,7 @@ export function cityModels(st) {
   }
   for (const x of st.angels) if (x.status === 'active') out.push({ key: 'v' + x.id, assetId: 'v' + x.id, model: w.models.angel, label: x.n, kind: 'angel' });
   if (w.mechanic === 'angel' && (st.stats.given > 0 || st.pledges.length)) out.push({ key: 'f', assetId: 'f', model: w.models.giving, label: 'הקרן שלך', kind: 'foundation' });
-  { const M = mechWith(st, 'cityModels'); if (M) M.cityModels(st, out, MCTX); } // worlds wave 0: module pieces (and per-asset render hints, e.g. w5 occupancy)
+  for (const M of mechs(st)) if (M.cityModels) M.cityModels(st, out, MCTX); // worlds wave 0: module pieces (and per-asset render hints, e.g. w5 occupancy)
   return out.filter((m) => m.model);
 }
 function holdingModelDiff(st, before, out) {
@@ -1409,6 +1422,7 @@ function monthlyWorld(st, out) {
     }
   }
   for (const M of mechsOf(w)) if (M.monthly) M.monthly(st, out, MCTX); // worlds wave 0: the module's month (its declared fixed 'world' draws)
+  if (st.content && w.content && st.rng.content != null) CT.paydayContent(st, w.content, () => next(st.rng, 'content'), st.stats.paydays); // §4.4: rotation (1 draw per pool every 12 paydays)
 }
 /** מכונת הזמן: one real month passes — rate, home prices, dollar, headlines, the benchmark investor. */
 function historyMonth(st, out) {
@@ -1518,7 +1532,7 @@ export function currentEvent(st) { return st.pending ? describe(st) : null; }
 
 function createDeal(st, forceGolden = null) {
   const w = W(st);
-  const base = drawCard(st, 'deal', w.deals, 'deal');
+  const base = contentDeal(st, w) || drawCard(st, 'deal', w.deals, 'deal'); // CATALOG §4: a world with a deal pool on this tile (rules 7)
   const gRoll = next(st.rng, 'deal');
   const gIdx = w.golden && w.golden.length ? int(st.rng, 'deal', 0, w.golden.length - 1) : (next(st.rng, 'deal'), 0);
   const negR = next(st.rng, 'deal'); // v3: the seller's answer to a lower offer is sealed with the card
@@ -1538,6 +1552,15 @@ function createDeal(st, forceGolden = null) {
   attachDD(st, p, rs, { golden, starter });
   attachRival(st, p, rv);
   return p;
+}
+/** CATALOG §4.3: the deal tile's card from the world's content pool (fixed POOL_D draws on stream `content`), frozen into an engine card;
+ *  null when the world has no pool on this tile (w1–w9: never — no draw) or nothing is eligible (the legacy deck is the fallback). */
+function contentDeal(st, w) {
+  if (!R7(st) || !st.content || !w.content || !w.content.pools || st.rng.content == null) return null;
+  const ch = w.board[st.pos]; const pool = w.content.pools[ch]; if (!pool) return null;
+  const inst = CT.select(st, w.content, pool, { worldId: w.id, tier: w.tier, tile: ch, regime: st.mkt ? st.mkt.regime.id : null, phase: st.econ ? st.econ.phase : null },
+    () => next(st.rng, 'content'), { band: (w.econ && w.econ.band && w.econ.band.deal) || [0, 0], fmt: (n) => fmtM(n) });
+  return inst ? CT.dealCard(inst) : null;
 }
 /** The 6 dd draws (rules 4 only; rules 3 never touches the stream). */
 function ddDraws(st) { if (!R4(st)) return null; const rs = []; for (let i = 0; i < DD.DD_DRAWS; i++) rs.push(next(st.rng, 'dd')); return rs; }
@@ -5252,10 +5275,12 @@ function worldActionImpl(st, name, param) {
   return { ...out, event: currentEvent(st), end };
 }
 /** The module actions available now (ids, labels, enabled + reason) — the panel descriptor lists them; [] in w1–w4. */
-export function worldActions(st) { const M = mechWith(st, 'actions'); return M ? M.actions(st, MCTX) : []; }
+export function worldActions(st) { const out = []; for (const M of mechs(st)) if (M.actions) out.push(...M.actions(st, MCTX)); return out; }
 /** Engine helpers handed to modules (a module never imports engine.js: no cycle, Node-importable, part of a world's pinned pack). */
 const MCTX = Object.freeze({
   draw: (st) => next(st.rng, 'world'),                  // THE module stream (index 15); modules declare their fixed counts (draws)
+  drawX: (st, name) => { if (st.rng[name] == null) throw new Error('stream ' + name + ' not declared'); return next(st.rng, name); }, // CATALOG §3.8: a declared lazy stream (exch, content)
+  fireTrigger: (st, on) => { const w = W(st); return w.content && st.content ? CT.fireTrigger(st, w.content, on) : []; }, // §4.4 triggered pool entries
   fmtM: (n) => fmtM(n), money: (n, f) => money(n, f), sgn: (n) => sgn(n), pct: (x, d) => pct(x, d), tpl: (t, v) => tpl(t, v), heMonths: (n) => heMonths(n),
   mentorLine: (st, k, v) => mentorLine(st, k, v), gz: (st, t) => gz(st, t), opt: (id, label, enabled, extra) => opt(id, label, enabled, extra),
   cashFx: (out, amount, label, at) => cashFx(out, amount, label, at), sound: (out, name) => sound(out, name),

@@ -14,23 +14,23 @@ async function test(name, fn) { const t0 = Date.now(); try { await fn(); passed+
 await test('lazy registry: w5 is not loaded by the engine; getWorld → world_not_loaded; ensureWorld loads it; WORLDS stays w1–w4', async () => {
   assert.deepEqual(E.WORLDS.map((w) => w.id), ['w1', 'w2', 'w3', 'w4'], 'the daily rotation and every legacy caller see the same 4');
   assert.equal(E.isLoaded('w5'), false);
-  assert.throws(() => E.getWorld('w5'), /world_not_loaded/); assert.throws(() => E.getWorld('w10'), /unknown world/);
+  assert.throws(() => E.getWorld('w5'), /world_not_loaded/); assert.throws(() => E.getWorld('w99'), /unknown world/);
   assert.throws(() => E.createGame({ worldId: 'w5', seed: 1 }), /world_not_loaded/);
   const saved = '{"v":4,"worldId":"w5"}'; assert.throws(() => E.deserialize(saved), /world_not_loaded|save_incompatible/);
   const w = await E.ensureWorld('w5'); assert.equal(w.id, 'w5'); assert.equal(E.isLoaded('w5'), true); assert.equal(E.getWorld('w5'), w);
   assert.deepEqual(E.WORLDS.map((x) => x.id), ['w1', 'w2', 'w3', 'w4']);
-  await assert.rejects(E.ensureWorld('w10'), /unknown world/);
+  await assert.rejects(E.ensureWorld('w99'), /unknown world/);
   assert.equal(E.dailyConfig('2026-12-25').worldId.startsWith('w') && ['w1', 'w2', 'w3', 'w4'].includes(E.dailyConfig('2026-12-25').worldId), true);
 });
 
 const W5 = E.getWorld('w5'); const CH = W5.characters.map((c) => c.id);
 
-await test('rules: RULES_CURRENT 6; w5 always ≥ its minRules 6; a ranked date before RULES6_FROM cannot make a w5 game older', () => {
-  assert.equal(E.RULES_CURRENT, 6); assert.equal(E.RULES6_FROM, E.RULES5_FROM, 'placeholder = RULES5_FROM until the owner confirms');
+await test('rules: RULES_CURRENT 7 (≡ 6 here); w5 always ≥ its minRules 6; a ranked date before RULES6_FROM cannot make a w5 game older', () => {
+  assert.equal(E.RULES_CURRENT, 7); assert.equal(E.RULES6_FROM, E.RULES5_FROM, 'placeholder = RULES5_FROM until the owner confirms'); assert.equal(E.RULES7_FROM, E.RULES6_FROM, 'rules 7 placeholder (CATALOG-25)');
   assert.equal(E.createGame({ worldId: 'w5', seed: 3, rules: 4 }).rules, 6);
   assert.equal(E.createGame({ worldId: 'w5', seed: 3, mode: 'challenge', dateKey: '2026-12-01' }).rules, 6);
   assert.equal(E.createGame({ worldId: 'w1', seed: 3, rules: 5 }).rules, 5, 'w1 keeps rules 5 when asked');
-  assert.equal(E.rulesForDay('2026-12-20'), 4); assert.equal(E.rulesForDay(E.RULES6_FROM), 6); assert.equal(E.rulesForDay(null), 6);
+  assert.equal(E.rulesForDay('2026-12-20'), 4); assert.equal(E.rulesForDay(E.RULES6_FROM), E.RULES_CURRENT, 'RULES7_FROM = RULES6_FROM: that day is rules 7'); assert.equal(E.rulesForDay(null), E.RULES_CURRENT);
 });
 
 await test('w5 start: October, tour 1, empty ring; characters as specified (hotel 120 rooms rep 70 debt ₪21M; 2 owner-run restaurants; cash only)', () => {
@@ -151,7 +151,7 @@ await test('fuzz (G-big): integer money, no NaN, NW = assets − liabilities, pa
     playW5({ worldId: 'w5', charId: CH[i % 3], seed: 900 + i, mode: 'free' }, r, { zRate: 0.25, maxTurns: 150, onTurn: (s) => {
       const m = E.metrics(s);
       for (const k of ['cash', 'netWorth', 'passive', 'expenses', 'cashflow', 'totalAssets', 'totalLiabilities']) assert.ok(Number.isInteger(m[k]), `${k} = ${m[k]}`);
-      assert.equal(m.netWorth, m.totalAssets - m.totalLiabilities - (s.world.line || 0), 'NW = assets − liabilities (− the seasonal line)');
+      assert.equal(m.netWorth, m.totalAssets - m.totalLiabilities, 'NW = assets − liabilities (the seasonal line is a liability — CATALOG-25 A1: module debts now count in totalLiabilities)');
       for (const a of s.assets) { assert.ok(Number.isInteger(a.value) && Number.isInteger(a.debt)); if (a.op) assert.ok(Number.isFinite(a.op.rep) && a.op.rep >= 0 && a.op.rep <= 100); }
       if (s.lastPayday && s.lastPayday !== last) { last = s.lastPayday; assert.ok(Number.isInteger(last.amount)); }
     } });
@@ -193,7 +193,7 @@ await test('verifier: core bundle + the w5 pack only (MAX_BUNDLE untouched), a w
     if (!st.over) continue;
     const row = { mode: 'challenge', world: 'w5', profession: ch, seed: String(seed), max_months: null, challenge_day: '2026-12-22', status: st.result.status, months: st.result.months, passive: Math.round(st.result.passive), expenses: Math.round(st.result.expenses), net_worth: Math.round(st.result.netWorth), claim_stars: st.result.stars || 0, claim_progress: st.result.progress };
     const a = performance.now(); const out = V.verifyGame(EE, row, st.actions); const ms = performance.now() - a; maxMs = Math.max(maxMs, ms); maxActs = Math.max(maxActs, st.actions.length);
-    assert.ok(out.ok, `w5 game ${i} should verify: ${out.error}`); assert.equal(out.cfg.rules, 6);
+    assert.ok(out.ok, `w5 game ${i} should verify: ${out.error}`); assert.equal(out.cfg.rules, E.RULES_CURRENT);
     const forged = V.verifyGame(EE, { ...row, net_worth: row.net_worth + 1000 }, st.actions); assert.equal(forged.ok, false);
     assert.throws(() => V.configFor(EE, { ...row, challenge_day: '2026-12-10' }), /bad_world/);
   }

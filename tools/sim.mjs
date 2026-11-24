@@ -312,7 +312,7 @@ const has2 = has; void has2;
 /* ---------- I8: per-mechanic policy plug-ins (tools/policies/<mechanic>.mjs). A plug-in exports make(ctx) → {policyName: policy}; those
    names override / extend POLICIES for the worlds of that mechanic only (w1–w4 never load one, so their reports are unchanged). */
 const PLUGINS = {};
-for (const mech of ['season', 'plant', 'chain', 'projects', 'energy']) {
+for (const mech of ['season', 'plant', 'chain', 'projects', 'energy', 'portfolio']) {
   const mod = await import(`./policies/${mech}.mjs`);
   PLUGINS[mech] = mod.make({ E, POLICIES, ddRule, facade, claimedNet, runFocus, firstEnabled, ABL });
 }
@@ -795,7 +795,7 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--world-g
     const recs = worldGatesRun(wid, n, spec.policies || []);
     const gates = worldGates(wid, recs, spec);
     const file = process.env.SIM_OUT || `tools/balance-data/gates-${wid}.json`;
-    writeFileSync(file, JSON.stringify({ world: wid, n, rules: SIM_RULES || E.RULES_CURRENT, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'turns', 'bankrupt', 'pwMet', 'forcedLoans'], gates, recs }) + '\n');
+    writeFileSync(file, JSON.stringify({ world: wid, n, rules: SIM_RULES || E.RULES_CURRENT, engineSha: ENGINE_SHA, secs: Math.round((Date.now() - t0) / 1000), cols: ['policy', 'char', 'i', 'bucket', 'won', 'inTime', 'months', 'stars', 'turns', 'bankrupt', 'pwMet', 'forcedLoans', 'nwEnd', 'modForced'], gates, recs }) + '\n');
     const pol = [...new Set(recs.map((r) => r[0]))];
     console.log(`| policy | in time | won | median months | bankrupt |\n|---|---|---|---|---|\n` + pol.map((p) => { const rs = recs.filter((r) => r[0] === p); const c = cellStats(rs); return `| ${p} | ${(c.inTime * 100).toFixed(0)}% | ${(rs.filter((r) => r[4]).length / rs.length * 100).toFixed(0)}% | ${Number.isFinite(c.med) ? c.med : '—'} | ${(rs.filter((r) => r[9]).length / rs.length * 100).toFixed(0)}% |`; }).join('\n'));
     console.log('\n| gate | status | numbers |\n|---|---|---|\n' + gates.map((g) => `| ${g.id} ${g.what} | ${g.status} | ${g.text} |`).join('\n'));
@@ -805,7 +805,7 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--world-g
 }
 /* ---------- worlds wave 0: the per-world balance gates of a module world (DESIGN §5.3) — `node tools/sim.mjs --world-gates N wX`
    Every policy below × character × N seeds (seedOf), free mode, cap 1.6× the limit; a winner plays 24 more months under the same policy
-   (continueAfterWin) for G-durable. Records: [pol, char, i, bucket, won, inTime, months, stars, turns, bankrupt, pwMet, forcedLoans]. */
+   (continueAfterWin) for G-durable. Records: [pol, char, i, bucket, won, inTime, months, stars, turns, bankrupt, pwMet, forcedLoans, nwEnd (at the end, before any continuation), modForced (a module's forced liquidations, w10)]. */
 export function worldGatePols() { return ['guideTapper', 'blindTapper', 'naive', 'smart', 'saver', 'founder', 'diversified', 'gambler', 'f:frugal', 'f:none', 'maxDebt']; }
 export function worldGatesRun(wid, n, extra = []) {
   const w = E.getWorld(wid); const recs = []; const t0 = Date.now();
@@ -816,12 +816,12 @@ export function worldGatesRun(wid, n, extra = []) {
     for (const pol of pols) {
       for (let i = 0; i < n; i++) {
         const { st, end } = play(wid, ch.id, seedOf(wid, i), pol, cap);
-        const won = !!(end && end.status === 'won'); let pw = null;
+        const won = !!(end && end.status === 'won'); let pw = null; const mEnd = E.metrics(st); const nwEnd = Math.round(mEnd.netWorth); const modForced = ((mEnd.worldIndicators || {}).portfolio || {}).forced || 0;
         if (won && E.continueAfterWin(st).ok !== false) { const P = policyFor(wid, pol); const r = prng(i + 101); const m0 = st.month; let g = 0;
           while (!st.over && st.month < m0 + 24 && g++ < 3000) { P.between(st, { r }); if (st.over) break; if (st.pending) { let ev = E.currentEvent(st); let k = 0; while (ev && k++ < 12) { const c = k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); const res = E.choose(st, ev, c[0], c[1]); ev = res.event; } if (st.over) break; }
             E.rollDice(st); let ev = E.landing(st); let k = 0; while (ev && !st.over) { const c = ev.auto ? [ev.options[0].id] : k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); let res = E.choose(st, ev, c[0], c[1]); if (!res.ok) res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id); ev = res.event; k++; } }
           pw = E.metrics(st).goalHold.met && !st.flags.bankrupt ? 1 : 0; }
-        recs.push([pol, ch.id, i, buckets[i], won ? 1 : 0, won && end.months <= lim ? 1 : 0, won ? end.months : null, end ? end.stars || 0 : 0, end ? end.turns : st.turn, end && end.reason === 'bankrupt' ? 1 : 0, pw, st.stats.forcedLoans]);
+        recs.push([pol, ch.id, i, buckets[i], won ? 1 : 0, won && end.months <= lim ? 1 : 0, won ? end.months : null, end ? end.stars || 0 : 0, end ? end.turns : st.turn, end && end.reason === 'bankrupt' ? 1 : 0, pw, st.stats.forcedLoans, nwEnd, modForced]);
       }
       if (!QUIET) console.log(`${wid} ${ch.id} ${pol} (${Math.round((Date.now() - t0) / 1000)}s)`);
     }
@@ -855,7 +855,7 @@ export function worldGates(wid, recs, extra = {}) {
   const pw = recs.filter((r) => ['smart', 'guideTapper'].includes(r[0]) && r[4] && r[10] != null); add('G-durable', '≥ 85 % of winners (smart, guide) still meet the goal 24 months after the win', pw.length > 0 && pw.filter((r) => r[10]).length / pw.length >= 0.85, `${pw.filter((r) => r[10]).length}/${pw.length} = ${P(pw.length ? pw.filter((r) => r[10]).length / pw.length : NaN)}`);
   const turns = recs.filter((r) => ['smart', 'guideTapper'].includes(r[0]) && r[4]).map((r) => r[8]); const mt = turns.length ? q(turns, 0.5) : NaN;
   add('G-time', 'median won rolls (smart + guide) 60–100', mt >= 60 && mt <= 100, `median ${mt} rolls (p10 ${turns.length ? q(turns, 0.1) : '—'}, p90 ${turns.length ? q(turns, 0.9) : '—'}) · median won months smart ${sm.med} guide ${gt.med}`);
-  for (const g of extra.gates || []) { const r = g(of, S, P); G.push(r); }
+  for (const g of extra.gates || []) { const r = g(of, S, P, recs); G.push(r); }
   return G;
 }
 
