@@ -214,6 +214,7 @@ async def on_trade_factory(sc, world, vp):
         if TRADE_SEEN.get(sc): return
         await pg.wait_for_selector('#qCdl:not([hidden]) .cdl-chart', timeout=20000)
         TRADE_SEEN[sc] = True
+        await pg.evaluate("() => document.querySelector('#qCdl .cdl-chart').scrollIntoView({ block: 'center' })"); await pg.wait_for_timeout(300)
         G = await pg.evaluate(CHART, '#qCdl .cdl-chart')
         price = norm(await pg.inner_text('#qprice'))
         ro = norm(G['ro'])
