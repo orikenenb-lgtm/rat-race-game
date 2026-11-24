@@ -32,7 +32,7 @@ const before = P.getProgress();
 const r = P.recordLearnGame({ worldId: 'w1', charId: 'driver', status: 'won', stars: 3, months: 30, seed: 5, netWorth: 1000, achievements: ['no_trap'], end: { achievements: ['first_win'] } });
 const after = P.getProgress();
 const changed = Object.keys(after).filter((k) => k !== 'dirty' && JSON.stringify(after[k]) !== JSON.stringify(before[k]));
-eq(changed.sort(), ['cleared', 'lastChar', 'learnGames', 'tutorialDone'].sort(), 'T-M1 recordLearnGame changes only learnGames / tutorialDone / lastChar / cleared (P0: a practice escape finishes the world)');
+eq(changed.sort(), ['cleared', 'endSigs', 'lastChar', 'learnGames', 'tutorialDone'].sort(), 'T-M1 recordLearnGame changes only learnGames / tutorialDone / lastChar / cleared (P0: a practice escape finishes the world)');
 ok(!after.achievements.includes('no_trap') && !after.achievements.includes('first_win'), 'T-M1 a learning game\'s end-payload achievements are never recorded');
 eq([r.learn, r.wouldStars, r.worldId, r.gained, r.unlockedWorld, r.newAchievements.length], [true, 3, 'w1', 0, null, 0], 'T-M1 recordLearnGame result');
 eq(P.recordLearnGame({ worldId: 'w1', charId: 'driver', status: 'won', stars: 3, months: 30, seed: 5, netWorth: 1000 }).learnGames, 1, 'same learning game twice is counted once');
