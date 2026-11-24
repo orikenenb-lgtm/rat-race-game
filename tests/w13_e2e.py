@@ -167,6 +167,14 @@ PANEL = """() => { const c = document.querySelector('#gmCard'); return { gauges:
   acts: c.querySelectorAll('button[data-wact]').length, sells: c.querySelectorAll('button[data-aid="sell"]').length,
   title: (c.querySelector('h2') || {}).textContent || '', now: (c.querySelector('.wp-now') || {}).textContent || '', text: c.textContent }; }"""
 
+async def close_gm(pg, n=8):
+    for _ in range(n):
+        if await pg.evaluate("() => document.querySelector('#gm').hidden"): return
+        b = pg.locator('#gm .acts button.primary:not([disabled])')
+        if await b.count(): await b.first.click()
+        else: await pg.keyboard.press('Escape')
+        await pg.wait_for_timeout(400)
+
 async def roll_to(pg, kind, n=60, seen=None, title=None):
     st0 = await pg.evaluate(SAVED); m0 = st0['month'] if st0 else 1; paid = False
     for i in range(n):
@@ -268,6 +276,7 @@ async def run_play(b):
         await pg.click('#gmCard .mh-row[data-row="world"] button[data-hub="world"]'); await pg.wait_for_selector('#gmCard.wpanel', timeout=10000)
         check(sc, '💼 → the club panel opens', await pg.locator('#gmCard.wpanel').count() == 1)
         await pg.locator('#gmCard .acts button.primary').click(); await pg.wait_for_timeout(400)
+    await close_gm(pg)   # a dialog that queued behind the panel (a new lesson / milestone after the sale) is answered first
     await pg.click('#hGoalBtn'); await pg.wait_for_selector('#goalPanel:not([hidden])', timeout=5000)
     gp = await pg.evaluate("() => document.querySelector('#goalPanel').textContent")
     gsub = await pg.evaluate("() => (document.querySelector('#hGoal .gsub') || {}).textContent || ''")
