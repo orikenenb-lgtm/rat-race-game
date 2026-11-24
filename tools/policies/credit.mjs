@@ -58,7 +58,7 @@ export function make({ E, POLICIES }) {
   const inT = (S, rs) => S(rs).inTime; const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : 0);
   P.__gates = {
     policies: ['priceLow', 'priceHigh', 'maxMismatch', 'noDividendEver'],
-    ablations: ['maxMismatch', 'noDividendEver'],
+    ablations: ['maxMismatch', 'priceHigh'],
     gates: [
       (of, S, Pc) => { const lo = of('priceLow'), hi = of('priceHigh'), sm = of('smart'); const pdHi = hi.length ? hi.reduce((s, r) => s + (r[14] || 1), 0) / hi.length : 1; const pdSm = sm.length ? sm.reduce((s, r) => s + (r[14] || 1), 0) / sm.length : 1;
         const ok = inT(S, lo) <= inT(S, sm) - 0.05 && pdHi >= pdSm * 1.2; return { id: 'W14-select', what: 'priceLow loses to smart by ≥ 5 pp; priceHigh new-loan PD ≥ +20 % vs smart', status: ok ? 'met' : 'NOT met', text: `priceLow ${Pc(inT(S, lo))} vs smart ${Pc(inT(S, sm))} · new-loan PD × ${pdHi.toFixed(2)} (priceHigh) vs × ${pdSm.toFixed(2)} (smart) · priceHigh in time ${Pc(inT(S, hi))}` }; },

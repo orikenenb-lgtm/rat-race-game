@@ -19,8 +19,8 @@ export const SEG = Object.freeze({
   corp: Object.freeze({ n: 'חברות גדולות', pd: 0.02, lgd: 0.4, rw: 1.0, mat: 48, fix: 0.3, sp: 2.2 }),
 });
 export const PRICES = Object.freeze([-1, -0.5, 0, 0.5, 1, 1.5]);
-/** Adverse selection: volume × (1 − 0.45 × delta), new-loan PD × (1 + 0.6 × delta) above the market. */
-export const SEL = Object.freeze({ vol: 0.45, pd: 0.6, volMin: 0.25, volMax: 1.6 });
+/** Adverse selection: volume × (1 − 0.45 × delta), new-loan PD × (1 + delta) above the market. */
+export const SEL = Object.freeze({ vol: 0.45, pd: 1.0, volMin: 0.25, volMax: 1.6 });
 const CYC = Object.freeze({ exp: 0.8, slow: 1.1, rec: 1.8, recov: 1.0 });
 const DEM = Object.freeze({ exp: 1.15, slow: 1.0, rec: 0.7, recov: 0.95 });
 export const REG = Object.freeze({ min: 0.08, target: 0.1, resolve: 0.05, ban: 12 });
@@ -28,6 +28,9 @@ export const FUND = Object.freeze({ retailSpread: 2.0, whSpread: 0.6, liq: Objec
 export const CONF = Object.freeze({ start: 70, run: 30, revert: 0.25, noise: 3, outR: 0.1, outW: 0.35 });
 export const RAISE = Object.freeze({ share: 0.2, disc: 0.15 });
 const LIQCONF = Object.freeze({ low: -10, mid: 0, high: 10 });
+/** The inherited book earns 0.8 pp below today's market and runs off twice as fast as new loans (prepaid / refinanced away); vintages: loans written in a boom default more. */
+export const LEGACY = Object.freeze({ yAdj: -0.8, run: 2 });
+export const VINT = Object.freeze({ exp: 1.3, slow: 1.0, rec: 0.8, recov: 0.9 });
 const RATE = Object.freeze({ start: 4, min: 0.25, max: 9, revert: 0.02 });
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -48,7 +51,7 @@ export const capRatio = (st) => { const R = rwa(st); return R > 0 ? round4(CR(st
 export const ownerEquity = (st) => r1000(Math.max(0, CR(st).eq) * CR(st).stake);
 const liqTarget = (st) => r1000(CR(st).ret * FUND.liq[CR(st).liq]);
 /** Wholesale fills the gap: loans + liquid = retail + wholesale + equity (+ the central bank window). */
-function rebalance(st) { const B = CR(st); B.liqA = liqTarget(st); const need = loans(st) - B.prov + B.liqA - B.ret - B.eq - B.cbw; if (need >= 0) B.wh = r1000(need); else { B.wh = 0; B.liqA = r1000(B.liqA - need); } }
+function rebalance(st) { const B = CR(st); for (const k of SEGS) if (B.seg[k].leg) B.seg[k].leg = Math.min(B.seg[k].leg, B.seg[k].book); B.liqA = liqTarget(st); const need = loans(st) - B.prov + B.liqA - B.ret - B.eq - B.cbw; if (need >= 0) B.wh = r1000(need); else { B.wh = 0; B.liqA = r1000(B.liqA - need); } }
 const retRate = (st) => CR(st).rr;
 const whRate = (st) => round2(CR(st).rate + FUND.whSpread + Math.max(0, (CONF.start - CR(st).conf) / 40));
 /** A segment's yield now (% a year) on its floating part. */
@@ -69,8 +72,8 @@ export const credit = {
 
   init(st, w, ch) {
     const S = (ch && ch.start) || {}; const book = S.book || 1.6e9; const mix = S.mix || { mort: 0.4, sme: 0.2, dev: 0.15, cons: 0.1, corp: 0.15 };
-    const seg = {}; for (const k of SEGS) { seg[k] = newSeg(k, r1000(book * (mix[k] || 0))); seg[k].delta = S.delta ?? 1; } // the previous management priced 1 pp above the market
-    st.world.cr = { seg, eq: S.equity || 200e6, stake: 1, ret: r1000(book * (S.retail || 0.75)), wh: 0, liqA: 0, cbw: 0, cbwUntil: 0, cbwLast: -99, liq: 'mid', prov: r1000(book * 0.004), rate: RATE.start, rr: RATE.start - FUND.retailSpread,
+    const seg = {}; for (const k of SEGS) { seg[k] = newSeg(k, r1000(book * (mix[k] || 0))); seg[k].delta = S.delta ?? 1.5; seg[k].leg = seg[k].book; } // the previous management: an old book written cheap, new loans priced 1.5 pp above the market
+    st.world.cr = { seg, eq: S.equity || 200e6, stake: 1, ret: r1000(book * (S.retail || 0.75)), wh: 0, liqA: 0, cbw: 0, cbwUntil: 0, cbwLast: -99, liq: S.liq || 'low', prov: r1000(book * 0.004), rate: RATE.start, rr: RATE.start - FUND.retailSpread,
       conf: CONF.start, hot: S.hot || 1, sticky: S.sticky || 1, demand: S.demand || 1, opex: S.opex || 1, last: null, profit12: [], div: 0, ban: 0, regAt: 0, regs: 0, runs: 0, runAt: 0, raised: 0, sold: 0, shocks: [], newPdSum: 0, newVolSum: 0, slump: 0 };
     rebalance(st);
   },
@@ -83,18 +86,19 @@ export const credit = {
     B.rate = round2(clamp(B.rate + (RATE.start - B.rate) * RATE.revert, RATE.min, RATE.max)); B.rr = round2(B.rr + (Math.max(0, B.rate - FUND.retailSpread) - B.rr) * 0.3);
     // 1. the month's interest
     let nii = 0; for (const k of SEGS) { const s = B.seg[k]; nii += (s.book - s.fixBook) * yieldOf(st, k) / 1200 + s.fixBook * s.fixY / 1200; }
+    for (const k of SEGS) nii += (B.seg[k].leg || 0) * LEGACY.yAdj / 1200;
     nii += B.liqA * Math.max(0, B.rate - 0.5) / 1200 - B.ret * retRate(st) / 1200 - B.wh * whRate(st) / 1200 - B.cbw * (B.rate + 3) / 1200;
     const opex = (B.fixedOpex + loans(st) * FUND.opexVar) * B.opex; // branches and systems are mostly fixed; a bigger book adds a little
     // 2. defaults (one draw per segment; a draw above 0.985 is a big single borrower: 3 % of the segment at once)
     let loss = 0; const hit = {};
     for (let i = 0; i < SEGS.length; i++) { const k = SEGS[i]; const s = B.seg[k]; const slump = k === 'dev' && B.slump >= st.month ? 2 : 1;
       let l = s.book * SEG[k].pd / 12 * s.pdMix * (CYC[ph] || 1) * slump * (0.4 + 1.2 * rs[i]) * SEG[k].lgd; if (rs[i] > 0.985 && (k === 'corp' || k === 'dev')) l += s.book * 0.03 * SEG[k].lgd;
-      l = Math.round(l); s.book = Math.max(0, s.book - Math.round(l / SEG[k].lgd)); s.fixBook = Math.min(s.fixBook, s.book); loss += l; hit[k] = l; }
+      l = Math.round(l); s.book = Math.max(0, s.book - Math.round(l / SEG[k].lgd)); s.fixBook = Math.min(s.fixBook, s.book); if (s.leg) s.leg = Math.min(s.leg, s.book); loss += l; hit[k] = l; }
     // 3. runoff + new lending at the player's price (adverse selection), expected loss provisioned at origination
     let el = 0; B.newVolSum = 0; let pdW = 0;
-    for (const k of SEGS) { const s = B.seg[k]; const run = Math.round(s.book / SEG[k].mat); const fr = s.book ? s.fixBook / s.book : 0; s.book -= run; s.fixBook = Math.max(0, s.fixBook - Math.round(run * fr));
+    for (const k of SEGS) { const s = B.seg[k]; const legRun = Math.round((s.leg || 0) * LEGACY.run / SEG[k].mat); const run = Math.round((s.book - (s.leg || 0)) / SEG[k].mat) + legRun; if (s.leg) s.leg = Math.max(0, s.leg - legRun); const fr = s.book ? s.fixBook / s.book : 0; s.book -= run; s.fixBook = Math.max(0, s.fixBook - Math.round(run * fr));
       const banned = s.stop || (B.ban >= pays && SEG[k].rw >= 0.85);
-      const vol = banned ? 0 : r1000(B.base[k] * B.demand * (DEM[ph] || 1) * volOf(s.delta)); const pn = pdNewOf(s.delta);
+      const vol = banned ? 0 : r1000(B.base[k] * B.demand * (DEM[ph] || 1) * volOf(s.delta)); const pn = round3(pdNewOf(s.delta) * (VINT[ph] || 1));
       if (vol > 0) { s.pdMix = round3((s.pdMix * s.book + pn * vol) / Math.max(1, s.book + vol)); s.yAdj = round3((s.yAdj * s.book + s.delta * vol) / Math.max(1, s.book + vol));
         const fv = Math.round(vol * SEG[k].fix); const y = round2(B.rate + SEG[k].sp + s.delta); s.fixY = s.fixBook + fv ? round2((s.fixY * s.fixBook + y * fv) / (s.fixBook + fv)) : y; s.fixBook += fv; s.book += vol;
         el += vol * SEG[k].pd * pn * SEG[k].lgd; B.newVolSum += vol; pdW += vol * pn; }
@@ -110,14 +114,14 @@ export const credit = {
     if (cr < REG.resolve) { st.flags.bankrupt = true; out.news.push({ kind: 'credit', text: 'יחס ההון ירד מתחת ל־5%. המפקח על הבנקים לקח את הבנק לניהול חיצוני.' }); }
     else if (cr < REG.min) { if (B.regAt !== pays) { B.regs++; } B.regAt = pays; B.ban = pays + REG.ban; out.news.push({ kind: 'credit', text: ctx.mentorLine(st, 'regulator', { pct: String(round2(cr * 100)) }) || `המפקח נכנס: יחס ההון ${round2(cr * 100)}% (מתחת ל־8%). שנה בלי דיבידנד ובלי אשראי מסוכן.` }); ctx.lesson(st, out, 'adverse_selection'); }
     // 5. confidence (1 draw): capital, losses, rumours; a run below 30
-    let target = CONF.start + (cr - 0.12) * 300 - (loss > B.eq * 0.02 ? 15 : 0) - 7 * (B.hot - 1) + LIQCONF[B.liq]; // hot money and a thin liquidity buffer make depositors nervous for (const x of B.shocks) if (x.until >= st.month) target += x.d;
+    let target = CONF.start + (cr - 0.12) * 300 - (loss > B.eq * 0.02 ? 15 : 0) - 7 * Math.min(1, B.hot - 1) + LIQCONF[B.liq]; // hot money and a thin liquidity buffer make depositors nervous for (const x of B.shocks) if (x.until >= st.month) target += x.d;
     B.conf = Math.round(clamp(B.conf + (clamp(target, 0, 95) - B.conf) * CONF.revert + (rs[5] - 0.5) * 2 * CONF.noise, 0, 100));
     const outR = Math.round(B.ret * 0.004 * B.hot / B.sticky * Math.max(0, (CONF.start - B.conf) / 10)); B.ret -= outR;
     if (B.conf < CONF.run) { B.runs++; B.runAt = pays; const o = Math.round(B.ret * CONF.outR * B.hot / B.sticky); B.ret -= o; out.news.push({ kind: 'credit', text: ctx.mentorLine(st, 'runHit', { amount: ctx.fmtM(o) }) || `תור בסניפים: מפקידים משכו ${ctx.fmtM(o)} בחודש אחד. הכסף הסיטונאי מתייקר.` }); ctx.lesson(st, out, 'bank_run');
       const gap = o - B.liqA; if (gap > 0) fireSale(st, gap, out, ctx); }
     else if (B.conf < CONF.run + 12) out.news.push({ kind: 'credit', text: ctx.mentorLine(st, 'runWarn', {}) || 'שמועות ברשת על הבנק. האמון במפקידים יורד — עוד קצת, ויתחילו למשוך.' });
-    // retail deposits grow with the book (a sticky franchise), more slowly for the fintech
-    B.ret = r1000(B.ret + B.newVolSum * 0.5 * (isFin(st) ? 0.7 : 1));
+    // retail deposits grow with the book (a sticky franchise), faster for the fintech (cheap digital deposits — that leave faster too)
+    B.ret = r1000(B.ret + B.newVolSum * 0.5 * (isFin(st) ? 1.3 : 1));
     B.shocks = B.shocks.filter((x) => x.until >= st.month);
     if (B.rate > 6 && SEGS.some((k) => B.seg[k].fixBook > B.seg[k].book * 0.4)) ctx.lesson(st, out, 'maturity_mismatch');
     rebalance(st); revalue(st);
@@ -157,8 +161,8 @@ function fireSale(st, gap, out, ctx) {
 }
 // the base new-lending demand per segment (₪ a month): DEMAND × the starting segment book (set once, after init)
 const _init = credit.init; credit.init = function (st, w, ch, ctx) { _init(st, w, ch, ctx); const B = CR(st); B.base = {}; for (const k of SEGS) B.base[k] = r1000(Math.max(B.seg[k].book, 50e6) * DEMAND); B.fixedOpex = r1000(loans(st) * FUND.opex); };
-/** New-lending demand per segment and month at the market price: 4.5 % of the starting segment book. */
-export const DEMAND = 0.045;
+/** New-lending demand per segment and month at the market price: 7 % of the starting segment book. */
+export const DEMAND = 0.07;
 
 /* ---------------------------------------------------------------- 'J' — an offer to the bank */
 credit.tiles.J = {
@@ -211,7 +215,7 @@ credit.act = {
 };
 function actionList(st, ctx) {
   const B = CR(st); const out = []; const cr = capRatio(st); const pays = st.stats.paydays;
-  for (const k of SEGS) { const s = B.seg[k]; const want = cr >= 0.17 ? -1 : cr >= 0.135 ? -0.5 : cr >= REG.target + 0.005 ? 0 : 0.5; // the guide: spare capital earns nothing — lend it out below the market; the market price near 10 %; +0.5 only to rebuild capital
+  for (const k of SEGS) { const s = B.seg[k]; const want = cr >= 0.12 && SEG[k].sp >= 3.5 ? -0.5 : cr >= REG.target + 0.005 ? 0 : 0.5; // the guide: spare capital earns nothing — grow the wide-margin segments 0.5 pp below the market; the market price otherwise; +0.5 only to rebuild capital
     for (const v of PRICES) out.push({ id: 'price', param: `${k}:${v}`, label: `${SEG[k].n}: ${v === 0 ? 'מחיר שוק' : (v > 0 ? '+' : '') + v + ' נק׳'}`, enabled: s.delta !== v, current: s.delta === v, seg: k, delta: v, suggested: s.delta !== v && v === want && !s.stop });
     out.push({ id: 'tighten', param: k, label: s.stop ? `${SEG[k].n}: לחזור לתת אשראי` : `${SEG[k].n}: להפסיק אשראי חדש`, enabled: true, suggested: s.stop ? cr > REG.target + 0.02 : (k === 'dev' && B.slump >= st.month) });
     out.push({ id: 'sellBook', param: k, label: `${SEG[k].n}: למכור רבע מהספר (${ctx.fmtM(r1000(s.book * 0.25))})`, enabled: s.book >= 10e6, suggested: cr < REG.min + 0.005 && SEG[k].rw >= 0.85 && s.book >= 10e6 }); }
