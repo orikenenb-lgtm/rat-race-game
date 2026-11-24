@@ -65,6 +65,7 @@ function fresh() {
     v: 1, stars: Object.fromEntries(WIDS.map((w) => [w, 0])), best: {}, achievements: [], pawn: 'classic', pawnColor: PAWN_COLORS[0].hex,
     pawnChosenAt: 0, gamesPlayed: 0, wins: 0, tutorialDone: false, lastSeenWorld: null, worldsPlayed: [],
     streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
+    endSigs: [],   // P0b 2026-11-24: the last games already recorded (survives reloads — a game's end is never counted twice)
     cleared: {},   // P0 2026-11-24: worlds escaped in a practice (learning) game — they open the next world, never stars/best
     learn: freshLearn(),
     // T4 §14.4 (local only — never in metaOf() / never synced)
@@ -85,12 +86,19 @@ function load() {
   p.learn = cleanLearn(p.learn);
   cleanT4(p);
   p.cleared = cleanCleared(p);
+  p.endSigs = cleanSigs(p.endSigs);
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
   if (!PAWNS.some((x) => x.id === p.pawn)) p.pawn = 'classic';
   return p;
 }
+/** (function declarations only up here: load() runs at import time, before any const below is initialised) */
+function endSigsMax() { return 40; }
+function cleanSigs(a) { return (Array.isArray(a) ? a : []).filter((x) => typeof x === 'string' && x.length < 200).slice(-endSigsMax()); }
+/** P0b: a game end that was already recorded (this session or before a reload) is never recorded again. */
+function seenEnd(sig) { return P.endSigs.includes(sig); }
+function markEnd(sig) { P.endSigs = [...P.endSigs.filter((x) => x !== sig), sig].slice(-endSigsMax()); }
 /** {w1:true,…} — only known world ids with a literal true. Repair for saves from before 2026-11-24: a practice escape
  *  recorded nothing that opens a world, but the last practice game's learning signature ("|learn|<w>|seed|months|won")
  *  is evidence of a real escape, so that world counts as cleared (nothing else is granted: no stars, best or ⚡). */
@@ -242,6 +250,7 @@ let lastLearnSig = null; let lastLearnRes = null;
 export function recordLearnGame(e = {}) {
   const sig = ['learn', e.worldId, e.charId, e.seed ?? '', e.status, e.months, Math.round(e.netWorth || 0)].join('|');
   if (sig === lastLearnSig && lastLearnRes) return lastLearnRes;  // the same game:end delivered twice
+  if (seenEnd(sig)) return dupResult(e, true);                    // P0b: recorded before a reload
   const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
   const unlockedBefore = unlockedWorlds();
   P.learnGames += 1;
@@ -251,6 +260,7 @@ export function recordLearnGame(e = {}) {
   const won = e.status === 'won';
   // P0 2026-11-24: escaping in practice finishes the world — the next one opens (still no stars, best, titles or ⚡)
   if (won && isUnlocked(wid)) P.cleared = { ...P.cleared, [wid]: true };
+  markEnd(sig);
   changed();
   const unlockedWorld = unlockedWorlds().find((w) => !unlockedBefore.includes(w)) || null;
   lastLearnSig = sig;
@@ -321,8 +331,9 @@ export function setHistorySeed(sid, seed) { P.history = { ...P.history, [sid]: {
 export const historyUnlocked = () => (P.stars.w1 || 0) >= 1;
 export function recordGame(e = {}) {
   if (e.mode === 'history' || e.worldId === 'h') return recordHistory(e);
-  const sig = [e.resultId || '', e.worldId, e.charId, e.mode, e.status, e.months, Math.round(e.netWorth || 0)].join('|');
+  const sig = [e.resultId || '', e.worldId, e.charId, e.mode, e.status, e.months, Math.round(e.netWorth || 0), e.seed ?? ''].join('|');
   if (sig === lastSig && lastResult) return lastResult; // the same game:end delivered twice
+  if (seenEnd(sig)) return dupResult(e, false);         // P0b: recorded before a reload — never counted twice
   const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
   const won = e.status === 'won';
   const totalBefore = totalStars(); const titleBefore = titleFor(totalBefore);
@@ -353,6 +364,7 @@ export function recordGame(e = {}) {
   const unlockedWorld = unlockedWorlds().find((w) => !unlockedBefore.includes(w)) || null;
   const newPawns = unlockedPawns().filter((x) => !pawnsBefore.includes(x));
   const totalAfter = totalStars();
+  markEnd(sig);
   changed(); scheduleSync(300);
   lastSig = sig;
   lastResult = {
@@ -361,6 +373,14 @@ export function recordGame(e = {}) {
     bankedLocked: !wasUnlocked && got > prevStars, roomGuest,
   };
   return lastResult;
+}
+
+/** The answer for an end that was already recorded: nothing new (no stars, unlocks, pawns or titles gained again). */
+function dupResult(e, learn) {
+  const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
+  return { worldId: wid, learn: !!learn, duplicate: true, prevStars: P.stars[wid] || 0, newStars: P.stars[wid] || 0, earned: 0, gained: 0, wouldStars: 0,
+    unlockedWorld: null, newPawns: [], newAchievements: [], titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(),
+    best: P.best[wid] ?? null, prevBest: P.best[wid] ?? null, newBest: false, bankedLocked: false, learnGames: P.learnGames };
 }
 
 /* ---------------- "מה למדתי" — decision quality & principle mastery across games (local only, never synced) */
@@ -538,5 +558,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); P.cleared = cleanCleared(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); P.cleared = cleanCleared(P); P.endSigs = cleanSigs(P.endSigs); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
 export { ACHIEVEMENTS, WIDS };

@@ -104,8 +104,6 @@ const P2 = await import('../js/progress.js?reload=' + Date.now());
 const S2 = P2.learningSummary();
 eq([S2.games, S2.dqHistory, S2.principles.map((x) => [x.id, x.mastery])], [0, [50], [['ok_id', 1]]], 'learning: corrupt storage is cleaned on load');
 
-console.log(fails ? `${fails}/${n} FAILED` : `all ${n} progress tests passed`);
-process.exit(fails ? 1 : 0);
 
 // ---- P0 2026-11-24: finishing a world opens the next one by every route; stuck saves are repaired; rewards once
 {
@@ -134,3 +132,26 @@ process.exit(fails ? 1 : 0);
   eq(P.isUnlocked('w2'), true, 'P0 repair: a 0★ escape from before PR #7 opens w2');
   P._reset({});
 }
+
+// ---- P0b 2026-11-24: a game end is recorded once, also across a reload (persistent end signatures)
+{
+  P._reset({});
+  const g = { worldId: 'w1', charId: 'teacher', mode: 'free', status: 'won', stars: 1, months: 50, netWorth: 9, seed: 4242 };
+  const a = P.recordGame(g);
+  P._reset(P.getProgress());   // = a reload (in-memory dedupe gone)
+  const b = P.recordGame(g);
+  const p = P.getProgress();
+  eq([a.unlockedWorld, b.duplicate, b.unlockedWorld, p.gamesPlayed, p.wins, P.isUnlocked('w2')], ['w2', true, null, 1, 1, true], 'P0b the same win after a reload is not counted twice');
+  const c = P.recordGame({ ...g, seed: 4243 });
+  eq([c.duplicate || false, P.getProgress().gamesPlayed], [false, 2], 'P0b another game (other seed) counts');
+  const l = { worldId: 'w2', charId: 'lawyer', status: 'won', stars: 1, months: 60, netWorth: 9, seed: 77 };
+  P.recordLearnGame(l); P._reset(P.getProgress()); const l2 = P.recordLearnGame(l);
+  eq([l2.duplicate, P.getProgress().learnGames], [true, 1], 'P0b a practice end after a reload is not counted twice');
+  P._reset({ endSigs: [1, 'x'.repeat(300), 'ok', ...Array.from({ length: 50 }, (_, i) => 's' + i)] });
+  const s = P.getProgress().endSigs;
+  eq([s.length <= 40, s.includes('ok') || s.length === 40, s.every((x) => typeof x === 'string' && x.length < 200)], [true, true, true], 'P0b endSigs is bounded and cleaned');
+  P._reset({});
+}
+
+console.log(fails ? `${fails}/${n} FAILED` : `all ${n} progress tests passed`);
+process.exit(fails ? 1 : 0);

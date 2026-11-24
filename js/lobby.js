@@ -286,6 +286,7 @@ export function openLobby(v) {
   const o = overlay(); if (!o) { console.error('lobby: #start not found'); return; }
   o.hidden = false; o.classList.add('lb-open'); document.body.classList.add('lb-lobby-open'); syncInert();
   if (!booted) { booted = true; boot(); }
+  else if (runEndRepair() && !(v && v.k === 'end')) setTimeout(() => { if (lobbyVisible() && !typing()) rerender(); }, 0);
   const nv = normalize(v);
   if (nv.k !== 'world') worldMode = nv.learn ? 'learn' : null;
   if (nv.k === 'end' && !endCtx) nv.k = 'home';
@@ -350,7 +351,38 @@ function typing() {
   if (a && r.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
   return [...r.querySelectorAll('input[type="text"], input:not([type]), textarea')].some((x) => !x.readOnly && x.value);
 }
+/** P0b 2026-11-24: a free / practice game that ENDED (won or lost) but whose end never reached the lobby — the page was closed
+ *  or reloaded during the celebration — is recorded now from its save (stars, best, the next world). The save is marked
+ *  endSent so a later resume does not deliver it again; progress also dedupes by game signature. Ranked games are left to
+ *  their own server flow. Returns the worlds that opened. */
+function repairUnrecordedEnds() {
+  const opened = [];
+  for (const w of WORLDS) {
+    for (const learn of [false, true]) {
+      const key = learn ? 'rr2-save-learn-' + w.id : freeKey(w.id);
+      let raw = null; try { raw = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { raw = null; }
+      const st = raw && parseState(raw.state); const r = st && st.result; const cfg = (raw && raw.cfg) || {};
+      if (!st || !st.over || !r || (st.ui && st.ui.endSent) || (cfg.mode && cfg.mode !== 'free') || cfg.resultId || st.history) continue;
+      if (st.worldId !== w.id || (r.status !== 'won' && r.status !== 'lost')) continue;
+      const e = { status: r.status, stars: r.stars || 0, months: r.months, netWorth: r.netWorth, passive: r.passive, expenses: r.expenses, progress: r.progress,
+        worldId: st.worldId, charId: st.charId, mode: 'free', resultId: null, end: r, achievements: Array.isArray(st.ach) ? st.ach.slice() : [], seed: (st.seed >>> 0), learn };
+      const res = safe(() => (learn ? P.recordLearnGame(e) : P.recordGame(e)), null);
+      if (res && res.unlockedWorld) opened.push(res.unlockedWorld);
+      try { st.ui = { ...(st.ui || {}), endSent: true }; localStorage.setItem(key, JSON.stringify({ ...raw, state: typeof raw.state === 'string' ? JSON.stringify(st) : st })); } catch (x) { /* storage full: progress dedupes anyway */ }
+    }
+  }
+  return opened;
+}
+/** P0b: run the repair (boot, and every time the lobby opens — e.g. "לובי" pressed during the win celebration), never while a
+ *  game is still delivering its own end. Tells the player what opened. */
+function runEndRepair() {
+  if (G && typeof G.isEnding === 'function' && safe(() => G.isEnding(), false)) return;
+  const repaired = safe(() => repairUnrecordedEnds(), []) || [];
+  if (repaired.length) setTimeout(() => toast(`🔓 נפתח עולם חדש: ${repaired.map((id) => worldOf(id).name).join(', ')} — הניצחון הקודם שלך נשמר`), 600);
+  return repaired.length > 0;
+}
 function boot() {
+  runEndRepair();
   migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
   // CR-33: the in-game graph starts loading right AFTER this first render (a task later), so it never delays the home itself
   setTimeout(() => Promise.all([game(), t6Mods(), cmP(), playCss()]).then(([m]) => { if ((m || CM) && lobbyVisible() && (view.k === 'home' || view.k === 'world') && !typing()) rerender(); }), 0);

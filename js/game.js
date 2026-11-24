@@ -793,7 +793,13 @@ async function startInner(cfg, my) {
     else if (note === 'corrupt') ui.toast(SS.S4);
     else if (note === 'incompatible') ui.toast(SS.S3, { kind: 'bad' });
     persist();
-    if (S.over) { busy = false; return true; }
+    if (S.over) {
+      busy = false;
+      // P0b: a finished game whose end never reached the lobby (the page was closed / reloaded during the celebration)
+      // finishes now: end screen, stars and the next world — the win is never lost and never counted twice
+      if (S.result && !(S.ui && S.ui.endSent)) { busy = true; ui.setRollEnabled(false); endGame(S.result, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
+      return true;
+    }
     // resume mid-event
     if (S.phase === 'land' || S.phase === 'event' || S.pending) {
       await handleLanding(my);
@@ -1659,6 +1665,7 @@ bus.on('game:afterwin', () => {
   if (!S || S.over !== 'won' || !CFG || typeof E.continueAfterWin !== 'function' || !flagFor('afterwin', CFG)) return;
   let r; try { r = E.continueAfterWin(S); } catch (e) { r = { ok: false, error: e.message }; }
   if (!r || r.ok === false) { ui.toast((r && r.error) || 'לא אפשרי עכשיו'); return; }
+  if (S.ui) S.ui.endSent = false;   // P0b: the continuation will have its own end
   persist();
   startGame({ ...CFG, resume: true });
 });
@@ -1746,7 +1753,14 @@ async function summarizeRun(confirmed = false) {
 
 /* ============================================================ end of game */
 const safe0 = (fn) => { try { return fn(); } catch (e) { return null; } };
+let ending = 0;
+/** P0b: true while a game's end is being delivered (celebration → game:end) — the lobby's repair waits for it. */
+export function isEnding() { return ending > 0; }
 async function endGame(end, my) {
+  ending++;
+  try { return await endGameBody(end, my); } finally { ending--; }
+}
+async function endGameBody(end, my) {
   busy = true; ui.setRollEnabled(false); closeCard(); ui.hideCoach(); onboard.hidePractice(); // IR-T4-9
   const win = end.status === 'won';
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
@@ -1771,6 +1785,8 @@ async function endGame(end, my) {
     t6, saveKey: saveKeyFor(CFG), branch: !!(S.ui && S.ui.branch), afterWin: end.afterWin || null,   // T6 (lobby: end summary, which slot to clear)
   };
   busy = false;
+  // P0b: the end is delivered now — a reload after this point must not deliver it again (progress also dedupes)
+  if (S.ui) { S.ui.endSent = true; persist(); }
   bus.emit('game:end', payload);
   if (!hasLobby()) attachEndAnalysis(end, my);   // the lobby's renderEnd calls ui.endAnalysisHtml itself (T6 brief); main.js fallback too
 }
