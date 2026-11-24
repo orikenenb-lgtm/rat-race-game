@@ -10,7 +10,7 @@ export function checkModule(M) {
   if (!M || typeof M !== 'object') return ['not an object'];
   if (typeof M.id !== 'string') errs.push('id');
   if (!M.draws || typeof M.draws.month !== 'number' || typeof M.draws.init !== 'number' || typeof M.draws.landing !== 'object') errs.push('draws {init, month, landing}');
-  for (const k of Object.keys(M)) if (!['id', 'draws', 'streams', 'lessons', 'mentorKeys', 'sealed', ...HOOKS].includes(k)) errs.push('unknown hook ' + k);
+  for (const k of Object.keys(M)) if (!['id', 'draws', 'streams', 'lessons', 'lessonDefs', 'mentorKeys', 'sealed', 'uses', ...HOOKS].includes(k)) errs.push('unknown hook ' + k);
   for (const [n, d] of Object.entries(M.streams || {})) if (!LAZY.includes(n) || !d || typeof d.month !== 'number') errs.push(`streams.${n} {init?, month}`);
   for (const [ch, T] of Object.entries(M.tiles || {})) {
     for (const f of ['create', 'describe', 'choose']) if (typeof T[f] !== 'function') errs.push(`tile ${ch}.${f}`);
@@ -18,6 +18,7 @@ export function checkModule(M) {
     if (M.draws && M.draws.landing && M.draws.landing[ch] == null) errs.push(`draws.landing.${ch}`);
   }
   for (const [n, f] of Object.entries(M.act || {})) if (typeof f !== 'function' || n.length > 20) errs.push('act ' + n);
+  if (M.uses && (!Array.isArray(M.uses) || M.uses.some((x) => typeof x !== 'string'))) errs.push('uses: [moduleIds] (a rule adapter, CATALOG §2.1)');
   if (M.starGates && typeof M.starGates !== 'function') errs.push('starGates (st, ctx) → [{id, stars, ok, label}]');
   if (M.asset && (typeof M.asset.create !== 'function' || typeof M.asset.cf !== 'function')) errs.push('asset {create, cf}');
   return errs;

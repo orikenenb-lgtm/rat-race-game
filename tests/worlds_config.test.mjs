@@ -18,8 +18,8 @@ const worlds = () => E.loadedWorlds();
 const withW5 = (patch) => worlds().map((w) => (w.id === 'w5' ? { ...w, ...patch(w) } : w));
 const has = (r, re) => r.errors.some((x) => re.test(x));
 
-test('the shipped worlds validate with no errors (w1–w10)', () => {
-  const r = validate(); assert.deepEqual(r.errors, []); assert.equal(E.loadedWorlds().length, 10);
+test('the shipped worlds validate with no errors (w1–w10, w13)', () => {
+  const r = validate(); assert.deepEqual(r.errors, []); assert.equal(E.loadedWorlds().length, 11);
 });
 test('error classes are caught: schema, meta mismatch, ids, references, money, goals, modules, unlock graph', () => {
   assert.ok(has(validate({ worlds: withW5(() => ({ board: W5.board.slice(0, 39) })) }), /board must be 40/));
@@ -43,17 +43,17 @@ test('error classes are caught: schema, meta mismatch, ids, references, money, g
   assert.ok(has(validate({ metas }), /★★ or more/));
   const cyc = clone(WORLD_META); cyc.find((m) => m.id === 'w2').unlock = [{ any: ['w3'], count: 1 }];
   assert.ok(has(validate({ metas: cyc }), /not reachable/));
-  const lazy = validate({ lazyIds: ['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11'] }); assert.ok(has(lazy, /LAZY_IDS/)); assert.ok(has(validate({ lazyIds: ['w5'] }), /LAZY_IDS/));
+  const lazy = validate({ lazyIds: ['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13'] }); assert.ok(has(lazy, /LAZY_IDS/)); assert.ok(has(validate({ lazyIds: ['w5'] }), /LAZY_IDS/));
   assert.ok(has(validate({ metas: WORLD_META.filter((m) => m.id !== 'w5') }), /w5: no meta entry/));
 });
 test('module contract check and the arithmetic lint pass for the shipped modules; a bad module is reported', () => {
-  assert.deepEqual(checkModule(W5.mech[0]), []); for (const id of ['w6', 'w7', 'w8', 'w9']) assert.deepEqual(checkModule(E.getWorld(id).mech[0]), [], id); for (const M of E.getWorld('w10').mech) assert.deepEqual(checkModule(M), [], 'w10 ' + M.id);
+  assert.deepEqual(checkModule(W5.mech[0]), []); for (const id of ['w6', 'w7', 'w8', 'w9']) assert.deepEqual(checkModule(E.getWorld(id).mech[0]), [], id); for (const id of ['w10', 'w13']) for (const M of E.getWorld(id).mech) assert.deepEqual(checkModule(M), [], id + ' ' + M.id);
   assert.deepEqual(lintModules(), []);
   assert.ok(checkModule({ id: 'x', draws: { init: 0, month: 0, landing: {} }, tiles: { Q: { create() {}, describe() {}, choose() {} } } }).some((x) => /safe|draws\.landing/.test(x)));
   assert.ok(checkModule({ id: 'x', draws: { init: 0, month: 0, landing: {} }, weird: 1 }).some((x) => /unknown hook/.test(x)));
 });
 test('fuzz: module draws are decision-independent and every safe option spends nothing (all characters of every module world)', () => {
-  const r = fuzzModules(E.loadedWorlds(), 50); assert.deepEqual(r.errors, []); assert.equal(r.notes.length, 18, 'w5–w10: 3 characters each');
+  const r = fuzzModules(E.loadedWorlds(), 50); assert.deepEqual(r.errors, []); assert.equal(r.notes.length, 21, 'w5–w10 + w13: 3 characters each');
 });
 test('meta unlock DAG (DESIGN §1.3): fork after w5, any one of w6–w8 opens w9 and w10, w11 needs two of w6–w8 + one of w9/w10; banked stars; override', () => {
   const S = (o) => ({ w1: 1, w2: 1, w3: 1, w4: 1, ...o });

@@ -16,7 +16,7 @@
 begin;
 
 create table game.worlds (
-  id text primary key check (id ~ '^w([1-9]|1[0-2])$'),
+  id text primary key check (id ~ '^w([1-9]|1[0-9]|2[0-5])$'),  -- CATALOG-25: w1–w25
   ord smallint not null unique,
   ranked boolean not null default false,
   nw_max bigint not null check (nw_max between 1000000 and 1000000000000),            -- |net worth| a finish may report
@@ -39,7 +39,8 @@ insert into game.worlds (id, ord, ranked, nw_max, passive_max, expenses_max, min
   ('w7', 7, false, 10000000000, 1000000000, 1000000000, 6, null),
   ('w8', 8, false, 20000000000, 1000000000, 1000000000, 6, null),
   ('w9', 9, false, 10000000000, 1000000000, 1000000000, 6, null),
-  ('w10', 10, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A1: market + portfolio, rules 7 (unranked until approved)
+  ('w10', 10, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A1: market + portfolio, rules 7 (unranked until approved)
+  ('w13', 13, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A2: league + auction, rules 7 (unranked until approved)
 
 create table game.world_rotation (
   kind text not null check (kind in ('daily', 'weekly')),

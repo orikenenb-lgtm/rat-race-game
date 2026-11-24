@@ -185,6 +185,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
   - Buy young and sell at the peak (trading) vs buy proven stars.
   - Bid high in a contest vs walk away.
 - **Recovery:** sell a player in the window (rating × age price, −10 % if forced), loan out, sell naming rights, an owner loan (happiness cost), a wage-cut deal (the star leaves).
+- **As built (wave A2, engine lane):** `js/worlds/adapters/league.js` + `js/worlds/mech/auction.js` + pool `js/content/deals-w13.js`; `modules: ['league','auction']` (the league calendar lives in the adapter; the hotel `season` module is not attached); goal targets as above; all gates met at N = 36 — see `w13-stadium.md`.
 
 ### w14 · רובע הבנקים (tier 8, diff 4)
 - **סיפור:** "אתה הבנק. הכסף שלך הוא בעיקר של אחרים. מאזן אחד, עשרות אלפי מפקידים, ושמועה אחת ברשת שיכולה להוציא את כולם לתור."

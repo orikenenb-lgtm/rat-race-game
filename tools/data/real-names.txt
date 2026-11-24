@@ -116,3 +116,63 @@ UBS
 BNP
 VOW
 BMW
+# Real football clubs, leagues and players (CATALOG-25 §7.4: w13 uses a fictional league only — tools/validate-worlds.mjs L-fict).
+# One-word club prefixes are matched against every word of a fictional club / player / division name.
+מכבי
+הפועל
+בית"ר
+ביתר
+עירוני
+סכנין
+ליגת העל
+הליגה הלאומית
+מכבי תל אביב
+מכבי חיפה
+מכבי נתניה
+מכבי פתח תקווה
+מכבי בני ריינה
+מכבי הרצליה
+הפועל באר שבע
+הפועל תל אביב
+הפועל חיפה
+הפועל ירושלים
+הפועל חדרה
+הפועל פתח תקווה
+הפועל קרית שמונה
+הפועל רעננה
+הפועל כפר סבא
+הפועל עכו
+הפועל ראשון לציון
+הפועל רמת גן
+הפועל אום אל פחם
+הפועל נוף הגליל
+הפועל עפולה
+בית"ר ירושלים
+בית"ר תל אביב
+בני סכנין
+בני יהודה
+עירוני קרית שמונה
+מ.ס. אשדוד
+Maccabi
+Hapoel
+Beitar
+Real Madrid
+Barcelona
+Manchester United
+Manchester City
+Liverpool
+Arsenal
+Chelsea
+Bayern
+Juventus
+Ajax
+Benfica
+Celtic
+ערן זהבי
+מנור סולומון
+יוסי בניון
+אלי אוחנה
+מוני זכאי
+טל בן חיים
+דור פרץ
+אוסקר גלוך

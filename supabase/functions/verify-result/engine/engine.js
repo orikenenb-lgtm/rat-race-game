@@ -421,6 +421,7 @@ onRegister((w) => {
   if (S.dd) DD.registerWorldCfg(w.id, S.dd);
   if (S.rivals) RV.registerWorldCfg(w.id, S.rivals);
   if (S.focus) FC.registerWorldCfg(w.id, S.focus);
+  for (const l of w.lessonDefs || []) if (l && l.id && !LESSON_BY_ID[l.id]) { LESSONS.push(l); LESSON_BY_ID[l.id] = l; } // lazy-world lessons (pack)
 });
 const loanUnit = (st) => W(st).loan.unit;
 const autoUnit = (st) => W(st).loan.autoUnit || W(st).loan.unit;

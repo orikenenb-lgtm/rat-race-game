@@ -22,6 +22,8 @@ import { ARCHETYPES } from '../js/finance/business.js';
 import { STREAMS, LAZY_STREAMS } from '../js/rng.js';
 import { checkPool, POOL_D, POOLS } from '../js/systems/content.js';
 import { COMPANIES, SECTORS } from '../js/worlds/data/companies.js';
+import { clubNames, playerName, DIVS } from '../js/worlds/adapters/league.js';
+import { DEALS_W13 } from '../js/content/deals-w13.js';
 import { existsSync } from 'node:fs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -165,6 +167,17 @@ export function checkCompanies(pool = COMPANIES, deny = readDeny()) {
   return errors;
 }
 function readDeny() { const f = join(ROOT, 'tools', 'data', 'real-names.txt'); if (!existsSync(f)) return new Set(); return new Set(readFileSync(f, 'utf8').split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('#'))); }
+/** L-fict (CATALOG §7.4, w13): the league's clubs, divisions, the first 600 generated player names and the sponsors' brands are fictional —
+ *  no entry of tools/data/real-names.txt (real football clubs, leagues and players included) is a name or a whole word of one. */
+export function checkLeague(deny = readDeny()) {
+  const errors = []; const bad = (s) => deny.has(s) || s.split(/[\s־-]+/).some((x) => deny.has(x)) || [...deny].some((d) => d.includes(' ') && s.includes(d));
+  for (const n of clubNames()) if (bad(n)) errors.push(`L-fict: club ${n} matches a real club`);
+  if (new Set(clubNames()).size !== clubNames().length) errors.push('L-fict: duplicate club names');
+  for (const d of DIVS) if (bad(d.n)) errors.push(`L-fict: division ${d.n} matches a real league`);
+  for (let i = 1; i <= 600; i++) { const n = playerName(i); if (bad(n)) errors.push(`L-fict: player name ${n} (id ${i}) matches a real name`); }
+  for (const e of DEALS_W13) for (const b of ((e.vars || {}).brand || [])) if (bad(b)) errors.push(`L-fict: sponsor ${b} matches a real name`);
+  return errors;
+}
 /** V-adapter (CATALOG §2.1): a rule adapter (js/worlds/adapters/*.js) is ≤ 350 lines and declares `uses: [moduleIds]`. */
 export function checkAdapters(dir = join(ROOT, 'js', 'worlds', 'adapters')) {
   const errors = []; if (!existsSync(dir)) return errors;
@@ -175,8 +188,10 @@ export function checkAdapters(dir = join(ROOT, 'js', 'worlds', 'adapters')) {
 /** Lint: module files use only exact arithmetic (no Math.pow / exp / log / random, no Date) — bit-identical in browser, Node and Deno. */
 export function lintModules(dir = join(ROOT, 'js', 'worlds', 'mech')) {
   const errors = [];
-  for (const f of readdirSync(dir).filter((x) => x.endsWith('.js'))) {
-    const src = readFileSync(join(dir, f), 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const adapters = join(dir, '..', 'adapters'); const files = readdirSync(dir).filter((x) => x.endsWith('.js')).map((f) => join(dir, f));
+  if (dir.endsWith(join('worlds', 'mech')) && existsSync(adapters)) for (const f of readdirSync(adapters).filter((x) => x.endsWith('.js'))) files.push(join(adapters, f)); // rule adapters: the same exact-arithmetic rule
+  for (const fp of files) { const f = fp.slice(dir.length + 1);
+    const src = readFileSync(fp, 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const re of [/Math\.(pow|exp|log|log2|log10|sqrt|random|sin|cos|tan|atan|cbrt|hypot)\b/, /\bDate\b/, /\*\*/, /\bimport\b[^;]*engine\.js/]) if (re.test(src)) errors.push(`mech/${f}: forbidden ${re}`);
   }
   return errors;
@@ -214,7 +229,7 @@ export function fuzzModules(worlds = E.loadedWorlds(), turns = 70) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   let style = null; try { style = (await import('../js/render/vocab.js')).WORLD_STYLE; } catch (e) { style = null; }
   const r = validate({ worldStyle: style }); const lint = lintModules(); const fz = fuzzModules();
-  const errors = [...r.errors, ...lint, ...fz.errors, ...checkCompanies(), ...checkAdapters()];
+  const errors = [...r.errors, ...lint, ...fz.errors, ...checkCompanies(), ...checkAdapters(), ...checkLeague()];
   if (process.argv.includes('--json')) console.log(JSON.stringify({ errors, warnings: r.warnings, notes: fz.notes }, null, 1));
   else {
     for (const x of r.warnings) console.log('⚠ ' + x);

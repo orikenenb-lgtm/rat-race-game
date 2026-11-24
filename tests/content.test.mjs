@@ -88,11 +88,13 @@ await test('C-freeze: an accepted offer keeps its id and numbers when the pack i
 });
 
 await test('w1–w9 never carry content: no `content` / `exch` stream, no st.content, the deal tile draws the legacy deck (0 content draws)', () => {
-  for (const w of E.loadedWorlds().filter((x) => x.id !== 'w10')) { const st = E.createGame({ worldId: w.id, charId: w.characters[0].id, seed: 5 });
+  for (const w of E.loadedWorlds().filter((x) => !x.content)) { const st = E.createGame({ worldId: w.id, charId: w.characters[0].id, seed: 5 });
     assert.equal(st.content, undefined, w.id); for (const nm of LAZY_STREAMS) assert.equal(st.rng[nm], undefined, w.id + ' ' + nm); assert.deepEqual(Object.keys(st.rng), STREAMS, w.id); }
   const st = E.createGame({ worldId: 'w10', seed: 5 }); assert.deepEqual(Object.keys(st.rng), [...STREAMS, ...LAZY_STREAMS]); assert.equal(st.rng.content !== undefined && st.content.v, CT.CONTENT_V);
   assert.equal(makeStreams(5).content, undefined, 'makeStreams never creates a lazy stream');
   assert.equal(CT.seenIds(st).length, 0); assert.ok(Array.isArray(CT.seenIds(E.createGame({ worldId: 'w1', seed: 1 }))));
+  assert.deepEqual(E.loadedWorlds().filter((x) => x.content).map((x) => x.id), ['w10', 'w13'], 'the content worlds (rules 7)');
+  const s13 = E.createGame({ worldId: 'w13', seed: 5 }); assert.deepEqual(Object.keys(s13.rng), [...STREAMS, 'content'], 'w13 declares only the content stream');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

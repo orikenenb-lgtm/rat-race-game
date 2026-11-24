@@ -50,10 +50,10 @@ await test('draft 20261125_worlds.sql applies on the production baseline', async
 
 await test('game.worlds: w1–w4 ranked with today\'s bounds; w5 unranked with bigger bounds; ids checked', async () => {
   const rows = (await db.query('select id, ranked, nw_max::text, passive_max::text from game.worlds order by ord')).rows;
-  assert.deepEqual(rows.map((r) => r.id), ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10']);
+  assert.deepEqual(rows.map((r) => r.id), ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13']);
   assert.ok(rows.slice(0, 4).every((r) => r.ranked && r.nw_max === '2000000000' && r.passive_max === '100000000'));
   assert.equal(rows[4].ranked, false);
-  await assert.rejects(db.exec(`insert into game.worlds(id, ord, nw_max, passive_max, expenses_max) values ('w13', 13, 2000000, 20000, 20000)`));
+  await assert.rejects(db.exec(`insert into game.worlds(id, ord, nw_max, passive_max, expenses_max) values ('w26', 26, 2000000, 20000, 20000)`));
 });
 
 await test('rotation from the table: game.day() / game.week() give exactly the baseline world', async () => {
@@ -93,7 +93,7 @@ await test('challenges: any ranked world by FK (w5 refused while unranked; an un
   await db.exec(`update game.worlds set ranked = true where id = 'w5'`);
   assert.ok((await rpc('rr_create_challenge2', { ...au(A), p_group: g.id, p_title: 'אתגר 5', p_world: 'w5', p_char: 'hotelier', p_days: 3 })).ok);
   await db.exec(`update game.worlds set ranked = false where id = 'w5'`);
-  await assert.rejects(db.exec(`insert into game.challenges(group_id, title, profession, world, seed, ends_at) values ('${g.id}', 'xx', 'teacher', 'w13', 5, now() + interval '1 day')`));
+  await assert.rejects(db.exec(`insert into game.challenges(group_id, title, profession, world, seed, ends_at) values ('${g.id}', 'xx', 'teacher', 'w26', 5, now() + interval '1 day')`));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

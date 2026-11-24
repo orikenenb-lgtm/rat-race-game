@@ -56,8 +56,9 @@ function sampleGames(n, worldId, o = {}) {
 }
 
 /* ------------------------------------------------------------------ §12.1–3 streams */
-test('§12.1 STREAMS gains exactly one name, story, at index 14; indexes 0–13 unchanged', () => {
-  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story']);
+test('§12.1 STREAMS gains story at index 14; indexes 0–13 unchanged (worlds wave 0 appended world at 15; the lazy exch / content are not in STREAMS)', () => {
+  assert.equal(STREAMS.length, 16); assert.equal(STREAMS[14], 'story'); assert.equal(STREAMS[15], 'world');
+  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story', 'world']);
   const a = makeStreams(77); const b = E.createGame({ worldId: 'w1', seed: 77 }).rng;
   for (const k of OLD) assert.equal(b[k] != null, true); assert.equal(a.story != null, true);
 });
