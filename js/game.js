@@ -492,7 +492,12 @@ export function cityAudit() {
   const occ = Object.fromEntries(E.cityModels(S).filter((m) => m.occDecile != null || m.closed).map((m) => [m.key, { decile: m.occDecile ?? 0, closed: !!m.closed }]));
   // w6: the engine's line state per city piece (plant.js cityModels) — tests compare it with levels / scene.levelOf
   const plant = Object.fromEntries(E.cityModels(S).filter((m) => m.condPips != null).map((m) => [m.key, { pips: m.condPips, light: m.condLight, running: !!m.running, down: !!m.down, pending: !!m.pending, mothball: !!m.mothball }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant };
+  // w7: every branch's engine state (chain.js cityModels) and the managers; w8: every site / rental / plot (projects.js cityModels)
+  const cm = E.cityModels(S);
+  const chain = Object.fromEntries(cm.filter((m) => m.lights != null && 'franchise' in m).map((m) => [m.key, { stage: m.stage, own: !!m.own, fitout: !!m.fitout, flicker: !!m.flicker, stockout: !!m.stockout }]));
+  const managers = cm.filter((m) => m.kind === 'manager').map((m) => m.key);
+  const proj = Object.fromEntries(cm.filter((m) => m.pct != null || m.fence || m.stage === 5).map((m) => [m.key, { stage: m.stage, pct: m.pct ?? null, floors: m.floors ?? null, stalled: !!m.stalled, crane: !!m.craneOn, permit: !!m.permit, presold: m.presold ?? 0, rental: m.stage === 5, plot: !!m.fence }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -506,6 +511,14 @@ function levelOf(entry, m) {
   // w6 (plant.js cityModels): a production line's condition (pips + light), running / down / ordered / mothballed, shift, hazard band
   if (entry.condPips != null) return { kind: 'plant', n: entry.condPips, of: 3, light: entry.condLight, cond: entry.cond ?? null, running: !!entry.running, down: !!entry.down,
     pending: !!entry.pending, mothball: !!entry.mothball, util: entry.util ?? 0, shift: entry.shift || 1, hazard: entry.hazardBand || null };
+  // w7 (chain.js cityModels): a branch's ramp stage 0–4, own / franchise, fit-out, over-span flicker, stock-out; the stock pool; a manager
+  if (entry.lights != null && 'franchise' in entry) return { kind: 'branch', n: entry.stage ?? 0, of: 4, own: !!entry.own, fitout: !!entry.fitout, flicker: !!entry.flicker, stockout: !!entry.stockout, count: entry.count || 1 };
+  if (entry.kind === 'manager') return { kind: 'mgr', links: entry.links || 6 };
+  const CH = (m.worldIndicators || {}).chain;
+  if (CH && entry.kind === 'inventory') return { kind: 'stock', cover: CH.coverNow };
+  // w8 (projects.js cityModels): a project (permit / stage / % / floors / stalled / crane / presold), a rental block (stage 5), a fenced plot
+  if (entry.pct != null || entry.fence || entry.stage === 5) return { kind: 'build', n: entry.stage ?? 0, of: 4, pct: entry.pct ?? (entry.stage === 5 ? 1 : 0), floors: entry.floors ?? 0, stalled: !!entry.stalled,
+    crane: !!entry.craneOn, permit: !!entry.permit, presold: entry.presold ?? 0, rental: entry.stage === 5, plot: !!entry.fence };
   const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
   const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
   if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
@@ -516,9 +529,10 @@ function syncLevels(animate) {
   if (!S || typeof scene.setLevel !== 'function') return;
   const m = E.metrics(S);
   for (const e of E.cityModels(S)) {
+    if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant')) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state change every month: no bump
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1484,7 +1498,7 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {
   if (!S || S.over || summarized) return;

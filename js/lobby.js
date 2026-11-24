@@ -62,8 +62,9 @@ async function ensureRules(id, { quiet = false } = {}) {
 const LAZY_ERR = 'לא הצלחנו לטעון את העולם. בדוק את החיבור ונסה שוב.';
 /** Card art: w1–w4 have painted cards; later worlds get a generated card (sky gradient + motif) — never a missing image. */
 const PAINTED = new Set(['w1', 'w2', 'w3', 'w4']);
-const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛒', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑' };
-const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ffe0ec', '#ef6c8f'], w8: ['#e3e8f4', '#5c6f9e'], w9: ['#ffe9a8', '#e07a2f'],
+const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛍️', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑' };
+// generated card art: w5–w8 from their WORLD_STYLE skies, later worlds a placeholder pair
+const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ef8354', '#2b2d42'], w8: ['#fde68a', '#93c5fd'], w9: ['#ffe9a8', '#e07a2f'],
   w10: ['#dfe7ff', '#2b3f8c'], w11: ['#d8f3ea', '#2a8c6f'], w12: ['#f5e1b0', '#8a5a14'] };
 function artHtml(id, alt = '', extra = '') {
   if (PAINTED.has(id)) return `<img src="${cardArt(id)}" alt="${esc(alt)}" ${extra}>`;
@@ -91,7 +92,8 @@ const baseUrl = () => location.origin + location.pathname;
 const waHref = (text) => 'https://wa.me/?text=' + encodeURIComponent(text);
 const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
-const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '🩺', scale: '⚖️', chef: '🧑‍🍳', chip: '📱', box: '📦', avocado: '🥑', anchor: '⚓', rocket: '🚀', gear: '⚙️', heart: '💗', hotel: '🏨', music: '🎪', factory: '🏭' };
+const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '🩺', scale: '⚖️', chef: '🧑‍🍳', chip: '📱', box: '📦', avocado: '🥑', anchor: '⚓', rocket: '🚀', gear: '⚙️', heart: '💗', hotel: '🏨', music: '🎪', factory: '🏭',
+  shop: '🏪', chart: '📊', handshake: '🤝', crane: '🏗️', land: '🌾', hardhat: '👷' };   // w7 shopFounder / cfo / franchisor · w8 developer / landowner / contractor
 const ACH_ICON = {
   seed: '🌱', shield: '🛡️', gold: '🪙', pillow: '🛟', card: '💳', arrows: '🔁', chart: '📈', cap: '🎓', crown: '👑', feather: '🪶', piggy: '🐷',
   phoenix: '🔥', scissors: '✂️', house: '🏠', fox: '🦊', moon: '🌙', lock: '🔒', hammer: '🔨', tower: '🏙️', umbrella: '☂️', scale: '⚖️',
@@ -1838,6 +1840,11 @@ function renderEnd(animate = false) {
   const statCells = [cell('חודשים', String(e.months))];
   if (g.type === 'passive') statCells.push(cell('הכנסה פסיבית', fmtM(e.passive || 0), won ? 'pos' : ''), cell('הוצאות', fmtM(e.expenses || 0)));
   else if (g.type === 'passive12') statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד: ממוצע לחודש', fmtM(g.target || 0)));   // w5: a 12-month average of asset income
+  else if (g.type === 'all') {   // w7: net worth AND liquidity (months of the chain's fixed costs) — the end screen shows both targets
+    const nwT = ((g.of || []).find((x) => x.type === 'nw' || x.type === 'netWorth') || {}).target || 0; const lq = (g.of || []).find((x) => x.type === 'liquidity');
+    statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד', fmtM(nwT)));
+    if (lq) statCells.push(cell('יעד קופה', `${lq.months} חודשי עלויות קבועות`));
+  }
   else statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('יעד', fmtM(g.target || 0)));
   if (hist) { statCells.length = 1; statCells.push(cell('שווי נקי', fmtM(e.netWorth || 0), won ? 'pos' : (e.netWorth || 0) < 0 ? 'neg' : ''), cell('קנה והחזק', fmtM((end.benchmark && end.benchmark.netWorth) || 0))); }
   else if (g.type === 'netWorthImpact') statCells.push(`<span><small>השפעה</small><b>${num((end.impact ?? 0) + '/' + g.impact)}</b></span>`);

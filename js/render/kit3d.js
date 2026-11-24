@@ -144,10 +144,13 @@ export function createKit() {
         const L = it.level; if (!L || L.kind === 'occ') { sprite(it.key, 'sign', null); sprite(it.key, 'badge', it.badge, it.x, top + it.h + 0.45 * it.s, it.z, 0.62 * Math.max(0.6, it.s)); continue; }   // w5 occupancy: the model's own windows show it (standins3d.js)
         // pips on the camera side of the plinth: filled gold discs vs hollow rings (shape, not only colour)
         const ps = Math.max(0.09, 0.15 * r), gap = ps * 2.3, z = it.z + r * 0.86;
-        if (!(L.kind === 'plant' && L.pending)) for (let i = 0; i < L.of; i++) { const x = it.x + (i - (L.of - 1) / 2) * gap; if (i < L.n) put(M.pipOn, x, top + 0.02, z, ps, ps, ps); else put(M.pipOff, x, top + 0.02, z, ps, ps, ps); }
+        // w7 / w8: no plinth pips while a branch is fitting out, for the stock pool / a manager's office, for a plot, a rental or a site waiting for its permit
+        const noPips = (L.kind === 'plant' && L.pending) || (L.kind === 'branch' && L.fitout) || L.kind === 'stock' || L.kind === 'mgr' || (L.kind === 'build' && (L.plot || L.rental || L.permit));
+        if (!noPips) for (let i = 0; i < L.of; i++) { const x = it.x + (i - (L.of - 1) / 2) * gap; if (i < L.n) put(M.pipOn, x, top + 0.02, z, ps, ps, ps); else put(M.pipOff, x, top + 0.02, z, ps, ps, ps); }
         // w6 production line: condition pips on the plinth (above), the lamp / conveyor / scaffold / shutter on the model (standins3d.js
         // paintPlant), a 🔧 badge while it is down (activityOf → breakdown). No stage kit.
-        if (L.kind === 'plant') { sprite(it.key, 'sign', null); sprite(it.key, 'badge', it.badge, it.x, top + it.h + 0.45 * it.s, it.z, 0.62 * Math.max(0.6, it.s)); continue; }
+        // w7 storefronts / stock / managers and w8 sites draw their state on the model itself (standins3d.js paintBranch / paintStock / paintBuild)
+        if (L.kind === 'plant' || L.kind === 'branch' || L.kind === 'stock' || L.kind === 'mgr' || L.kind === 'build') { sprite(it.key, 'sign', null); sprite(it.key, 'badge', it.badge, it.x, top + it.h + 0.45 * it.s, it.z, 0.62 * Math.max(0.6, it.s)); continue; }
         const P = kitParts(L); const w = 0.8 * it.s, h = it.h;
         if (P.scaffold) {
           const t = Math.max(0.03, 0.045 * it.s), hh = h * 0.95;

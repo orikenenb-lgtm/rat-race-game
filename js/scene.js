@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
-import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt } from './render/standins3d.js';   // w5 / w6: procedural models, occupancy windows, production lines
+import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
@@ -459,7 +459,7 @@ export function worldModelNames(w) {
   if (w.mechanic === 'history' || w.id === 'h') for (const n of HISTORY_MODELS) set.add('history/' + n); // T5 CR-05: only for h
   return [...set].filter((n) => !hasStandin(n, assetDir(w)));   // w5 / w6: stand-in models are built, never fetched (no 404); w6's warehouse only in w6
 }
-const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine' };
+const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine', cranes: 'w3/crane' };   // w8: w3's real crane.glb in the background (procedural if it fails)
 function landmarkNames(w) {
   const list = [];
   for (const m of Object.values(w.models || {})) if (m && !list.includes(m)) list.push(m);
@@ -631,6 +631,9 @@ function drawIcon(g, icon, x, y, c) {
     case 'plane': // w5 tile N
       P(); g.moveTo(x, y - 48); g.lineTo(x + 8, y - 10); g.lineTo(x + 48, y + 10); g.lineTo(x + 8, y + 4); g.lineTo(x + 6, y + 32); g.lineTo(x + 18, y + 44); g.lineTo(x - 18, y + 44);
       g.lineTo(x - 6, y + 32); g.lineTo(x - 8, y + 4); g.lineTo(x - 48, y + 10); g.lineTo(x - 8, y - 10); g.closePath(); g.fill(); break;
+    case 'crane': // w8 tile Q: a tower crane (mast, jib, counter-weight, hook)
+      g.fillRect(x - 24, y - 40, 10, 86); g.fillRect(x - 44, y - 44, 92, 9); g.fillRect(x - 46, y - 44, 16, 20); g.lineWidth = 5;
+      P(); g.moveTo(x + 34, y - 36); g.lineTo(x + 34, y + 4); g.stroke(); g.fillRect(x + 26, y + 4, 16, 12); g.fillRect(x - 40, y + 40, 50, 8); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -660,10 +663,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -780,10 +783,12 @@ const LIGHTS = {
   stars: { hemi: 0.75, sun: 1.5, exp: 1.0, env: 0.36, sunPos: [-8, 20, 10], fill: ['#22d3ee', 10] },
   palms: { hemi: 1.1, sun: 2.6, exp: 1.03, env: 0.4, sunPos: [16, 15, 8], fill: ['#ff9f7f', 4] },   // w5: golden hour, a low warm sun
   stacks: { hemi: 1.12, sun: 2.2, exp: 1.02, env: 0.38, sunPos: [-11, 21, 13], fill: ['#fbbf24', 3] },  // w6: morning haze, a soft high sun
+  storefronts: { hemi: 1.0, sun: 2.0, exp: 1.03, env: 0.38, sunPos: [15, 11, 9], fill: ['#ef8354', 5] },   // w7: dusk on the shopping street, a low warm sun
+  cranes: { hemi: 1.15, sun: 2.6, exp: 1.04, env: 0.42, sunPos: [10, 24, 12], fill: ['#93c5fd', 3] },     // w8: a clear day on the building site
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null;
+  updaters.clear(); steamHook = null; linkHook = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -802,17 +807,18 @@ const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness
 /** Build the whole board + decor for a world (models must be preloaded). */
 let worldDir = null;
 /** T5 §8.4: entering a world with another asset folder frees the previous world's models (life/, pawns/, history/ stay). */
-function releaseOtherWorlds(dir) {
+function releaseOtherWorlds(dir, w = null) {
   if (dir === worldDir) return; worldDir = dir;
+  const keep = new Set(w ? worldModelNames(w).filter((n) => String(n).includes('/')).map((n) => urlFor(w, n)) : []);   // w8 borrows w3's crane.glb
   for (const url of new Set([...cache.keys(), ...ready.keys()])) {
-    const m = /^assets\/(w[1-4])\//.exec(url); if (!m || m[1] === dir) continue;
+    const m = /^assets\/(w[1-4])\//.exec(url); if (!m || m[1] === dir || keep.has(url)) continue;
     const g = ready.get(url); if (g) disposeTree(g); // still loading → freed when it lands (loadGLB)
     ready.delete(url); cache.delete(url); heightOf.delete(url);
   }
 }
 export function buildWorld(w) {
   clearWorld(); clearCity(); marks.current = marks.dest = null; if (markObj) placeMarks();
-  releaseOtherWorlds(assetDir(w));
+  releaseOtherWorlds(assetDir(w), w);
   world = w; theme = w.mechanic === 'history' ? HISTORY_THEME(w.theme) : w.theme; setBoardSize(w.board.length);
   // worlds wave 1: later worlds take their look from WORLD_STYLE (render-side identity; the engine theme stays legacy data). w1–w4 / h
   // are unchanged (their WORLD_STYLE board is their theme board).
@@ -886,7 +892,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1189,6 +1195,102 @@ function decorStacks(T) {
     for (const it of city.values()) stepBelt(it.obj, dt || 0);   // the conveyors of running lines (standins3d.js)
   });
 }
+/** w7 רשתות המסחר: a shopping street at dusk — warm paving, a boulevard ring with lamps, rows of lit shopfronts with striped awnings behind
+ *  the board. One updater flickers the signs of branches over the management span (standins3d.js stepShop: only while the scene animates,
+ *  never under reduced motion). linkHook draws the light lines from every regional manager's office to the (up to) 6 own branches it holds. */
+let linkHook = null; const linkState = new Map();
+function decorStorefronts(T) {
+  island(31, std('#e8cfc8', { roughness: 1 }), '#8b5e57');
+  const road = own(new THREE.Mesh(new THREE.RingGeometry(12.0, 15.0, 72), std('#3d3a4b', { roughness: 0.85 })));
+  road.rotation.x = -Math.PI / 2; road.position.y = -0.7; road.receiveShadow = true; worldGroup.add(road);
+  const d = new THREE.Object3D();
+  const dashes = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.02, 0.7), std('#f8fafc', { roughness: 0.6 }), 48);
+  for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; d.position.set(Math.sin(a) * 13.5, -0.68, Math.cos(a) * 13.5); d.rotation.set(0, a, 0); d.scale.setScalar(1); d.updateMatrix(); dashes.setMatrixAt(i, d.matrix); }
+  own(dashes); worldGroup.add(dashes);
+  // shopfront rows behind the board: blocks facing the board, lit window bands and striped awnings (all instanced)
+  const shops = scatter(dn(34), 17, 28, { backOnly: true, seed: 33 }).filter((p) => p.z < -3);   // behind the board only (the camera side stays open)
+  const blk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#ffffff', { roughness: 0.85 }), shops.length);
+  const win = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), shops.length * 2);
+  const awn = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.06, 0.6), std('#ffffff', { roughness: 0.7 }), shops.length);
+  const walls = ['#f5e6d3', '#e7dccb', '#d6c7b3', '#f1d5d0', '#cbb8a6', '#efe3cf'], awns = ['#e63946', '#f8fafc', '#ffd166', '#e63946', '#2b2d42'], lit = ['#ffd27a', '#ffe3a3', '#ffc46b'];
+  shops.forEach((p, i) => {
+    const w = 2.2 + p.k * 1.8, h = 1.8 + p.k * 2.6, rot = Math.atan2(-p.x, -p.z);
+    d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, rot, 0); d.scale.set(w, h, 1.6); d.updateMatrix(); blk.setMatrixAt(i, d.matrix); blk.setColorAt(i, new THREE.Color(walls[i % walls.length]));
+    const fx = Math.sin(rot), fz = Math.cos(rot);   // local +z (the block's front face) looks at the board
+    for (let k = 0; k < 2; k++) { d.position.set(p.x + fx * 0.81, -0.72 + (k ? h * 0.7 : 0.75), p.z + fz * 0.81); d.rotation.set(0, rot, 0); d.scale.set(w * 0.8, k ? 0.5 : 0.9, 1); d.updateMatrix(); win.setMatrixAt(i * 2 + k, d.matrix); win.setColorAt(i * 2 + k, new THREE.Color(lit[(i + k) % lit.length])); }
+    d.position.set(p.x + fx * 1.0, -0.72 + 1.35, p.z + fz * 1.0); d.rotation.set(0.35, rot, 0, 'YXZ'); d.scale.set(w * 0.9, 1, 1); d.updateMatrix(); awn.setMatrixAt(i, d.matrix); awn.setColorAt(i, new THREE.Color(awns[i % awns.length]));
+  });
+  blk.castShadow = true; blk.receiveShadow = true; [blk, win, awn].forEach((m) => { own(m); worldGroup.add(m); });
+  // street lamps on the outer side of the boulevard (warm globes that read at dusk)
+  const lamps = scatter(dn(18), 15.6, 16.4, { seed: 12 });
+  const poleG = new THREE.CylinderGeometry(0.05, 0.07, 2.4, 6), globeG = new THREE.SphereGeometry(0.22, 10, 8);
+  const poles = new THREE.InstancedMesh(poleG, std('#2b2d42', { roughness: 0.6 }), lamps.length), globes = new THREE.InstancedMesh(globeG, new THREE.MeshBasicMaterial({ color: '#ffd166' }), lamps.length);
+  lamps.forEach((p, i) => { d.position.set(p.x, -0.72 + 1.2, p.z); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.updateMatrix(); poles.setMatrixAt(i, d.matrix); d.position.y = -0.72 + 2.5; d.updateMatrix(); globes.setMatrixAt(i, d.matrix); });
+  poles.castShadow = true; [poles, globes].forEach((m) => { own(m); worldGroup.add(m); });
+  // the manager link lines (thin glowing beams, instanced; rebuilt from the city in linkHook)
+  const MAXL = 48; const beam = own(new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#ffd166', transparent: true, opacity: 0.85, depthWrite: false }), MAXL));
+  beam.count = 0; beam.frustumCulled = false; beam.name = 'chain:links'; worldGroup.add(beam);
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  linkHook = () => {
+    const mgrs = [...city.entries()].filter(([k]) => /^chain:mgr:/.test(k)).sort((x, y) => x[0].localeCompare(y[0], 'en', { numeric: true }));
+    const shopsOwn = [...city.entries()].filter(([, it]) => it.level && it.level.kind === 'branch' && it.level.own).sort((x, y) => x[0].localeCompare(y[0], 'en', { numeric: true }));
+    linkState.clear(); let n = 0;
+    mgrs.forEach(([mk, mit], i) => {
+      const list = shopsOwn.slice(i * 6, i * 6 + 6); linkState.set(mk, list.map(([k]) => k));
+      const ms = mit.obj.scale.x; a.set(mit.obj.position.x, CITY_Y + (mit.h0 || 1.6) * ms, mit.obj.position.z);
+      for (const [, bit] of list) {
+        if (n >= MAXL) break;
+        const bs = bit.obj.scale.x; b.set(bit.obj.position.x, CITY_Y + (bit.h0 || 1) * bs * 0.9, bit.obj.position.z);
+        const len = a.distanceTo(b); if (len < 0.05) continue;
+        d.position.copy(a).add(b).multiplyScalar(0.5); d.scale.set(0.05, 0.05, len); d.lookAt(b); d.updateMatrix(); beam.setMatrixAt(n++, d.matrix);
+      }
+    });
+    beam.count = n; beam.instanceMatrix.needsUpdate = true; beam.visible = n > 0;
+  };
+  updaters.add((t) => { for (const it of city.values()) stepShop(it.obj, t); });   // over-span signs flicker (standins3d.js)
+}
+/** w8 מטרופולין הנדל"ן: a city that grows upwards — a dusty site ground, a ring road, towers in the background (some still frames), w3's
+ *  tower cranes (crane.glb; a procedural crane if it is not there), containers and rebar. One updater turns the jibs of the player's working
+ *  sites (standins3d.js stepCrane) and of the background cranes: only while the scene animates, never under reduced motion. */
+function decorCranes(T) {
+  island(31, std('#d6cfb8', { roughness: 1 }), '#8a7a5e');
+  const road = own(new THREE.Mesh(new THREE.RingGeometry(12.0, 15.0, 72), std('#4b5563', { roughness: 0.85 })));
+  road.rotation.x = -Math.PI / 2; road.position.y = -0.7; road.receiveShadow = true; worldGroup.add(road);
+  const d = new THREE.Object3D();
+  const dashes = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 0.02, 0.8), std('#eab308', { roughness: 0.6 }), 48);
+  for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; d.position.set(Math.sin(a) * 13.5, -0.68, Math.cos(a) * 13.5); d.rotation.set(0, a, 0); d.scale.setScalar(1); d.updateMatrix(); dashes.setMatrixAt(i, d.matrix); }
+  own(dashes); worldGroup.add(dashes);
+  // the skyline behind the board: finished towers (glass / concrete) and a few concrete frames still going up
+  const tw = scatter(dn(20), 18, 29, { backOnly: true, seed: 51 });
+  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#ffffff', { roughness: 0.5, metalness: 0.1 }), tw.length);
+  const tones = ['#cbd5e1', '#e2e8f0', '#94a3b8', '#bfdbfe', '#d6d3d1', '#a5b4fc'];
+  tw.forEach((p, i) => { const h = 4 + p.k * 9, w = 1.6 + p.k * 1.2; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, Math.atan2(p.x, p.z), 0); d.scale.set(w, h, w); d.updateMatrix(); body.setMatrixAt(i, d.matrix); body.setColorAt(i, new THREE.Color(tones[i % tones.length])); });
+  body.castShadow = true; body.receiveShadow = true; own(body); worldGroup.add(body);
+  const fr = scatter(dn(5), 17.5, 22, { backOnly: true, seed: 77 });
+  const slabG = new THREE.BoxGeometry(2.2, 0.12, 2.2); const slabs = new THREE.InstancedMesh(slabG, std('#a8a29e', { roughness: 0.9 }), fr.length * 8);
+  let si = 0; fr.forEach((p) => { const n = 4 + Math.floor(p.k * 4); for (let k = 0; k < n; k++) { d.position.set(p.x, -0.72 + 0.6 + k * 0.62, p.z); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.updateMatrix(); slabs.setMatrixAt(si++, d.matrix); } });
+  slabs.count = si; slabs.castShadow = true; own(slabs); worldGroup.add(slabs);
+  // tower cranes: w3's crane.glb when it loaded, else procedural (both turn slowly)
+  const spots = [[-14, -19], [2, -21], [16, -17]];
+  const jibs = [];
+  spots.forEach(([x, z], i) => {
+    const real = ready.get(modelUrl('w3', 'crane'));
+    const c = real ? inst('w3/crane') : buildCrane(7 + i);
+    c.position.set(x, -0.72, z); if (real) c.scale.setScalar(2.4 + i * 0.2); c.rotation.y = (i - 1) * 0.6; worldGroup.add(c);
+    if (!real) { c.userData.ownTree = true; c.traverse((o) => { if (o.isMesh) { o.userData.ownGeo = true; o.userData.ownMat = true; } }); if (c.userData.jib) jibs.push([c.userData.jib, 0.08 + i * 0.03]); }
+    else jibs.push([c, 0.03 + i * 0.01]);
+  });
+  // containers and rebar bundles by the road
+  const ct = scatter(dn(12), 15.8, 18.5, { seed: 43, frontMin: 17.5 });
+  const cont = new THREE.InstancedMesh(new THREE.BoxGeometry(1.6, 0.6, 0.6), std('#ffffff', { roughness: 0.8 }), ct.length);
+  const ccol = ['#eab308', '#2563eb', '#ef4444', '#16a34a', '#f97316'];
+  ct.forEach((p, i) => { d.position.set(p.x, -0.72 + 0.3, p.z); d.rotation.set(0, p.a, 0); d.scale.setScalar(1); d.updateMatrix(); cont.setMatrixAt(i, d.matrix); cont.setColorAt(i, new THREE.Color(ccol[i % ccol.length])); });
+  cont.castShadow = true; own(cont); worldGroup.add(cont);
+  updaters.add((t, dt) => {
+    for (const it of city.values()) stepCrane(it.obj, dt || 0);   // the player's working sites (standins3d.js)
+    for (const [j, v] of jibs) j.rotation.y += (dt || 0) * v;
+  });
+}
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
   const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.2, 64), std('#ead8b0', { roughness: 1 })));
@@ -1475,7 +1577,7 @@ function syncKit() {
     px.position.set(o.position.x, CITY_Y + h * 0.575, o.position.z); px.scale.set(w, h * 1.15, w); px.updateMatrixWorld();
     i++;
   }
-  kit.sync(items); kitDirty = false; updateEmpty(); invalidate();
+  kit.sync(items); kitDirty = false; if (linkHook) linkHook(); updateEmpty(); invalidate();
 }
 function relayout(animate = true) {
   // compact slots in current order so a bigger grid stays tidy
@@ -1588,6 +1690,10 @@ export function bump(key) {
 function applyLevelParts(it) {
   if (it.level && it.level.kind === 'occ') { paintWindows(it.obj, it.level); return; }   // w5: lit windows = occupancy decile (no kit parts)
   if (it.level && it.level.kind === 'plant') { paintPlant(it.obj, it.level); return; }    // w6: lamp, pips, conveyor, scaffold, shutter on the model
+  if (it.level && it.level.kind === 'branch') { paintBranch(it.obj, it.level); return; }  // w7: lit windows = ramp stage, sign, awning, fit-out boards
+  if (it.level && it.level.kind === 'stock') { paintStock(it.obj, it.level); return; }    // w7: pallet stacks = months of stock
+  if (it.level && (it.level.kind === 'mgr')) return;                                    // w7: a regional office (its light lines: linkHook)
+  if (it.level && it.level.kind === 'build') { paintBuild(it.obj, it.level); return; }    // w8: slabs, crane, tarp, permit board, presale banner
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1642,7 +1748,11 @@ export function pulse(key, kind = 'good') {
 /** highlight(key|null) — brightens the item's plinth rim (taps that are not allowed to open the modal, hover). */
 export function highlight(key) { try { hlKey = key && city.has(key) ? key : null; syncKit(); } catch (e) { console.warn(e); } }
 /** for tests and the info modal: the level object an item currently shows */
-export function levelOf(key) { const it = city.get(key); return it && it.level ? { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(it.obj.userData.plantState ? { model: { ...it.obj.userData.plantState, beltPhase: it.obj.userData.belt ? it.obj.userData.belt.phase : null } } : {}) } : null; }
+export function levelOf(key) {
+  const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
+  const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState } : null;
+  return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
+}
 export function shield(keys) {
   for (const key of keys || []) {
     const it = city.get(key); if (!it) continue;
@@ -1707,7 +1817,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {

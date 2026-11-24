@@ -272,6 +272,13 @@ function paintLevel(it, L) {
     if (L.kind === 'plant') {   // w6: the condition light as a corner dot (the pips and the accessible name carry it too); ordered ⏳, mothballed 💤
       hidden(el('span', 'b2d-corner-b', c, L.pending ? '⏳' : L.mothball ? '💤' : L.down ? '🔴' : PLANT_DOT[L.light] || '🟢'));
       c.dataset.light = L.pending || L.mothball ? 'off' : L.down ? 'red' : L.light; c.dataset.run = L.running ? '1' : '0';
+    } else if (L.kind === 'branch') {   // w7: a storefront — 🚧 fit-out, a franchise tag, a flickering sign over the span (CSS, none with reduced motion)
+      hidden(el('span', 'b2d-corner-b', c, L.fitout ? '🚧' : !L.own ? '🤝' : L.n === 4 ? '★' : '💡'));
+      c.dataset.light = L.fitout ? 'off' : L.flicker ? 'flicker' : 'on'; c.dataset.run = L.own ? 'own' : 'fran';
+    } else if (L.kind === 'build') {   // w8: a site — the % complete as a fill bar, ⛔ stalled, 🏗️ working, 📋 permit, 🔑 rental, 🚧 plot
+      hidden(el('span', 'b2d-corner-b', c, L.plot ? '🚧' : L.rental ? '🔑' : L.permit ? '📋' : L.stalled ? '⛔' : '🏗️'));
+      c.dataset.light = L.stalled ? 'stalled' : L.permit || L.plot ? 'off' : 'on'; c.dataset.run = String(Math.round(L.pct * 100));
+      c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
     } else { delete c.dataset.light; delete c.dataset.run; }
     if (L.kind === 'biz') {
       const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');

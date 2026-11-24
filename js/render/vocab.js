@@ -35,6 +35,15 @@ export const WORLD_STYLE = Object.freeze({
   // from h's newsprint (rule: ≥ 10), so the board is a cooler concrete #c9cbcc (ΔE 13.3 to h, 15.0 to w4, 15.3 to w1, 23.6 to w5); the
   // engine theme's #d6d3cd is legacy only. The dark accent ink is #fb923c (w5 already owns #ff9f7f).
   w6: { name: 'אזור התעשייה', mood: 'industrial morning haze', sky: ['#cfd8dc', '#f5f0e6'], board: '#c9cbcc', edge: '#4b5563', center: '#e7e5e4', decor: 'stacks', accent: '#f97316', accent2: '#fbbf24', accentInk: ['#9a3412', '#fb923c'], rim: '#f97316', rimGlow: false, motif: 'gears', caption: 'המפעל שלך' },
+  // worlds wave 3 — w7 רשתות המסחר (docs/full-upgrade/worlds/w7-retail.md "Visual language"): a shopping street in the evening, sky
+  // #2b2d42 → #ef8354, red / white awnings #e63946, ink #9b1c24, decor 'storefronts', 🛍️. The doc's paving #efe6dd is ΔE76 3.6 from w1's
+  // board (rule: ≥ 10), so the board is a blush paving #f1d5d0 (ΔE 11.4 to w1 and h, 13.0 to w6, 13.6 to w5); the engine theme's #efe6dd
+  // is legacy only. The UI fill (css body[data-world=w7] --accent) is the lighter #ec5562 so --ink on it stays ≥ 4.5; 3D keeps #e63946.
+  w7: { name: 'רשתות המסחר', mood: 'shopping street at dusk', sky: ['#2b2d42', '#ef8354'], board: '#f1d5d0', edge: '#9b1c24', center: '#f9e8e4', decor: 'storefronts', accent: '#e63946', accent2: '#ffd166', accentInk: ['#9b1c24', '#ff8a93'], rim: '#e63946', rimGlow: false, motif: 'bags', caption: 'הרשת שלך' },
+  // w8 מטרופולין הנדל"ן (docs/full-upgrade/worlds/w8-metropolis.md): a building site under a clear sky, sky #fde68a → #93c5fd, caution
+  // yellow #eab308, ink #854d0e, decor 'cranes' (w3's crane.glb in the background, procedural cranes on every project), 🏗️. The doc's
+  // concrete #e5e7eb is ΔE76 6.5 from w4's board, so the board is a cool concrete #d6d1e6 (ΔE 11.3 to w6, 11.9 to w4, 16.3 to w7).
+  w8: { name: 'מטרופולין הנדל"ן', mood: 'building site, clear sky', sky: ['#fde68a', '#93c5fd'], board: '#d6d1e6', edge: '#854d0e', center: '#ebe8f3', decor: 'cranes', accent: '#eab308', accent2: '#93c5fd', accentInk: ['#854d0e', '#facc15'], rim: '#eab308', rimGlow: false, motif: 'cranes', caption: 'הפרויקטים שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -52,6 +61,8 @@ export const CHAR_STYLE = Object.freeze({
   founder: '#db2777', engineer: '#64748b', social: '#16a34a',
   hotelier: '#0e7490', restaurateur: '#e8833a', promoter: '#c026d3',   // w5
   opseng: '#0f766e', heir: '#b45309', trader: '#475569',                // w6
+  shopFounder: '#be123c', cfo: '#1d4ed8', franchisor: '#7c3aed',        // w7
+  developer: '#ca8a04', landowner: '#4d7c0f', contractor: '#ea580c',    // w8
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -74,7 +85,10 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   // w5 model keys (procedural stand-ins in 3D, js/render/kit3d.js RESORT_KIT; no .glb files)
   hotel_beach: '🏨', resort: '🏝️', spa: '♨️', conference: '🏛️', waterpark: '🌊', apartments: '🏘️', restaurant: '🍽️', dive_center: '🤿', staff_housing: '🏢',
   // w6 model keys (procedural stand-ins in 3D, js/render/standins3d.js; no .glb files). warehouse keeps its 📦.
-  factory_cnc: '⚙️', factory_plastic: '🧴', factory_food: '🥫', factory_recycle: '♻️', factory_metal: '🔩', factory_pack: '📦' });
+  factory_cnc: '⚙️', factory_plastic: '🧴', factory_food: '🥫', factory_recycle: '♻️', factory_metal: '🔩', factory_pack: '📦',
+  // w7 / w8 model keys (procedural stand-ins in 3D, js/render/standins3d.js; no .glb files). w7's warehouse (the DC) keeps its 📦.
+  store_street: '🏪', store_mall: '🛍️', store_outlet: '🏷️', store_airport: '✈️', stock_pallets: '📦', ecom_hub: '🌐', regional_office: '🏢',
+  tower_build: '🏗️', logistics_build: '🚚', office_build: '🏢', plot_fence: '🚧', tower_done: '🏙️' });
 export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
 
 
@@ -91,6 +105,10 @@ const int = (x, d = 0) => (Number.isFinite(Number(x)) ? Math.round(Number(x)) : 
 export const PLANT_LIGHTS = Object.freeze(['green', 'amber', 'red']);
 export const PLANT_LIGHT_HE = Object.freeze({ green: 'תקין', amber: 'שחוק', red: 'במצב ירוד' });
 export const PLANT_LIGHT_COLOR = Object.freeze({ green: '#22c55e', amber: '#f59e0b', red: '#ef4444', off: '#6b7280' });
+/** w7 branch ramp stages (chain.js cityModels stage 0–4: 0 = fit-out, 4 = mature) and w8 build words. */
+export const BRANCH_STAGE_HE = Object.freeze(['בשיפוץ', 'נפתח', 'בהרצה', 'כמעט בשל', 'בשל']);
+const clampN = (x, a, b, d) => Math.max(a, Math.min(b, int(x, d)));
+const frac = (x) => (Number.isFinite(Number(x)) ? Math.max(0, Math.min(1, Math.round(Number(x) * 100) / 100)) : 0);
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
 export function normLevel(level) {
   if (!level || typeof level !== 'object') return null;
@@ -120,6 +138,27 @@ export function normLevel(level) {
     const hazard = ['low', 'mid', 'high'].includes(level.hazard) ? level.hazard : null;
     return { kind: 'plant', n, of: 3, light, cond, running, down, pending, mothball, util, shift, hazard, activity: down ? { breakdown: true } : null, trouble: false };
   }
+  if (level.kind === 'branch') {   // w7: a branch (chain.js cityModels): ramp stage 0–4 (0 = fit-out), own / franchise, over-span flicker, stock-out
+    const fitout = !!level.fitout; const n = fitout ? 0 : clampN(level.n, 1, 4, 1);
+    const stockout = !fitout && !!level.stockout && level.own !== false;
+    return { kind: 'branch', n, of: 4, own: level.own !== false, fitout, flicker: !fitout && !!level.flicker && level.own !== false, stockout, count: clampN(level.count, 1, 40, 1),
+      activity: stockout ? { stockout: true } : null, trouble: false };
+  }
+  if (level.kind === 'stock') {   // w7: the chain's pooled stock (months of sales on hand → 0–4 pallet stacks)
+    const cover = Number.isFinite(Number(level.cover)) ? Math.max(0, Math.round(Number(level.cover) * 100) / 100) : null;
+    const n = cover == null ? 0 : Math.max(0, Math.min(4, Math.round(cover * 1.5)));
+    return { kind: 'stock', n, of: 4, cover, short: cover != null && cover < 0.6, activity: cover != null && cover < 0.6 ? { stockout: true } : null, trouble: false };
+  }
+  if (level.kind === 'mgr') return { kind: 'mgr', n: 0, of: 0, links: clampN(level.links, 1, 12, 6), activity: null, trouble: false };   // w7: a regional manager (6 branches)
+  if (level.kind === 'build') {   // w8 (projects.js cityModels): a project (permit / stages 1–4, floors, stalled, crane, presold), a rental block, a fenced plot
+    const plot = !!level.plot, rental = !plot && !!level.rental;
+    const permit = !plot && !rental && !!level.permit;
+    const n = plot ? 0 : rental ? 4 : permit ? 0 : clampN(level.n, 1, 4, 1);
+    const pct = rental ? 1 : plot || permit ? 0 : frac(level.pct);
+    const stalled = !plot && !rental && !!level.stalled;
+    return { kind: 'build', n, of: 4, pct, floors: plot ? 0 : clampN(level.floors, 0, 60, Math.round(pct * 20)), stalled, crane: !plot && !rental && !permit && !stalled && level.crane !== false,
+      permit, presold: plot || rental ? 0 : frac(level.presold), rental, plot, activity: null, trouble: false };
+  }
   return null;
 }
 /** T5-L0/L1/L2 */
@@ -134,6 +173,18 @@ export function levelText(level) {
     if (L.down) return `${st} · בתקלה, לא מייצר`;
     return `${st} · ${L.running ? `ניצולת ${Math.round(L.util * 100)}%` : 'עומד בלי הזמנות'}${L.shift > 1 ? ` · ${L.shift} משמרות` : ''}`;
   }
+  if (L.kind === 'branch') {
+    if (L.fitout) return 'בשיפוץ: עוד לא נפתח';
+    return `שלב ${L.n} מתוך 4 · ${BRANCH_STAGE_HE[L.n]}${L.own ? '' : ' · זכיינות'}${L.count > 1 ? ` · ${L.count} סניפים` : ''}${L.flicker ? ' · מעבר ליכולת הניהול' : ''}`;
+  }
+  if (L.kind === 'stock') return L.cover == null ? 'מלאי: אין סניפים פתוחים' : `מלאי ל־${Math.round(L.cover * 10) / 10} חודשי מכירות${L.short ? ' · כמעט נגמר' : ''}`;
+  if (L.kind === 'mgr') return `מנהל אזור · מחזיק ${L.links} סניפים`;
+  if (L.kind === 'build') {
+    if (L.plot) return 'מגרש: עוד אין פרויקט';
+    if (L.rental) return 'בניין גמור · מושכר';
+    if (L.permit) return 'ממתין להיתר בנייה';
+    return `בבנייה: ${Math.round(L.pct * 100)}% · שלב ${L.n} מתוך 4${L.stalled ? ' · העבודה עומדת' : ''}${L.presold ? ` · ${Math.round(L.presold * 100)}% נמכרו על הנייר` : ''}`;
+  }
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
 /** T5-H0…H3 / T5-HU */
@@ -143,6 +194,13 @@ export function levelHint(level) {
   if (L.kind === 'occ') return L.closed ? 'סגור החודש: אין הכנסה, אבל חלק מהעלויות הקבועות ממשיכות.' : 'החלונות הדלוקים = התפוסה. בעונה המלון מתמלא; בשפל מחיר נמוך ממלא חדרים.';
   if (L.kind === 'plant') return L.pending ? 'שילמת מקדמה. הקו מגיע אחרי חצי שנה, ורק אז מתחיל לייצר.' : L.mothball ? 'מושבת: משלם רק חלק מהעלויות הקבועות, המצב קפוא. אפשר להפעיל מחדש בלוח קווי הייצור.'
     : L.down ? 'הקו בתקלה: אין ייצור עד שהתיקון נגמר, והעלויות הקבועות ממשיכות.' : 'הנורה והנקודות = מצב הקו. מצב נמוך = יותר תקלות ושווי נמוך יותר. תחזוקה בלוח קווי הייצור.';
+  if (L.kind === 'branch') return L.fitout ? 'חודשיים של שיפוץ: שכירות ושכר בלי מכירות. אחר כך חצי שנה של הרצה.' : L.flicker ? 'השלט מהבהב: יש יותר סניפים ממה שהמנהלים מחזיקים, וכל הסניפים מוכרים פחות. מנהל אזור — בלוח הרשת.'
+    : L.own ? 'האורות בחזית = שלב ההרצה. סניף בשל (4 מתוך 4) מוכר במלואו.' : 'זכיין: פתח בכסף שלו ומשלם לך חלק מהמכירות. האיכות שלו — והמותג של כולם.';
+  if (L.kind === 'stock') return 'משטחי המלאי = כמה חודשי מכירות יש במחסן. סחורה מגיעה אחרי חודשיים; יותר מדי מלאי נמכר בהנחה.';
+  if (L.kind === 'mgr') return 'כל מנהל אזור מחזיק 6 סניפים. הקווים המאירים מחברים אותו לסניפים שלו.';
+  if (L.kind === 'build') return L.plot ? 'מגרש בלי פרויקט: אפשר להתחיל פרויקט או למכור, בלוח הפרויקטים.' : L.rental ? 'הדירות שלא נמכרו נשארו אצלך להשכרה.'
+    : L.permit ? 'עד ההיתר אין בנייה, והקרקע עולה מס ואגרות כל חודש.' : L.stalled ? 'הברזנט = העבודה עומדת (אין הון עצמי, אין מספיק מכירות, או עיכוב). הריבית ממשיכה לרוץ.'
+    : 'הקומות והעגורן = ההתקדמות. השווי של בניין שלא נגמר = מה ששולם עליו.';
   return HINTS[L.n];
 }
 /** '●●○' — 2D pips (visual only, aria-hidden). */
@@ -150,6 +208,10 @@ export function pipsText(level) {
   const L = normLevel(level); if (!L) return '';
   if (L.kind === 'occ') { if (L.closed) return '🔒'; const k = Math.round(L.n / 2); return '▮'.repeat(k) + '▯'.repeat(5 - k); }   // 5 windows, each 2 deciles
   if (L.kind === 'plant' && L.pending) return '⏳';   // w6: an ordered line has no condition to show yet
+  if (L.kind === 'branch' && L.fitout) return '🚧';   // w7: a branch in its fit-out
+  if (L.kind === 'stock') return '▮'.repeat(L.n) + '▯'.repeat(4 - L.n);
+  if (L.kind === 'mgr') return '';
+  if (L.kind === 'build') { if (L.plot) return '🚧'; if (L.rental) return '🔑'; if (L.permit) return '📋'; }   // w8
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -174,6 +236,10 @@ export function kitParts(level) {
   if (L.kind === 'upgrade') { p.band = L.n >= 1; p.dome = L.n >= 2; return p; }
   if (L.kind === 'occ') { p.windows = L.n; p.closed = L.closed; p.wing = L.wing; return p; }   // drawn on the model itself (standins3d.js)
   if (L.kind === 'plant') { p.light = L.light; p.pips = L.n; p.conveyor = L.running; p.down = L.down; p.pending = L.pending; p.mothball = L.mothball; return p; }   // w6: on the model (standins3d.js paintPlant)
+  if (L.kind === 'branch') { p.lights = L.n; p.fitout = L.fitout; p.flicker = L.flicker; p.franchise = !L.own; p.stockout = L.stockout; return p; }   // w7: on the model (paintBranch)
+  if (L.kind === 'stock') { p.pallets = L.n; return p; }
+  if (L.kind === 'mgr') { p.links = L.links; return p; }
+  if (L.kind === 'build') { p.floors = L.floors; p.pct = L.pct; p.crane = L.crane; p.tarp = L.stalled; p.permit = L.permit; p.presold = L.presold; p.rental = L.rental; p.fence = L.plot; return p; }   // w8 (paintBuild)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }
   if (L.n >= 1) p.sign = true;

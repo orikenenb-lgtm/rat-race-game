@@ -1,4 +1,4 @@
-// w5 עיר התיירות + w6 אזור התעשייה — procedural 3D stand-ins for the world's model keys (w5.js `models`: hotel_beach, resort, spa, conference,
+// w5 עיר התיירות + w6 אזור התעשייה + w7 רשתות המסחר + w8 מטרופולין הנדל"ן — procedural 3D stand-ins for the world's model keys (w5.js `models`: hotel_beach, resort, spa, conference,
 // waterpark, apartments, restaurant, dive_center, staff_housing). No .glb exists for them, so scene.js never requests one
 // (worldModelNames skips STANDIN names) and builds these instead — never a 404, never a grey placeholder box.
 //
@@ -246,23 +246,251 @@ export function stepBelt(g, dt) {
   return true;
 }
 
+/* ---------------------------------------------------------------- w7 רשתות המסחר: storefronts, the stock pool, the DC, e-commerce, managers
+   chain.js cityModels → {stage 0–4, lights, own / franchise, fitout, flicker (over span), stockout, count}, normalised by vocab.normLevel
+   kind 'branch'. Every storefront carries (userData): `lights` (4 window panes: lit panes = the ramp stage), `sign` (the shop sign over
+   the door: grey while fitting out, gold when open, flickering when the chain has more branches than its managers can hold — the flicker
+   only moves while the scene animates, never under reduced motion; a still frame shows a dimmed sign), `awn` (the striped awning: red /
+   white for your own branch, blue / white for a franchise) and `boards` (boarded windows + a scaffold during the 2-month fit-out).
+   paintBranch() is the only writer; stepShop() is the flicker step. */
+export const AWN = Object.freeze({ own: ['#e63946', '#fff5f5'], fran: ['#2563eb', '#eef2ff'] });
+export const SIGN = Object.freeze({ on: '#ffd166', dim: '#7c6a3a', off: '#6b7280' });
+function awning(g, { w, y, z, n = 7, depth = 0.26 }) {
+  const strips = []; const sw = w / n;
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sw * 1.02, 0.035, depth), mat(i % 2 ? AWN.own[1] : AWN.own[0]));
+    m.position.set(-w / 2 + sw * (i + 0.5), y, z + depth / 2 - 0.02); m.rotation.x = 0.38; g.add(m); strips.push(m);
+  }
+  // scalloped valance (one dark strip under the awning edge)
+  box(g, w, 0.05, 0.02, '#7f1d1d', 0, y - 0.11, z + depth * 0.93);
+  g.userData.awn = strips; return strips;
+}
+/** the storefront kit every branch model shares: 4 window panes, a sign, an awning, the fit-out boards (hidden) */
+function shopKit(g, { w, h, z, winY = 0.18, winH = 0.34, signY, awnY, door = 0.22 }) {
+  const im = new THREE.InstancedMesh(new THREE.PlaneGeometry(w * 0.19, winH), new THREE.MeshBasicMaterial({ color: '#ffffff' }), 4);
+  im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(12).fill(1), 3);
+  const o = new THREE.Object3D();
+  for (let i = 0; i < 4; i++) { const x = -w * 0.36 + i * w * 0.24 + (i >= 2 ? door * 0.5 : -door * 0.1); o.position.set(x, winY + winH / 2, z + 0.006); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }
+  im.name = 'standin:shoplights'; g.add(im); g.userData.lights = im;
+  box(g, door, winH + 0.08, 0.02, '#3f2a1d', w * 0.12, 0, z + 0.004);
+  const sg = new THREE.Mesh(new THREE.BoxGeometry(w * 0.62, 0.13, 0.04), new THREE.MeshBasicMaterial({ color: SIGN.on }));
+  sg.position.set(0, signY ?? h - 0.12, z + 0.025); sg.name = 'standin:sign'; g.add(sg); g.userData.sign = sg;
+  awning(g, { w: w * 0.96, y: awnY ?? winY + winH + 0.1, z });
+  const bd = new THREE.Group(); bd.name = 'standin:boards'; bd.visible = false;
+  for (let i = 0; i < 4; i++) box(bd, w * 0.9, 0.05, 0.02, '#c08a52', 0, winY + 0.03 + i * winH * 0.28, z + 0.03);
+  for (const sx of [-1, 1]) box(bd, 0.035, h * 1.05, 0.035, '#f59e0b', sx * (w / 2 + 0.05), 0, z + 0.08);
+  box(bd, w + 0.16, 0.03, 0.03, '#f59e0b', 0, h * 0.62, z + 0.08);
+  g.add(bd); g.userData.boards = bd;
+}
+function finishShop(g, body) { g.userData.body = body; g.userData.shop = true; paintBranch(g, null); return g; }
+const SHOP = {
+  store_street() {   // a two-storey street shop: plaster upper floor with two windows, a red / white awning
+    const g = new THREE.Group(); const body = [box(g, 1.3, 1.05, 0.8, '#f5e6d3'), box(g, 1.36, 0.06, 0.86, '#9b1c24', 0, 1.05)];
+    for (const x of [-0.32, 0.32]) box(g, 0.24, 0.18, 0.02, '#475569', x, 0.64, 0.405);
+    shopKit(g, { w: 1.3, h: 1.05, z: 0.4, signY: 0.94 }); return finishShop(g, body);
+  },
+  store_mall() {   // a mall unit: a wide glass front in a beige mall block with a skylight
+    const g = new THREE.Group(); const body = [box(g, 1.7, 0.95, 1.0, '#e7dccb'), box(g, 1.76, 0.08, 1.06, '#a8a29e', 0, 0.95), box(g, 0.7, 0.16, 0.5, '#bae6fd', 0, 1.03, -0.1, { roughness: 0.2 })];
+    shopKit(g, { w: 1.6, h: 0.95, z: 0.5, winH: 0.4, signY: 0.85, awnY: 0.66 }); return finishShop(g, body);
+  },
+  store_outlet() {   // an outlet: a low wide box with pennants on a pole
+    const g = new THREE.Group(); const body = [box(g, 1.8, 0.7, 0.9, '#d6d3d1'), box(g, 1.84, 0.05, 0.94, '#e63946', 0, 0.7)];
+    const pole = cyl(g, 0.02, 0.02, 1.2, '#57534e', 0.95, 0, 0.3, 6); body.push(pole);
+    for (let i = 0; i < 3; i++) { const f = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 3), mat(i % 2 ? '#ffd166' : '#e63946')); f.rotation.z = Math.PI / 2; f.position.set(0.88, 1.12 - i * 0.14, 0.3); g.add(f); body.push(f); }
+    shopKit(g, { w: 1.7, h: 0.7, z: 0.45, winH: 0.26, winY: 0.12, signY: 0.58, awnY: 0.48 }); return finishShop(g, body);
+  },
+  store_airport() {   // a glass pavilion in the terminal, a tail fin on the roof
+    const g = new THREE.Group(); const body = [box(g, 1.4, 0.85, 0.9, '#cbd5e1', 0, 0, 0, { roughness: 0.25, metalness: 0.2 }), box(g, 1.46, 0.05, 0.96, '#334155', 0, 0.85)];
+    const fin = box(g, 0.08, 0.42, 0.34, '#e63946', 0.42, 0.9, -0.1); fin.rotation.z = -0.25; body.push(fin);
+    shopKit(g, { w: 1.4, h: 0.85, z: 0.45, signY: 0.75, awnY: 0.58 }); return finishShop(g, body);
+  },
+};
+/** the chain's stock pool: 4 pallet stacks on a loading pad (how many are full = months of sales on hand) */
+function stockPallets() {
+  const g = new THREE.Group(); box(g, 1.5, 0.05, 1.0, '#a8a29e');
+  const stacks = [];
+  for (let i = 0; i < 4; i++) {
+    const st = new THREE.Group(); st.position.set(-0.52 + (i % 2) * 0.62 + (i > 1 ? 0.42 : 0), 0.05, i > 1 ? 0.22 : -0.22);
+    box(st, 0.46, 0.06, 0.4, '#a16207'); box(st, 0.42, 0.34, 0.36, i % 2 ? '#d6a35c' : '#c08a52', 0, 0.06); box(st, 0.44, 0.012, 0.38, '#f5f5f4', 0, 0.42);
+    g.add(st); stacks.push(st);
+  }
+  g.userData.pallets = stacks; g.userData.body = []; paintStock(g, null); return g;
+}
+/** w7's distribution centre (a big shed with docks and a truck) — w7 only: w3 keeps its real warehouse.glb (DIR_BUILD). */
+function warehouse7() {
+  const g = new THREE.Group();
+  const body = [box(g, 1.9, 0.8, 1.1, '#e7e5e4'), box(g, 1.94, 0.06, 1.14, '#9b1c24', 0, 0.8), box(g, 1.9, 0.08, 0.02, '#e63946', 0, 0.62, 0.551)];
+  for (let i = 0; i < 4; i++) box(g, 0.3, 0.36, 0.02, '#475569', -0.66 + i * 0.44, 0, 0.555);
+  box(g, 0.5, 0.26, 0.22, '#f8fafc', 0.5, 0.05, 0.82); box(g, 0.18, 0.2, 0.2, '#e63946', 0.16, 0.05, 0.82);   // a truck at the dock
+  for (const x of [0.2, 0.62]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.24, 10), mat('#111827')); w.rotation.x = Math.PI / 2; w.position.set(x, 0.06, 0.82); g.add(w); }
+  g.userData.body = body; return g;
+}
+/** the e-commerce hub: a parcel hall with a big screen, an antenna and a stack of boxes */
+function ecomHub() {
+  const g = new THREE.Group(); const body = [box(g, 1.3, 0.8, 0.9, '#e0f2fe'), box(g, 1.34, 0.05, 0.94, '#0369a1', 0, 0.8)];
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.32), new THREE.MeshBasicMaterial({ color: '#38bdf8' })); scr.position.set(0, 0.45, 0.452); g.add(scr);
+  body.push(cyl(g, 0.015, 0.02, 0.7, '#475569', 0.45, 0.8, -0.2, 6)); const dish = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat('#f8fafc')); dish.rotation.x = -1.2; dish.position.set(0.45, 1.42, -0.15); g.add(dish);
+  for (let i = 0; i < 3; i++) box(g, 0.2, 0.16, 0.2, '#c08a52', -0.45 + i * 0.12, i === 2 ? 0.16 : 0, 0.62);
+  g.userData.body = body; return g;
+}
+/** a regional manager's office: a slim tower with lit windows and a beacon (scene.js draws the light lines to its 6 branches) */
+function regionalOffice() {
+  const g = new THREE.Group(); const body = [box(g, 0.75, 1.6, 0.75, '#334155', 0, 0, 0, { roughness: 0.35, metalness: 0.2 }), box(g, 0.8, 0.06, 0.8, '#e63946', 0, 1.6)];
+  windows(g, { w: 0.62, y1: 0.55, y2: 1.15, z: 0.375, pane: 0.09 });
+  const bc = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: SIGN.on })); bc.position.set(0, 1.76, 0); bc.name = 'standin:beacon'; g.add(bc); g.userData.beacon = bc;
+  g.userData.body = body; g.userData.office = true; return g;
+}
+/** level (normalised, kind 'branch') → lit panes, the sign, the awning colours, the fit-out boards. null → a mature own branch. */
+export function paintBranch(g, L) {
+  const ud = g && g.userData; if (!ud || !ud.lights) return false;
+  const lv = L && L.kind === 'branch' ? L : null;
+  const fitout = !!(lv && lv.fitout), fran = !!(lv && !lv.own), flicker = !!(lv && lv.flicker);
+  const lit = !lv ? 4 : fitout ? 0 : Math.max(0, Math.min(4, lv.n | 0));
+  const c = new THREE.Color();
+  for (let i = 0; i < 4; i++) { c.set(i < lit ? WIN_LIT : WIN_DARK); ud.lights.setColorAt(i, c); }
+  ud.lights.instanceColor.needsUpdate = true;
+  const pal = fran ? AWN.fran : AWN.own;
+  (ud.awn || []).forEach((m, i) => m.material.color.set(pal[i % 2]));
+  if (ud.boards) ud.boards.visible = fitout;
+  const sign = fitout ? SIGN.off : flicker ? SIGN.dim : SIGN.on;   // a still over-span frame shows a dimmed sign (reduced motion)
+  ud.sign.material.color.set(sign);
+  ud.shopState = { lit, fitout, franchise: fran, flicker, sign, stockout: !!(lv && lv.stockout) };
+  return true;
+}
+/** One flicker step of an over-span branch's sign (scene.js calls it per frame while the scene animates, never under reduced motion). */
+export function stepShop(g, t) {
+  const ud = g && g.userData; const s = ud && ud.shopState; if (!s || !s.flicker || !ud.sign) return false;
+  const on = Math.sin(t * 13.1) + Math.sin(t * 5.3 + 1) > 0.4;
+  ud.sign.material.color.set(on ? SIGN.on : SIGN.dim); s.blink = on; return true;
+}
+/** level (kind 'stock') → visible pallet stacks (0–4); null → 2. */
+export function paintStock(g, L) {
+  const ud = g && g.userData; if (!ud || !ud.pallets) return false;
+  const n = L && L.kind === 'stock' ? Math.max(0, Math.min(4, L.n | 0)) : 2;
+  ud.pallets.forEach((p, i) => { p.visible = i < n; });
+  ud.stockState = { pallets: n }; return true;
+}
+
+/* ---------------------------------------------------------------- w8 מטרופולין הנדל"ן: building sites, finished blocks, fenced plots
+   projects.js cityModels → {pct, stage 0–4, floors, stalled / tarp, craneOn, permit, presold} (+ rentals stage 5, plots fence), normalised
+   by vocab.normLevel kind 'build'. A site carries (userData): `slabs` (an InstancedMesh of floor slabs: how many stand = % complete),
+   `cols` (4 corner columns as tall as the slabs), `crane` + `jib` (a tower crane whose jib turns while work goes on — only while the scene
+   animates, never under reduced motion), `tarp` (a blue sheet over the frame when the site stands still), `sign` (the permit board while
+   the plot waits for its permit) and `banner` (the presale banner on the fence: its green part = the share sold on paper). paintBuild()
+   is the only writer; stepCrane() is the jib step. */
+function towerCrane(g, { x, z, h = 2.0, jib = 1.2 }) {
+  const c = new THREE.Group(); c.name = 'standin:crane'; c.position.set(x, 0, z);
+  box(c, 0.11, h, 0.11, '#eab308');
+  for (let i = 0; i < 6; i++) { const b = box(c, 0.1, 0.012, 0.012, '#a16207', 0, (i + 0.5) * h / 6); b.rotation.z = 0.6; }
+  const j = new THREE.Group(); j.position.y = h; j.name = 'standin:jib'; c.add(j);
+  box(j, jib, 0.07, 0.08, '#eab308', jib / 2 - 0.15, 0); box(j, 0.4, 0.05, 0.06, '#eab308', -0.32, 0); box(j, 0.14, 0.14, 0.12, '#57534e', -0.46, -0.07);
+  box(j, 0.12, 0.12, 0.1, '#f8fafc', 0.02, -0.1); const cable = box(j, 0.008, 0.5, 0.008, '#1f2937', jib * 0.7, -0.52); const hook = box(j, 0.05, 0.05, 0.05, '#1f2937', jib * 0.7, -0.56);
+  g.add(c); g.userData.crane = c; g.userData.jib = j; g.userData.hook = [cable, hook];
+  return c;
+}
+function siteKit(g, { w, d, n = 10, fh = 0.15, slab = '#d6d3d1', glass = null, crane = true, cx, cz }) {
+  box(g, w + 0.3, 0.04, d + 0.3, '#a8a29e');   // the site pad
+  const sl = new THREE.InstancedMesh(new THREE.BoxGeometry(w, 0.04, d), mat(slab, { roughness: 0.9 }), n);
+  const o = new THREE.Object3D();
+  for (let i = 0; i < n; i++) { o.position.set(0, 0.06 + (i + 1) * fh, 0); o.updateMatrix(); sl.setMatrixAt(i, o.matrix); }
+  sl.name = 'standin:slabs'; sl.castShadow = true; sl.receiveShadow = true; g.add(sl); g.userData.slabs = sl; g.userData.slabN = n; g.userData.fh = fh;
+  if (glass) { const gl = new THREE.InstancedMesh(new THREE.BoxGeometry(w * 0.96, fh * 0.7, d * 0.96), mat(glass, { roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.75 }), n);
+    for (let i = 0; i < n; i++) { o.position.set(0, 0.06 + i * fh + fh * 0.62, 0); o.updateMatrix(); gl.setMatrixAt(i, o.matrix); } gl.name = 'standin:glass'; g.add(gl); g.userData.glass = gl; }
+  const cols = [];
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1]]) { const c = box(g, 0.08, 1, 0.08, '#57534e', sx * (w / 2 - 0.05), 0.06, sz * (d / 2 - 0.05)); cols.push(c); }
+  g.userData.cols = cols;
+  const tarp = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 1, d + 0.08), mat('#2563eb', { transparent: true, opacity: 0.62, roughness: 0.9 }));
+  tarp.name = 'standin:tarp'; tarp.visible = false; g.add(tarp); g.userData.tarp = tarp;
+  // the permit board (two posts, a yellow face) and the presale banner on the fence
+  const sign = new THREE.Group(); sign.name = 'standin:permit'; sign.visible = false;
+  for (const sx of [-0.22, 0.22]) box(sign, 0.03, 0.42, 0.03, '#57534e', sx, 0, d / 2 + 0.22);
+  box(sign, 0.58, 0.28, 0.03, '#facc15', 0, 0.32, d / 2 + 0.24); box(sign, 0.4, 0.04, 0.035, '#854d0e', 0, 0.44, d / 2 + 0.25); box(sign, 0.3, 0.04, 0.035, '#854d0e', 0, 0.36, d / 2 + 0.25);
+  g.add(sign); g.userData.sign = sign;
+  const bn = new THREE.Group(); bn.name = 'standin:banner'; bn.position.set(-(w / 2) - 0.08, 0, d / 2 + 0.16);
+  box(bn, 0.03, 0.62, 0.03, '#57534e', -0.11, 0); box(bn, 0.03, 0.62, 0.03, '#57534e', 0.11, 0);
+  box(bn, 0.24, 0.42, 0.015, '#f8fafc', 0, 0.18, 0.01);
+  const fill = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.38, 0.02), new THREE.MeshBasicMaterial({ color: '#16a34a' })); fill.position.set(0, 0.2, 0.02); bn.add(fill);
+  g.add(bn); g.userData.banner = { group: bn, fill, y0: 0.2, h: 0.38 };
+  if (crane) towerCrane(g, { x: cx ?? w / 2 + 0.22, z: cz ?? -d / 2 + 0.1, h: n * fh + 0.55, jib: Math.max(1.0, w * 0.85) });
+}
+function finishSite(g, body = []) { g.userData.body = body; g.userData.site = true; paintBuild(g, null); return g; }
+const SITE = {
+  tower_build() { const g = new THREE.Group(); siteKit(g, { w: 1.2, d: 1.0, n: 10, fh: 0.15, slab: '#b5aea5' }); return finishSite(g); },
+  office_build() { const g = new THREE.Group(); siteKit(g, { w: 1.2, d: 1.0, n: 8, fh: 0.16, slab: '#94a3b8', glass: '#38bdf8' }); return finishSite(g); },
+  logistics_build() {   // a logistics hall: wide and low, built bay by bay (the slabs here are roof bays along x)
+    const g = new THREE.Group(); box(g, 1.9, 0.04, 1.1, '#a8a29e');
+    const n = 6; const sl = new THREE.InstancedMesh(new THREE.BoxGeometry(0.28, 0.5, 0.9), mat('#e7e5e4', { roughness: 0.9 }), n); const o = new THREE.Object3D();
+    for (let i = 0; i < n; i++) { o.position.set(-0.75 + i * 0.3, 0.29, 0); o.updateMatrix(); sl.setMatrixAt(i, o.matrix); }
+    sl.name = 'standin:slabs'; sl.castShadow = true; g.add(sl); g.userData.slabs = sl; g.userData.slabN = n; g.userData.bays = true;
+    const tarp = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.56, 0.96), mat('#2563eb', { transparent: true, opacity: 0.62 })); tarp.position.y = 0.3; tarp.visible = false; tarp.name = 'standin:tarp'; g.add(tarp); g.userData.tarp = tarp;
+    const sign = new THREE.Group(); sign.visible = false; sign.name = 'standin:permit'; box(sign, 0.03, 0.42, 0.03, '#57534e', 0, 0, 0.7); box(sign, 0.5, 0.26, 0.03, '#facc15', 0, 0.3, 0.72); g.add(sign); g.userData.sign = sign;
+    towerCrane(g, { x: 1.05, z: -0.3, h: 1.2, jib: 1.1 });
+    return finishSite(g);
+  },
+};
+/** a finished block (a rental: the units you kept) — lit windows */
+function towerDone() {
+  const g = new THREE.Group(); const body = [box(g, 0.9, 1.7, 0.8, '#e7e5e4'), box(g, 0.96, 0.06, 0.86, '#854d0e', 0, 1.7)];
+  windows(g, { w: 0.78, y1: 0.6, y2: 1.25, z: 0.4, pane: 0.11 });
+  box(g, 0.3, 0.32, 0.02, '#334155', 0, 0, 0.405);
+  g.userData.body = body; return g;
+}
+/** a fenced plot: dirt, a fence, a "for development" board */
+function plotFence() {
+  const g = new THREE.Group(); box(g, 1.5, 0.04, 1.1, '#b08968', 0, 0, 0, { roughness: 1 });
+  const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.035, 0.32, 0.035), mat('#78716c'), 16); const o = new THREE.Object3D(); let k = 0;
+  for (let i = 0; i < 4; i++) for (const [x, z] of [[-0.75 + i * 0.5, -0.55], [-0.75 + i * 0.5, 0.55], [-0.75, -0.55 + i * 0.367], [0.75, -0.55 + i * 0.367]]) { if (k >= 16) break; o.position.set(x, 0.18, z); o.updateMatrix(); posts.setMatrixAt(k++, o.matrix); }
+  g.add(posts);
+  for (const z of [-0.55, 0.55]) box(g, 1.52, 0.03, 0.02, '#f59e0b', 0, 0.26, z);
+  for (const x of [-0.75, 0.75]) box(g, 0.02, 0.03, 1.12, '#f59e0b', x, 0.26, 0);
+  box(g, 0.03, 0.5, 0.03, '#57534e', 0.4, 0, 0.62); box(g, 0.5, 0.26, 0.03, '#facc15', 0.4, 0.36, 0.64);
+  const heap = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.24, 7), mat('#8b6b4a', { flatShading: true })); heap.position.set(-0.3, 0.16, -0.1); g.add(heap);
+  g.userData.body = []; g.userData.plot = true; return g;
+}
+/** level (normalised, kind 'build') → slabs standing, columns, crane, tarp, the permit board, the presale banner. null → half built. */
+export function paintBuild(g, L) {
+  const ud = g && g.userData; if (!ud || !ud.slabs) return false;
+  const lv = L && L.kind === 'build' ? L : null;
+  const permit = !!(lv && lv.permit), stalled = !!(lv && lv.stalled);
+  const pct = lv ? (permit ? 0 : lv.pct) : 0.5;
+  const N = ud.slabN; const k = permit ? 0 : Math.max(pct > 0 ? 1 : 0, Math.min(N, Math.round(pct * N)));
+  ud.slabs.count = k; ud.slabs.instanceMatrix.needsUpdate = true;
+  if (ud.glass) { ud.glass.count = Math.max(0, k - 1); }
+  const top = 0.06 + k * (ud.fh || 0.15);
+  for (const c of ud.cols || []) { c.visible = k > 0; c.scale.y = Math.max(0.01, top - 0.06); c.position.y = 0.06 + (top - 0.06) / 2; }
+  if (ud.tarp) { ud.tarp.visible = stalled && k > 0; if (!ud.bays) { ud.tarp.scale.y = Math.max(0.05, top - 0.06); ud.tarp.position.y = 0.06 + (top - 0.06) / 2; } }
+  if (ud.sign) ud.sign.visible = permit || k === 0;
+  if (ud.crane) ud.crane.visible = !permit && pct < 1;
+  if (ud.banner) { const p = lv ? lv.presold : 0; ud.banner.group.visible = !permit; ud.banner.fill.scale.y = Math.max(0.02, p); ud.banner.fill.position.y = ud.banner.y0 - ud.banner.h / 2 + (ud.banner.h * Math.max(0.02, p)) / 2; }
+  ud.buildState = { slabs: k, crane: !!(ud.crane && ud.crane.visible), craneOn: !!(lv ? lv.crane : true) && !stalled && !permit, tarp: !!(ud.tarp && ud.tarp.visible), permit, presold: lv ? lv.presold : 0 };
+  return true;
+}
+/** One step of a working site's crane (the jib turns; scene.js calls it while the scene animates, never under reduced motion). */
+export function stepCrane(g, dt) {
+  const ud = g && g.userData; const s = ud && ud.buildState; if (!s || !s.craneOn || !ud.jib) return false;
+  ud.jib.rotation.y = (ud.jib.rotation.y + (dt || 0) * 0.35) % (Math.PI * 2); s.jib = ud.jib.rotation.y; return true;
+}
+/** A procedural tower crane for the w8 background when w3's crane.glb is not loaded (scene.js decorCranes). */
+export function buildCrane(h = 6) { const g = new THREE.Group(); towerCrane(g, { x: 0, z: 0, h, jib: h * 0.6 }); return shadowAll(g); }
+
 /** Model names that are built here in every world (no GLB is ever requested for them). */
-export const STANDIN_NAMES = Object.freeze([...Object.keys(BUILD), ...Object.keys(PLANT)]);
+const W78 = Object.freeze({ ...SHOP, ...SITE, stock_pallets: stockPallets, ecom_hub: ecomHub, regional_office: regionalOffice, tower_done: towerDone, plot_fence: plotFence });
+export const STANDIN_NAMES = Object.freeze([...Object.keys(BUILD), ...Object.keys(PLANT), ...Object.keys(W78)]);
 /** Names built here only for a given asset folder (a name another world has a real .glb for). */
-const DIR_BUILD = Object.freeze({ w6: Object.freeze({ warehouse: warehouse6 }) });
+const DIR_BUILD = Object.freeze({ w6: Object.freeze({ warehouse: warehouse6 }), w7: Object.freeze({ warehouse: warehouse7 }) });
 const base = (name) => String(name || '').split('/').pop();
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 /** Is `name` (in asset folder `dir`) a procedural stand-in? A 'dir/name' model keeps its own folder. */
 export function hasStandin(name, dir = null) {
   const s = String(name || ''); const n = base(s); const d = s.includes('/') ? s.split('/')[0] : dir;
-  return own(BUILD, n) || own(PLANT, n) || !!(d && DIR_BUILD[d] && own(DIR_BUILD[d], n));
+  return own(BUILD, n) || own(PLANT, n) || own(W78, n) || !!(d && DIR_BUILD[d] && own(DIR_BUILD[d], n));
 }
 /** A fresh stand-in group (own geometry / materials: the caller disposes it with the object). */
 export function buildStandin(name, dir = null) {
   const s = String(name || ''); const n = base(s); const d = s.includes('/') ? s.split('/')[0] : dir;
-  const f = BUILD[n] || PLANT[n] || (d && DIR_BUILD[d] && DIR_BUILD[d][n]); if (!f) return null;
+  const f = (own(BUILD, n) && BUILD[n]) || (own(PLANT, n) && PLANT[n]) || (own(W78, n) && W78[n]) || (d && DIR_BUILD[d] && DIR_BUILD[d][n]); if (!f) return null;
   const g = shadowAll(f()); g.userData.standin = name;
   if (g.userData.win) { g.userData.win.castShadow = false; g.userData.win.receiveShadow = false; }
-  for (const k of ['lamp', 'pips']) if (g.userData[k]) { g.userData[k].castShadow = false; g.userData[k].receiveShadow = false; }
+  for (const k of ['lamp', 'pips', 'lights', 'sign', 'beacon', 'tarp']) if (g.userData[k] && g.userData[k].isMesh) { g.userData[k].castShadow = false; g.userData[k].receiveShadow = false; }
   return g;
 }

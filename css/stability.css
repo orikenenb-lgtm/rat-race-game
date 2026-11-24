@@ -138,6 +138,23 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 @keyframes b2dBelt{to{background-position:18px 0}}
 :root[data-motion=reduce] .b2d-card[data-kind="plant"]::after{animation:none}
 @media (prefers-reduced-motion:reduce){.b2d-card[data-kind="plant"]::after{animation:none}}
+/* worlds wave 3 — w7 (bags motif: shopping-bag dots + awning stripes) and w8 (cranes motif: a site grid + caution stripes) */
+.b2d-m-bags .b2d-center{background-image:repeating-linear-gradient(90deg,rgba(230,57,70,.16) 0 10px,rgba(255,255,255,.18) 10px 20px),radial-gradient(rgba(155,28,36,.22) 1.5px,transparent 2px);background-size:auto 14px,20px 20px;background-repeat:repeat-x,repeat;background-position:0 0,0 0}
+.b2d-m-cranes .b2d-center{background-image:repeating-linear-gradient(135deg,rgba(234,179,8,.22) 0 7px,transparent 7px 20px),linear-gradient(rgba(133,77,14,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(133,77,14,.12) 1px,transparent 1px);background-size:auto,18px 18px,18px 18px}
+/* w7 storefronts: a sign strip on top of the card — lit when open, dim while fitting out, flickering over the management span (never with
+   reduced motion: a still, dimmed strip there); a franchise card has a blue border, your own branch a red one */
+.b2d-card[data-kind="branch"]{border-color:#e63946}.b2d-card[data-kind="branch"][data-run="fran"]{border-color:#2563eb}
+.b2d-card[data-kind="branch"]::after{content:"";position:absolute;inset-inline:14%;top:5px;height:4px;border-radius:2px;pointer-events:none;background:#ffd166}
+.b2d-card[data-kind="branch"][data-light="off"]{border-style:dashed}.b2d-card[data-kind="branch"][data-light="off"]::after{background:#9ca3af}
+.b2d-card[data-kind="branch"][data-light="flicker"]::after{background:#a8863a;animation:b2dFlicker 1.1s steps(2,jump-none) infinite}
+@keyframes b2dFlicker{0%,40%{background:#ffd166}50%,70%{background:#7c6a3a}80%{background:#ffd166}}
+:root[data-motion=reduce] .b2d-card[data-kind="branch"]::after{animation:none}
+@media (prefers-reduced-motion:reduce){.b2d-card[data-kind="branch"]::after{animation:none}}
+/* w8 sites: a progress bar at the bottom (the % complete), a dashed border while the site stands still */
+.b2d-card[data-kind="build"]{border-color:#eab308}.b2d-card[data-kind="build"][data-light="stalled"]{border-color:#b91c1c;border-style:dashed}
+.b2d-card[data-kind="build"][data-light="off"]{border-color:#a16207;border-style:dotted}
+.b2d-card[data-kind="build"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;
+  background:linear-gradient(to left,#854d0e 0 var(--b2d-pct,0%),rgba(133,77,14,.18) var(--b2d-pct,0%) 100%);width:80%}
 .b2d-m-news .b2d-center{background-image:repeating-linear-gradient(0deg,rgba(91,65,39,.16) 0 1px,transparent 1px 12px)}
 :root[data-motion=reduce] .b2d-card,:root[data-motion=reduce] .b2d-pawn{transition:none}
 /* dense city grids (6–8 per row): the short label goes; the card's accessible name keeps it (12 px floor, review m-6) */

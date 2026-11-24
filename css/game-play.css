@@ -1167,3 +1167,22 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 .wp-act.arm{background:light-dark(#fde2e1,#4a2323);color:var(--red);box-shadow:inset 0 0 0 2px var(--red)}
 @media (max-width:600px){ .wp-bars li{grid-template-columns:minmax(0,1fr) auto;row-gap:2px}.wp-bars .wb-bar{grid-column:1/-1;grid-row:2} }
 .grid .row .num.wrap{white-space:normal;text-align:end;min-width:0}
+/* ===== worlds wave 3 — w7 "הרשת" / w8 "הפרויקטים": the timeline (gantt), the equity-call calendar, the site / land minis */
+.wp-gantt{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.wp-gantt li{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr);align-items:center;gap:4px 8px;font-size:13px}
+.wp-gantt .gn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.wp-gantt .gbarw{display:flex;gap:2px;height:16px;min-width:0}
+.wp-gantt .gbarw i{flex:1;min-width:6px;border-radius:3px;background:light-dark(#e7dfcf,#4a3f30);position:relative;overflow:hidden;font-style:normal}
+.wp-gantt .gbarw i.gp{flex:0 0 22px;font-size:12px;line-height:16px;text-align:center;background:light-dark(#fde68a,#5b4a12)}
+.wp-gantt .gbarw i.gp.on{box-shadow:inset 0 0 0 2px #854d0e}
+.wp-gantt .gbarw i.done{background:#854d0e}
+.wp-gantt .gbarw i.part::after{content:"";position:absolute;inset-block:0;inset-inline-start:0;width:var(--f);background:#ca8a04}
+.wp-gantt .gst{grid-column:1/-1;color:var(--mut);font-size:12px}
+.wp-calls{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.wp-calls li{display:grid;grid-template-columns:minmax(0,1.4fr) auto auto;gap:8px;align-items:baseline;font-size:13px;padding:5px 0;border-bottom:1px dashed light-dark(#e2d6bd,#4a3f30)}
+.wp-calls li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wp-calls li.tot{font-weight:800;border-bottom:0}
+.wp-calls small{color:var(--mut);font-size:12px}
+.sitemini .mt small,.landmini .mt small{line-height:1.3}
+.landmini .mt{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:600px){ .wp-gantt li{grid-template-columns:minmax(0,1fr)} .wp-calls li{grid-template-columns:minmax(0,1fr) auto} .wp-calls li small{grid-column:1/-1;grid-row:2} }
