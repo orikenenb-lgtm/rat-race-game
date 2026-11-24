@@ -212,5 +212,36 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     ok(wr && wr.icon === '🏗️' && wr.title === m.worldIndicators.panel.title && wr.value.includes(`ריבית ${PJ.rate}%`) && wr.value.startsWith(String(PJ.open)) && wr.acts[0].act === 'world', `w8/${ch}: 💼 "הפרויקטים" row from the engine (open, rate)`, wr);
   }
 }
+/* 9. worlds wave 4 — w9 (goal passiveTarget: run-rate operating income after debt service ≥ ₪3.5M a month, hold 3) and w10 (net worth ₪400M,
+   ★★★ also without a forced sale): the rule, the gap, the ladder, the ★★★ gate, the 💼 rows (engine values only) */
+{
+  const { moneyHubModel, milestoneLadder } = await import('../js/hudgoal.js');
+  const play = (wid, ch, months) => { const st = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 160 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  await E.ensureWorld('w9'); await E.ensureWorld('w10');
+  for (const ch of ['gridEng', 'infraFund', 'kibbutz']) {
+    const st = play('w9', ch, 5); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w9'), st.charId, m.rules) });
+    const p = M.parts[0] || {};
+    ok(m.goalType === 'passiveTarget' && M.parts.length === 1 && p.key === 'opIncome' && p.target === 3500000 && p.label === 'הכנסה תפעולית אחרי החזר חוב', `w9/${ch}: one part, operating income after debt service ₪3.5M`, p);
+    ok(M.rule.includes(p.targetText) && M.rule.includes('אחרי החזר החוב') && M.rule.includes('חודש שמשי'), `w9/${ch}: the rule (run-rate, after debt service, no sunny month)`, M.rule);
+    ok(M.met || (M.gaps[0] && M.gaps[0].includes(E.fmtM(p.target - p.value)) && M.gaps[0].includes('בחודש')), `w9/${ch}: the gap = target − value, a month`, M.gaps);
+    const L = milestoneLadder(m); ok(L.filter((x) => x.id.startsWith('opIncome')).length === 3 && L.some((x) => /הכנסה תפעולית של/.test(x.title)), `w9/${ch}: the ladder has the ¼ / ½ / ¾ operating-income rungs`, L.map((x) => x.title));
+    const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world'); const EN = m.worldIndicators.energy;
+    ok(wr && wr.icon === '☀️' && wr.title === m.worldIndicators.panel.title && wr.value.includes(E.fmtM(EN.income)) && wr.value.includes(`ריבית ${EN.rate}%`) && wr.acts[0].act === 'world', `w9/${ch}: 💼 "התחנות והפרויקטים" row from the engine (income, target, rate)`, wr);
+  }
+  for (const ch of ['allocator', 'blockHeir', 'floorTrader']) {
+    const st = play('w10', ch, 4); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w10'), st.charId, m.rules) });
+    const p = M.parts[0] || {};
+    ok(M.parts.length === 1 && p.key === 'netWorth' && p.target === 400000000 && M.rule.includes(p.targetText) && M.rule.includes('שווי נקי'), `w10/${ch}: one net-worth part, ₪400M, the rule`, { goalType: m.goalType, rule: M.rule });
+    const g3 = (M.stars[2].gates || []).find((g) => g.key === 'noForced'); const F = m.worldIndicators.portfolio.forced;
+    ok(g3 && g3.text === 'בלי אף מכירה כפויה' && g3.ok === !F, `w10/${ch}: the ★★★ gate "בלי אף מכירה כפויה" = the engine's forced count (${F})`, g3);
+    const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world'); const PF = m.worldIndicators.portfolio;
+    ok(wr && wr.icon === '📊' && wr.title === 'הבורסה והתיק' && wr.value.includes(E.fmtM(PF.nw)) && wr.value.includes(`מינוף ${Math.round(PF.ltv * 100)}%`) && wr.acts[0].act === 'world', `w10/${ch}: 💼 "הבורסה והתיק" row from the engine (net worth, LTV)`, wr);
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);

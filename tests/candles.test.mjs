@@ -199,6 +199,46 @@ function reference(st) {
   ok(html.includes(V.EDU) && /aria-pressed="true"/.test(html) && !/NaN|undefined/.test(html), 'R: the full view carries the educational line, a pressed tab, no NaN');
 }
 
+/* ---------- M (w10): the ENGINE's candles (market.js) through the same chart component — candlelog.marketSeries converts the engine rows
+   [m, o, h, l, c, prints, volume] (agorot) to ₪ exactly; the open candle = the last closed month + 1; svg / text / table draw them; the market
+   screen (render/marketview.js) lists every live company + the index, keeps the closed ones with their claim status, and the trade preview is
+   the engine's market.preview (spread, commission, tax, total) */
+{
+  const V = await import('../js/render/candles-lite.js'); const MV = await import('../js/render/marketview.js');
+  const MKT = await import('../js/worlds/mech/market.js');
+  await E.ensureWorld('w10');
+  const pick = (ev) => { const en = ev.options.filter((o) => o.enabled); return (ev.forcePrimary && en.find((o) => o.id === ev.forcePrimary)) || en.find((o) => o.primary) || en.find((o) => ['done', 'pass', 'ok'].includes(o.id)) || en[0]; };
+  const st = E.createGame({ worldId: 'w10', charId: 'allocator', seed: 7, mode: 'free' });
+  for (let t = 0; t < 200 && !st.over && st.month < 14; t++) { if (st.pending) { let ev = E.currentEvent(st), k = 0; while (ev && k++ < 12) ev = E.choose(st, ev, pick(ev).id, { qty: 1 }).event; }
+    E.rollDice(st); let ev = E.landing(st), k = 0; while (ev && k++ < 12 && !st.over) ev = E.choose(st, ev, pick(ev).id, { qty: 1 }).event; }
+  const MK = E.metrics(st).worldIndicators.market; let good = 0, tot = 0;
+  for (const co of [MK.idx, ...MK.cos]) {
+    tot++; const s = CL.marketSeries(co, { news: MK.news, month: st.month }); const live = co.status == null || co.status === 'listed' || co.status === 'halted';
+    const rows = co.cand; const closed = s.cand.filter((c) => !c.open);
+    const same = closed.length === rows.length && closed.every((c, i) => c.m === rows[i][0] && Math.round(c.o * 100) === rows[i][1] && Math.round(c.h * 100) === rows[i][2] && Math.round(c.l * 100) === rows[i][3] && Math.round(c.c * 100) === rows[i][4] && c.n === rows[i][5] && c.v === rows[i][6]);
+    const open = s.cand[s.cand.length - 1]; const openOk = !live || (open.open && open.m === (rows.length ? rows[rows.length - 1][0] + 1 : co.listedM) && Math.round(open.c * 100) === co.open.c);
+    const order = s.cand.every((c) => c.l <= Math.min(c.o, c.c) && Math.max(c.o, c.c) <= c.h && c.l > 0);
+    const r = V.svgFor(s, { W: 330, H: 140, n: 36 }); const groups = (r.svg.match(/<g class="cdl-c/g) || []).length;
+    const txt = V.candleText(s, s.cand[0]);
+    if (same && openOk && order && groups === Math.min(36, s.cand.length) && !/NaN|undefined/.test(r.svg) && txt.includes('מחזור') && s.symbol === co.tk && Math.round(s.price * 100) === co.px) good++;
+    else ok(false, `M ${co.id}: series = engine rows`, { same, openOk, order, groups, n: s.cand.length, txt });
+  }
+  ok(good === tot && tot >= 10, `M: ${good}/${tot} market series = the engine's candles (₪ = agorot / 100, open = last + 1, OHLC order, one shape each, volume in the text)`);
+  const tb = V.tableHtml(CL.marketSeries(MK.idx, {})); ok(tb.includes('מחזור') && (tb.match(/<tr data-m=/g) || []).length === MK.idx.cand.length + 1, 'M: the month table has a volume column and a row per candle');
+  const Mf = { mS: (x) => E.money(Math.round(x), 'short'), mSg: (x) => (x > 0 ? '+' : '') + E.money(Math.round(x), 'short'), ex: (x) => E.fmtM(Math.round(x)) };
+  const list = MV.listHtml(MK, Mf, null, st.month); const live = MK.cos.filter((c) => c.status === 'listed' || c.status === 'halted');
+  ok((list.match(/data-mco="/g) || []).length === live.length + 1 && list.includes('data-mco="IDX"') && live.every((c) => list.includes(c.tk) && list.includes(MV.pxT(c.px))) && /▲|▼|—/.test(list) && !/NaN|undefined/.test(list), 'M: the list = the index + every live company (symbol, price, ▲ / ▼ / —)');
+  const dead = MK.cos.filter((c) => !(c.status === 'listed' || c.status === 'halted')).length + MK.grave.length;
+  const cl = MV.closedHtml(MK, Mf, null);
+  ok(dead >= 1 && (cl.match(/class="mk-co mk-dead/g) || []).length === dead && /תביעה|קיבלת/.test(cl) && !/NaN|undefined/.test(cl), `M: "נסגרו" keeps every closed company (${dead}) with its claim status`);
+  ok(MV.isNewListing({ listedM: 9 }, 12) && !MV.isNewListing({ listedM: 1 }, 3) && !MV.isNewListing({ listedM: 2 }, 12), 'M: a relisting is shown as a new listing for 6 months; the first companies never are');
+  const co = live[0]; const pv = MKT.preview(st, co.id, 'b', MKT.qtyFor(st, co.id, 1000000)); const html = MV.previewHtml(pv, co, Mf, st.cash);
+  ok(pv.qty > 0 && html.includes(`data-mgo="${co.id}:b:${pv.qty}"`) && html.includes(E.fmtM(pv.spreadCost)) && html.includes(E.fmtM(pv.commission)) && html.includes(E.fmtM(pv.total)) && html.indexOf('עמלה') < html.indexOf('data-mgo'), 'M: the trade preview (spread, commission, total — exact ₪) comes before the confirm, which sends exactly the previewed quantity');
+  const H = MK.cos.find((c) => c.held && c.held.qty > 0);
+  if (H) { const ps = MKT.preview(st, H.id, 's', H.held.qty); const hs = MV.previewHtml(ps, H, Mf, st.cash); ok(hs.includes('מס רווח הון') && hs.includes(E.fmtM(ps.tax)) && hs.includes('risky'), 'M: a sell preview names the capital-gains tax and its confirm needs a second tap (risky)'); }
+  ok(MV.headHtml(MK, null, st.month).includes(V.SIM_NOTE) && MV.detailHtml(MK.idx, CL.marketSeries(MK.idx, {}), MK, Mf, {}).includes(V.SIM_NOTE), 'M: the simulation line is on the screen and on every company');
+}
+
 /* ---------- G: the engine graph never reaches the candle files (L-nochange; tools/build-edge.mjs --check pins the bundle) */
 {
   const seen = new Set();

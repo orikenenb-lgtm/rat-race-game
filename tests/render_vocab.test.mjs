@@ -243,5 +243,58 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   ok(/updaters\.add\(\(t\) => \{ for \(const it of city\.values\(\)\) stepShop/.test(scn) && /stepCrane\(it\.obj/.test(scn), 'flicker / crane steps run only inside scene updaters (never under reduced motion, never on the low tier)');
 }
 
+/* worlds wave 4 — w9 / w10: identity (the docs, ΔE ≥ 10), character colours, model emoji + a procedural stand-in for every model key (no .glb),
+   the 'energy' (w9) and 'hold' (w10) level kinds (text, pips, states, idempotent, model parts only), w4's turbine borrowed and kept, motion
+   only in the updaters, the engine's cityModels fields game.js reads */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const sSrc = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8') + readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8');
+  const doc = { w9: { sky: ['#fef3c7', '#fbbf24'], board: '#e9c46a', accent: '#06b6d4', ink: '#155e75', decor: 'solar' }, w10: { sky: ['#0f172a', '#3b82f6'], board: '#1e293b', accent: '#d4af37', ink: '#7a5a0a', decor: 'towers' } };
+  for (const wid of ['w9', 'w10']) {
+    const w = await E.ensureWorld(wid); const st = V.WORLD_STYLE[wid]; const D = doc[wid];
+    ok(st && st.sky[0] === D.sky[0] && st.sky[1] === D.sky[1] && st.board === D.board && st.accent === D.accent && st.accentInk[0] === D.ink && st.decor === D.decor && st.motif && st.caption, `WORLD_STYLE.${wid} = the ${wid} doc (sky, board, accent, ink, decor)`);
+    for (const id of Object.keys(V.WORLD_STYLE)) if (id !== wid) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `${wid} board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+    const cs = w.characters.map((c) => c.id);
+    ok(cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === cs.length, `CHAR_STYLE: ${cs.join(' / ')}, distinct`);
+    for (const m of new Set(Object.values(w.models).filter(Boolean))) {
+      ok(V.CITY_EMOJI[m], `CITY_EMOJI ${wid}/${m}`);
+      ok(new RegExp(`\\b${m}[:(]`).test(sSrc) || new RegExp(`${m}: [a-zA-Z]+`).test(sSrc), `standins build ${wid}/${m} (no .glb is ever requested)`);
+    }
+  }
+  { const g = E.createGame({ worldId: 'w9', charId: 'gridEng', seed: 7, mode: 'free' }); const cm = E.cityModels(g).filter((m) => m.tech != null);
+    ok(cm.length >= 1 && cm.every((m) => Number.isInteger(m.stage) && typeof m.unconnected === 'boolean' && typeof m.stalled === 'boolean' && Number.isFinite(m.pct) && m.units >= 1), 'w9 cityModels: every project has tech / stage / pct / unconnected / stalled / units (the fields game.js reads)', cm);
+    const k = E.cityModels(E.createGame({ worldId: 'w9', charId: 'kibbutz', seed: 7, mode: 'free' })).filter((m) => m.tech === 'site');
+    ok(k.length === 2 && k.every((m) => m.fence && m.stage === 0), 'w9 cityModels: the kibbutz\'s two plots (tech site, fence)'); }
+  { const g = E.createGame({ worldId: 'w10', charId: 'allocator', seed: 7, mode: 'free' }); const cm = E.cityModels(g).filter((m) => m.cls != null);
+    ok(['daily', 'monthly', 'locked'].every((c) => cm.some((m) => m.cls === c)) && cm.every((m) => Number.isFinite(m.value)), 'w10 cityModels: daily / monthly / locked blocks with a value (the fields game.js reads)', cm);
+    ok(cm.some((m) => m.key === 'mkt:daily' && m.model === 'glass_tower' && typeof m.call === 'boolean'), 'w10 cityModels: mkt:daily is the glass tower with its call flag'); }
+  // w9 level kind
+  const Bu = V.normLevel({ kind: 'energy', tech: 'solar', n: 2, pct: 0.5, units: 4, unconnected: true, stalled: true, crane: true });
+  ok(Bu.kind === 'energy' && Bu.n === 2 && Bu.pct === 0.5 && Bu.unconnected && Bu.stalled && !Bu.crane && JSON.stringify(V.normLevel(Bu)) === JSON.stringify(Bu), 'energy build level: normalised (stalled → no working crane), idempotent');
+  ok(V.levelText(Bu) === 'בבנייה: 50% · שלב 2 מתוך 3 · העבודה עומדת · בלי חיבור לרשת' && V.pipsText(Bu) === '●●○', `energy build text "${V.levelText(Bu)}" + pips ●●○`);
+  const Op = V.normLevel({ kind: 'energy', tech: 'wind', n: 4, output: 0.82, offtake: 'ppa', stake: 0.51, unconnected: true, stalled: true });
+  ok(Op.n === 4 && !Op.unconnected && !Op.stalled && Op.output === 0.82 && Op.offtake === 'ppa' && V.levelText(Op) === 'מחוברת ומייצרת · תפוקה 82% מהרגיל · חוזה PPA · 51% שלך' && V.pipsText(Op) === '▮▮▯', `operating plant "${V.levelText(Op)}"`);
+  const Dn = V.normLevel({ kind: 'energy', tech: 'solar', n: 4, output: 1, down: true }); ok(Dn.down && Dn.output === 0 && V.activityOf(Dn) === 'breakdown' && V.pipsText(Dn) === '⛔', 'a plant down this month: no output, 🔧 activity, ⛔');
+  const Sl = V.normLevel({ kind: 'energy', tech: 'slot', n: 0 }); ok(Sl.slot && Sl.unconnected && V.pipsText(Sl) === '🔌' && V.levelText(Sl).includes('חיבור פנוי'), 'a free grid slot: 🔌, "חיבור פנוי לרשת"');
+  const Pl = V.normLevel({ kind: 'energy', tech: 'site', fence: true, n: 3, pct: 0.7 }); ok(Pl.plot && Pl.n === 0 && Pl.pct === 0 && V.pipsText(Pl) === '🏜️' && V.levelText(Pl).includes('קרקע'), 'the kibbutz\'s plot: 🏜️, "קרקע לפרויקט"');
+  const H2 = V.normLevel({ kind: 'energy', tech: 'h2', n: 5 }); ok(H2.failed && V.levelText(H2).includes('נסגר') && V.pipsText(H2) === '✖', 'a failed hydrogen pilot: ✖, "נסגר"');
+  const kp = V.kitParts(Bu); ok(kp.cable && kp.stalled && kp.units === 4 && kp.pct === 0.5 && !kp.sign && !kp.scaffold, 'energy level: model parts only (cable, rows, barrier)');
+  // w10 level kind
+  const Ho = V.normLevel({ kind: 'hold', cls: 'daily', value: 40e6, call: true }); ok(Ho.kind === 'hold' && Ho.cls === 'daily' && Ho.call && Ho.n >= 1 && Ho.n <= 6 && !Ho.trouble && JSON.stringify(V.normLevel(Ho)) === JSON.stringify(Ho), 'hold level: normalised, idempotent, a call is named (never "העסק בבעיה")');
+  ok(V.levelText(Ho) === 'נזיל תוך יומיים · קריאת מרווח' && V.cardName('מניות', 'השקעה', Ho) === 'מניות · השקעה, נזיל תוך יומיים · קריאת מרווח', `hold text "${V.levelText(Ho)}"`);
+  ok(V.levelText({ kind: 'hold', cls: 'monthly', value: 1e7, frozen: true }) === 'נזילות חודשית · קפוא החודש' && V.levelText({ kind: 'hold', cls: 'locked', value: 3e6, lockUntil: 34 }) === 'נעול · נעול עד חודש 34', 'stone (frozen) / vault (lock until) words');
+  ok(!V.normLevel({ kind: 'hold', cls: 'monthly', call: true }).call && V.normLevel({ kind: 'hold', cls: 'bogus' }).cls === 'daily', 'only the daily class carries a call; an unknown class is daily');
+  ok(V.kitParts(Ho).call && V.kitParts(Ho).cls === 'daily' && !V.kitParts(Ho).sign, 'hold level: model parts only');
+  // stand-ins + scene: paint / step functions; w4's turbine borrowed (kept), motion only in updaters
+  ok(/export function paintEnergy/.test(sSrc) && /export function stepEnergy/.test(sSrc) && /export function paintHold/.test(sSrc) && /export function stepTicker/.test(sSrc), 'standins910: paintEnergy / stepEnergy / paintHold / stepTicker');
+  ok(!/\.glb['"`]/.test(readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8')) && !/import\(|fetch\(|Loader/.test(readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8')), 'standins910 requests no file');
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  ok(/solar: 'w4\/turbine'/.test(scn) && /keep\.has\(url\)/.test(scn), "w9's ridge turbines are w4's turbine.glb (kept when w9 releases the other worlds' models)");
+  ok(/stepEnergy\(it\.obj, dt \|\| 0\)/.test(scn) && /stepTicker\(it\.obj, dt \|\| 0, t \|\| 0\)/.test(scn) && /noSpread/.test(scn), 'pulses / ticker steps run only inside scene updaters (never under reduced motion); the per-frame ring / ribbon skip spreadDecor');
+}
+
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

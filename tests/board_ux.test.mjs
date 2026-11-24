@@ -28,6 +28,10 @@ const W7 = (await import('../js/worlds/w7.js')).default; E.registerWorld(W7);   
 const W8 = (await import('../js/worlds/w8.js')).default; E.registerWorld(W8);   // worlds wave 3: the lazy w8 (tile Q, project decks)
 const CHAIN = await import('../js/worlds/mech/chain.js');
 const PROJ = await import('../js/worlds/mech/projects.js');
+const W9 = (await import('../js/worlds/w9.js')).default; E.registerWorld(W9);     // worlds wave 4: the lazy w9 (tile V, energy decks)
+const W10 = (await import('../js/worlds/w10.js')).default; E.registerWorld(W10);  // worlds wave 4: the lazy w10 (tiles W / Y, fund deck, portfolio market)
+const ENERGY = await import('../js/worlds/mech/energy.js');
+const PORT = await import('../js/worlds/mech/portfolio.js');
 
 /* T-opt */
 const OPT = nul.SCENE_OPTIONAL;
@@ -45,7 +49,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -69,9 +73,9 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'h']) {
   const w = W(wid);
-  for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
+  for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, { ...T.MARKET_WORDS, ...((T.MARKET_WORDS_W || {})[wid] || {}) }]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
     const desc = T.tileText(tile, w).desc;
     const have = new Set(deck.map(kindOf));
@@ -144,6 +148,26 @@ ok(T.tileText({ type: 'deal', name: 'הזדמנות' }).desc === T.TILE_TEXT.dea
   ok(T.dealKind({ k: 'pack', op: { ck: 'branch' } }) === 'ck:branch' && T.dealKind({ k: 'warehouse' }) === 'warehouse', 'dealKind: module cards by op.ck, plain cards by k');
 }
 
+/* T-w9 / T-w10: tile V (type 'powerSite'), W ('exchange'), Y ('privateDeal') — the V / Y texts are built from energy.js (SLOT.wait, PPA.share)
+   and portfolio.js (PE.calls, STAKE, FIRE.secondary) at game start; the decks are named by their own words (a grid slot, an operating plant, a
+   line share, the hydrogen pilot; the funds), the market cards by their mk (w10's freeze is a LIQUIDITY freeze), the crisis tiles by theirs. */
+{
+  const tV = W9.tiles.V, tW = W10.tiles.W, tY = W10.tiles.Y; const p = (v) => `${Math.round(v * 100)}%`;
+  ok(tV && tV.type === 'powerSite' && tW && tW.type === 'exchange' && tY && tY.type === 'privateDeal', 'w9 tile V is powerSite; w10 W is exchange, Y is privateDeal');
+  ok(!/\d/.test(T.TILE_TEXT.powerSite.desc) && !/\d/.test(T.TILE_TEXT.privateDeal.desc) && !/\d/.test(T.TILE_TEXT.exchange.desc), 'V / W / Y before prepareWorldText: the number-free wording');
+  ok((await T.prepareWorldText(W9)).includes('powerSite') && (await T.prepareWorldText(W10)).includes('privateDeal'), 'prepareWorldText builds the V / Y texts from the modules');
+  const v = T.tileText(tV, W9), w = T.tileText(tW, W10), y = T.tileText(tY, W10);
+  ok(v.emoji === '⚡' && w.emoji === '📊' && y.emoji === '🔒' && [v, w, y].every((x) => x.short.length <= T.SHORT_MAX), `V ⚡ "${v.short}", W 📊 "${w.short}", Y 🔒 "${y.short}"`);
+  ok(v.desc.includes(`${ENERGY.SLOT.wait} חודשים`) && v.desc.includes(p(ENERGY.PPA.share)) && v.desc.includes('חיבור לרשת') && v.desc.includes('שותף') && v.desc.includes('לוותר'), `w9 V text = energy.js constants: ${v.desc}`);
+  ok(y.desc.includes(`${PORT.PE.calls} שלבים`) && y.desc.includes(`${PORT.STAKE.lockMin}–${PORT.STAKE.lockMin + PORT.STAKE.lockSpan - 1}`) && y.desc.includes(p(PORT.FIRE.secondary)) && y.desc.includes('לוותר'), `w10 Y text = portfolio.js constants: ${y.desc}`);
+  ok(/בין הטלות/.test(w.desc) && /חינם/.test(w.desc), 'w10 W text: the floor (a free look), trading in the panel between rolls');
+  ok(ENERGY.energy.tiles.V.safe === 'pass' && PORT.portfolio.tiles.Y.safe === 'pass', 'V / Y: the safe default is pass (named "לוותר")');
+  const d9 = T.tileText(Object.values(W9.tiles).find((t) => t.type === 'deal'), W9).desc, d10 = T.tileText(Object.values(W10.tiles).find((t) => t.type === 'deal'), W10).desc;
+  ok(/חיבור לרשת/.test(d9) && /תחנה שכבר עובדת/.test(d9) && /פיילוט מימן/.test(d9) && /קרנות/.test(d10), 'w9 deal tile: a slot, an operating plant, the pilot; w10: the funds: ' + d9 + ' | ' + d10);
+  const m9 = T.tileText(Object.values(W9.tiles).find((t) => t.type === 'market'), W9).desc, m10 = T.tileText(Object.values(W10.tiles).find((t) => t.type === 'market'), W10).desc;
+  ok(/גל חום/.test(m9) && /סופת חול/.test(m9) && /הקפאת נזילות/.test(m10) && !/היתרים/.test(m10) && /קריסה בזק/.test(m10), 'w9 / w10 market tiles name their module shocks (w10 freeze = liquidity)');
+  ok(T.tileText(Object.values(W9.tiles).find((t) => t.type === 'crisis'), W9).desc.includes('שנאי'), 'w9 crisis tile: its own wording (a transformer, the neighbours)');
+}
 /* T-pin */
 let pin = ''; try { pin = execFileSync('node', [resolve(ROOT, 'tools/build-edge.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { pin = 'ERR ' + (e.stdout || '') + (e.stderr || ''); }
 ok(/✓ verify-result pins the current engine/.test(pin), 'build-edge --check passes (engine unchanged): ' + pin.trim().slice(0, 120));
@@ -152,7 +176,7 @@ for (const f of ['js/engine.js', 'js/life.js', 'js/rng.js', 'js/practice.js', 'j
 
 /* T-saves: no new S.ui keys from this wave (the life helpers weddingAge / burnSeen / lifeSeen were already there) */
 const uiKeys = new Set([...game.matchAll(/\bS\.ui\.(\w+)\s*(?:\?\?=|=(?!=))/g)].map((m) => m[1]));
-const KNOWN = ['seq', 'fundWarn', 'weddingAge', 'burnSeen', 'lifeSeen', 'inflReality', 'tl', 'hist', 'pensionHist', 'trackMonth', 'coach', 'firstPayday'];
+const KNOWN = ['seq', 'fundWarn', 'weddingAge', 'burnSeen', 'lifeSeen', 'inflReality', 'tl', 'hist', 'pensionHist', 'trackMonth', 'coach', 'firstPayday', 'endSent'];   // endSent (P0b, 6d05559): the win reached the lobby — it must survive a reload, so it IS save data
 for (const k of uiKeys) ok(KNOWN.includes(k), 'game.js writes S.ui.' + k + ' (display data must go to rr2-settings, not the save)');
 
 console.log(`${n - fails} passed, ${fails} failed`);
