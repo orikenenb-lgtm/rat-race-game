@@ -310,7 +310,7 @@ body.lb-lobby-open { overflow: hidden; }
 .gp-code { font: 800 34px/1 Rubik, sans-serif; letter-spacing: .22em; text-align: center; padding: 14px 8px 12px; margin: 8px 0 10px; border: 2px dashed var(--gold); border-radius: 14px; background: light-dark(#fffaf0, #2a2533); }
 .gp-invite .lb-wa { width: 100%; }
 .gp-link { margin-top: 10px; }
-.gp-link input { font-size: 13px; }
+.gp-link input { font-size: 16px; }   /* P1: < 16px makes iOS Safari zoom in on focus */
 .gp-mlist { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .gp-mlist li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 10px; }
 .gp-mlist li.me { background: light-dark(#fff1c4, #4a3a14); font-weight: 700; }
