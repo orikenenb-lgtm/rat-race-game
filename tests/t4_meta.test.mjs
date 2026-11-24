@@ -60,10 +60,15 @@ ok(!/learnGames|mentorPref/.test(readFileSync(join(ROOT, 'js/progress.js'), 'utf
 
 /* ---------------- T-M2 lessons-meta.js */
 const ids = E.LESSONS.map((l) => l.id);
-const missing = ids.filter((id) => !LESSON_META[id] || !LESSON_META[id].teaser || !LESSON_META[id].hint);
-eq(missing, [], `T-M2 every engine lesson (${ids.length}) has teaser + hint`);
+// w13+: a lazy world's lessons travel in its pack (world.lessonDefs, registered by ensureWorld) — read them from the world files without
+// registering them, so every lesson a player can meet needs its meta (E.LESSONS itself stays the core list for the checks below)
+const { LAZY_IDS } = await import('../js/worlds/index.js');
+const lazyIds = (await Promise.all(LAZY_IDS.map((w) => import(`../js/worlds/${w}.js`).then((m) => (m.default.lessonDefs || []).map((l) => l.id))))).flat();
+const allIds = [...new Set([...ids, ...lazyIds])];
+const missing = allIds.filter((id) => !LESSON_META[id] || !LESSON_META[id].teaser || !LESSON_META[id].hint);
+eq(missing, [], `T-M2 every engine lesson (${ids.length} core + ${allIds.length - ids.length} from the lazy worlds' packs) has teaser + hint`);
 // review M-1: meta written ahead of an engine lane (T3 lessons) is PENDING until that engine work is committed — not a failure
-for (const id of Object.keys(LESSON_META).filter((x) => !ids.includes(x))) pending(`T-M2 lessons-meta has '${id}'; the engine has no such lesson yet (engine lane, T3)`);
+for (const id of Object.keys(LESSON_META).filter((x) => !allIds.includes(x))) pending(`T-M2 lessons-meta has '${id}'; the engine has no such lesson yet (engine lane, T3)`);
 const trig = [...new Set(PR.PRACTICE.flatMap((x) => x.after))];
 eq(trig.filter((id) => !(LESSON_META[id] && LESSON_META[id].example)), [], 'T-M2 / AC-B5 every practice-trigger lesson has a worked example');
 eq(trig.filter((id) => !ids.includes(id)), [], 'practice triggers are real lesson ids');
