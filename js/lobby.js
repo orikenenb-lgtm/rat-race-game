@@ -565,7 +565,7 @@ const T4 = {
   G1: 'רוצה פחות עזרה? במשחק הבא אבא עשיר רק ירמוז.', G2: 'רמת עזרה:', G3: 'מדריך', G4: 'רמזים', G5: 'מקצוען', G6: '🔒 אחרי ★★', G7: '🔒 אחרי משחק אחד',
   L1: 'יצאת מהמירוץ — בתרגול 🎓', L2: 'נשארת במירוץ — בתרגול 🎓',
   L3: (s) => `במשחק רגיל התוצאה הזאת הייתה שווה ${s}.`, L4: 'במשחק רגיל זה עוד לא היה כוכב.',
-  L5: 'במצב תרגול לא נאספים כוכבים, הישגים ו־⚡. השיעורים נכנסים לספרייה.', L6: 'לנסות במשחק רגיל ⭐', L7: 'עוד תרגול 🎓',
+  L5: 'במצב תרגול לא נאספים כוכבים, הישגים ו־⚡. יציאה מהמירוץ פותחת את העולם הבא, והשיעורים נכנסים לספרייה.', L6: 'לנסות במשחק רגיל ⭐', L7: 'עוד תרגול 🎓',
   H3: '🎬 סיור קצר במסך (5 צעדים)', H4: '📖 מה כל סימן אומר', H5: '🔄 הדרכה מלאה במשחק הבא בשכונה', H6: 'נפתח את ההדרכה במשחק הבא בשכונה.',
   H7: '🎬 סיור קצר — בפעם הבאה שתיכנס למשחק', H8: '👋 להציג שוב את מסך הפתיחה', Hhelp: 'איך משחקים', T2: 'מה כל סימן אומר',
   B1: (t, h) => `שיעור נעול: ${t}. איך פותחים: ${h}`, B2: 'עוד ▾', B3: (x) => `🔢 דוגמה: ${x}`, B5: (x) => `🎲 פישוט של המשחק: ${x}`, B6: (r, n) => `💡 תרגלת: ${r} מתוך ${n} נכונות`,
@@ -2031,7 +2031,9 @@ function endButtons(e, res, nextW, nextOpen) {
       <div class="end-more"><button class="chip" data-act="end-normal">${T4.L6}</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
   }
   if (endCtx.learn) {   // §7.4: no duel / share; normal game or more practice, same world and character
-    return `<div class="end-acts"><button class="primary lb-big" data-act="end-normal">${T4.L6}</button><button data-act="end-learn">${T4.L7}</button></div>
+    // P0 2026-11-24: a practice escape opens the next world — offer it first
+    const nextL = nextW && nextOpen && e.status === 'won' ? `<button class="primary lb-big" data-act="end-next" data-id="${nextW.id}">לעולם הבא: ${esc(nextW.name)} ←</button>` : '';
+    return `<div class="end-acts">${nextL}<button class="${nextL ? '' : 'primary lb-big'}" data-act="end-normal">${T4.L6}</button><button data-act="end-learn">${T4.L7}</button></div>
       <div class="end-more"><button class="chip" data-act="world" data-id="${e.worldId}">דמות אחרת</button><button class="chip" data-act="end-lobby">ללובי</button></div>`;
   }
   const btns = [];
