@@ -37,6 +37,16 @@ const modValue = {
   text(st, g, ctx) { return `${g.label || g.key} ${ctx.fmt(ctx.mod(st, g.key))} מתוך ${ctx.fmt(g.target)}`; },
 };
 
+/** passiveTarget — the module's operating income (goalValue(st, g.key), default 'opIncome': w9's plant income after debt service) ≥ target.
+ *  g = {type, key?, target, label?}. */
+const passiveTarget = {
+  key: (g) => g.key || 'opIncome',
+  met(st, g, ctx) { return ctx.mod(st, passiveTarget.key(g)) >= g.target; },
+  progress(st, g, ctx) { const v = ctx.mod(st, passiveTarget.key(g)); return v >= g.target ? 1 : clamp(0.05 + 0.95 * v / g.target, 0, 0.999); },
+  parts(st, g, ctx) { const v = ctx.mod(st, passiveTarget.key(g)); return [{ key: passiveTarget.key(g), label: g.label || 'הכנסה תפעולית אחרי החזר חוב', value: v, target: g.target, progress: clamp(v / g.target, 0, 1) }]; },
+  text(st, g, ctx) { return `${g.label || 'הכנסה תפעולית'} ${ctx.fmt(ctx.mod(st, passiveTarget.key(g)))} מתוך ${ctx.fmt(g.target)} בחודש`; },
+};
+
 /** nw — net worth ≥ target (a registered twin of the legacy netWorth type, for composite goals; module goalValue assets count as the engine
  *  values them). g = {type:'nw', target}. */
 const nw = {
@@ -63,7 +73,7 @@ const all = {
   text(st, g, ctx) { return g.of.map((s) => GOALS[s.type].text(st, s, ctx)).join(' · '); },
 };
 
-export const GOALS = { passive12, modValue, nw, liquidity, all };
+export const GOALS = { passive12, modValue, passiveTarget, nw, liquidity, all };
 /** Legacy types the engine evaluates itself (kept for the validator). */
 export const LEGACY_GOALS = ['passive', 'netWorth', 'netWorthImpact', 'benchmark'];
 export function goalType(g) { return g && GOALS[g.type] ? GOALS[g.type] : null; }

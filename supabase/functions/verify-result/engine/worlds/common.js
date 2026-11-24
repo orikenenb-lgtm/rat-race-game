@@ -28,6 +28,8 @@ export const TILE_TYPES = {
   R: { type: 'site', name: 'מיקום לסניף', color: '#e63946', ink: '#ffffff', icon: 'shop' },
   // worlds wave 3 (w8): a module tile — js/worlds/mech/projects.js tiles.Q (land for a project: buy with a contractor tier, a permit check, or pass)
   Q: { type: 'land', name: 'קרקע לפרויקט', color: '#eab308', ink: '#3a2400', icon: 'crane' },
+  // worlds wave 4 (w9): a module tile — js/worlds/mech/energy.js tiles.V (a site for a power project: a resource study, develop, or pass)
+  V: { type: 'powerSite', name: 'אתר אנרגיה', color: '#06b6d4', ink: '#ffffff', icon: 'bolt' },
 };
 
 /** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */

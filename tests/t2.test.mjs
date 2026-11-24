@@ -161,7 +161,7 @@ test('T6 v3 → v4 migration from fixtures (roll, mid-deal, mid-trade, ranked da
   // v2 (st.v = 1) → v3 → v4
   const base = JSON.parse(saves.roll); base.v = 1; base.pos = 13; base.phase = 'roll'; base.pending = null; delete base.life; delete base.lessons; delete base.taxes; delete base.actions; delete base.rng.life; delete base.rng.index; delete base.holdings.IDX; delete base.prices.IDX;
   const v2 = E.deserialize(JSON.stringify(base)); assert.equal(v2.v, 4); assert.equal(v2.rules, 4); assert.ok(v2.life.focus);
-  for (const bad of [{ ...JSON.parse(saves.roll), v: 5 }, { ...JSON.parse(saves.roll), v: 2 }, { v: 4, worldId: 'w9' }, 'null', '"x"']) assert.throws(() => E.deserialize(typeof bad === 'string' ? bad : JSON.stringify(bad)), /save_incompatible/);
+  for (const bad of [{ ...JSON.parse(saves.roll), v: 5 }, { ...JSON.parse(saves.roll), v: 2 }, { v: 4, worldId: 'w10' }, 'null', '"x"']) assert.throws(() => E.deserialize(typeof bad === 'string' ? bad : JSON.stringify(bad)), /save_incompatible/);
 });
 
 /* ------------------------------------------------------------------ T7 legacy equivalence */

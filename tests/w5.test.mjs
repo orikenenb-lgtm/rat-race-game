@@ -14,12 +14,12 @@ async function test(name, fn) { const t0 = Date.now(); try { await fn(); passed+
 await test('lazy registry: w5 is not loaded by the engine; getWorld → world_not_loaded; ensureWorld loads it; WORLDS stays w1–w4', async () => {
   assert.deepEqual(E.WORLDS.map((w) => w.id), ['w1', 'w2', 'w3', 'w4'], 'the daily rotation and every legacy caller see the same 4');
   assert.equal(E.isLoaded('w5'), false);
-  assert.throws(() => E.getWorld('w5'), /world_not_loaded/); assert.throws(() => E.getWorld('w9'), /unknown world/);
+  assert.throws(() => E.getWorld('w5'), /world_not_loaded/); assert.throws(() => E.getWorld('w10'), /unknown world/);
   assert.throws(() => E.createGame({ worldId: 'w5', seed: 1 }), /world_not_loaded/);
   const saved = '{"v":4,"worldId":"w5"}'; assert.throws(() => E.deserialize(saved), /world_not_loaded|save_incompatible/);
   const w = await E.ensureWorld('w5'); assert.equal(w.id, 'w5'); assert.equal(E.isLoaded('w5'), true); assert.equal(E.getWorld('w5'), w);
   assert.deepEqual(E.WORLDS.map((x) => x.id), ['w1', 'w2', 'w3', 'w4']);
-  await assert.rejects(E.ensureWorld('w9'), /unknown world/);
+  await assert.rejects(E.ensureWorld('w10'), /unknown world/);
   assert.equal(E.dailyConfig('2026-12-25').worldId.startsWith('w') && ['w1', 'w2', 'w3', 'w4'].includes(E.dailyConfig('2026-12-25').worldId), true);
 });
 

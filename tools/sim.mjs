@@ -312,7 +312,7 @@ const has2 = has; void has2;
 /* ---------- I8: per-mechanic policy plug-ins (tools/policies/<mechanic>.mjs). A plug-in exports make(ctx) → {policyName: policy}; those
    names override / extend POLICIES for the worlds of that mechanic only (w1–w4 never load one, so their reports are unchanged). */
 const PLUGINS = {};
-for (const mech of ['season', 'plant', 'chain', 'projects']) {
+for (const mech of ['season', 'plant', 'chain', 'projects', 'energy']) {
   const mod = await import(`./policies/${mech}.mjs`);
   PLUGINS[mech] = mod.make({ E, POLICIES, ddRule, facade, claimedNet, runFocus, firstEnabled, ABL });
 }
