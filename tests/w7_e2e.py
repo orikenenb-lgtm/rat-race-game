@@ -43,6 +43,15 @@ STATE = """() => ({ roll: !document.querySelector('#roll').disabled, card: !docu
 CARD = """() => { const c = document.querySelector('#evCard'); return { title: (c.querySelector('h2') || {}).textContent || '', opts: [...c.querySelectorAll('button[data-o]')].map((b) => b.dataset.o),
   en: [...c.querySelectorAll('button[data-o]:not([disabled])')].map((b) => b.dataset.o), text: c.textContent, mt: c.querySelectorAll('.mt > div').length, warn: !!c.querySelector('.warn'), site: !!c.querySelector('.sitemini') }; }"""
 
+AXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vendor', 'axe-core', 'axe.min.js')
+async def axe_bad(pg, sel):
+    """axe-core (vendored, no network) on one element after its animations end: the critical / serious violations"""
+    await pg.evaluate("() => Promise.race([Promise.all(document.getAnimations().filter((a) => { const t = a.effect && a.effect.getTiming(); return t && t.iterations !== Infinity && a.playState === 'running'; }).map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))])")
+    if not await pg.evaluate("typeof axe !== 'undefined'"): await pg.add_script_tag(path=AXE)
+    v = await pg.evaluate("""async (sel) => { const r = await axe.run({ include: [sel] }, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice'] }, resultTypes: ['violations'] });
+      return r.violations.filter((x) => x.impact === 'critical' || x.impact === 'serious').map((x) => ({ id: x.id, impact: x.impact, nodes: x.nodes.map((n) => n.target.join(' ')).slice(0, 4) })); }""", sel)
+    return v
+
 async def page(b, vp, flags='', unlock=True, reduced=False):
     kw = FB.new_context_kwargs()
     if reduced: kw['reduced_motion'] = 'reduce'
@@ -188,6 +197,7 @@ async def run_play(b):
           and 'יכולת ניהול' in site['text'] and ('זכיין' in site['text'] or 'זכיינות' in site['text']), site and (site['title'], site['opts'], site['text'][:500]))
     if site and 'survey' in site['opts']:
         check(sc, 'unsurveyed: 3 locations with their odds, the survey fee', site['mt'] == 3 and 'סקר מיקום' in site['text'] and '%' in site['text'], site['mt'])
+        bad = await axe_bad(pg, '#evm'); check(sc, 'axe: the site card has no critical / serious violation', not bad, bad)
         if SHOTS: await pg.evaluate("() => document.querySelector('#evCard .sitemini')?.scrollIntoView({ block: 'center' })"); await pg.wait_for_timeout(1500)
         await shot(pg, 'site_card_desk')
         if 'survey' in site['en']:
@@ -214,6 +224,7 @@ async def run_play(b):
     P = await pg.evaluate(PANEL); nb = len(branches_of(st))
     check(sc, 'panel: 4 gauges (liquidity / span / stock cover / brand), one row per branch with its ramp stage, the cover row, actions',
           P['gauges'] == ['liq', 'span', 'cover', 'brand'] and P['rows'] == nb and nb >= 3 and len(P['pips']) == nb and all('שלב הרצה' in x for x in P['pips']) and 'מלאי: חודשי כיסוי' in P['segs'] and P['acts'] >= 8 and 'הרשת' in P['title'], (nb, P))
+    bad = await axe_bad(pg, '#gm'); check(sc, 'axe: the chain panel has no critical / serious violation', not bad, bad)
     if SHOTS: await pg.wait_for_timeout(1500); await pg.add_style_tag(content='#toast{visibility:hidden !important}')
     await shot(pg, 'panel_desk')
     # a cover action through E.worldAction

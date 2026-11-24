@@ -42,6 +42,15 @@ STATE = """() => ({ roll: !document.querySelector('#roll').disabled, card: !docu
 CARD = """() => { const c = document.querySelector('#evCard'); return { title: (c.querySelector('h2') || {}).textContent || '', opts: [...c.querySelectorAll('button[data-o]')].map((b) => b.dataset.o),
   en: [...c.querySelectorAll('button[data-o]:not([disabled])')].map((b) => b.dataset.o), text: c.textContent, mt: c.querySelectorAll('.mt > div').length, warn: !!c.querySelector('.warn'), land: !!c.querySelector('.landmini') }; }"""
 
+AXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vendor', 'axe-core', 'axe.min.js')
+async def axe_bad(pg, sel):
+    """axe-core (vendored, no network) on one element after its animations end: the critical / serious violations"""
+    await pg.evaluate("() => Promise.race([Promise.all(document.getAnimations().filter((a) => { const t = a.effect && a.effect.getTiming(); return t && t.iterations !== Infinity && a.playState === 'running'; }).map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))])")
+    if not await pg.evaluate("typeof axe !== 'undefined'"): await pg.add_script_tag(path=AXE)
+    v = await pg.evaluate("""async (sel) => { const r = await axe.run({ include: [sel] }, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice'] }, resultTypes: ['violations'] });
+      return r.violations.filter((x) => x.impact === 'critical' || x.impact === 'serious').map((x) => ({ id: x.id, impact: x.impact, nodes: x.nodes.map((n) => n.target.join(' ')).slice(0, 4) })); }""", sel)
+    return v
+
 async def page(b, vp, flags='', unlock=True, reduced=False):
     kw = FB.new_context_kwargs()
     if reduced: kw['reduced_motion'] = 'reduce'
@@ -161,6 +170,7 @@ async def run_play(b):
           and 'קבלן אמין' in land['text'] and 'קבלן זול' in land['text'] and 'סיכון לקריסה' in land['text'] and land['mt'] == 2, land and (land['title'], land['opts'], land['text'][:500]))
     if land and 'check' in land['opts']:
         check(sc, 'unchecked: the permit range says so, the check fee is named', '(לא נבדק)' in land['text'] and 'בדיקת תב"ע' in land['text'], land['text'][:300])
+        bad = await axe_bad(pg, '#evm'); check(sc, 'axe: the land card has no critical / serious violation', not bad, bad)
         if SHOTS: await pg.evaluate("() => document.querySelector('#evCard .landmini')?.scrollIntoView({ block: 'center' })"); await pg.wait_for_timeout(1500)
         await shot(pg, 'land_card_desk')
         if 'check' in land['en']:
@@ -189,6 +199,7 @@ async def run_play(b):
           P['gauges'] == ['runway', 'rate', 'demand'] and len(P['gantt']) == len(pj) and len(pj) >= 1 and all(g['cells'] >= 4 and g['name'] for g in P['gantt']) and P['rows'] >= len(pj)
           and 'יעד מכירות מוקדמות' in P['segs'] and P['acts'] >= 8 and 'הפרויקטים' in P['title'] and 'לוח זמנים' in P['text'], (len(pj), P['gauges'], P['gantt'], P['rows'], P['segs'], P['acts']))
     if P['calls']: check(sc, 'the equity-call calendar lists the projects that still owe equity + a total', P['calls'] >= 2 and 'קריאות להון עצמי' in P['text'], P['calls'])
+    bad = await axe_bad(pg, '#gm'); check(sc, 'axe: the projects panel (gantt, calls) has no critical / serious violation', not bad, bad)
     if SHOTS: await pg.wait_for_timeout(1500); await pg.add_style_tag(content='#toast{visibility:hidden !important}')
     await shot(pg, 'panel_desk')
     # a presale target through E.worldAction
