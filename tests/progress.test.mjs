@@ -106,3 +106,31 @@ eq([S2.games, S2.dqHistory, S2.principles.map((x) => [x.id, x.mastery])], [0, [5
 
 console.log(fails ? `${fails}/${n} FAILED` : `all ${n} progress tests passed`);
 process.exit(fails ? 1 : 0);
+
+// ---- P0 2026-11-24: finishing a world opens the next one by every route; stuck saves are repaired; rewards once
+{
+  P._reset({});
+  eq(P.unlockedWorlds(), ['w1'], 'P0 fresh: only w1');
+  const r = P.recordLearnGame({ worldId: 'w1', charId: 'teacher', status: 'won', stars: 2, months: 40, seed: 7, netWorth: 1 });
+  eq([r.unlockedWorld, P.isUnlocked('w2'), P.getProgress().stars.w1, P.getProgress().best.w1 ?? null], ['w2', true, 0, null], 'P0 practice escape opens w2 (no stars, no best)');
+  const lost = P.recordLearnGame({ worldId: 'w2', charId: 'teacher', status: 'lost', months: 60, seed: 8, netWorth: 1 });
+  eq([lost.unlockedWorld, P.isUnlocked('w3')], [null, false], 'P0 a practice loss opens nothing');
+  // every boundary w1→w2→w3→w4 in normal games, 0★ escapes, reward once on a duplicate end
+  P._reset({});
+  for (const [w, nx] of [['w1', 'w2'], ['w2', 'w3'], ['w3', 'w4']]) {
+    const g = { worldId: w, charId: 'x', mode: 'free', status: 'won', stars: 0, months: 99, netWorth: 5 };
+    const a = P.recordGame(g); const games = P.getProgress().gamesPlayed; const b = P.recordGame(g);
+    eq([a.unlockedWorld, P.isUnlocked(nx), b === a, P.getProgress().gamesPlayed === games], [nx, true, true, true], `P0 ${w} → ${nx} opens, a duplicate end is recorded once`);
+  }
+  // stuck save from before the fix: a practice escape left only its learning signature
+  P._reset({ learn: { games: 1, dq: [70], principles: {}, lastSig: '|learn|w1|123|38|won' } });
+  eq([P.isUnlocked('w2'), P.getProgress().cleared], [true, { w1: true }], 'P0 repair: the last practice escape (learning signature) opens w2');
+  P._reset({ learn: { games: 1, dq: [70], principles: {}, lastSig: '|learn|w1|123|38|lost' } });
+  eq(P.isUnlocked('w2'), false, 'P0 repair: a practice loss is not an escape');
+  P._reset({ cleared: { w1: 'yes', w9: true, w2: true } });
+  eq(P.getProgress().cleared, { w2: true }, 'P0 cleared keeps only known worlds with a literal true');
+  // pre-hotfix 0★ escape (best recorded, 0 stars) is healed by the rule itself
+  P._reset({ stars: { w1: 0 }, best: { w1: 61 } });
+  eq(P.isUnlocked('w2'), true, 'P0 repair: a 0★ escape from before PR #7 opens w2');
+  P._reset({});
+}

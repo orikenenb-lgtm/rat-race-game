@@ -56,6 +56,7 @@ function fresh() {
     v: 1, stars: Object.fromEntries(WIDS.map((w) => [w, 0])), best: {}, achievements: [], pawn: 'classic', pawnColor: PAWN_COLORS[0].hex,
     pawnChosenAt: 0, gamesPlayed: 0, wins: 0, tutorialDone: false, lastSeenWorld: null, worldsPlayed: [],
     streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
+    cleared: {},   // P0 2026-11-24: worlds escaped in a practice (learning) game — they open the next world, never stars/best
     learn: freshLearn(),
     // T4 §14.4 (local only — never in metaOf() / never synced)
     learnGames: 0, dream: null, dreams: {}, tutorialReplay: false, lastMode: 'normal', mentorPref: null,
@@ -74,12 +75,27 @@ function load() {
   p.history = { ...(p.history || {}) };
   p.learn = cleanLearn(p.learn);
   cleanT4(p);
+  p.cleared = cleanCleared(p);
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
   if (!PAWNS.some((x) => x.id === p.pawn)) p.pawn = 'classic';
   return p;
 }
+/** {w1:true,…} — only known world ids with a literal true. Repair for saves from before 2026-11-24: a practice escape
+ *  recorded nothing that opens a world, but the last practice game's learning signature ("|learn|<w>|seed|months|won")
+ *  is evidence of a real escape, so that world counts as cleared (nothing else is granted: no stars, best or ⚡). */
+function cleanCleared(p) {
+  const src = p.cleared && typeof p.cleared === 'object' && !Array.isArray(p.cleared) ? p.cleared : {};
+  const out = {};
+  for (const w of WIDS) if (src[w] === true) out[w] = true;
+  const m = /^\|learn\|(w\d+)\|[^|]*\|\d+\|won$/.exec((p.learn && p.learn.lastSig) || '');
+  if (m && WIDS.includes(m[1])) out[m[1]] = true;
+  return out;
+}
+/** The single progression rule: a world is "finished" (it opens the next one) after any escape from it — a normal game at
+ *  any speed (a recorded best), a ★ (also banked from a daily), or a practice escape (cleared). */
+export function worldFinished(worldId, p = P) { return (p.stars[worldId] || 0) >= 1 || p.best[worldId] != null || !!(p.cleared && p.cleared[worldId]); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) { /* storage full / private mode */ } }
 
 const listeners = new Set();
@@ -106,8 +122,9 @@ export function isUnlocked(worldId) {
   if (i <= 0) return i === 0;
   // hotfix 2026-11-23: escaping the previous world at ANY speed opens the next one (the map always said "לפתוח: לצאת מ…");
   // a ★ (escape within the month limit) still opens it too — e.g. stars banked from a daily.
+  // P0 2026-11-24: a practice (learning) escape opens it as well — see worldFinished().
   const prev = WIDS[i - 1];
-  return isUnlocked(prev) && ((P.stars[prev] || 0) >= 1 || P.best[prev] != null);
+  return isUnlocked(prev) && worldFinished(prev);
 }
 export function unlockedWorlds() { return WIDS.filter(isUnlocked); }
 
@@ -196,15 +213,19 @@ export function recordLearnGame(e = {}) {
   const sig = ['learn', e.worldId, e.charId, e.seed ?? '', e.status, e.months, Math.round(e.netWorth || 0)].join('|');
   if (sig === lastLearnSig && lastLearnRes) return lastLearnRes;  // the same game:end delivered twice
   const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
+  const unlockedBefore = unlockedWorlds();
   P.learnGames += 1;
   P.tutorialDone = true;
   if (e.charId) P.lastChar[wid] = e.charId;
   session = new Set();                                             // achievements of this game are never reported
-  changed();
   const won = e.status === 'won';
+  // P0 2026-11-24: escaping in practice finishes the world — the next one opens (still no stars, best, titles or ⚡)
+  if (won && isUnlocked(wid)) P.cleared = { ...P.cleared, [wid]: true };
+  changed();
+  const unlockedWorld = unlockedWorlds().find((w) => !unlockedBefore.includes(w)) || null;
   lastLearnSig = sig;
   lastLearnRes = { learn: true, worldId: wid, wouldStars: won ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0, learnGames: P.learnGames,
-    newStars: P.stars[wid] || 0, prevStars: P.stars[wid] || 0, gained: 0, earned: 0, unlockedWorld: null, newPawns: [], newAchievements: [],
+    newStars: P.stars[wid] || 0, prevStars: P.stars[wid] || 0, gained: 0, earned: 0, unlockedWorld, newPawns: [], newAchievements: [],
     titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(), best: P.best[wid] ?? null, prevBest: P.best[wid] ?? null, newBest: false, bankedLocked: false };
   return lastLearnRes;
 }
@@ -483,5 +504,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); P.cleared = cleanCleared(P); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
 export { ACHIEVEMENTS, WIDS };
