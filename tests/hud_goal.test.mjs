@@ -180,5 +180,37 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     ok(wr && wr.icon === '🏭' && wr.title === m.worldIndicators.panel.title && wr.value.startsWith(`${P.lines} מתוך ${P.slots} קווים`) && wr.acts[0].act === 'world', `w6/${ch}: 💼 has the "קווי ייצור" row (lines / slots from the engine)`, wr);
   }
 }
+/* 8. worlds wave 3 — w7 (goal: net worth ₪120M AND liquidity ≥ 4 months of the chain's fixed costs, unit 'months', 99 = no fixed costs yet) and
+   w8 (net worth ₪250M with WIP at cost): two parts with their own words (never ₪ for months), the rule, the gaps, the ladder, the 💼 row */
+{
+  const { moneyHubModel, milestoneLadder, monthsText, NO_FIXED } = await import('../js/hudgoal.js');
+  const play = (wid, ch, months) => { const st = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 160 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  await E.ensureWorld('w7'); await E.ensureWorld('w8');
+  ok(monthsText(NO_FIXED) === 'אין עלויות קבועות' && monthsText(3.04) === '3 חודשים' && monthsText(7.69) === '7.7 חודשים', 'monthsText: 99 = no fixed costs, else months (1 decimal)');
+  for (const ch of ['shopFounder', 'cfo', 'franchisor']) {
+    const st = play('w7', ch, 5); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w7'), st.charId, m.rules) });
+    const nw = M.parts.find((p) => p.key === 'netWorth'), lq = M.parts.find((p) => p.key === 'liquidity'); const eq = (m.goalParts || []).find((p) => p.key === 'liquidity');
+    ok(m.goalType === 'all' && M.parts.length === 2 && nw && nw.target === 120000000 && nw.targetText === E.fmtM(120000000), `w7/${ch}: two parts, net worth ₪120M`, M.parts);
+    ok(lq && lq.unit === 'months' && lq.target === 4 && lq.targetText === '4 חודשים' && lq.valueText === monthsText(eq.value) && !/₪/.test(lq.valueText + lq.targetText), `w7/${ch}: liquidity in months (${lq && lq.valueText}), never ₪`, lq);
+    ok(M.rule.includes('שני יעדים יחד') && M.rule.includes(nw.targetText) && M.rule.includes('4 חודשים'), `w7/${ch}: the rule names both targets`, M.rule);
+    ok(lq.met === (eq.value >= 4) && (lq.met || M.gaps.some((g) => g.includes('צריך 4 חודשים'))), `w7/${ch}: the liquidity gap appears exactly when it is short`, M.gaps);
+    const L = milestoneLadder(m); ok(L.some((x) => x.id === 'liquidity' && x.unit === 'mo' && x.target === 4) && !L.some((x) => /שווי נקי של/.test(x.title) && x.id.startsWith('liquidity')), `w7/${ch}: one liquidity rung in months, net-worth rungs in ₪`);
+    const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world'); const C = m.worldIndicators.chain;
+    ok(wr && wr.icon === '🛍️' && wr.title === m.worldIndicators.panel.title && wr.value.startsWith(`${C.branches} סניפים`) && wr.value.includes(`ניהול ${C.branches}/${C.span}`) && wr.value.includes(monthsText(C.liqMonths)) && wr.acts[0].act === 'world', `w7/${ch}: 💼 "הרשת" row from the engine (branches, span, liquidity)`, wr);
+  }
+  for (const ch of ['developer', 'landowner', 'contractor']) {
+    const st = play('w8', ch, 4); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w8'), st.charId, m.rules) });
+    const p = M.parts[0] || {};
+    ok(m.goalType === 'netWorth' && M.parts.length === 1 && p.target === 250000000 && M.rule.includes(p.targetText), `w8/${ch}: one net-worth part, ₪250M, the rule`, p);
+    ok(M.met || (M.gaps[0] && M.gaps[0].includes(E.fmtM(p.target - p.value))), `w8/${ch}: the gap = target − value`, M.gaps);
+    const H = moneyHubModel(m); const wr = H.rows.find((r) => r.id === 'world'); const PJ = m.worldIndicators.proj;
+    ok(wr && wr.icon === '🏗️' && wr.title === m.worldIndicators.panel.title && wr.value.includes(`ריבית ${PJ.rate}%`) && wr.value.startsWith(String(PJ.open)) && wr.acts[0].act === 'world', `w8/${ch}: 💼 "הפרויקטים" row from the engine (open, rate)`, wr);
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);

@@ -70,7 +70,7 @@ for (const t of TEXT) {
 /* ---------- A-1: --accent-ink for the 5 worlds × 2 modes (w1 = :root; others from body[data-world=…]) */
 const accentInk = { w1: tok('--accent-ink') };
 const accentFill = {};
-for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
+for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
   const b = block(GAME, `body[data-world=${w}]`);
   ok(!!b, `game.css has body[data-world=${w}]`);
   const d = decls(b || '');
@@ -78,7 +78,7 @@ for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
   ok(!!accentInk[w], `body[data-world=${w}] sets --accent-ink as light-dark(hex,hex)`);
   if (d['--accent']) accentFill[w] = d['--accent'];
 }
-const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], h: ['#7a5520', '#c8a24a'] };
+const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], w7: ['#9b1c24', '#ff8a93'], w8: ['#854d0e', '#facc15'], h: ['#7a5520', '#c8a24a'] };
 for (const [w, p] of Object.entries(accentInk)) {
   if (!p) continue;
   ok(p.light.toLowerCase() === SPEC_INK[w][0] && p.dark.toLowerCase() === SPEC_INK[w][1], `--accent-ink ${w} matches the §3 identity sheet`);
@@ -122,9 +122,9 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
 }
 
 /* ---------- text on world accent FILLS uses --ink (§2.1, h fill becomes #c8a24a) */
-const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
+const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
 const fillOf = (w) => accentFill[w] || (worldsSrc[w].match(/accent:\s*'(#[0-9a-f]{6})'/i) || worldsSrc.w1.match(/accent:\s*'(#[0-9a-f]{6})'/i))[1];
-for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
+for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
   const f = fillOf(w), r = cr(tok('--ink').light, f);
   ok(r >= 4.5, `--ink on ${w} accent fill ${f} ≥ 4.5 (${f2(r)})`);
   table.push({ token: `--ink on accent ${w}`, light: `${f} ${f2(r)}` });
@@ -218,6 +218,20 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
     ok(p && cr(p.light, gold) >= 4.5 && cr(p.dark, gold) >= 4.5, `${sel} on the gold fill ≥ 4.5 in light and dark (${p ? f2(cr(p.light, gold)) + ' / ' + f2(cr(p.dark, gold)) : 'no rule'})`);
     if (p) table.push({ token: `${sel} on --gold`, light: `${p.light} ${f2(cr(p.light, gold))}`, dark: `${p.dark} ${f2(cr(p.dark, gold))}` });
   }
+}
+
+/* ---------- worlds wave 3 (w7 / w8): every later world's board (WORLD_STYLE, the render identity) is ΔE76 ≥ 10 from every other world's board,
+   so a screenshot never leaves you guessing which world it is (w1–w4 / h keep their own spacing, checked in render_vocab) */
+{
+  const { WORLD_STYLE } = await import('../js/render/vocab.js');
+  const lab = (h) => { const [r, g, b] = hex(h).map(lin); const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    const X = f((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = f(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = f((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const ids = Object.keys(WORLD_STYLE);
+  for (const w of ['w5', 'w6', 'w7', 'w8']) for (const o of ids) if (o !== w) { const d = dE(WORLD_STYLE[w].board, WORLD_STYLE[o].board); ok(d >= 10, `board ΔE76 ${w} ${WORLD_STYLE[w].board} ↔ ${o} ${WORLD_STYLE[o].board} = ${d.toFixed(1)} ≥ 10`); }
+  // the 3D accent and the UI fill: w7's UI fill is lighter than its awning red so --ink on it stays ≥ 4.5 (checked above); the 3D accents differ per world
+  ok(new Set(['w5', 'w6', 'w7', 'w8'].map((w) => WORLD_STYLE[w].accent)).size === 4, 'w5–w8 accents are distinct');
 }
 
 /* ---------- report */

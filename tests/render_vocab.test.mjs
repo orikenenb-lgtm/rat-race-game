@@ -181,6 +181,67 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   for (const m of new Set(Object.values(w6.models).filter(Boolean))) ok(m === 'warehouse' ? /DIR_BUILD = Object\.freeze\(\{ w6: Object\.freeze\(\{ warehouse:/.test(sSrc) : new RegExp(`\\b${m}\\(\\)`).test(sSrc), `standins3d builds ${m} (no .glb is ever requested)`);
   ok(/lamp/.test(sSrc) && /stepBelt/.test(sSrc) && /scaff/.test(sSrc) && /shutter/.test(sSrc), 'standins3d: lamp, conveyor step, scaffold, shutter');
 }
+/* worlds wave 3 — w7 / w8: identity (ΔE ≥ 10 from every world), character colours, model emoji, the 'branch' / 'stock' / 'mgr' (w7) and
+   'build' (w8) level kinds (text, pips, states, idempotent, model parts only), stand-ins for every model key (w7's warehouse dir-scoped:
+   w3 keeps its real warehouse.glb), the w3 crane borrowed for the w8 background, the engine's cityModels → game.js levelOf fields */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const sSrc = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8');
+  const doc = { w7: { sky: ['#2b2d42', '#ef8354'], accent: '#e63946', ink: '#9b1c24', decor: 'storefronts' }, w8: { sky: ['#fde68a', '#93c5fd'], accent: '#eab308', ink: '#854d0e', decor: 'cranes' } };
+  for (const wid of ['w7', 'w8']) {
+    const w = await E.ensureWorld(wid); const st = V.WORLD_STYLE[wid]; const D = doc[wid];
+    ok(st && st.sky[0] === D.sky[0] && st.sky[1] === D.sky[1] && st.accent === D.accent && st.accentInk[0] === D.ink && st.decor === D.decor && st.motif && st.caption, `WORLD_STYLE.${wid} = the ${wid} doc (sky, accent, ink, decor)`);
+    for (const id of Object.keys(V.WORLD_STYLE)) if (id !== wid) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `${wid} board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+    const cs = w.characters.map((c) => c.id);
+    ok(cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === cs.length, `CHAR_STYLE: ${cs.join(' / ')}, distinct`);
+    for (const m of new Set(Object.values(w.models).filter(Boolean))) {
+      ok(V.CITY_EMOJI[m], `CITY_EMOJI ${wid}/${m}`);
+      ok(m === 'warehouse' ? /w7: Object\.freeze\(\{ warehouse: warehouse7 \}\)/.test(sSrc) : new RegExp(`\\b${m}[:(]`).test(sSrc) || new RegExp(`${m}: [a-zA-Z]+`).test(sSrc), `standins3d builds ${wid}/${m} (no .glb is ever requested)`);
+    }
+    // the engine's own city pieces at the start → the game's level objects (the same mapping game.js levelOf uses)
+    const ch = w.characters[0].id; const g = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    const cm = E.cityModels(g);
+    if (wid === 'w7') {
+      const br = cm.filter((m) => m.lights != null && 'franchise' in m);
+      ok(br.length === 3 && br.every((m) => Number.isInteger(m.stage) && m.stage >= 0 && m.stage <= 4 && typeof m.own === 'boolean' && typeof m.fitout === 'boolean' && typeof m.flicker === 'boolean' && typeof m.stockout === 'boolean'), 'w7 cityModels: every branch has stage / own / fitout / flicker / stockout (the fields game.js reads)', br);
+      ok(cm.some((m) => m.kind === 'inventory' && m.model === 'stock_pallets'), 'w7 cityModels: the stock pool (stock_pallets)');
+    } else {
+      const pj = cm.filter((m) => m.pct != null || m.fence || m.stage === 5);
+      ok(pj.length >= 1 && pj.every((m) => m.fence || (Number.isFinite(m.pct) && Number.isInteger(m.stage) && typeof m.stalled === 'boolean' && typeof m.craneOn === 'boolean' && typeof m.permit === 'boolean' && Number.isFinite(m.presold))), 'w8 cityModels: every site has pct / stage / stalled / craneOn / permit / presold (the fields game.js reads)', pj);
+    }
+  }
+  // w7 level kinds
+  const B = V.normLevel({ kind: 'branch', n: 2, own: true, flicker: true });
+  ok(B && B.kind === 'branch' && B.n === 2 && B.of === 4 && B.own && B.flicker && !B.fitout && JSON.stringify(V.normLevel(B)) === JSON.stringify(B), 'branch level: normalised, idempotent');
+  ok(V.levelText(B) === 'שלב 2 מתוך 4 · בהרצה · מעבר ליכולת הניהול' && V.pipsText(B) === '●●○○', `branch text "${V.levelText(B)}" + pips ●●○○`);
+  const F = V.normLevel({ kind: 'branch', n: 3, own: false, flicker: true, stockout: true });
+  ok(!F.own && !F.flicker && !F.stockout && V.levelText(F).includes('זכיינות'), 'a franchise never flickers or runs out (no span, no stock of yours), "זכיינות"');
+  const Fo = V.normLevel({ kind: 'branch', n: 2, own: true, fitout: true, flicker: true });
+  ok(Fo.fitout && Fo.n === 0 && !Fo.flicker && V.pipsText(Fo) === '🚧' && V.levelText(Fo).includes('בשיפוץ') && V.levelHint(Fo).includes('שיפוץ'), 'fit-out: stage 0, 🚧, "בשיפוץ", no flicker');
+  const So = V.normLevel({ kind: 'branch', n: 4, own: true, stockout: true });
+  ok(V.activityOf(So) === 'stockout' && V.cardName('החנות', 'סניף רחוב', So).includes('המלאי אזל'), 'stock-out: the 📭 activity (3D badge, 2D badge, accessible name)');
+  const kb = V.kitParts(B); ok(kb.lights === 2 && kb.flicker && !kb.sign && !kb.scaffold && kb.scale === 1, 'branch level: model parts only (no stage kit)');
+  const St = V.normLevel({ kind: 'stock', cover: 1.44 }); ok(St.kind === 'stock' && St.n === 2 && V.levelText(St).includes('1.4') && V.pipsText(St) === '▮▮▯▯' && V.kitParts(St).pallets === 2, 'stock level: 1.44 months → 2 pallet stacks');
+  ok(V.normLevel({ kind: 'stock', cover: 0.3 }).short && V.activityOf({ kind: 'stock', cover: 0.3 }) === 'stockout', 'stock almost out → 📭');
+  ok(V.levelText({ kind: 'mgr' }).includes('מנהל אזור') && V.pipsText({ kind: 'mgr' }) === '' && V.kitParts({ kind: 'mgr' }).links === 6, 'manager level: "מנהל אזור", 6 links, no pips');
+  // w8 level kind
+  const Bu = V.normLevel({ kind: 'build', n: 2, pct: 0.5, floors: 10, stalled: true, crane: true, presold: 0.33 });
+  ok(Bu.kind === 'build' && Bu.n === 2 && Bu.pct === 0.5 && Bu.stalled && !Bu.crane && Bu.presold === 0.33 && JSON.stringify(V.normLevel(Bu)) === JSON.stringify(Bu), 'build level: normalised (a stalled site has no working crane), idempotent');
+  ok(V.levelText(Bu) === 'בבנייה: 50% · שלב 2 מתוך 4 · העבודה עומדת · 33% נמכרו על הנייר' && V.pipsText(Bu) === '●●○○', `build text "${V.levelText(Bu)}"`);
+  const Pm = V.normLevel({ kind: 'build', n: 0, pct: 0, permit: true, crane: true }); ok(Pm.permit && !Pm.crane && Pm.n === 0 && V.pipsText(Pm) === '📋' && V.levelText(Pm).includes('היתר'), 'permit: 📋, no crane, "ממתין להיתר"');
+  const Pl = V.normLevel({ kind: 'build', plot: true, pct: 0.7 }); ok(Pl.plot && Pl.pct === 0 && V.pipsText(Pl) === '🚧' && V.levelText(Pl).includes('מגרש'), 'plot: 🚧, "מגרש"');
+  const Re = V.normLevel({ kind: 'build', rental: true, n: 5 }); ok(Re.rental && Re.n === 4 && Re.pct === 1 && V.pipsText(Re) === '🔑' && V.levelText(Re).includes('מושכר'), 'rental: 🔑, "מושכר"');
+  const kp = V.kitParts(Bu); ok(kp.tarp && kp.pct === 0.5 && kp.presold === 0.33 && !kp.sign && !kp.scaffold, 'build level: model parts only (tarp, %, presale)');
+  // stand-ins: states drawn by paintBranch / paintStock / paintBuild; motion steps only in stepShop / stepCrane (scene.js runs them in its updaters)
+  ok(/export function paintBranch/.test(sSrc) && /export function stepShop/.test(sSrc) && /export function paintBuild/.test(sSrc) && /export function stepCrane/.test(sSrc) && /export function paintStock/.test(sSrc), 'standins3d: paintBranch / stepShop / paintStock / paintBuild / stepCrane');
+  ok(!/\.glb['"`]/.test(sSrc) && !/import\(|fetch\(|Loader/.test(sSrc), 'standins3d requests no file');
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  ok(/cranes: 'w3\/crane'/.test(scn) && /keep\.has\(url\)/.test(scn), "w8's background crane is w3's crane.glb (kept when w8 releases the other worlds' models)");
+  ok(/updaters\.add\(\(t\) => \{ for \(const it of city\.values\(\)\) stepShop/.test(scn) && /stepCrane\(it\.obj/.test(scn), 'flicker / crane steps run only inside scene updaters (never under reduced motion, never on the low tier)');
+}
 
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

@@ -24,6 +24,10 @@ const W5 = (await import('../js/worlds/w5.js')).default; E.registerWorld(W5);   
 const SEASON = await import('../js/worlds/mech/season.js');
 const W6 = (await import('../js/worlds/w6.js')).default; E.registerWorld(W6);   // worlds wave 2: the lazy w6 (its tiles, decks, tile C)
 const PLANT = await import('../js/worlds/mech/plant.js');
+const W7 = (await import('../js/worlds/w7.js')).default; E.registerWorld(W7);   // worlds wave 3: the lazy w7 (tile R, chain decks)
+const W8 = (await import('../js/worlds/w8.js')).default; E.registerWorld(W8);   // worlds wave 3: the lazy w8 (tile Q, project decks)
+const CHAIN = await import('../js/worlds/mech/chain.js');
+const PROJ = await import('../js/worlds/mech/projects.js');
 
 /* T-opt */
 const OPT = nul.SCENE_OPTIONAL;
@@ -41,7 +45,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -65,9 +69,9 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'h']) {
   const w = W(wid);
-  for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, T.DEAL_WORDS], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
+  for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, T.MARKET_WORDS]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
     const desc = T.tileText(tile, w).desc;
     const have = new Set(deck.map(kindOf));
@@ -117,6 +121,27 @@ ok(T.tileText({ type: 'deal', name: 'הזדמנות' }).desc === T.TILE_TEXT.dea
   ok(/ביקורת בטיחות/.test(mk) && /הזמנת יצוא/.test(mk), 'w6 market tile: the industry shocks (mk cards) are named: ' + mk);
   ok(T.tileText(Object.values(W6.tiles).find((t) => t.type === 'crisis'), W6).desc.includes('משבר בתעשייה'), 'w6 crisis tile: the industry crisis wording');
   ok(T.marketKind({ mk: 'inspect' }) === 'mk:inspect' && T.marketKind({ k: 'price', mk: 'x' }) === 'price', 'marketKind: k first, then mk:');
+}
+/* T-w7 / T-w8: tile R (type 'site') and tile Q (type 'land') — the text is built from chain.js (RAMP, ROYALTY) / projects.js (LAND_LTV,
+   PRESALE, CONTRACTOR) at game start; a balance change that moves a number fails here. The decks are named by their own words (branches,
+   a DC, e-commerce, a leased commercial building; a stalled project, plots, a rented building) — never "קווי אריזה" for w7's rival chain. */
+{
+  const tR = W7.tiles.R, tQ = W8.tiles.Q; const p = (v) => `${Math.round(v * 100)}%`;
+  ok(tR && tR.type === 'site' && tQ && tQ.type === 'land', 'w7 tile R is type site, w8 tile Q is type land');
+  ok(!/\d/.test(T.TILE_TEXT.site.desc) && !/\d/.test(T.TILE_TEXT.land.desc), 'R / Q before prepareWorldText: the number-free wording');
+  ok((await T.prepareWorldText(W7)).includes('site') && (await T.prepareWorldText(W8)).includes('land'), 'prepareWorldText builds the R / Q texts from the modules');
+  const r = T.tileText(tR, W7), q = T.tileText(tQ, W8);
+  ok(r.emoji === '🏪' && r.short.length <= T.SHORT_MAX && q.emoji === '🏗️' && q.short.length <= T.SHORT_MAX, `R: 🏪 "${r.short}", Q: 🏗️ "${q.short}"`);
+  ok(r.desc.includes(p(CHAIN.RAMP[0])) && r.desc.includes(p(CHAIN.ROYALTY.pct)) && r.desc.includes('סקר מיקום') && r.desc.includes('לוותר'), `w7 R text = chain.js {RAMP[0] ${CHAIN.RAMP[0]}, royalty ${CHAIN.ROYALTY.pct}}: ${r.desc}`);
+  ok(q.desc.includes(p(PROJ.LAND_LTV)) && q.desc.includes(p(PROJ.PRESALE.req)) && q.desc.includes(p(PROJ.CONTRACTOR.reliable.cost - 1)) && q.desc.includes(p(PROJ.CONTRACTOR.cheap.over)) && q.desc.includes('לוותר'), `w8 Q text = projects.js constants: ${q.desc}`);
+  ok(CHAIN.chain.tiles.R.safe === 'pass' && PROJ.projects.tiles.Q.safe === 'pass', 'R / Q: the safe default is pass (named "לוותר")');
+  const d7 = T.tileText(Object.values(W7.tiles).find((t) => t.type === 'deal'), W7).desc, d8 = T.tileText(Object.values(W8.tiles).find((t) => t.type === 'deal'), W8).desc;
+  ok(/סניפים/.test(d7) && /מרכז הפצה/.test(d7) && /מבנה מסחרי מושכר/.test(d7) && !/קווי אריזה|יבואנים/.test(d7), 'w7 deal tile: branches, a DC, a leased building — no packing lines / importers: ' + d7);
+  ok(/פרויקט תקוע/.test(d8) && /מגרשים/.test(d8) && /בניין מושכר/.test(d8), 'w8 deal tile: a stalled project, plots, a rented building: ' + d8);
+  const m7 = T.tileText(Object.values(W7.tiles).find((t) => t.type === 'market'), W7).desc, m8 = T.tileText(Object.values(W8.tiles).find((t) => t.type === 'market'), W8).desc;
+  ok(/ספק מעלה מחירים/.test(m7) && /רשת מתחרה/.test(m7) && /הריבית במשק זזה/.test(m8) && /הקפאת היתרים/.test(m8), 'w7 / w8 market tiles name their module shocks');
+  ok(T.tileText(Object.values(W7.tiles).find((t) => t.type === 'crisis'), W7).desc.includes('משבר בקמעונאות') && T.tileText(Object.values(W8.tiles).find((t) => t.type === 'crisis'), W8).desc.includes('משבר בבנייה'), 'w7 / w8 crisis tiles: their own wording');
+  ok(T.dealKind({ k: 'pack', op: { ck: 'branch' } }) === 'ck:branch' && T.dealKind({ k: 'warehouse' }) === 'warehouse', 'dealKind: module cards by op.ck, plain cards by k');
 }
 
 /* T-pin */
