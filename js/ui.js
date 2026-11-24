@@ -8,7 +8,7 @@ import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
-import { levelText as stageText, levelHint as stageHint } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
+import { levelText as stageText, levelHint as stageHint, ageBand, DIV_HE } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
 import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';
 import * as MV from './render/marketview.js';   // w10: the market screen (HTML only; the engine's numbers)
 import { marketSeries } from './candlelog.js';  // w10: the engine's candles in the one chart component's series shape   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
@@ -422,6 +422,12 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">📊 <span class="hb-w">${esc(R.label || '')} · </span>מינוף ${num(pctI(PF.ltv))}${PF.call ? ' ⚠️' : ''}</button>`;
     if (PF.hedge) extra = '<span class="hedge" title="הגנת אופציות פעילה">🛡️</span>';
   }
+  else if (wi.league && wi.panel) {   // w13: the place in the table and wages vs revenue — a button that opens the club panel (המועדון והטבלה) + the live table strip
+    const LG = wi.league; key = 'rank'; v = LG.rank; goodUp = -1;
+    const al = `${wi.panel.title || 'המועדון'}: מקום ${LG.rank} מתוך 8 ב${LG.divName}, מחזור ${LG.round} מתוך ${LG.rounds}${LG.window ? ', חלון העברות פתוח' : ''}, שכר ${+LG.wageRatio > 0 ? `${pctI(LG.wageRatio)} מההכנסות ב־12 החודשים האחרונים` : 'מול הכנסות: עוד אין נתונים'}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">⚽ <span class="hb-mf">מקום </span>${num(String(LG.rank))}<span class="hb-ms">/8</span><span class="hb-w"> ב${esc(LG.divName)}</span><span class="hb-b"> · שכר ${num(wrT(LG.wageRatio))}</span>${LG.window ? ' 🔁' : ''}</button>`;
+    extra = leagueStrip(wi.panel.table, LG);
+  }
   else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
   if (key) {
     if (ind.key === key && ind.v != null && v !== ind.v) { ind.dir = Math.sign(v - ind.v); ind.good = goodUp ? ind.dir * goodUp : 0; ind.t = performance.now(); }
@@ -439,7 +445,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   const cv = $('#c'); if (cv) { const n = (m.assets || []).length; const t = n ? `לוח המשחק. בעיר שלך ${n === 1 ? 'נכס אחד' : n + ' נכסים'}. פרטים על כל נכס בדוח הכספי.` : 'לוח המשחק. עדיין אין נכסים בעיר.'; if (cv.getAttribute('aria-label') !== t) cv.setAttribute('aria-label', t); }
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
-  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : (m.goalParts || []).some((p) => p.unit === 'months') ? 'שווי וקופה' : 'יעד העולם';
+  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : (m.goalParts || []).some((p) => p.unit === 'months') ? 'שווי וקופה' : (m.goalParts || []).some((p) => p.cmp === 'le') ? 'שווי ושכר' : 'יעד העולם';
   const parts = m.goalParts || [];
   const pc = shownPct(m);
   const sig = m.goalType + parts.length;
@@ -448,7 +454,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     // wave 2 (A2 G-04): the meter is an inner role=meter (a meter's children are presentational) + a full-card toggle that opens "יעד העולם"
     for (const a of ['role', 'aria-label', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-valuetext']) g.removeAttribute(a);
     g.innerHTML = `<div class="gm" role="meter" aria-valuemin="0" aria-valuemax="100"><div class="gl"><span>${label}</span><b class="num"></b></div>` +
-      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${p.key === 'impact' ? 'השפעה' : p.unit === 'months' ? 'קופה' : 'שווי'}</em>` : ''}</div>`).join('') +
+      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${p.key === 'impact' ? 'השפעה' : p.unit === 'months' ? 'קופה' : p.cmp === 'le' ? 'שכר' : 'שווי'}</em>` : ''}</div>`).join('') +
       '<div class="gsub"></div></div>' +
       `<button type="button" class="gx" id="hGoalBtn" aria-controls="goalPanel" aria-expanded="${gpOpen}"><span class="gchev" aria-hidden="true"></span></button>`;
     g.querySelector('.gx').onclick = (e) => { sfx('click'); goalPanel(!gpOpen, { focus: e.detail === 0 }); };
@@ -464,7 +470,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     b.querySelector('s').style.width = pend + '%';
   });
   const gh = m.goalHold && m.goalType !== 'benchmark' && m.goalHold.streak > 0 && m.goalHold.streak < m.goalHold.need ? ` · ⏳ מחזיק ${m.goalHold.streak}/${m.goalHold.need}` : '';
-  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : p.unit === 'months' ? `🛟 ${iso(p.value >= 99 ? '—' : mo1(p.value))}/${iso(String(p.target))} ח׳` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // w7: liquidity in months   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
+  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : p.unit === 'months' ? `🛟 ${iso(p.value >= 99 ? '—' : mo1(p.value))}/${iso(String(p.target))} ח׳` : p.cmp === 'le' ? `⚖️ שכר ${iso(pctI(p.value))} (עד ${iso(pctI(p.target))})` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // w7: liquidity in months   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
   gm.setAttribute('aria-label', label);
   // T7 CR-01: a role=meter needs its value
   gm.setAttribute('aria-valuenow', String(pc));
@@ -537,7 +543,7 @@ function placeGoalPanel() {
   el.style.maxHeight = `calc(100dvh - ${top}px - 12px - var(--safe-b, 0px))`;
 }
 function goalPanelHtml(M) {
-  const parts = M.parts.map((p) => `<div class="gp-part"><div class="gp-pl"><span>${esc(p.label)}</span><b>${escI(p.valueText)} מתוך ${escI(p.targetText)}</b></div><div class="gbar" aria-hidden="true"><i style="width:${Math.max(2, Math.round(p.progress * 100))}%"></i></div></div>`).join('');
+  const parts = M.parts.map((p) => `<div class="gp-part"><div class="gp-pl"><span>${esc(p.label)}</span><b>${p.cmp === 'le' ? `${escI(p.valueText)} · היעד: ${escI(p.targetText)}` : `${escI(p.valueText)} מתוך ${escI(p.targetText)}`}</b></div><div class="gbar" aria-hidden="true"><i style="width:${Math.max(2, Math.round(p.progress * 100))}%"></i></div></div>`).join('');
   const gaps = M.gaps.length ? M.gaps.map((t) => `<p class="gp-gap"><span aria-hidden="true">🎯</span> ${escI(t)}</p>`).join('') : `<p class="gp-gap met">${gpTick(true)} ${escI(M.summary)}</p>`;
   const hold = M.hold ? `<p class="gp-row"><span><span aria-hidden="true">⏳</span> ${esc(M.hold.text)}</span><b class="num">${esc(M.hold.status)}</b>${gpTick(M.hold.ok ? true : null)}</p>` : '';
   const starLi = (s) => `<li><span class="gp-s" aria-label="${s.n === 1 ? 'כוכב אחד' : s.n === 2 ? 'שני כוכבים' : 'שלושה כוכבים'}">${'★'.repeat(s.n)}</span><span class="gp-t">${escI(s.text)}${s.now ? ` <small>${escI(s.now)}</small>` : ''}</span>${gpTick(s.ok)}` +
@@ -844,6 +850,12 @@ export function renderSheet(m, ctx) {
       <p class="note">מניות וקרן מדד ${num(mS((PF.classes || {}).daily || 0))} · קרנות ${num(mS((PF.classes || {}).monthly || 0))} · פרטי ${num(mS((PF.classes || {}).locked || 0))}${PF.debt ? ` · הלוואה כנגד התיק ${num(mS(PF.debt))}` : ''}${PF.unfunded ? ` · התחייבויות פתוחות ${num(mS(PF.unfunded))}` : ''}${PF.call ? ' · <b class="neg">⚠️ קריאת מרווח</b>' : ''}${PF.forced ? ` · ${num(String(PF.forced))} מכירות כפויות` : ''}.</p>
       <div class="loans"><button data-act="world">📊 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
   }
+  else if (wi.league && wi.panel) {   // w13: the club box; the club panel (table, squad, stadium, actions) opens from here
+    const LG = wi.league; const La = LG.last || {};
+    world = `<div class="wbox"><div class="wl"><span>🏟️ ${esc(wi.panel.title || 'המועדון')} · ${esc(LG.divName)}</span><b class="num">מקום ${esc(String(LG.rank))}</b></div>
+      <p class="note">עונה ${num(String(LG.season))} · מחזור ${num(`${LG.round}/${LG.rounds}`)}${LG.window ? ' · 🔁 חלון העברות' : ''} · הכנסות החודש ${num(mS(La.rev || 0))} · שכר ${num(mS(LG.wages))} · שכר מול הכנסות (12 חודשים) ${num(wrT(LG.wageRatio), LG.wageRatio > LG.wageRatioTarget ? 'neg' : '')} (יעד: עד ${num(pctI(LG.wageRatioTarget))}) · הסגל בספרים ${num(mS(LG.squadBook))} · בשוק ${num(mS(LG.squadMv))}${LG.ownerLoan ? ` · הלוואת בעלים ${num(mS(LG.ownerLoan))}` : ''}.</p>
+      <div class="loans"><button data-act="world">🏟️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+  }
   else if (wi.proj && wi.panel) {   // w8: the projects box; the full panel (gantt, equity calls, rows, rentals, actions) opens from here
     const PJ = wi.proj;
     world = `<div class="wbox"><div class="wl"><span>🏗️ ${esc(wi.panel.title || 'הפרויקטים')}: ${num(String(PJ.open))}</span><b class="num">ריבית ${esc(PJ.rate + '%')}</b></div>
@@ -879,7 +891,7 @@ export function renderSheet(m, ctx) {
   const angelDone = done.length ? `<p class="note">${done.length} השקעות נסגרו: ${done.map((x) => `${esc(x.name)} ${x.mult ? '×' + x.mult : '✗'}`).join(' · ')}</p>` : '';
   el.innerHTML = `<div class="sh-head"><div><h2>הדוח הכספי</h2><p class="sub">${esc(st.charName)} · ${esc(w.name)} · חודש ${m.month}${m.mode !== 'free' ? '/' + m.maxMonths : ''}</p></div><button class="ibtn sh-close" data-act="close" aria-label="סגירת הדוח">${ICON.close}</button></div>
   <div class="freedom"><div class="fl"><span>${esc(goalTitle)}</span><span class="num">${shownPct(m)}%</span></div>
-   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : p.unit === 'months' ? `${monthsText(p.value)} / ${p.target} חודשים` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
+   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : p.unit === 'months' ? `${monthsText(p.value)} / ${p.target} חודשים` : p.cmp === 'le' ? `${pctI(p.value)} · היעד: עד ${pctI(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
    ${holdLine(m)}<p>${goalHelp}</p></div>
   ${world}
   ${m.econ ? `<div class="wbox econbox"><div class="wl"><span>📊 מד הכלכלה</span></div>${econBlockHtml(m.econ)}</div>` : ''}
@@ -1495,6 +1507,7 @@ function renderEvent(first) {
     : ev.type === 'business' && ev.data.mode === 'offer' && Array.isArray(ev.data.setups) && ev.data.setups.length ? bizOfferActions(ev)
     : hasPlans ? planPicker(ev, ev.type === 'payday' && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '', ev.type === 'payday')
     : hasEffects ? effectChoices(ev)
+    : ev.type === 'mech' && ev.data && ev.data.levels && ev.data.rounds ? auctionActions(ev)   // w13 the transfer market
     : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id) && !inDd(o), '', ev.type === 'doodad' || ev.type === 'tax');
   const bizM = ev.type === 'business' && ev.data.mode === 'manage';
   const focus = !(hasPlans && ev.type === 'payday') && (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
@@ -1739,12 +1752,64 @@ function worldMktHtml(d) {   // a module market card's own numbers (w9 energy / 
     row('מינוף (LTV)', `${pctI(X.ltv)}${X.ltv > 1 ? ' — קריאת מרווח' : ''}`, X.ltv > 1 ? 'neg' : ''), X.freezeUntil >= 0 && X.mk === 'freeze' ? row('קרנות קפואות עד', `חודש ${X.freezeUntil}`, 'neg') : '', X.mk === 'gate' ? row('קרנות אשראי נעולות עד', `חודש ${X.gateUntil}`, 'neg') : '', X.flash ? row('הירידה חוזרת', `במשכורת של חודש ${X.flash.back}`, 'pos') : '']) + `<p class="mk-sim" role="note">⚠️ ${esc(MV_SIM)}</p>`; }
   return '';
 }
+/* ---------- w13 (league + auction): the transfer-market card (type 'mech', auction.js tiles.H; the same card re-describes after an outbid —
+   ctl.update, the ghost-tap guard stays), the sponsor / facility block of a deal card (data.league.ck), a league news card's own numbers
+   (data.league.mk), a player as a token with an age ring (age in the ring's words, never colour alone) and the live league-table strip.
+   Engine values only: the public estimate, the reserve, the levels, the rivals' count, who outbid and at what price, the guide's budget. */
+/** w13: the 12-month wage ratio — 0 before the first payday has any revenue (no data yet, never "0 %") */
+const wrT = (x) => (+x > 0 ? pctI(x) : 'אין עדיין');
+const LOT_BAND_HE = { young: 'כישרון צעיר', prospect: 'צעיר שכבר פותח', prime: 'בשיא', star: 'כוכב', veteran: 'ותיק' };
+function tokenHtml(p, { size = '' } = {}) {
+  const b = ageBand(p.age); const r = Math.round(+p.rating || +p.r || 0);
+  return `<span class="ptok ${size} age-${b.id}" role="img" aria-label="${esc(`${p.name || ''}: גיל ${p.age} (${b.he}), דירוג ${r}`)}"><b class="num">${r}</b><small class="num">${esc(String(p.age))}</small></span>`;
+}
+function leagueStrip(table, LG) {
+  const T = table || []; if (!T.length) return '';
+  const us = T.find((x) => x.us) || {};
+  const al = `הטבלה עכשיו: ${T.map((x) => `${x.pos}. ${x.name}${x.us ? ' (המועדון שלך)' : ''} ${x.pts} נק׳`).join(', ')}. ${LG && LG.div < 2 ? 'שתיים ראשונות עולות. ' : ''}${LG && LG.div > 0 ? 'שתיים אחרונות יורדות.' : ''}`;
+  return `<span class="lgstrip" role="img" aria-label="${esc(al)}" title="${esc(`מקום ${us.pos || ''} מתוך ${T.length}`)}">${T.map((x) => `<i class="${x.us ? 'us' : ''}" data-zone="${esc(x.zone || '')}">${x.us ? '★' : x.pos}</i>`).join('')}</span>`;
+}
+function auctionHtml(ev) {
+  const d = ev.data || {}; const L = d.levels || {};
+  const pips = Array.from({ length: d.rounds || 3 }, (_, i) => (i < d.round ? '●' : '○')).join('');
+  const lot = `<div class="lot"><span class="lot-tok">${tokenHtml({ name: ev.title, age: d.age, rating: d.r }, { size: 'lg' })}</span><div class="lot-t"><b>${esc(LOT_BAND_HE[d.band] || '')} · גיל ${num(String(d.age))} · דירוג ${num(String(d.r))}</b>
+    <small>פוטנציאל ${num(`${d.potLo}–${d.potHi}`)} (טווח — לא הערך האמיתי) · ${d.squadRank <= 11 ? `ייכנס להרכב: מספר ${num(String(d.squadRank))} בסגל שלך` : `מספר ${num(String(d.squadRank))} בסגל — לא בהרכב`}</small>
+    <small>שכר ${num(mS(d.wage))} בחודש × ${num(String(d.months))} חודשים = ${num(mS(d.wage * d.months))} · שווי שוק היום ${num(mS(d.mv))}</small></div></div>`;
+  const rows = [row('הערכת שווי ציבורית', mS(d.value)), row('מחיר עכשיו', `${mS(d.price)}${d.price > d.value ? ' · מעל ההערכה' : ''}`, d.price > d.value ? 'neg' : ''),
+    row('סבב', `${pips} ${d.round} מתוך ${d.rounds}`, 'wrap'),
+    row('מועדונים מתמודדים', `👥 ${d.rivals === 1 ? 'מועדון אחד' : `${d.rivals} מועדונים`} — ההערכות שלהם סודיות`, 'wrap'),
+    d.outbidBy ? row('מי הציע', `${d.outbidBy} · ${mS(d.price)}`, 'neg wrap') : '',
+    row('שכר מול הכנסות עכשיו (12 חודשים)', wrT(d.wageRatio), d.wageRatio > 0.7 ? 'neg' : '')];
+  const guide = d.budget > 0 ? `🧭 המנטור קובע מחיר מקסימלי לפני שמתחילים: עד ${num(mS(d.budget))} (92% מההערכה, אם יש כסף ושכר שאפשר לשאת). מעל זה — מוותרים.`
+    : '🧭 המנטור היה מוותר כאן: השחקן לא ייכנס להרכב, או שהשכר שלו ידחוף את השכר מעל מה שההכנסות נושאות.';
+  const lv = `<div class="mini aucmini"><p class="mh">⚽ ההצעות בסבב הזה</p><ul class="auc-lv">${[['bid', d.round === 1 ? 'מחיר הפתיחה' : 'להשוות'], ['raise', '+15%'], ['jump', '+35%']].map(([k, w]) => `<li class="${L[k] > d.value ? 'over' : ''}"><span>${esc(w)}</span><b class="num">${esc(mS(L[k]))}</b><small>${L[k] > d.value ? `⚠️ מעל ההערכה ב־${esc(mS(L[k] - d.value))}` : `✓ ${esc(mS(d.value - L[k]))} מתחת להערכה`}</small></li>`).join('')}</ul></div>`;
+  return lot + grid(rows) + lv + `<p class="note">${escI(guide)}</p>` + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+}
+/** the auction's buttons: each bid with what it takes now and every month, ⚠ over the public estimate (words, not colour), a loan when needed; walk = safe */
+function auctionActions(ev) {
+  const d = ev.data || {};
+  const b = (o, i) => { const P = o.preview || {}; const over = P.risk === 'over';
+    const sub = o.id === 'walk' ? 'בלי לשלם כלום · השחקן הבא יגיע' : `${iso(sgn(P.cash || -o.amount))} עכשיו · ${iso(sgn(P.monthly || 0))} בחודש × ${P.months || d.months}${o.loanAmount ? ` · הלוואה ${iso(mS(o.loanAmount))}` : ''}${over ? ' · ⚠️ מעל ההערכה' : ''}`;
+    return `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} hasnet auc-b${over ? ' over' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}><span>${escI(o.label)}</span><small class="net sub">${escI(sub)}</small>${o.primary ? '<small class="tagc rec">המנטור</small>' : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`; };
+  return `<div class="acts col auc-acts">${ev.options.map(b).join('')}</div>`;
+}
+function leagueDealHtml(X) {
+  if (!X || !X.ck) return '';
+  return `<div class="mini lgmini"><p class="mh">${X.ck === 'sponsor' ? `📣 חוזה חסות${X.months ? ` ל־${num(String(X.months))} חודשים` : ''}` : '🏟️ נכס של המועדון'} · שכר מול הכנסות עכשיו ${num(wrT(X.wageRatio), X.wageRatio > 0.7 ? 'neg' : '')}</p>${X.ck === 'sponsor' ? '<p class="note">כסף החסות נספר כהכנסה ביחס השכר — עד שהחוזה נגמר.</p>' : ''}${X.note ? `<p class="note">${escI(X.note)}</p>` : ''}</div>`;
+}
+function leagueMktHtml(X) {
+  const div = DIV_HE[X.div] || '';
+  const r = { tv: row('כסף הטלוויזיה עכשיו', `×${X.tvMult} מהבסיס`, 'pos'), fees: row('מחירי השחקנים', '+20% לחצי שנה — לקנות יקר, למכור טוב'), coach: row('הצעירים', 'חצי שנה בלי שיפור', 'neg'),
+    cup: row('נכנס לקופה', mSg(X.amount), 'pos'), derby: row('היציע', 'מלא יותר החודש', 'pos'), star: row('השכר עלה ב־30%', X.star || 'השחקן הכי טוב שלך', 'neg wrap') }[X.mk] || '';
+  return grid([r, row('הדרג שלך', div)]);
+}
 const BODY = {
   mech(ev) {   // a world module's tile card — w5 'N' (allotment), w6 'C' (supply contract), w7 'R' (site), w8 'Q' (land), w9 'V' (power site), w10 'W' / 'Y'
     const d = ev.data || {};
     if (d.tech && d.mw != null && d.slots && d.partner) return powerSiteHtml(d);   // w9
     if (d.market && d.market.idx) return exchangeHtml(d);                          // w10 'W'
     if (d.private && d.private.band) return privateHtml(d);                         // w10 'Y'
+    if (d.levels && d.rounds && d.value != null) return auctionHtml(ev);            // w13 'H' (auction.js: every round re-describes the same card)
     if (d.vol != null && d.delta && typeof d.delta === 'object') return contractHtml(d);
     if (d.site && d.mature && d.locs) return siteHtml(d);
     if (d.pk && d.contractors && d.cost && typeof d.cost === 'object') return landHtml(d);
@@ -1827,7 +1892,7 @@ const BODY = {
     if (d.plant && !d.plant.tech) extra += plantDealHtml(d.plant, d.warning);   // w6: condition, breakdown risk, the month in a boom / normal / recession, delivery, runway
     if (d.chain && d.chain.ck) extra += chainDealHtml(d.chain);   // w7: a branch (fit-out + ramp), a DC (−2 % on goods), e-commerce
     if (d.proj && d.proj.pk) extra += projDealHtml(d.proj);       // w8: a stalled project (units, stages built, cost, equity)
-    extra += energyDealHtml(d);                                    // w9: a grid slot, an operating plant / line, the hydrogen pilot; w10: a fund
+    extra += energyDealHtml(d) + leagueDealHtml(d.league);                                    // w9: a grid slot, an operating plant / line, the hydrogen pilot; w10: a fund
     if (d.cfAtUsd) {
       const imp = d.sens < 0;
       extra += `<div class="mini"><p class="mh">${d.usdLinked ? 'השווי צמוד לדולר.' : imp ? 'יבואן: משלם לספקים בדולרים — דולר חזק פוגע.' : 'יצואן: מוכר בדולרים — דולר חזק עוזר.'}</p><div class="mt">${d.cfAtUsd.map((x, i) => `<div class="${i === 1 ? 'cur' : ''}"><small>דולר ${usdTxt(x.usd)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b><small>שווי ${fmtC(x.value)}</small></div>`).join('')}</div>
@@ -1852,6 +1917,7 @@ const BODY = {
   market(ev) {
     const d = ev.data;
     if (d.energy || d.portfolio) return worldMktHtml(d);   // w9 / w10 module market cards
+    if (d.league && d.league.mk) return leagueMktHtml(d.league);   // w13
     if (d.kind === 'sell') {
       if (!d.offers.length) return '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
       return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.netAfterTax ?? o.net)}</b>${o.tax ? ` <small>(אחרי מס ${num(fmtM(o.tax))})</small>` : ''}<br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
@@ -3161,10 +3227,64 @@ function seasonLine(se) {
 /** w6–w8: actions that cannot be undone ask for a second tap (sell a line / the building, close / convert a branch, a clearance sale, sell
  *  the DC, a project, a plot or a rental); radio-like groups get a row label */
 const WP_CONFIRM = new Set(['sellLine', 'leaseback', 'close', 'convert', 'clearance', 'dcLeaseback', 'sellProj', 'sellPlot', 'sellRent',
-  'sellStake', 'sellPlant', 'sellSlot', 'sellNow', 'secondary']);   // w9 / w10: a stake, a plant, a slot, a fund now (−5 %), a private stake (−25 %)
+  'sellStake', 'sellPlant', 'sellSlot', 'sellNow', 'secondary', 'sell', 'wageCut']);   // w13: a player's sale; the wage cut (the star leaves for free)   // w9 / w10: a stake, a plant, a slot, a fund now (−5 %), a private stake (−25 %)
 const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט', offtake: 'בסיום: איך מוכרים את החשמל' };
-export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, month = 0 } = {}) {
+/* ---------- w13 (league) panel "המועדון והטבלה": the club line, the gauges (wages ÷ revenue in %, the rank with the cliff, strength vs the
+   tier, the stands' fill), the table (an accessible <table>: the zones are words + ▲ / ▼, our row named), the squad as tokens with an age ring
+   (market value vs book, wage, contract, injured / on loan / academy / in the eleven) with each player's own actions, then the club's actions.
+   Actions keep their index in panel.actions (data-wact), so the panel's one handler (two taps for a sale) serves them. */
+function leagueGauge(g) {
+  const v = +g.value || 0;
+  if (g.id === 'wageRatio') { const bad = v > g.ref; const pos = Math.min(100, (v / (g.max || 1.2)) * 100);
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="wageRatio"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(wrT(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${pos}%"></i><s style="inset-inline-start:${(g.ref / (g.max || 1.2)) * 100}%"></s></div><small>היעד: עד ${esc(pctI(g.ref))} · מעל 80% בסוף העונה = קנס${bad ? ' · גבוה' : ''}</small></div>`; }
+  if (g.id === 'rank') { const up = v <= g.ref; const pos = ((8 - v) / 7) * 100;
+    return `<div class="wp-g${v >= 7 ? ' low' : ''}" data-g="rank"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">מקום ${esc(String(v))} מתוך 8</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${pos}%"></i><s style="inset-inline-start:${((8 - g.ref) / 7) * 100}%"></s></div><small>${up ? '▲ באזור העלייה (מקום 1–2)' : v >= 7 ? '▼ באזור הירידה (מקום 7–8)' : 'באמצע — מקום 1–2 עולים, 7–8 יורדים'}</small></div>`; }
+  if (g.id === 'strength') { const d = Math.round((v - g.ref) * 10) / 10;
+    return `<div class="wp-g${d < 0 ? ' low' : ''}" data-g="strength"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(String(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, (v - 35) / 50 * 100))}%"></i><s style="inset-inline-start:${Math.max(0, Math.min(100, (g.ref - 35) / 50 * 100))}%"></s></div><small>ממוצע הדרג ${esc(String(g.ref))} · ${d >= 0 ? `+${d} מעליו` : `${d} מתחתיו`}</small></div>`; }
+  const bad = v < g.ref;
+  return `<div class="wp-g${bad ? ' low' : ''}" data-g="${esc(g.id)}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(pctI(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, v * 100)}%"></i><s style="inset-inline-start:${g.ref * 100}%"></s></div><small>רגיל: ${esc(pctI(g.ref))}${bad ? ' · נמוך' : ''}</small></div>`;
+}
+function leagueLine(LG) {
+  if (!LG) return '';
+  const La = LG.last || {}; const P = LG.payoff || {};
+  return `<p class="wp-now">🏟️ <b>${esc(LG.divName)}</b> · עונה ${num(String(LG.season))} · מחזור ${num(`${LG.round}/${LG.rounds}`)}${LG.window ? ' · <b>🔁 חלון העברות פתוח</b> (מכירה בלי הנחה)' : ' · מחוץ לחלון: מכירה ב־10% פחות'} · הכנסות החודש ${num(mS(La.rev || 0))} (כרטיסים ${num(mS(La.gate || 0))}, טלוויזיה ${num(mS(La.tv || 0))}, מרצ׳נדייז ${num(mS(La.merch || 0))}) · שכר ${num(mS(LG.wages))} · תפעול ${num(mS(La.ops || 0))} · נשאר ${num(mSg(La.cf || 0), cls(La.cf || 0))}
+    · ${P.up ? `עלייה: הכנסות ×${num(String(P.up))}` : 'בדרג העליון'}${P.down ? ` · ירידה: ×${num(String(P.down))}` : ''} · פרס על מקום 1 ${num(mS((LG.prize || [])[0] || 0))}, מקום 3 ${num(mS((LG.prize || [])[2] || 0))}
+    · ${num(String(LG.seats))} מקומות${LG.build ? ` · 🏗️ מרחיבים: שלב ${num(String(LG.build.stage))} מתוך 2 עד חודש ${num(String(LG.build.at))}` : ''}${LG.train ? ' · מתחם אימונים' : ''}${LG.academy ? ' · אקדמיה' : ''}${LG.naming && LG.naming.until >= 0 ? ` · שם האצטדיון נמכר (${LG.naming.mode === 'now' ? 'כסף מראש' : '8% מהכרטיסים'})` : ''}${LG.ffp ? ` · <b class="neg">⚠️ ${num(String(LG.ffp))} קנסות יציבות</b>` : ''}${LG.sold ? ` · נמכרו ${num(String(LG.sold))} (${num(mSg(LG.soldGain), cls(LG.soldGain))} מול הספרים)` : ''}</p>`;
+}
+function leagueTableHtml(T, LG) {
+  if (!T || !T.length) return '';
+  const zone = (z) => (z === 'up' ? '▲ עולה' : z === 'down' ? '▼ יורדת' : '');
+  return `<section class="wp-sec"><h3>הטבלה · ${esc((LG && LG.divName) || '')}</h3><table class="lgtbl"><caption class="sr">טבלת הליגה: מקום, מועדון, נקודות ואזור. שתיים ראשונות עולות דרג, שתיים אחרונות יורדות.</caption>
+    <thead><tr><th scope="col">מקום</th><th scope="col">מועדון</th><th scope="col">נק׳</th><th scope="col">אזור</th></tr></thead><tbody>${T.map((x) => `<tr class="${x.us ? 'us' : ''}" data-zone="${esc(x.zone || '')}"><td class="num">${esc(String(x.pos))}</td><th scope="row">${x.us ? '★ ' : ''}${esc(x.name)}${x.us ? ' <small>(שלך)</small>' : ''}</th><td class="num">${esc(String(x.pts))}</td><td>${esc(zone(x.zone))}</td></tr>`).join('')}</tbody></table>
+    <p class="note">בין מקום 2 למקום 3 עובר הצוק: שתי הראשונות עולות וההכנסות קופצות, השלישית נשארת.</p></section>`;
+}
+function squadHtml(P, acts) {
+  const rows = P.rows || []; if (!rows.length) return '';
+  const byP = new Map(); acts.forEach((a, i) => { if (a.param && /^p\d+$/.test(a.param) && ['sell', 'renew', 'loanOut'].includes(a.id)) { if (!byP.has(a.param)) byP.set(a.param, []); byP.get(a.param).push([a, i]); } });
+  const AL = { sell: 'למכור', renew: 'לחדש חוזה', loanOut: 'להשאיל' };
+  const btn = ([a, i], r) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" data-pid="${esc(r.pid)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(a.label)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${esc(AL[a.id] || a.id)}${a.id === 'sell' && a.price != null ? ` <small class="num">${esc(mS(a.price))}</small>` : ''}</button>`;
+  return `<section class="wp-sec"><h3>הסגל (${num(String(rows.length))} שחקנים) · השווי הנקי סופר את הספרים, לא את השוק</h3><ul class="wp-rows squad">${rows.map((r) => {
+    const b = ageBand(r.age);
+    const badges = [r.starter ? '<em class="b ok">בהרכב</em>' : '', r.injured ? '<em class="b warn">🩹 פצוע</em>' : '', r.loaned ? '<em class="b">↔ בהשאלה</em>' : '', r.academy ? '<em class="b">🌱 אקדמיה</em>' : '', r.monthsLeft <= 6 ? `<em class="b warn">⏳ ${esc(String(r.monthsLeft))} חודשים לסוף החוזה</em>` : ''].join('');
+    const gain = r.mv - r.book;
+    return `<li class="wp-row prow" data-pid="${esc(r.pid)}" data-light="${r.injured ? 'red' : r.starter ? 'green' : 'off'}"><div class="wp-rh">${tokenHtml(r)}<div class="pr-n"><b>${esc(r.name)}</b><small>גיל ${esc(String(r.age))} · ${esc(b.he)} · דירוג ${esc(String(r.rating))} · פוטנציאל ${esc(`${r.potLo}–${r.potHi}`)}</small></div>${badges}</div>
+      <div class="wp-rm"><span>בשוק ${num(mS(r.mv))}</span><span>בספרים ${num(mS(r.book))}</span><span class="${cls(gain)}">${gain >= 0 ? 'רווח במכירה' : 'הפסד במכירה'} ${num(mSg(gain), cls(gain))}</span><span>שכר ${num(mS(r.wage))} בחודש</span><span>חוזה עד חודש ${num(String(r.until))}</span></div>
+      ${(byP.get(r.pid) || []).length ? `<div class="wp-acts pr-acts">${byP.get(r.pid).map((x) => btn(x, r)).join('')}</div>` : ''}</li>`;
+  }).join('')}</ul><p class="note">הטבעת סביב הדירוג = הגיל: צעיר עד 21, עולה עד 24, בשיא עד 28, אחרי השיא עד 30, ותיק. מכירה מבקשת לחיצה שנייה.</p></section>`;
+}
+function leagueActsHtml(acts) {
+  const list = acts.map((a, i) => [a, i]).filter(([a]) => !(a.param && /^p\d+$/.test(a.param)));
+  if (!list.length) return '';
+  return `<section class="wp-sec"><h3>המועדון והאצטדיון</h3><div class="wp-acts">${list.map(([a, i]) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'}${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(a.label)}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`).join('')}</div>
+    <p class="note">💡 = מה שהמנטור היה בוחר עכשיו. כל פעולה נכנסת לחודש הזה מיד (בלי להטיל קוביות).</p></section>`;
+}
+function leaguePanelHtml(P, LG) {
+  const acts = P.actions || [];
+  return `${leagueLine(LG)}<div class="wp-gauges">${(P.gauges || []).map(leagueGauge).join('')}</div>${leagueTableHtml(P.table, LG)}${squadHtml(P, acts)}${leagueActsHtml(acts)}`;
+}
+export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, league = null, month = 0 } = {}) {
   if (!P) return '';
+  if (P.id === 'league') return leaguePanelHtml(P, league);   // w13
   const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || []), ...(P.plants || []), ...((energy && energy.sites) || []), ...((energy && energy.h2) || [])];   // w8 / w9: actions on rentals, plots, plants, sites are named too
   return `${seasonLine(season)}${plantLine(plant)}${chainLine(chain)}${projsLine(proj)}${P.id === 'energy' ? energyLine(energy) : ''}<div class="wp-gauges">${(P.gauges || []).map((g) => gaugeHtml(g, P.id)).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${barsHtml(P.bars)}${P.id === 'proj' || P.id === 'energy' ? ganttHtml(P.gantt) + callsHtml(P.calls, proj, month) : ''}${rowsHtml(P.rows, P)}${P.id === 'proj' ? rentPlotHtml(proj, P) : ''}${P.id === 'energy' ? plantsHtml(P.plants, energy) : ''}${actionsHtml(P.actions, names)}`;
 }
@@ -3176,7 +3296,7 @@ export function worldPanel(get, onAct) {
   let D = get(); if (!D || !D.panel) return Promise.resolve();
   let busyAct = false;
   const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
-  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
+  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
     html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead

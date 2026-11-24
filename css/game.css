@@ -69,6 +69,7 @@ body[data-world=w7]{--accent-ink:light-dark(#9b1c24,#ff8a93);--accent:#ec5562}  
 body[data-world=w8]{--accent-ink:light-dark(#854d0e,#facc15)}
 body[data-world=w9]{--accent-ink:light-dark(#155e75,#67e8f9)}
 body[data-world=w10]{--accent-ink:light-dark(#7a5a0a,#facc15)}   /* w10: the doc's #a16207 is 3.8:1 on --paper3 — a darker gold */
+body[data-world=w13]{--accent-ink:light-dark(#7f1d1d,#fca5a5);--accent:#f05252}   /* w13: the club red #dc2626 is the 3D accent / tile H; the UI fill is #f05252 so --ink on it stays ≥ 4.5 */
 body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--accent2:#c8a24a}
 
 /* ============================================================ base */

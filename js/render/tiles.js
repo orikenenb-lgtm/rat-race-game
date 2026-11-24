@@ -35,6 +35,9 @@ export const TILE_TEXT = Object.freeze({
   // until prepareWorldText() built them from the modules' constants (MODULE_TEXT below).
   powerSite: { short: 'אתר אנרגיה', desc: 'אתר לתחנת כוח: ייזום, היתרים והון עצמי — והבנק מממן את הבנייה רק לפרויקט עם חיבור לרשת. אפשר לעשות סקר משאבים, לייזם לבד או עם שותף, או לוותר.' },
   exchange: { short: 'הבורסה', desc: 'חדר המסחר: מצב השוק, המדד והחדשות, ומבט חינם על החברה שבחדשות. המסחר עצמו — בלוח "הבורסה והתיק" בין הטלות.' },
+  // w13 אצטדיון הכוכבים — tile H (auction.js tiles.H, wired by w13.js world.auction). Number-free until prepareWorldText() built it from
+  // the module's constants (MODULE_TEXT below).
+  transfer: { short: 'שוק העברות', desc: 'שחקן במכירה מול מועדונים אחרים: ההערכה ציבורית, כל מועדון מעריך בעצמו. מציעים, מעלים או מוותרים — מי שמעריך הכי ביוקר זוכה.' },
   privateDeal: { short: 'עסקה פרטית', desc: 'השקעה פרטית: נעולה לשנים, בלי מחיר יומי, ואי אפשר ללוות כנגדה. אפשר לבדוק את המנהל, להשקיע הכל או חצי, או לוותר.' },
 });
 
@@ -55,6 +58,8 @@ const BY_NAME = Object.freeze({
   'משבר בתעשייה': { short: 'משבר', desc: 'משבר בתעשייה: לקוח גדול קורס, שריפה במחסן או חודש בלי משכורת. כרית מזומן ולקוחות מפוזרים עוזרים לעבור אותו.' },
   // w9: the crisis tile (w9.crises: a transformer burns, the neighbours sue, an operation)
   'תקלה ברשת': { short: 'תקלה ברשת', desc: 'תקלה ברשת: שנאי שנשרף ומשבית תחנה, תביעה של שכנים או חודש בלי משכורת. תחנות שמכסות את החוב שלהן בנוח עוברות את זה בלי הלוואה.' },
+  // w13: the crisis tile (w13.crises: the FFP audit, a sponsor scandal, a fan protest, the stand roof, a lawsuit, a month without salary)
+  'משבר במועדון': { short: 'משבר', desc: 'משבר במועדון: ביקורת על השכר, שערוריית נותן חסות, מחאת אוהדים או חודש בלי משכורת. שכר שלא אוכל את ההכנסות ומזומן בצד עוזרים לעבור אותו.' },
   'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
 /* ---------- worlds wave 1: module tiles get their text from the module's own constants (no copied numbers that drift) */
@@ -62,6 +67,8 @@ const pctW = (x) => `${Math.round(x * 100)}%`;
 const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
 /** mechanic id → (its module namespace) → { tile type: {short, desc} } */
 const MODULE_TEXT = {
+  // w13 (auction.js ROUNDS, STEP): the transfer market's rounds and bid steps
+  auction: (M) => (M && M.ROUNDS && M.STEP ? { transfer: { short: 'שוק העברות', desc: `שחקן במכירה מול 1–3 מועדונים: ההערכה ציבורית, ההערכות שלהם סודיות. עד ${M.ROUNDS} סבבים — להשוות, להעלות ב־${pctW(M.STEP.raise - 1)} או לקפוץ ב־${pctW(M.STEP.jump - 1)}. לוותר תמיד אפשר.` } } : {}),
   // w9 / w10 (energy.js SLOT, PPA; portfolio.js PE, STAKE, FIRE)
   energy: (M) => (M && M.SLOT && M.PPA ? { powerSite: { short: 'אתר אנרגיה', desc: `אתר לתחנת כוח: ייזום, היתרים והון עצמי — והבנק מממן את הבנייה רק לפרויקט עם חיבור לרשת (מהתור: ${M.SLOT.wait} חודשים). בסיום: חוזה PPA (${pctW(M.PPA.share)} מהמחיר הממוצע) או שוק חופשי. אפשר לעשות סקר משאבים, לייזם לבד או עם שותף, או לוותר.` } } : {}),
   portfolio: (M) => (M && M.PE && M.STAKE && M.FIRE ? { privateDeal: { short: 'עסקה פרטית', desc: `השקעה פרטית: קרן שקוראת לכסף ב־${M.PE.calls} שלבים, או אחזקה נעולה ${M.STAKE.lockMin}–${M.STAKE.lockMin + M.STAKE.lockSpan - 1} חודשים. אין מחיר יומי ואי אפשר ללוות כנגדה; מכירה מוקדמת עולה ${pctW(M.FIRE.secondary)}. אפשר לבדוק את המנהל, להשקיע הכל או חצי, או לוותר.` } } : {}),
@@ -92,7 +99,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -106,6 +113,7 @@ export const DEAL_WORDS = Object.freeze({
   cnc: 'קווי CNC', plastic: 'מכונות הזרקה', food: 'מפעלי מזון', recycle: 'מפעלי מיחזור', metal: 'מסגריות', pack: 'קווי אריזה',   // w6
   // w7 / w8 module deal cards carry op.ck (chain.js branch / dc / ecom, projects.js proj / plot) — dealKind names them 'ck:<ck>'
   'ck:branch': 'סניפים ורשת מתחרה', 'ck:dc': 'מרכז הפצה', 'ck:ecom': 'אתר מכירות', 'ck:proj': 'פרויקט תקוע באמצע', 'ck:plot': 'מגרשים', building: 'בניין מושכר',
+  'ck:sponsor': 'חסויות', 'ck:facility': 'מתקנים של המועדון', 'ck:club': 'המועדון',   // w13
   'ck:slot': 'חיבור לרשת', 'ck:plant': 'תחנה שכבר עובדת', 'ck:line': 'חלק בקו הולכה', 'ck:h2': 'פיילוט מימן', 'ck:fund': 'קרנות אג"ח, ריט ואשראי',   // w9 / w10
   resort: 'ריזורטים', spa: 'ספא', conference: 'כנסים', waterpark: 'פארקי מים', apts: 'דירות נופש', housing: 'מגורי עובדים', restaurant: 'מסעדות', dive: 'צלילה',   // w5
   'tk:GOLD': 'זהב', 'tk:USD': 'דולרים', 'tk:MADAD': 'קרן מדד', 'tk:INDX': 'מדד החדשנות', 'tk:IDX': 'קרן מדד', 'tk:AGAH': 'אג"ח ממשלתי', stock: 'מניות', crypto: 'קריפטו',
@@ -130,6 +138,8 @@ export const MARKET_WORDS = Object.freeze({
   'mk:feedin': { t: 'קיצוץ בתעריף' }, 'mk:heat': { t: 'גל חום' }, 'mk:sand': { t: 'סופת חול' }, 'mk:curtail': { t: 'הגבלת רשת' },
   'mk:panels': { t: 'פאנלים זולים' }, 'mk:carbon': { t: 'מס פחמן' }, 'mk:boom': { t: 'עוד שדות סולאריים' },
   // w10 (portfolio.js market: c.mk)
+  // w13 (league.js market: c.mk)
+  'mk:tv': { t: 'חוזה טלוויזיה' }, 'mk:fees': { t: 'שוק ההעברות רותח' }, 'mk:coach': { t: 'מאמן הנוער נחטף' }, 'mk:cup': { t: 'ריצה בגביע' }, 'mk:derby': { t: 'דרבי מקומי' }, 'mk:star': { t: 'הכוכב רוצה העלאה' },
   'mk:shock': { t: 'הבורסה זזה בחדות' }, 'mk:spread': { t: 'מרווחי האשראי מתפוצצים' }, 'mk:prop': { t: 'מחירי הנדל"ן זזים' }, 'mk:flash': { t: 'קריסה בזק' }, 'mk:gate': { t: 'קרן נועלת פדיונות' },
 });
 /** Per-world market words where a kind means something else in that world (w10's 'freeze' is a liquidity freeze, not a permit freeze). */

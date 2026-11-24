@@ -169,3 +169,9 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 :root[data-motion=reduce] .b2d-card,:root[data-motion=reduce] .b2d-pawn{transition:none}
 /* dense city grids (6–8 per row): the short label goes; the card's accessible name keeps it (12 px floor, review m-6) */
 .b2d-dense .b2d-cl{display:none}
+/* w13 (pitch motif: mowing stripes + a centre circle on the pitch green; the club card: the stands' fill as a bar, a dashed border while the stand grows) */
+.b2d-m-pitch .b2d-center{background-image:radial-gradient(circle at 50% 50%,transparent 0 46px,rgba(255,255,255,.35) 46px 49px,transparent 49px),linear-gradient(90deg,transparent calc(50% - 1.5px),rgba(255,255,255,.35) calc(50% - 1.5px) calc(50% + 1.5px),transparent calc(50% + 1.5px)),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 26px,transparent 26px 52px)}
+.b2d-card[data-kind="club"]{border-color:#dc2626}.b2d-card[data-kind="club"][data-light="build"]{border-style:dashed}
+.b2d-card[data-kind="club"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;width:80%;
+  background:linear-gradient(to left,#15803d 0 var(--b2d-pct,0%),rgba(21,128,61,.18) var(--b2d-pct,0%) 100%)}
+.b2d-card[data-kind="sponsor"][data-light="off"]{border-style:dotted;opacity:.85}

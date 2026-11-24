@@ -6,7 +6,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
 import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';
-import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
+import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';
+import { paintClub, paintBillboard } from './render/standins13.js';   // w13: the stadium (stands ∝ seats, crowd ∝ fill, crane while building), billboards   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
@@ -639,6 +640,11 @@ function drawIcon(g, icon, x, y, c) {
       P(); g.moveTo(x + 8, y - 50); g.lineTo(x - 26, y + 6); g.lineTo(x - 2, y + 6); g.lineTo(x - 12, y + 50); g.lineTo(x + 28, y - 8); g.lineTo(x + 4, y - 8); g.closePath(); g.fill(); break;
     case 'lock': // w10 tile Y: a padlock
       g.lineWidth = 10; P(); g.arc(x, y - 14, 22, Math.PI, 0); g.stroke(); g.fillRect(x - 34, y - 14, 68, 52); g.save(); g.globalCompositeOperation = 'destination-out'; P(); g.arc(x, y + 6, 8, 0, 7); g.fill(); g.fillRect(x - 3, y + 6, 6, 18); g.restore(); break;
+    case 'ball': // w13 tile H: a football (a circle, the centre pentagon and its seams)
+      g.lineWidth = 6; P(); g.arc(x, y, 44, 0, 7); g.stroke();
+      P(); for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; g.lineTo(x + Math.cos(a) * 17, y + Math.sin(a) * 17); } g.closePath(); g.fill();
+      for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; P(); g.moveTo(x + Math.cos(a) * 17, y + Math.sin(a) * 17); g.lineTo(x + Math.cos(a) * 40, y + Math.sin(a) * 40); g.stroke(); }
+      break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -668,10 +674,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -792,10 +798,11 @@ const LIGHTS = {
   cranes: { hemi: 1.15, sun: 2.6, exp: 1.04, env: 0.42, sunPos: [10, 24, 12], fill: ['#93c5fd', 3] },     // w8: a clear day on the building site
   solar: { hemi: 1.2, sun: 2.8, exp: 1.05, env: 0.4, sunPos: [4, 28, 8], fill: ['#fbbf24', 3] },            // w9: desert noon, the sun high
   towers: { hemi: 0.85, sun: 1.6, exp: 1.02, env: 0.42, sunPos: [-12, 16, 10], fill: ['#3b82f6', 8] },    // w10: blue hour between glass towers
+  floodlights: { hemi: 0.8, sun: 2.1, exp: 1.04, env: 0.36, sunPos: [6, 26, 10], fill: ['#e0f2fe', 6] },  // w13: a night match — the "sun" is the floodlights, high and white
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 };
+  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -899,7 +906,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1389,6 +1396,37 @@ function syncTicker() {
   if (!tickerDecor) return; let call = false; for (const it of city.values()) if (it.level && it.level.kind === 'hold' && it.level.call) call = true;
   tickerDecor.call = call; tickerDecor.tk.material.color.set(call ? '#dc2626' : '#d4af37'); invalidate();
 }
+/** w13 אצטדיון הכוכבים: a night match — a dark turf island, a running track ring around the board, low stands with a red / white crowd in the
+ *  back, and four floodlight masts with lit lamp heads at the corners (light cones as soft additive planes). Nothing moves: the lights are on
+ *  — the same with or without reduced motion (no updater). */
+function decorFloodlights(T) {
+  island(31, std('#14532d', { roughness: 1 }), '#0b1020');
+  const track = own(new THREE.Mesh(new THREE.RingGeometry(12.2, 14.2, 72), std('#9a3412', { roughness: 0.95 }))); track.rotation.x = -Math.PI / 2; track.position.y = -0.7; track.receiveShadow = true; worldGroup.add(track);
+  const d = new THREE.Object3D();
+  // stands in the back: sloped blocks + crowd dots (red / white / grey)
+  const st = scatter(dn(10), 18, 26, { backOnly: true, seed: 131 });
+  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#334155', { roughness: 0.85 }), st.length);
+  const crowd = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.18, 0.18), std('#ffffff', { roughness: 0.8 }), st.length * 4);
+  const tones = ['#dc2626', '#f8fafc', '#94a3b8', '#dc2626'];
+  st.forEach((p, i) => { const w = 4 + p.k * 4, h = 1.6 + p.k * 1.6, rot = Math.atan2(-p.x, -p.z);
+    d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(-0.28, rot, 0); d.scale.set(w, h, 1.6); d.updateMatrix(); body.setMatrixAt(i, d.matrix);
+    const fx = Math.sin(rot), fz = Math.cos(rot);
+    for (let k = 0; k < 4; k++) { d.position.set(p.x + fx * (0.6 - k * 0.32), -0.72 + 0.4 + k * (h / 4.2), p.z + fz * (0.6 - k * 0.32)); d.rotation.set(0, rot, 0); d.scale.set(w * 0.9, 1, 1); d.updateMatrix(); crowd.setMatrixAt(i * 4 + k, d.matrix); crowd.setColorAt(i * 4 + k, new THREE.Color(tones[(i + k) % tones.length])); } });
+  body.castShadow = true; body.receiveShadow = true; [body, crowd].forEach((m) => { own(m); worldGroup.add(m); });
+  // four floodlight masts at the corners, lamp heads facing the board, a soft light cone under each
+  const R = 21.5; const masts = []; const lampMat = new THREE.MeshBasicMaterial({ color: '#fef9c3' }); const coneMat = new THREE.MeshBasicMaterial({ color: '#fef9c3', transparent: true, opacity: 0.08, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  disposables.push(lampMat, coneMat);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const g = new THREE.Group(); g.userData.ownTree = true; g.name = 'decor:floodlight'; const x = sx * R * 0.72, z = sz * R * 0.72; g.position.set(x, -0.72, z); g.rotation.y = Math.atan2(-x, -z);
+    const h = 12; const pole = own(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.3, h, 8), std('#94a3b8', { metalness: 0.4, roughness: 0.5 }))); pole.position.y = h / 2; g.add(pole);
+    const head = own(new THREE.Mesh(new THREE.BoxGeometry(3, 1.6, 0.3), std('#e2e8f0', { metalness: 0.3 }))); head.position.set(0, h + 0.6, 0.1); head.rotation.x = 0.35; g.add(head);
+    const lamps = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 1.3), lampMat); lamps.position.set(0, h + 0.6, 0.27); lamps.rotation.x = 0.35; g.add(lamps);
+    const cone = own(new THREE.Mesh(new THREE.ConeGeometry(5.5, h, 24, 1, true), coneMat)); cone.userData.ownMat = false; cone.position.set(0, h / 2, 5.2); cone.rotation.x = -0.42; g.add(cone);
+    worldGroup.add(g); masts.push(g);
+  }
+  floodState = { masts: masts.length, lit: true };
+}
+let floodState = null;
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
   const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.2, 64), std('#ead8b0', { roughness: 1 })));
@@ -1794,6 +1832,8 @@ function applyLevelParts(it) {
   if (it.level && it.level.kind === 'build') { paintBuild(it.obj, it.level); return; }    // w8: slabs, crane, tarp, permit board, presale banner
   if (it.level && it.level.kind === 'energy') { paintEnergy(it.obj, it.level); return; }  // w9: rows / turbines / boxes, crane, barrier, loose cable vs wire, pulses
   if (it.level && it.level.kind === 'hold') { paintHold(it.obj, it.level); syncTicker(); return; }   // w10: floors ∝ value, ticker red on a call, frost, vault
+  if (it.level && it.level.kind === 'club') { paintClub(it.obj, it.level); return; }      // w13: stands ∝ seats, crowd ∝ fill, crane + scaffold while building, tier stars
+  if (it.level && it.level.kind === 'sponsor') { paintBillboard(it.obj, it.level); return; }   // w13: a lit billboard, dark once the contract ended
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1851,7 +1891,7 @@ export function highlight(key) { try { hlKey = key && city.has(key) ? key : null
 export function levelOf(key) {
   const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
   const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
-    : ud.energyState ? { ...ud.energyState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
+    : ud.energyState ? { ...ud.energyState } : ud.clubState ? { ...ud.clubState } : ud.boardState ? { ...ud.boardState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
   return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
 }
 export function shield(keys) {
@@ -1918,7 +1958,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
@@ -2277,7 +2317,7 @@ export function perfStats() {
   return { calls: r.render.calls, triangles: r.render.triangles, geos: r.memory.geometries, textures: r.memory.textures, texMB: +(texBytes() / 1048576).toFixed(1),
     dpr: renderer.getPixelRatio(), tier, lowPower, shadows: renderer.shadowMap.enabled, antialias: !!renderer.getContextAttributes()?.antialias, framesRendered, lastTurnMs: Math.round(turnMs),
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
-    decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null },   // w9 pulses / w10 ribbon (tests)
+    decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null, floodlights: floodState && theme && theme.decor === 'floodlights' ? { ...floodState } : null },   // w9 pulses / w10 ribbon (tests)
     paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
     kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
     shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };

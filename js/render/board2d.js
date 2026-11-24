@@ -284,6 +284,13 @@ function paintLevel(it, L) {
       hidden(el('span', 'b2d-corner-b', c, L.slot ? '🔌' : L.plot ? '🏜️' : L.tech === 'h2' ? (L.failed ? '✖' : '🧪') : op ? (L.down ? '⛔' : TI[L.tech] || '☀️') : L.unconnected ? '🔌' : L.n === 0 ? '📋' : L.stalled ? '⛔' : '🏗️'));
       c.dataset.light = op ? (L.down ? 'stalled' : 'on') : L.stalled || L.unconnected ? 'stalled' : L.n === 0 || L.slot || L.plot ? 'off' : 'build'; c.dataset.run = String(Math.round((op ? L.output : L.pct) * 100));
       c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
+    } else if (L.kind === 'club') {   // w13: 🏟️ the stadium (🏗️ while the stand grows), the stands' fill as the bar, the tier as data
+      hidden(el('span', 'b2d-corner-b', c, L.stage ? '🏗️' : '⚽'));
+      c.dataset.light = L.stage ? 'build' : 'on'; c.dataset.run = String(Math.round(L.fill * 100)); c.dataset.div = String(L.div);
+      c.style.setProperty('--b2d-pct', `${Math.round(L.fill * 100)}%`);
+    } else if (L.kind === 'sponsor') {   // w13: a billboard — dark once the contract ended
+      hidden(el('span', 'b2d-corner-b', c, L.expired ? '⬛' : '📣'));
+      c.dataset.light = L.expired ? 'off' : 'on'; c.dataset.run = L.expired ? 'expired' : 'live';
     } else if (L.kind === 'hold') {   // w10: the liquidity class (glass / stone / vault), ⚠️ a margin call, ❄️ frozen, 🔒 locked
       hidden(el('span', 'b2d-corner-b', c, L.call ? '⚠️' : L.frozen ? '❄️' : L.cls === 'locked' ? '🔒' : L.cls === 'monthly' ? '🧱' : '🏦'));
       c.dataset.light = L.call ? 'call' : L.frozen ? 'off' : 'on'; c.dataset.run = L.cls;

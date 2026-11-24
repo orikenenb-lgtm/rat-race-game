@@ -52,6 +52,10 @@ export const WORLD_STYLE = Object.freeze({
   // (ΔE76 11.8 to w2's slate, ≥ 66 to the rest), gold #d4af37 (ink #7a5a0a / dark #facc15 — the doc's #a16207 is 3.8 on --paper3), decor 'towers' with a ticker ribbon that
   // flashes red on a margin call (still under reduced motion), 🏦📊.
   w10: { name: 'מרכז הפיננסים', mood: 'glass towers at blue hour', sky: ['#0f172a', '#3b82f6'], board: '#1e293b', edge: '#0f172a', center: '#334155', decor: 'towers', accent: '#d4af37', accent2: '#3b82f6', accentInk: ['#7a5a0a', '#facc15'], rim: '#d4af37', rimGlow: true, motif: 'ticker', caption: 'המשרד שלך' },
+  // w13 אצטדיון הכוכבים (docs/full-upgrade/worlds/w13-stadium.md): a night match under floodlights, sky #0b1020 → #1e3a8a, the pitch board
+  // #166534 (ΔE76 ≥ 49 from every world), edge #14532d, the club red #dc2626 (ink #7f1d1d / dark #fca5a5; the UI fill is the lighter #f05252 so
+  // --ink on it stays ≥ 4.5), decor 'floodlights' (four masts with lamp heads, still — nothing moves, also under reduced motion), ⚽🏟️.
+  w13: { name: 'אצטדיון הכוכבים', mood: 'night match under floodlights', sky: ['#0b1020', '#1e3a8a'], board: '#166534', edge: '#14532d', center: '#15803d', decor: 'floodlights', accent: '#dc2626', accent2: '#f8fafc', accentInk: ['#7f1d1d', '#fca5a5'], rim: '#dc2626', rimGlow: true, motif: 'pitch', caption: 'המועדון שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -73,6 +77,7 @@ export const CHAR_STYLE = Object.freeze({
   developer: '#ca8a04', landowner: '#4d7c0f', contractor: '#ea580c',    // w8
   gridEng: '#0891b2', infraFund: '#1e3a8a', kibbutz: '#65a30d',         // w9
   allocator: '#a16207', blockHeir: '#7c2d12', floorTrader: '#be123c',   // w10
+  coachOwner: '#15803d', localTycoon: '#b91c1c', academyDirector: '#65a30d',   // w13
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -101,7 +106,9 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   tower_build: '🏗️', logistics_build: '🚚', office_build: '🏢', plot_fence: '🚧', tower_done: '🏙️',
   // w9 / w10 model keys (procedural stand-ins in 3D, js/render/standins910.js; no .glb files)
   solar_field: '☀️', wind_farm: '🌬️', battery_yard: '🔋', solar_storage: '🔆', pylon_line: '🗼', h2_pilot: '🧪', grid_slot: '🔌', desert_plot: '🏜️',
-  stone_block: '🧱', vault: '🔒', glass_tower: '🏦' });
+  stone_block: '🧱', vault: '🔒', glass_tower: '🏦',
+  // w13 model keys (procedural stand-ins in 3D, js/render/standins13.js; no .glb files)
+  stadium: '🏟️', billboard: '📣', club_shop: '🧣' });
 export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
 
 
@@ -130,6 +137,11 @@ export const OFFTAKE_HE = Object.freeze({ ppa: 'חוזה PPA', merchant: 'שוק
 export const LIQ_CLASSES = Object.freeze(['daily', 'monthly', 'locked']);
 export const LIQ_HE = Object.freeze({ daily: 'נזיל תוך יומיים', monthly: 'נזילות חודשית', locked: 'נעול' });
 export const LIQ_COLOR = Object.freeze({ daily: '#7dd3fc', monthly: '#d6c7a1', locked: '#475569' });
+/** w13 (league.js cityModels): the club's tier words, the stadium's works (stage 0 none / 1 / 2 of the expansion) and the age bands of a player token. */
+export const DIV_HE = Object.freeze(['הדרג השלישי', 'הדרג השני', 'הדרג הראשון']);
+export const AGE_BAND = Object.freeze([[21, 'young', 'צעיר'], [24, 'rising', 'עולה'], [28, 'prime', 'בשיא'], [30, 'late', 'אחרי השיא'], [99, 'vet', 'ותיק']]);
+/** a player's age → its band {id, he} (the token's age ring; the same bands as the market value's age factor) */
+export function ageBand(age) { const a = Number(age) || 0; const b = AGE_BAND.find((x) => a <= x[0]) || AGE_BAND[AGE_BAND.length - 1]; return { id: b[1], he: b[2] }; }
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
 export function normLevel(level) {
   if (!level || typeof level !== 'object') return null;
@@ -199,6 +211,12 @@ export function normLevel(level) {
     return { kind: 'hold', n, of: 6, cls, value, call: cls === 'daily' && !!level.call, frozen: cls === 'monthly' && !!level.frozen, lockUntil: cls === 'locked' && Number.isFinite(Number(level.lockUntil)) ? int(level.lockUntil) : null,
       activity: null, trouble: false };   // a margin call is named in the level text (never "העסק בבעיה")
   }
+  if (level.kind === 'club') {   // w13 (league.js cityModels): the stadium — seats, the expansion's stage, fill, tier, rank, floodlights, training ground, academy
+    const stage = clampN(level.stage, 0, 2, 0);
+    return { kind: 'club', n: stage, of: 2, seats: Math.max(0, int(level.seats, 20000)), stage, expanded: clampN(level.expanded, 0, 2, 0), fill: frac(level.fill), div: clampN(level.div, 0, 2, 1),
+      rank: clampN(level.rank, 1, 8, 4), floodlights: level.floodlights !== false, training: !!level.training, academy: !!level.academy, activity: null, trouble: false };
+  }
+  if (level.kind === 'sponsor') return { kind: 'sponsor', n: level.expired ? 0 : 1, of: 1, expired: !!level.expired, activity: null, trouble: false };   // w13: a billboard; an ended contract goes dark
   return null;
 }
 /** T5-L0/L1/L2 */
@@ -233,6 +251,8 @@ export function levelText(level) {
     if (L.n === 0) return `בהיתרים${L.unconnected ? ' · בלי חיבור לרשת' : ''}`;
     return `בבנייה: ${Math.round(L.pct * 100)}% · שלב ${L.n} מתוך 3${L.stalled ? ' · העבודה עומדת' : ''}${L.unconnected ? ' · בלי חיבור לרשת' : ''}`;
   }
+  if (L.kind === 'club') return `${DIV_HE[L.div]} · מקום ${L.rank} · ${L.seats.toLocaleString('en-US')} מקומות · תפוסה ${Math.round(L.fill * 100)}%${L.stage ? ` · מרחיבים את היציע: שלב ${L.stage} מתוך 2` : ''}${L.training ? ' · מתחם אימונים' : ''}${L.academy ? ' · אקדמיה' : ''}`;   // w13
+  if (L.kind === 'sponsor') return L.expired ? 'החוזה נגמר · השלט כבוי' : 'חוזה חסות פעיל';
   if (L.kind === 'hold') return `${LIQ_HE[L.cls]}${L.call ? ' · קריאת מרווח' : ''}${L.frozen ? ' · קפוא החודש' : ''}${L.lockUntil != null ? ` · נעול עד חודש ${L.lockUntil}` : ''}`;
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
@@ -254,6 +274,8 @@ export function levelHint(level) {
     : L.n === 4 ? 'הזרם בקווים = התפוקה. תחנה שעובדת אפשר לממן מחדש בלוח התחנות — כסף עכשיו, החזר גבוה יותר כל חודש.'
     : L.unconnected ? 'הכבל המנותק = אין חיבור לרשת. בלי חיבור הבנק לא מממן את הבנייה, והפרויקט נעצר.' : L.stalled ? 'העבודה עומדת: אין הון עצמי, אין חיבור או שהבנייה הושהתה. הריבית ממשיכה לרוץ.'
     : 'הפאנלים מצטרפים שורה אחרי שורה. עד החיבור לרשת אין הכנסה.';
+  if (L.kind === 'club') return L.stage ? 'העגורן = מרחיבים את היציע: 15% פחות מקומות בזמן הבנייה, ו־40% יותר בסוף.' : 'הקהל ביציע = התפוסה. מקום גבוה בטבלה ממלא את היציע — ומעלה את ההכנסה.';   // w13
+  if (L.kind === 'sponsor') return L.expired ? 'שלט כבוי = החוזה נגמר (או בוטל בשערורייה). אין עוד כסף ממנו.' : 'שלט דולק = החסות משלמת כל חודש עד סוף החוזה.';
   if (L.kind === 'hold') return L.cls === 'daily' ? 'זכוכית = נזיל: מניות וקרן מדד שאפשר למכור תוך יומיים. רצועת המניות מהבהבת באדום בקריאת מרווח.'
     : L.cls === 'monthly' ? 'אבן = נזילות חודשית: קרן שאפשר לפדות רק ביום המשכורת הבא (או מיד, בהנחה).' : 'כספת = נעול: השקעה פרטית שאי אפשר למכור מהר, ואי אפשר ללוות כנגדה.';
   return HINTS[L.n];
@@ -269,6 +291,8 @@ export function pipsText(level) {
   if (L.kind === 'build') { if (L.plot) return '🚧'; if (L.rental) return '🔑'; if (L.permit) return '📋'; }   // w8
   if (L.kind === 'energy') { if (L.slot) return '🔌'; if (L.plot) return '🏜️'; if (L.tech === 'h2') return L.failed ? '✖' : L.n === 4 ? '✔' : '🧪'; if (L.n === 0) return '📋'; if (L.n === 4) return L.down ? '⛔' : '▮'.repeat(Math.max(1, Math.min(3, Math.round(L.output * 3)))) + '▯'.repeat(3 - Math.max(1, Math.min(3, Math.round(L.output * 3)))); return '●'.repeat(L.n) + '○'.repeat(3 - L.n); }   // w9
   if (L.kind === 'hold') return L.cls === 'daily' ? '▮'.repeat(L.n) : L.cls === 'monthly' ? '▭'.repeat(L.n) : '🔒';   // w10
+  if (L.kind === 'club') return L.stage ? '🏗️' : '▮'.repeat(Math.max(1, Math.round(L.fill * 5))) + '▯'.repeat(5 - Math.max(1, Math.round(L.fill * 5)));   // w13: the stands' fill in fifths
+  if (L.kind === 'sponsor') return L.expired ? '○' : '●';
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -298,6 +322,8 @@ export function kitParts(level) {
   if (L.kind === 'mgr') { p.links = L.links; return p; }
   if (L.kind === 'energy') { p.units = L.units; p.pct = L.pct; p.stage = L.n; p.crane = L.crane; p.stalled = L.stalled; p.cable = L.unconnected; p.output = L.output; p.down = L.down; p.offtake = L.offtake; p.stake = L.stake; p.slot = L.slot; p.fence = L.plot; p.failed = L.failed; return p; }   // w9 (standins910.js paintEnergy)
   if (L.kind === 'hold') { p.cls = L.cls; p.floors = L.n; p.call = L.call; p.frozen = L.frozen; p.lock = L.lockUntil != null; return p; }   // w10 (paintHold)
+  if (L.kind === 'club') { p.stage = L.stage; p.expanded = L.expanded; p.fill = L.fill; p.div = L.div; p.rank = L.rank; p.floodlights = L.floodlights; p.training = L.training; p.academy = L.academy; p.crane = L.stage > 0; return p; }   // w13 (standins13.js paintClub)
+  if (L.kind === 'sponsor') { p.lit = !L.expired; return p; }   // w13 (paintBillboard)
   if (L.kind === 'build') { p.floors = L.floors; p.pct = L.pct; p.crane = L.crane; p.tarp = L.stalled; p.permit = L.permit; p.presold = L.presold; p.rental = L.rental; p.fence = L.plot; return p; }   // w8 (paintBuild)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }

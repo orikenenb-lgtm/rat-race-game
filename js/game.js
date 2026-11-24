@@ -503,12 +503,20 @@ export function cityAudit() {
   // w9: every plant / project / slot / plot (energy.js cityModels); w10: every holding block (portfolio.js cityModels: class, value, call)
   const energy = Object.fromEntries(cm.filter((m) => m.tech != null).map((m) => [m.key, { tech: m.tech, stage: m.stage ?? 0, pct: m.pct ?? null, unconnected: !!m.unconnected, stalled: !!m.stalled, output: m.output ?? null, offtake: m.offtake || null, stake: m.stake ?? 1, down: !!m.down, slot: !!m.slot, plot: !!m.fence }]));
   const hold = Object.fromEntries(cm.filter((m) => m.cls != null).map((m) => [m.key, { cls: m.cls, value: m.value ?? 0, call: !!m.call, frozen: !!m.frozen, lockUntil: m.lockUntil ?? null }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold };
+  // w13: the stadium (league.js cityModels) and the sponsors' billboards
+  const club = Object.fromEntries(cm.filter((m) => m.seats != null && m.floodlights != null).map((m) => [m.key, { seats: m.seats, stage: m.stage ?? 0, expanded: m.expanded ?? 0, fill: m.fill ?? 0, div: m.div ?? 1, rank: m.rank ?? 0, training: !!m.training, academy: !!m.academy }]));
+  const sponsors = Object.fromEntries(cm.filter((m) => m.expired != null && m.model === 'billboard').map((m) => [m.key, { expired: !!m.expired }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
 const prevLevels = new Map();
 function levelOf(entry, m) {
+  // w13 (league.js cityModels): the club's stadium (seats, the expansion's stage, fill, tier, rank, floodlights, training ground, academy);
+  // a sponsor's billboard (dark once the contract ended). First: the stadium's `stage` is the stand's works, not a business stage.
+  if (entry.seats != null && entry.floodlights != null) return { kind: 'club', stage: entry.stage ?? 0, seats: entry.seats, expanded: entry.expanded ?? 0, fill: entry.fill ?? 0, div: entry.div ?? 1, rank: entry.rank ?? 4,
+    floodlights: !!entry.floodlights, training: !!entry.training, academy: !!entry.academy };
+  if (entry.expired != null && entry.model === 'billboard') return { kind: 'sponsor', expired: !!entry.expired };
   // w5 (season.js cityModels): occupancy decile / closed on the asset's own city piece; a closed wing from the panel rows
   if (entry.occDecile != null || entry.closed) {
     const row = (((m.worldIndicators || {}).panel || {}).rows || []).find((r) => r.assetId === entry.key);
@@ -544,7 +552,7 @@ function syncLevels(animate) {
     if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1400,11 +1408,15 @@ async function applyOut(out, opts = {}) {
   if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream, S ? safe0(() => E.metrics(S).dream) : null); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
-  let mkt = 0, mktFirst = null;   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
+  let mkt = 0, mktFirst = null; const lg = []; let lgBad = false;   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
   for (const n of out.news || []) {
     if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
     if (n.kind === 'market' && n.text) { mkt++; if (!mktFirst || (mktFirst.rumor && !n.rumor)) mktFirst = n; continue; }
     if (n.kind === 'portfolio' && n.text) { const hard = /קריאת מרווח|מכירה כפויה|נמכר בכפייה|קראה להון/.test(n.text); ui.toast('🏦 ' + n.text, { kind: hard ? 'bad' : '', keep: hard }); continue; }   // w10: calls are never dropped
+    if (n.kind === 'league' && n.text) {   // w13: the season's end / a fine / a relegation keep their own toast; the month's fixture, injuries and the wage line become ONE toast
+      if (/סוף העונה|קנס|יורדים|ירידה ל|עולים|עלייה ל/.test(n.text)) { const up = /עולים|עלייה ל/.test(n.text); ui.toast('⚽ ' + n.text, { kind: up ? 'gold' : 'bad', keep: true }); ui.announce?.(n.text); }
+      else { lg.push(n.text); if (/נפצע|עזב בלי תמורה|אוכל|שרים נגדך/.test(n.text)) lgBad = true; }
+      continue; }
     if (n.kind === 'energy' && n.text) { const bad = /אזהרה|עומד|קראו להלוואות|קרא להלוואה|עיכוב/.test(n.text); ui.toast('☀️ ' + n.text, { kind: bad ? 'bad' : '', keep: /קראו להלוואות|אזהרה/.test(n.text) }); continue; }   // w9
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
@@ -1428,6 +1440,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'story') { ui.toast('📖 ' + n.text, { keep: true, ms: 4200 }); ui.announce?.(n.text); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
+  if (lg.length) ui.toast('⚽ ' + lg.join(' · '), { kind: lgBad ? 'bad' : '', ms: 3400 + 900 * Math.min(3, lg.length - 1) });
   if (mkt) ui.toast(`📈 ${mktFirst.rumor ? '🗣️ שמועה: ' : ''}${mktFirst.text}${mkt > 1 ? ` · עוד ${mkt - 1} בלוח הבורסה` : ''}`);
   if (out.mentor) ui.mentor(out.mentor);
   if (out.toast) ui.toast(out.toast, { kind: 'bad' });
@@ -1532,7 +1545,7 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null,
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null,
     month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {
