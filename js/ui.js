@@ -3162,7 +3162,7 @@ function seasonLine(se) {
  *  the DC, a project, a plot or a rental); radio-like groups get a row label */
 const WP_CONFIRM = new Set(['sellLine', 'leaseback', 'close', 'convert', 'clearance', 'dcLeaseback', 'sellProj', 'sellPlot', 'sellRent',
   'sellStake', 'sellPlant', 'sellSlot', 'sellNow', 'secondary']);   // w9 / w10: a stake, a plant, a slot, a fund now (−5 %), a private stake (−25 %)
-const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט', offtake: 'בסיום: איך התחנה תמכור' };
+const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט', offtake: 'בסיום: איך מוכרים את החשמל' };
 export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, month = 0 } = {}) {
   if (!P) return '';
   const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || []), ...(P.plants || []), ...((energy && energy.sites) || []), ...((energy && energy.h2) || [])];   // w8 / w9: actions on rentals, plots, plants, sites are named too

@@ -217,7 +217,7 @@ async def run_play(b):
     P = await pg.evaluate(PANEL)
     check(sc, 'panel: 4 gauges (income vs target / rate / power price / solar capture), the timeline (one bar per project, a cell per stage, an accessible name), a row per project, the offtake row, actions',
           P['gauges'] == ['income', 'rate', 'spot', 'capture'] and len(P['gantt']) == len(pj) and len(pj) >= 1 and all(g['cells'] >= 3 and g['name'] for g in P['gantt']) and P['rows'] >= len(pj) + len(pl)
-          and 'בסיום: איך התחנה תמכור' in P['segs'] and P['acts'] >= 4 and 'התחנות' in P['title'] and 'לוח זמנים' in P['text'] and 'התחנות שלך' in P['text'], (len(pj), P['gauges'], P['gantt'], P['rows'], P['segs'], P['acts']))
+          and 'בסיום: איך מוכרים את החשמל' in P['segs'] and P['acts'] >= 4 and 'התחנות' in P['title'] and 'לוח זמנים' in P['text'] and 'התחנות שלך' in P['text'], (len(pj), P['gauges'], P['gantt'], P['rows'], P['segs'], P['acts']))
     nos = [a for a in pj if not a['op'].get('slot')]
     if nos: check(sc, 'a project without a grid slot says so in the timeline and its row ("בלי חיבור לרשת")', '🔌 בלי חיבור לרשת' in P['text'], P['text'][:400])
     check(sc, 'the top line: operating income vs the target, the rate, the power price, free slots', 'הכנסה תפעולית' in P['now'] and 'ריבית' in P['now'] and 'חיבורים פנויים' in P['now'], P['now'])
