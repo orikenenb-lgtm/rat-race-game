@@ -22,7 +22,7 @@ export const CHANNELS = Object.freeze([Object.freeze({ id: 'search', n: 'חיפ�
   Object.freeze({ id: 'tv', n: 'פרסום בטלוויזיה', cac: 22, sat: 8000000 })]);
 export const LEVELS = Object.freeze([0, 500000, 1500000, 4000000]);
 export const PF = Object.freeze({ net: 2000000, netCac: 0.8, netRet: 0.005, arpuUp: 0.005, tam: 8000000, capEvery: 18, server: 0.8, organic: 0.008, raise: Object.freeze({ s: 0.08, m: 0.15, l: 0.25 }), raiseEvery: 6, winterCut: 0.7, bubbleUp: 1.15,
-  bridge: 0.8, crunch: 0.6, debt: 20000000, debtPct: 0.01, covenant: 6, penalty: 0.03, cutOpex: 0.3, cutRet: 0.01, cutMonths: 6, coreRet: 0.97, rival0: 0.25 });
+  bridge: 0.8, crunch: 0.4, crunchPct: 0.25, freeze: 3, debt: 20000000, debtPct: 0.01, covenant: 6, penalty: 0.03, cutOpex: 0.3, cutRet: 0.01, cutMonths: 6, coreRet: 0.97, rival0: 0.25 });
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const frac = (x) => x - Math.floor(x);
@@ -92,7 +92,7 @@ export const platform = {
     F.rival = round3(clamp(F.rival + 0.004 * (rs[1] - 0.4), 0.05, 0.8)); F.arpu = round3(F.arpu * (1 + PF.arpuUp)); // the product monetises better with time
     if (netOn(st) && !F.netOnAt) { F.netOnAt = m; out.news.push({ kind: 'pf', text: ctx.mentorLine(st, 'netOn', {}) || 'עברת שני מיליון משתמשים: אפקט הרשת. גיוס משתמשים זול ב־20%, והם נשארים יותר.' }); }
     if (F.debt && runwayOf(st) < PF.covenant) { F.breaches++; F.stake = round4(F.stake * (1 - PF.penalty)); out.news.push({ kind: 'pf', text: `הפרת תנאי ההלוואה (פחות מ־${PF.covenant} חודשי מזומן): המלווה לקח ${Math.round(PF.penalty * 100)}% מהחברה.` }); }
-    if (st.cash < 0) { F.crunches++; F.crunchAt = st.stats.paydays; sellShares(st, PF.raise.m, PF.crunch, out, ctx, 'גיוס חירום במחיר נמוך'); out.news.push({ kind: 'pf', text: ctx.mentorLine(st, 'crunch', {}) || 'נגמר הכסף. המשקיעים הקיימים הכניסו כסף חירום — במחיר נמוך, ועם עוד חתיכה ממך.' }); ctx.ensureCash(st, out, 'platform'); }
+    if (st.cash < 0) { F.crunches++; F.crunchAt = st.stats.paydays; F.frozen = m + PF.freeze - 1; for (const C of CHANNELS) F.lvl[C.id] = 0; sellShares(st, PF.crunchPct, PF.crunch, out, ctx, 'גיוס חירום במחיר נמוך'); out.news.push({ kind: 'pf', text: ctx.mentorLine(st, 'crunch', {}) || 'נגמר הכסף. המשקיעים הקיימים הכניסו כסף חירום — במחיר נמוך, עם רבע מהחברה שלך, ובתנאי שהפרסום נעצר לשלושה חודשים.' }); ctx.ensureCash(st, out, 'platform'); }
     F.hist.push({ m, users: usersOf(st), mrr: mrrOf(st), cf: cfOf(st), mult: multOf(st) }); while (F.hist.length > 24) F.hist.shift();
     revalue(st);
   },
@@ -158,7 +158,7 @@ export const platform = {
 function revalue(st) { for (const a of st.assets) if (a.op && a.op.ck === 'app') { a.value = live(st) ? r1000(P(st).stake * evOf(st)) : 0; a.debt = 0; } }
 
 platform.act = {
-  spend(st, p, out) { const F = P(st); const [ch, l] = String(p || '').split(':'); const lv = +l; if (!live(st) || !CHANNELS.some((c) => c.id === ch) || !(lv >= 0 && lv < LEVELS.length) || Math.floor(lv) !== lv) return fail(out, 'bad_param'); if (lv > capOf(st)) return fail(out, 'צוות השיווק עוד קטן מדי לתקציב כזה');
+  spend(st, p, out) { const F = P(st); const [ch, l] = String(p || '').split(':'); const lv = +l; if (!live(st) || !CHANNELS.some((c) => c.id === ch) || !(lv >= 0 && lv < LEVELS.length) || Math.floor(lv) !== lv) return fail(out, 'bad_param'); if (lv > capOf(st)) return fail(out, 'צוות השיווק עוד קטן מדי לתקציב כזה'); if (lv > 0 && F.frozen >= st.month) return fail(out, 'המשקיעים של גיוס החירום הקפיאו את הפרסום');
     F.lvl[ch] = lv; out.toast = `${CHANNELS.find((c) => c.id === ch).n}: ${LEVELS[lv] ? (LEVELS[lv] / 1e6) + ' מיליון ₪ בחודש' : 'בלי פרסום'}.`; return true; },
   raise(st, p, out, ctx) { const F = P(st); if (!live(st) || !PF.raise[p]) return fail(out, 'bad_param'); if (st.month - F.lastRaise < PF.raiseEvery) return fail(out, 'סבב גיוס אחד בחצי שנה');
     const k = F.regime === 'bubble' ? PF.bubbleUp : WINTER.includes(F.regime) ? PF.winterCut : 1; sellShares(st, PF.raise[p], k, out, ctx, 'סבב גיוס'); F.lastRaise = st.month; revalue(st);
@@ -177,7 +177,7 @@ function actionList(st, ctx) {
   for (const C of CHANNELS) { const cur = F.lvl[C.id] || 0;
     let best = 0; for (let l = 1; l <= capOf(st); l++) { const s = LEVELS[l]; if (ltv >= 1.6 * cacOf(st, C.id, s) && rw >= 9 && st.cash > 6 * (costOf(st) - spendOf(st) + s - mrrOf(st))) best = l; }
     if (rw < 6) best = Math.min(best, cur > 0 ? cur - 1 : 0);
-    for (let l = 0; l < LEVELS.length; l++) if (l !== cur) out.push({ id: 'spend', param: `${C.id}:${l}`, label: `${C.n}: ${LEVELS[l] ? ctx.fmtM(LEVELS[l]) + ' בחודש' : 'לעצור'} (עלות למשתמש ${l ? '₪' + Math.round(cacOf(st, C.id, LEVELS[l])) : '—'})`, enabled: l <= capOf(st), suggested: l === best,
+    for (let l = 0; l < LEVELS.length; l++) if (l !== cur) out.push({ id: 'spend', param: `${C.id}:${l}`, label: `${C.n}: ${LEVELS[l] ? ctx.fmtM(LEVELS[l]) + ' בחודש' : 'לעצור'} (עלות למשתמש ${l ? '₪' + Math.round(cacOf(st, C.id, LEVELS[l])) : '—'})`, enabled: l <= capOf(st) && !(l > 0 && F.frozen >= st.month), suggested: l === best && !(l > 0 && F.frozen >= st.month),
       cac: l ? cacOf(st, C.id, LEVELS[l]) : null, preview: { cash: 0, monthly: LEVELS[cur] - LEVELS[l], months: 0, risk: null } }); }
   for (const [sz, pct] of Object.entries(PF.raise)) { const k = F.regime === 'bubble' ? PF.bubbleUp : winter ? PF.winterCut : 1; const amt = r1000(Math.max(1, (evOf(st) + st.cash - F.debt) * k) * pct / (1 - pct));
     const sug = canRaise && ((sz === 'm' && rw < 9 && !winter) || (sz === 's' && rw < 6 && winter) || (sz === 'm' && F.regime === 'bubble' && rw < 18));

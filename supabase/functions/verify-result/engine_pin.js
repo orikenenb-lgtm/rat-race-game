@@ -76,10 +76,10 @@ export const WORLD_PACKS = {
     "worlds/mech/auction.js": "a07c1d9fc1ef87f46d4c8cbf40011cb8631f9ec23d2a14fc8912d9ea3956b859",
     "worlds/w13.js": "e9b803f0c90988a18f9ec7da2875a9c619f210f8b3e2bc76d189053e896cc0d3",
   } },
-  "w15": { sha256: "cf0684aef0600c537b7c00e1fa83d917d23f64c6b5ae6812f8b86a9e347fc6ff", chars: 87812, bytes: 95933, entry: "worlds/w15.js", files: {
+  "w15": { sha256: "b16c5fe0432115228b3c805ffc923f7fce63d06100f34dc71fc5161de791ef0b", chars: 88155, bytes: 96368, entry: "worlds/w15.js", files: {
     "worlds/data/companies.js": "8cd3f254fba40e54027935a041d588f2838a4df5140b9242fd1ec48ca33b6d50",
     "worlds/mech/market.js": "2f35008bdf202fe5519d15fe0b6ce958da2eb840a22baaf5a4756ac89fce158a",
-    "worlds/mech/platform.js": "c101ac716d48e2651feb947770556a9e6a2e0292c02ec141f23183538b1dc4b8",
-    "worlds/w15.js": "41bb5d6f2e5a7356cae7e9bb4ec21df9cba7080c7702c11ff3c9399e4d37d717",
+    "worlds/mech/platform.js": "9ca428e2bfc5ad976aa6f344d6c2307d0aed38ce3aa5c08082f1427e49ae1e00",
+    "worlds/w15.js": "19f43b12f39a51257d4120a03884df3800687b5249be0f173098acf38e464563",
   } },
 };

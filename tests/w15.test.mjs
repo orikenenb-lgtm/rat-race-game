@@ -87,7 +87,7 @@ await test('channels: CAC rises with spend (saturation), the users (market size)
   assert.equal(PF.net, 2000000);
 });
 
-await test('rounds: sell % at today\'s multiple (bubble ×1.15, winter ×0.7), one in 6 months; a down round triggers the ratchet; cash < 0 → an emergency round at 60 %', () => {
+await test('rounds: sell % at today\'s multiple (bubble ×1.15, winter ×0.7), one in 6 months; a down round triggers the ratchet; cash < 0 → an emergency round at 45 %', () => {
   const st = E.createGame({ worldId: 'w15', charId: 'soloFounder', seed: 21 }); const F = st.world.pf; untilMonth(st, 3);
   F.regime = 'growth'; const pre = evOf(st) + st.cash - F.debt; const c0 = st.cash; assert.ok(E.worldAction(st, 'raise', 'm').ok);
   assert.equal(st.cash - c0, Math.round(pre * PF.raise.m / (1 - PF.raise.m) / 1000) * 1000); assert.equal(F.stake, Math.round(0.7 * 0.85 * 10000) / 10000); assert.equal(E.worldAction(st, 'raise', 's').ok, false);

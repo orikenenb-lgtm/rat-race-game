@@ -36,7 +36,8 @@ rival drift · the new cohort's sealed retention · its shown range's jitter) ·
 - ARPU grows 0.5 %/month; servers ₪0.8/user; opex per character; cash flow = MRR − opex − marketing − servers − debt interest (the asset's cf).
 - Rounds `raise s|m|l` sell 8 / 15 / 25 % at (EV + cash − debt) × (1.15 bubble · 0.7 winter = recession / sector crisis / high volatility),
   once in 6 months; below the last post-money a **ratchet** gives the earlier investors 50 % of the shortfall out of your stake. `bridge` = 8 % at
-  0.8 (3 months apart). Cash < 0 at a payday → an **emergency round** of 15 % at 0.6 (counted: `crunches`).
+  0.8 (3 months apart). Cash < 0 at a payday → an **emergency round** of 25 % at 0.4 (counted: `crunches`), and the emergency investors freeze
+  all marketing for 3 months (every channel to 0; `spend` above 0 is refused until then) — re-tuned 2026-11-25 (was 15 % at 0.6, no freeze).
 - Venture debt ₪20M at 1 %/month (covenant runway ≥ 6; below it the lender takes 3 % of the company every month). `cut` = −30 % opex for 6
   months (−1 pp retention, happiness −5). `pivot` (once) = −40 % users and a new sealed quality.
 - `H` card: 35 % a giant's buyout at 1.0–1.6 × EV (your part = stake × (price + cash − debt), the company is gone, the proceeds are your stake
@@ -72,16 +73,21 @@ maxMonths 84, ★★ ≤ 70, ★★★ ≤ 58.
 | G-smart | met | smart 69 % med 54 · naive 12 % med 63 |
 | G-reach | met | soloFounder 56 % · bigTechExec 58 % · bootstrapper 94 % |
 | G-loss | met | naive 88 % · maxDebt 29 % · smart loses 31 % |
-| G-dom | **NOT met** | cells 6: saver 17 % founder 75 % diversified 8 % gambler 0 % · ablations neverRaise 61 % (Δ 8 pp) · acceptFirstOffer 5 % (Δ 65 pp) |
+| G-dom | **NOT met** | cells 6: saver 17 % founder 75 % diversified 8 % gambler 0 % · ablations neverRaise 59 % (Δ 10 pp) · acceptFirstOffer 5 % (Δ 65 pp) |
 | G-frugal | met | 69 % vs 69 % |
 | G-durable | met | 198 / 198 |
 | G-time | met | median 81 rolls (p10 42, p90 165) · median won months 54 |
-| W15-runway | met | blitzGrowth out of runway 54 % (in time 71 %) · smart 1 % |
+| W15-runway | met | blitzGrowth out of runway 54 % (in time 67 %; 33 of its 58 crunched games still end in time) · smart 1 % |
 | W15-dilute | met | raiseEveryRound 0 % vs smart 69 % · median final stake 0 % vs 60 % |
 
-Open: G-dom (allowed alone) — the founder archetype (top spend always) is the best archetype in 75 % of cells. Watch: blitzGrowth burns into the
-emergency round in 54 % of games yet ends in time 71 % (≈ smart): the emergency round at 60 % is not costly enough — a re-tune should make it
-dearer (0.4–0.5) and re-run. maxDebt (personal bank loans into the company) is 71 % vs smart 69 %.
+Open: G-dom (allowed alone) — the founder archetype (top spend always) is the best archetype in 75 % of cells. maxDebt (personal bank loans
+into the company) is 71 % vs smart 69 %.
+Re-tune of the emergency round (2026-11-25, after the first as-built run showed blitzGrowth ≈ smart: 54 % crunched, in time 71 %):
+- 0.45 instead of 0.6 alone: no measurable change (blitzGrowth 70 % in time, smart 69 %) — the 15 % sold is small next to the growth it bought.
+- 25 % at 0.4 (no freeze): blitzGrowth 69 %.
+- **as shipped: 25 % at 0.4 + a 3-month marketing freeze**: blitzGrowth 67 % (crunched games in time 33 / 58 = 57 %, was 64 %). Every required
+  gate stays met with the same numbers. blitzGrowth is still within 2 pp of smart: its edge is the growth itself, and one or two emergency rounds
+  stay survivable. A further lever would be a ratchet on emergency rounds or a stake floor for the board — not done (owner / director call).
 W15-runway needed one fix (the blitz policy took every term sheet and never ran out; it now raises nothing).
 
 ### Deviations from the catalog
