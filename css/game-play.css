@@ -1270,5 +1270,5 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 .mk-closed small{color:var(--mut)}
 .cdl-news li.rumor{color:var(--mut)}
 .wp-act.urgent{box-shadow:inset 0 0 0 2px var(--red)}
-@media (max-width:600px){ .mk-ladder li{grid-template-columns:minmax(0,1fr) auto}.mk-ladder .ml-bar{grid-column:1/-1;grid-row:2}.mk-closed li{grid-template-columns:minmax(0,1fr) auto}.mk-closed li small{grid-column:1/-1;grid-row:2}.enmini .mt{grid-template-columns:minmax(0,1fr)} }
+@media (max-width:600px){ .mk-ladder li{grid-template-columns:minmax(0,1fr) auto auto}.mk-ladder .ml-bar{grid-column:1/-1;grid-row:2}.mk-closed li{grid-template-columns:minmax(0,1fr) auto}.mk-closed li small{grid-column:1/-1;grid-row:2}.enmini .mt{grid-template-columns:minmax(0,1fr)} }
 @media (max-width:420px){ .mk-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.mk-tabs .mk-tab{flex:0 0 auto} }
