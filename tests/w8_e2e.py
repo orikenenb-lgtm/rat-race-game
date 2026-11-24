@@ -300,6 +300,15 @@ async def run_3dphone(b):
         chip = await pg.evaluate("() => { const b = document.querySelector('#worldPanelBtn'); if (!b) return null; const r = b.getBoundingClientRect(), h = document.querySelector('#hWorld').getBoundingClientRect(); return { inside: r.left >= h.left - 1 && r.right <= h.right + 1, h: r.height, t: b.textContent, sw: b.scrollWidth, cw: b.clientWidth }; }")
         check(sc, '3D board on a phone; the 🏗️ chip stays inside its HUD card', k == '3d' and chip and chip['inside'] and '🏗️' in chip['t'], (k, chip))
         await shot(pg, f'board3d_{vp}')
+        # the developer's panel on a phone: the timeline and the project row fit the width
+        await pg.click('#worldPanelBtn'); await pg.wait_for_selector('#gmCard.wpanel', timeout=10000); await pg.wait_for_timeout(900)
+        g = await pg.evaluate("() => { const c = document.querySelector('#gmCard'); const bars = [...c.querySelectorAll('.wp-gantt .gbarw')]; return { n: bars.length, vw: innerWidth, over: document.documentElement.scrollWidth > innerWidth + 1, inside: bars.every((b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.width > 60; }), rows: [...c.querySelectorAll('.wp-row')].every((r) => r.scrollWidth <= r.clientWidth + 1) }; }")
+        check(sc, 'the developer\'s timeline and project rows fit the phone width', g['n'] >= 1 and g['inside'] and not g['over'] and g['rows'], g)
+        if SHOTS:
+            await pg.add_style_tag(content='#toast{visibility:hidden !important}')
+            await pg.evaluate("() => document.querySelector('#gmCard .wp-gantt')?.scrollIntoView({ block: 'start' })"); await pg.wait_for_timeout(500)
+        await shot(pg, f'panel_gantt_{vp}')
+        await pg.locator('#gmCard .acts button.primary').click()
         await ctx.close()
 
 async def run_motion(b):
