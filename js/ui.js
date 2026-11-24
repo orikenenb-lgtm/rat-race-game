@@ -1713,7 +1713,7 @@ function energyDealHtml(d) {
 function exchangeHtml(d) {
   const X = d.market || {}; const R = X.regime || {}; const I = X.idx || {}; const F = X.focus;
   const ch = I.px != null ? MV.changeOf(I) : { d: 0, pct: 0 };
-  const rows = [row('מצב השוק', `${R.label || ''}${R.sectorLabel ? ` · ${R.sectorLabel}` : ''}`, 'wrap'), row(esc(I.name || 'המדד'), `${MV.pxT(I.px)} · ${ch.d > 0 ? '▲ עלה' : ch.d < 0 ? '▼ ירד' : '— לא זז'} ${Math.round(Math.abs(ch.pct) * 10) / 10}% החודש`, 'wrap'), row('התיק שלך בבורסה', mS(X.value || 0))];
+  const rows = [row('מצב השוק', `${R.label || ''}${R.sectorLabel ? ` · ${R.sectorLabel}` : ''}`, 'wrap'), row(esc(I.name || 'המדד'), `${MV.pxT(I.px)} · ${ch.d > 0 ? '▲ עלה' : ch.d < 0 ? '▼ ירד' : '— לא זז'} ${Math.round(Math.abs(ch.pct) * 10) / 10}% בחודש האחרון`, 'wrap'), row('התיק שלך בבורסה', mS(X.value || 0))];
   if (F) { const fc = MV.changeOf(F); rows.push(row(`${esc(F.name)} (${esc(F.tk)})`, `${MV.pxT(F.px)} · ${fc.d > 0 ? '▲' : fc.d < 0 ? '▼' : '—'} ${Math.round(Math.abs(fc.pct) * 10) / 10}% · ${F.sectorLabel || ''}${F.seen ? ` · איכות ${F.seen.bandLabel}` : ''}`, 'wrap')); }
   const news = (X.news || []).slice().reverse().slice(0, 4);
   return grid(rows) + (news.length ? `<div class="mini"><p class="mh">📰 חדשות החודש</p><ul class="cdl-news">${news.map((x) => `<li${x.type === 'rumor' ? ' class="rumor"' : ''}>${x.type === 'rumor' ? '🗣️ שמועה: ' : ''}${esc(x.text)}</li>`).join('')}</ul></div>` : '')

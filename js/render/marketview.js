@@ -27,10 +27,12 @@ const REASON_HE = { sold: 'נמכר', forced: 'מכירה כפויה', bankrupt:
 const FUND_HE = { gov: 'אג"ח ממשלתי', govLong: 'אג"ח ממשלתי ארוך', linked: 'אג"ח צמוד', corp: 'אג"ח קונצרני', credit: 'אשראי פרטי', reit: 'ריט (נדל"ן)', infra: 'תשתיות', hedge: 'קרן גידור', note: 'פיקדון "מובטח"', stale: 'נדל"ן לא סחיר', distressed: 'אג"ח במצוקה', theme: 'קרן נושא' };
 const PRIV_HE = { pe: 'קרן פרייבט אקוויטי', vc: 'הון סיכון מאוחר', stake: 'אחזקה ישירה בחברה פרטית', prop: 'שותפות נדל"ן', credit: 'אשראי פרטי' };
 
-/** the month's change of a company in agorot (price − the previous close; the open candle opens at it) */
+/** the change over the last month in agorot: the price now − the close BEFORE the last closed candle (the last full month + this month so far;
+ *  right after a payday the open candle has not moved yet, so "this month" alone would read 0 for every company) */
 export function changeOf(co) {
-  const last = (co.cand || [])[co.cand.length - 1]; const prev = co.open && co.open.o != null ? co.open.o : last ? last[4] : co.px;
-  const d = Math.round((co.px ?? 0) - (prev ?? 0)); return { d, pct: prev ? ((co.px / prev) - 1) * 100 : 0 };
+  const C = co.cand || []; const px = co.px ?? co.endPx ?? 0;
+  const prev = C.length >= 2 ? C[C.length - 2][4] : C.length === 1 ? C[0][1] : co.open && co.open.o != null ? co.open.o : px;
+  const d = Math.round(px - (prev ?? 0)); return { d, pct: prev ? ((px / prev) - 1) * 100 : 0 };
 }
 const live = (c) => c.status === 'listed' || c.status === 'halted';
 /** A new listing: a company that entered the market after the first month (a relisted slot = a NEW id, its own history). */
@@ -40,7 +42,7 @@ export const isNewListing = (c, month) => (c.listedM || 0) > 1 && month - (c.lis
 export function headHtml(MK, PF, month) {
   const R = MK.regime || {}; const I = MK.idx || {}; const ch = changeOf(I);
   return `<p class="wp-now mk-now">📊 מצב השוק: <b>${esc(R.label || '')}</b>${R.sectorLabel ? ` · ${esc(R.sectorLabel)}` : ''} · מאז חודש ${num(String(R.since ?? month))}
-    · ${esc(I.name || 'המדד')} ${num(pxT(I.px))} <span class="${cls(ch.d)}">${ARROW[dirOf(ch.d)]} ${WORD[dirOf(ch.d)]} ${num(pctS(ch.pct))}</span> החודש${PF && PF.call ? ' · <b class="neg">⚠️ קריאת מרווח פתוחה</b>' : ''}${PF && PF.freezeUntil >= month ? ' · ❄️ הנזילות החודשית קפואה' : ''}${PF && PF.hedge ? ' · 🛡️ הגנת אופציות פעילה' : ''}</p>
+    · ${esc(I.name || 'המדד')} ${num(pxT(I.px))} <span class="${cls(ch.d)}">${ARROW[dirOf(ch.d)]} ${WORD[dirOf(ch.d)]} ${num(pctS(ch.pct))}</span> בחודש האחרון${PF && PF.call ? ' · <b class="neg">⚠️ קריאת מרווח פתוחה</b>' : ''}${PF && PF.freezeUntil >= month ? ' · ❄️ הנזילות החודשית קפואה' : ''}${PF && PF.hedge ? ' · 🛡️ הגנת אופציות פעילה' : ''}</p>
     <p class="mk-sim" role="note">⚠️ ${esc(SIM_NOTE)}</p>`;
 }
 /** the liquidity ladder: cash (0 days) → stocks and the index (2) → funds (30) → private (locked) — the engine's rungs */
@@ -65,13 +67,13 @@ function coRow(c, M, sel, month) {
   // the button's name is its visible text (axe label-content-name-mismatch) + hidden words: "סימול", "מחיר", the direction in words
   return `<li class="mk-co${sel ? ' on' : ''}" data-co="${esc(c.id)}"><button type="button" class="mk-row" data-mco="${esc(c.id)}" aria-expanded="${sel}" aria-controls="mkDetail">
     <span class="mk-nm"><b>${esc(c.name)}</b><small><span class="sr">סימול </span>${num(c.tk)} · ${esc(c.sectorLabel || (c.id === 'IDX' ? 'כל השוק' : ''))}</small></span>
-    <span class="mk-px"><b class="num"><span class="sr">מחיר </span>${esc(pxT(c.px))}</b><small class="${cls(ch.d)}">${ARROW[d]}<span class="sr"> ${WORD[d]} החודש</span> ${num(sgnPx(ch.d), cls(ch.d))} (${num(pctS(ch.pct), cls(ch.d))})</small></span>${hold}</button>${badges ? `<span class="mk-bd">${badges}</span>` : ''}</li>`;
+    <span class="mk-px"><b class="num"><span class="sr">מחיר </span>${esc(pxT(c.px))}</b><small class="${cls(ch.d)}">${ARROW[d]}<span class="sr"> ${WORD[d]} בחודש האחרון</span> ${num(sgnPx(ch.d), cls(ch.d))} (${num(pctS(ch.pct), cls(ch.d))})</small></span>${hold}</button>${badges ? `<span class="mk-bd">${badges}</span>` : ''}</li>`;
 }
 /** the company list: the index fund first, then the listed companies (by sector) */
 export function listHtml(MK, M, sel, month) {
   const cos = (MK.cos || []).filter(live).slice().sort((a, b) => (a.sector < b.sector ? -1 : a.sector > b.sector ? 1 : a.slot - b.slot));
   return `<section class="wp-sec"><h3>החברות בבורסה (${num(String(cos.length))})</h3><ul class="mk-list">${coRow(MK.idx, M, sel === 'IDX', month)}${cos.map((c) => coRow(c, M, sel === c.id, month)).join('')}</ul>
-    <p class="note">כל החברות בדיוניות. ▲ / ▼ = כיוון המחיר מתחילת החודש. לחיצה על חברה פותחת את הגרף, החדשות והמסחר.</p></section>`;
+    <p class="note">כל החברות בדיוניות. ▲ / ▼ = כיוון המחיר בחודש האחרון. לחיצה על חברה פותחת את הגרף, החדשות והמסחר.</p></section>`;
 }
 /** the closed companies (bankrupt / bought) — still in the market list for their claim months, then in the grave — and the closed positions */
 export function closedHtml(MK, M, sel) {
@@ -124,7 +126,7 @@ export function detailHtml(c, s, MK, M, { trade = '', research = '', readOnly = 
     : '<p class="note">אין חדשות על החברה הזו לאחרונה.</p>';
   return `<section class="wp-sec mk-detail" id="mkDetail" data-co="${esc(c.id)}" aria-label="${esc(`${c.name} (${c.tk})`)}">
     <div class="cdl-head"><div class="cdl-id"><b class="cdl-name">${esc(c.name)}</b><small>סימול ${num(c.tk)} · ${esc(c.sectorLabel || (idx ? 'כל השוק' : ''))}</small><small>${facts}</small></div>
-      <div class="cdl-px"><b class="num">${esc(pxT(c.px ?? c.endPx))}</b><small class="${cls(ch.d)}">${readOnly ? 'מחיר אחרון' : `${ARROW[d]} ${WORD[d]} החודש ${num(sgnPx(ch.d), cls(ch.d))} (${num(pctS(ch.pct), cls(ch.d))})`}</small>${s ? `<small>מאז ${s.listedM > 1 ? `ההנפקה (חודש ${num(String(s.listedM))})` : 'תחילת המשחק'}: ${num(sgnPx(Math.round(since * 100)), cls(since))} (${num(pctS(s.sincePct), cls(since))})</small>` : ''}</div></div>
+      <div class="cdl-px"><b class="num">${esc(pxT(c.px ?? c.endPx))}</b><small class="${cls(ch.d)}">${readOnly ? 'מחיר אחרון' : `${ARROW[d]} ${WORD[d]} בחודש האחרון ${num(sgnPx(ch.d), cls(ch.d))} (${num(pctS(ch.pct), cls(ch.d))})`}</small>${s ? `<small>מאז ${s.listedM > 1 ? `ההנפקה (חודש ${num(String(s.listedM))})` : 'תחילת המשחק'}: ${num(sgnPx(Math.round(since * 100)), cls(since))} (${num(pctS(s.sincePct), cls(since))})</small>` : ''}</div></div>
     ${hold}
     <div class="cdl-host mk-chart" data-cdl-key="${esc(c.id)}"></div><p class="cdl-cap">חודשי משחק, משמאל (ישן) לימין (עכשיו) · נר אחד = חודש אחד · עמודות בתחתית = מחזור. נגיעה בנר מראה את המספרים שלו.</p>
     <p class="cdl-leg"><span><i class="lg up" aria-hidden="true"></i> חלול ▲ = עלה בחודש</span><span><i class="lg down" aria-hidden="true"></i> מלא ▼ = ירד</span><span><i class="lg flat" aria-hidden="true"></i> קו — = לא זז</span><span>קווקו = החודש הנוכחי</span></p>

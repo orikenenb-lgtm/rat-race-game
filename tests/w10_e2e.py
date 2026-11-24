@@ -313,8 +313,8 @@ async def run_play(b):
     await ctx.close()
 
 async def run_phone(b):
-    for vp in ('phone', 'small'):
-        for d2 in (False, True):
+    for vp in ('desk', 'phone', 'small'):
+        for d2 in ((True,) if vp == 'desk' else (False, True)):
             sc = f'{"2d" if d2 else "3d"}-{vp}'; ctx, pg = await page(b, vp, flags='?ff=board2d:on' if d2 else '')
             await pg.evaluate(START, {'seed': 7, 'ch': 'allocator'})
             await pg.wait_for_selector('#start', state='hidden', timeout=120000); await pg.wait_for_timeout(2500)
