@@ -7,7 +7,7 @@
 //                         investor card's pick (a term sheet when runway < 18 at ≥ 0.95 × market; the buyout only when your part ≥ ₪800M
 //                         or in a winter with < 4 months of runway).
 //   naive                 believes the growth story: every channel at the top level, takes every term sheet, never cuts.
-//   ablations             blitzGrowth (top spend everywhere, never cuts, never raises a round — takes every term sheet) · raiseEveryRound (the large round whenever allowed)
+//   ablations             blitzGrowth (top spend everywhere, never cuts, never raises — burns until the emergency round) · raiseEveryRound (the large round whenever allowed)
 //                         · neverRaise (no rounds, no term sheets) · acceptFirstOffer (sells to the first buyout offer).
 export function make({ E, POLICIES }) {
   const Z = (st, id, param) => (st.over ? { ok: false } : E.worldAction(st, id, param));
@@ -22,7 +22,7 @@ export function make({ E, POLICIES }) {
   }
   function manage(st, v) {
     if (v.noTouch) return;
-    const skip = new Set(v.skip || []); if (v.blitz || v.topSpend) skip.add('spend'); if (v.blitz) { skip.add('raise'); skip.add('cut'); skip.add('bridge'); } if (v.noRaise) { skip.add('raise'); skip.add('bridge'); } if (v.raiseL) skip.add('raise');
+    const skip = new Set(v.skip || []); if (v.blitz || v.topSpend) skip.add('spend'); if (v.blitz) { skip.add('raise'); skip.add('cut'); skip.add('bridge'); skip.add('debt'); } if (v.noRaise) { skip.add('raise'); skip.add('bridge'); } if (v.raiseL) skip.add('raise');
     tap(st, (a) => !skip.has(a.id));
     if (v.blitz || v.topSpend) for (const a of acts(st).filter((x) => x.id === 'spend' && x.enabled && !acts(st).some((y) => y.id === 'spend' && y.enabled && y.param.split(':')[0] === x.param.split(':')[0] && +y.param.split(':')[1] > +x.param.split(':')[1]))) Z(st, a.id, a.param);
 
@@ -49,7 +49,7 @@ export function make({ E, POLICIES }) {
   }
   const P = {
     smart: smartLike(), adaptive: smartLike(),
-    blitzGrowth: smartLike({ blitz: true, allTerms: true }),
+    blitzGrowth: smartLike({ blitz: true, noRaise: true }),
     raiseEveryRound: smartLike({ raiseL: true, allTerms: true }),
     neverRaise: smartLike({ noRaise: true }),
     acceptFirstOffer: smartLike({ firstOffer: true }),

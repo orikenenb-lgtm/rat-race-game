@@ -235,6 +235,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** opens w17 and w19. Library: "LTV מול CAC", "דילול".
 - **Choices:** growth spend vs runway; raise now vs prove metrics first; accept the acquisition offer or not.
 - **Recovery:** cut burn (layoffs: happiness −, growth −), a bridge from insiders at −20 %, venture debt, sell the company (the offer floor), a pivot (resets cohorts, keeps cash).
+- **As built (wave A3, engine lane):** `js/worlds/mech/platform.js` (+ the market regime table), `modules: ['platform']`; all gates met at N = 36 except G-dom — see `w15-cloud.md`.
 
 ### w16 · ארץ השדות (tier 8, diff 4)
 - **סיפור:** "שדות ומים בעמק. את היבול רואים רק בקציר, ואת המחיר אפשר לנעול כבר בזריעה. כמה לנעול, כשאתה לא יודע כמה תקצור?"
