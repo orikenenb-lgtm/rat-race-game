@@ -32,6 +32,8 @@ const W9 = (await import('../js/worlds/w9.js')).default; E.registerWorld(W9);   
 const W10 = (await import('../js/worlds/w10.js')).default; E.registerWorld(W10);  // worlds wave 4: the lazy w10 (tiles W / Y, fund deck, portfolio market)
 const ENERGY = await import('../js/worlds/mech/energy.js');
 const PORT = await import('../js/worlds/mech/portfolio.js');
+const W13 = await E.ensureWorld('w13');   // w13: the lazy world (tile H, the sponsor / facility deck, league news)
+const AUC = await import('../js/worlds/mech/auction.js');
 
 /* T-opt */
 const OPT = nul.SCENE_OPTIONAL;
@@ -49,7 +51,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -73,7 +75,7 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', 'h']) {
   const w = W(wid);
   for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, { ...T.MARKET_WORDS, ...((T.MARKET_WORDS_W || {})[wid] || {}) }]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
@@ -176,6 +178,23 @@ for (const f of ['js/engine.js', 'js/life.js', 'js/rng.js', 'js/practice.js', 'j
 
 /* T-saves: no new S.ui keys from this wave (the life helpers weddingAge / burnSeen / lifeSeen were already there) */
 const uiKeys = new Set([...game.matchAll(/\bS\.ui\.(\w+)\s*(?:\?\?=|=(?!=))/g)].map((m) => m[1]));
+/* T-w13: tile H (type 'transfer'): number-free until prepareWorldText builds it from auction.js (ROUNDS, STEP.raise / jump); ⚽, a short name
+   ≤ 10; the deal tile names the sponsors and the club's facilities, the league news tile every mk, the crisis tile its own wording */
+{
+  const tH = W13.tiles.H; const p = (v) => `${Math.round(v * 100)}%`;
+  ok(tH && tH.type === 'transfer' && tH.icon === 'ball' && tH.color === '#dc2626' && tH.ink === '#ffffff', 'w13 tile H is transfer (ball, #dc2626 / #fff)');
+  ok(!/\d/.test(T.TILE_TEXT.transfer.desc), 'H before prepareWorldText: the number-free wording');
+  ok((await T.prepareWorldText(W13)).includes('transfer'), 'prepareWorldText builds the H text from auction.js');
+  const h = T.tileText(tH, W13);
+  ok(h.emoji === '⚽' && h.short.length <= T.SHORT_MAX && h.short === 'שוק העברות', `H ⚽ "${h.short}"`);
+  ok(h.desc.includes(`עד ${AUC.ROUNDS} סבבים`) && h.desc.includes(p(AUC.STEP.raise - 1)) && h.desc.includes(p(AUC.STEP.jump - 1)) && h.desc.includes('לוותר') && h.desc.length <= 180, `w13 H text = auction.js constants: ${h.desc}`);
+  ok(AUC.auction.tiles.H.safe === 'walk', 'H: the safe default is walk (named "לוותר")');
+  const d = T.tileText(Object.values(W13.tiles).find((t) => t.type === 'deal'), W13).desc, mk = T.tileText(Object.values(W13.tiles).find((t) => t.type === 'market'), W13).desc, cr = T.tileText(Object.values(W13.tiles).find((t) => t.type === 'crisis'), W13).desc;
+  ok(/חסויות/.test(d) && /מתקנים של המועדון/.test(d), 'w13 deal tile: sponsors and the club facilities: ' + d);
+  ok(['חוזה טלוויזיה', 'שוק ההעברות רותח', 'מאמן הנוער נחטף', 'ריצה בגביע', 'דרבי מקומי', 'הכוכב רוצה העלאה'].every((x) => mk.includes(x)), 'w13 market tile names every league news card: ' + mk);
+  ok(/ביקורת על השכר/.test(cr) && /שערוריית נותן חסות/.test(cr) && cr.length <= 180, 'w13 crisis tile: its own wording: ' + cr);
+  ok(W13.board.length === 40 && Object.values(W13.tiles).every((t) => T.tileText(t, W13).short.length <= T.SHORT_MAX), 'w13: 40 tiles, every short name ≤ 10');
+}
 const KNOWN = ['seq', 'fundWarn', 'weddingAge', 'burnSeen', 'lifeSeen', 'inflReality', 'tl', 'hist', 'pensionHist', 'trackMonth', 'coach', 'firstPayday', 'endSent'];   // endSent (P0b, 6d05559): the win reached the lobby — it must survive a reload, so it IS save data
 for (const k of uiKeys) ok(KNOWN.includes(k), 'game.js writes S.ui.' + k + ' (display data must go to rr2-settings, not the save)');
 

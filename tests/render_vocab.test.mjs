@@ -296,5 +296,35 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   ok(/stepEnergy\(it\.obj, dt \|\| 0\)/.test(scn) && /stepTicker\(it\.obj, dt \|\| 0, t \|\| 0\)/.test(scn) && /noSpread/.test(scn), 'pulses / ticker steps run only inside scene updaters (never under reduced motion); the per-frame ring / ribbon skip spreadDecor');
 }
 
+/* w13 — identity (the doc, board ΔE ≥ 10 from every world), character colours, model emoji + a procedural stand-in for every model key (no .glb),
+   the 'club' / 'sponsor' level kinds (text, pips, model parts only), the age bands of a player token, the cityModels fields game.js reads, still decor */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const s13 = readFileSync(resolve(ROOT, 'js/render/standins13.js'), 'utf8'); const sAll = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8') + s13;
+  const w = await E.ensureWorld('w13'); const st = V.WORLD_STYLE.w13;
+  ok(st && st.sky[0] === '#0b1020' && st.sky[1] === '#1e3a8a' && st.board === '#166534' && st.edge === '#14532d' && st.accent === '#dc2626' && st.accentInk[0] === '#7f1d1d' && st.decor === 'floodlights' && st.motif === 'pitch' && st.caption, 'WORLD_STYLE.w13 = the w13 doc (night sky, pitch board, edge, club red, ink, floodlights)');
+  for (const id of Object.keys(V.WORLD_STYLE)) if (id !== 'w13') ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `w13 board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+  const cs = w.characters.map((c) => c.id);
+  ok(cs.join() === 'coachOwner,localTycoon,academyDirector' && cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === 3, 'CHAR_STYLE: coachOwner / localTycoon / academyDirector, distinct');
+  for (const m of new Set(Object.values(w.models).filter(Boolean))) { ok(V.CITY_EMOJI[m], `CITY_EMOJI w13/${m}`); ok(new RegExp(`\\b${m}[:(,]`).test(sAll) || new RegExp(`${m}: [a-zA-Z]+`).test(sAll), `standins build w13/${m} (no .glb is ever requested)`); }
+  ok(!/\.glb['"`]/.test(s13) && !/import\(|fetch\(|Loader/.test(s13), 'standins13 requests no file');
+  { const g = E.createGame({ worldId: 'w13', charId: 'coachOwner', seed: 7, mode: 'free' }); const cm = E.cityModels(g);
+    const c = cm.find((m) => m.model === 'stadium');
+    ok(c && Number.isFinite(c.seats) && Number.isInteger(c.stage) && Number.isFinite(c.fill) && Number.isInteger(c.div) && Number.isInteger(c.rank) && c.floodlights === true && typeof c.training === 'boolean' && typeof c.academy === 'boolean', 'w13 cityModels: the stadium carries seats / stage / fill / div / rank / floodlights / training / academy (the fields game.js reads)', c); }
+  const C = V.normLevel({ kind: 'club', stage: 1, seats: 20000, expanded: 0, fill: 0.634, div: 1, rank: 2, floodlights: true, training: true });
+  ok(C.kind === 'club' && C.n === 1 && C.fill === 0.63 && !C.trouble && JSON.stringify(V.normLevel(C)) === JSON.stringify(C), 'club level: normalised, idempotent');
+  ok(V.levelText(C) === 'הדרג השני · מקום 2 · 20,000 מקומות · תפוסה 63% · מרחיבים את היציע: שלב 1 מתוך 2 · מתחם אימונים' && V.pipsText(C) === '🏗️', `club text "${V.levelText(C)}"`);
+  const C0 = V.normLevel({ kind: 'club', stage: 0, seats: 28000, fill: 0.8, div: 2, rank: 7 }); ok(V.pipsText(C0) === '▮▮▮▮▯' && V.levelText(C0).startsWith('הדרג הראשון · מקום 7') && V.activityOf(C0) === null, `club pips = the fill in fifths "${V.pipsText(C0)}", no activity badge`);
+  const kp = V.kitParts(C); ok(kp.crane && kp.stage === 1 && kp.fill === 0.63 && kp.training && !kp.sign && !kp.scaffold, 'club level: model parts only (crane while building, fill, training)');
+  const Sp = V.normLevel({ kind: 'sponsor', expired: true }); ok(Sp.expired && V.levelText(Sp).includes('נגמר') && V.pipsText(Sp) === '○' && V.kitParts(Sp).lit === false && V.kitParts({ kind: 'sponsor' }).lit === true, 'sponsor level: an ended contract is a dark billboard');
+  ok(V.ageBand(19).id === 'young' && V.ageBand(23).id === 'rising' && V.ageBand(27).id === 'prime' && V.ageBand(30).id === 'late' && V.ageBand(33).id === 'vet' && V.AGE_BAND.every((b) => /[\u0590-\u05FF]/.test(b[2])), 'age bands (the token ring) = the market value age steps, each with its Hebrew word');
+  ok(/export function paintClub/.test(s13) && /export function paintBillboard/.test(s13) && !/requestAnimationFrame|step[A-Z]\w*\(/.test(s13), 'standins13: paintClub / paintBillboard, nothing steps (still)');
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  ok(/floodlights: decorFloodlights/.test(scn) && !/function decorFloodlights[\s\S]{0,4000}?updaters\.add/.test(scn.slice(scn.indexOf('function decorFloodlights'), scn.indexOf('let floodState'))), 'the floodlights decor adds no updater (on with and without reduced motion)');
+  ok(/case 'ball':/.test(scn) && /w13: 'המועדון שלך'/.test(scn), "scene: tile icon 'ball', the caption");
+}
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

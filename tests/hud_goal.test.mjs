@@ -243,5 +243,33 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     ok(wr && wr.icon === '📊' && wr.title === 'הבורסה והתיק' && wr.value.includes(E.fmtM(PF.nw)) && wr.value.includes(`מינוף ${Math.round(PF.ltv * 100)}%`) && wr.acts[0].act === 'world', `w10/${ch}: 💼 "הבורסה והתיק" row from the engine (net worth, LTV)`, wr);
   }
 }
+/* 10. w13 (goal all: nw ₪450M at book AND wageRatio12 ≤ 0.70, cmp 'le'): the ratio part in %, never ₪; met when at most the target; the gap
+   above it in points; the rule (the squad at book, both bars); one ⚖️ ladder rung (no quarters); the 💼 "המועדון והטבלה" row */
+{
+  const { moneyHubModel, milestoneLadder, nextMilestone } = await import('../js/hudgoal.js');
+  await E.ensureWorld('w13');
+  const play = (ch, months) => { const st = E.createGame({ worldId: 'w13', charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 200 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.id === 'walk') || os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  for (const ch of ['coachOwner', 'localTycoon', 'academyDirector']) {
+    for (const months of [1, 8]) {
+      const st = play(ch, months); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w13'), st.charId, m.rules) });
+      const nw = M.parts.find((x) => x.key === 'netWorth'), wr = M.parts.find((x) => x.key === 'wageRatio12'); const raw = m.goalParts.find((x) => x.key === 'wageRatio12');
+      ok(m.goalType === 'all' && nw && wr && nw.target === 450000000 && wr.target === 0.7 && wr.cmp === 'le' && wr.label === 'שכר מול הכנסות (12 חודשים)', `w13/${ch}/m${months}: two parts, ₪450M and wages ≤ 0.70 (cmp le)`, M.parts);
+      ok(wr.valueText === `${Math.round(raw.value * 100)}%` && wr.targetText === 'עד 70%' && !/₪/.test(wr.valueText + wr.targetText), `w13/${ch}/m${months}: the ratio in % ("${wr.valueText}" / "${wr.targetText}"), never ₪`, wr);
+      ok(wr.met === (raw.value <= 0.7) && Math.abs(wr.gap - Math.max(0, raw.value - 0.7)) < 1e-9, `w13/${ch}/m${months}: met = value ≤ target, gap = value − target`, wr);
+      ok(M.rule.includes(nw.targetText) && M.rule.includes('עד 70%') && M.rule.includes('הספרים') && M.rule.includes('שני הפסים'), `w13/${ch}/m${months}: the rule (net worth at book AND wages ≤ 70 %)`, M.rule);
+      ok(wr.met || M.gaps.some((g) => g.includes(`${Math.round(raw.value * 100)}%`) && g.includes('70%') && !/₪/.test(g)), `w13/${ch}/m${months}: the wage gap in %, never ₪`, M.gaps);
+      const L = milestoneLadder(m); const rung = L.filter((x) => x.id.startsWith('wageRatio12'));
+      ok(rung.length === 1 && rung[0].unit === '%' && rung[0].met === (raw.value <= 0.7) && L.filter((x) => /^netWorth/.test(x.id)).length === 3, `w13/${ch}/m${months}: one ⚖️ wage rung (%), the ¼ ½ ¾ net-worth rungs`, L.map((x) => [x.id, x.unit]));
+      const nx = nextMilestone(m); ok(!nx || !/₪0\.7|₪1$/.test(nx.valText), `w13/${ch}/m${months}: the next rung never shows a ratio as ₪`, nx);
+      const H = moneyHubModel(m); const row = H.rows.find((r) => r.id === 'world'); const LG = m.worldIndicators.league;
+      ok(row && row.icon === '🏟️' && row.title === 'המועדון והטבלה' && row.value.includes(`מקום ${LG.rank}`) && row.value.includes(LG.divName) && row.value.includes(`מחזור ${LG.round}/${LG.rounds}`) && row.acts[0].act === 'world', `w13/${ch}/m${months}: 💼 "המועדון והטבלה" row from the engine (rank, tier, round)`, row);
+    }
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);
