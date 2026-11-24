@@ -425,7 +425,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   else if (wi.league && wi.panel) {   // w13: the place in the table and wages vs revenue — a button that opens the club panel (המועדון והטבלה) + the live table strip
     const LG = wi.league; key = 'rank'; v = LG.rank; goodUp = -1;
     const al = `${wi.panel.title || 'המועדון'}: מקום ${LG.rank} מתוך 8 ב${LG.divName}, מחזור ${LG.round} מתוך ${LG.rounds}${LG.window ? ', חלון העברות פתוח' : ''}, שכר ${+LG.wageRatio > 0 ? `${pctI(LG.wageRatio)} מההכנסות ב־12 החודשים האחרונים` : 'מול הכנסות: עוד אין נתונים'}`;
-    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">⚽ <span class="hb-mf">מקום </span>${num(String(LG.rank))}<span class="hb-ms">/8</span><span class="hb-w"> ב${esc(LG.divName)}</span><span class="hb-b"> · שכר ${num(wrT(LG.wageRatio))}</span>${LG.window ? ' 🔁' : ''}</button>`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">⚽ <span class="hb-mf">מקום ${num(String(LG.rank))}</span><span class="hb-ms">${num(`${LG.rank}/8`)}</span><span class="hb-w"> ב${esc(LG.divName)}</span><span class="hb-b"> · שכר ${num(wrT(LG.wageRatio))}</span>${LG.window ? ' 🔁' : ''}</button>`;
     extra = leagueStrip(wi.panel.table, LG);
   }
   else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
