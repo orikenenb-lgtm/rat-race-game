@@ -42,13 +42,14 @@ export const REGIME_IDS = Object.freeze(Object.keys(REGIMES));
 export const CRASH = Object.freeze({ p: Object.freeze({ growth: 0.008, bubble: 0.06, recession: 0.05, recovery: 0.01, highVol: 0.08, sectorCrisis: 0.02 }), jump: Object.freeze([-0.22, -0.1]) });
 const REGIME0 = Object.freeze({ growth: 50, recovery: 20, highVol: 10, recession: 20 });
 /** Company events (§3.5, TUNE): weight per regime, jump range, distress change, negative? */
+// merger: half the catalog §3.5 weights (~0.9 takeovers a game-year instead of ~1.6: 12 listed slots churned too fast)
 export const EVENTS = Object.freeze({
   revUp: Object.freeze({ label: 'הכנסות עלו', w: { growth: 30, recession: 10, highVol: 15, bubble: 30, recovery: 30, sectorCrisis: 8 }, jump: [0.04, 0.12], dist: -1, neg: false }),
   revDown: Object.freeze({ label: 'הכנסות ירדו', w: { growth: 12, recession: 30, highVol: 20, bubble: 8, recovery: 15, sectorCrisis: 25 }, jump: [-0.15, -0.05], dist: 1, neg: true }),
   launch: Object.freeze({ label: 'השקת מוצר', w: { growth: 18, recession: 6, highVol: 12, bubble: 25, recovery: 15, sectorCrisis: 5 }, jump: [0.08, 0.25], dist: 0, neg: false }),
   lostClient: Object.freeze({ label: 'לקוח גדול עזב', w: { growth: 10, recession: 18, highVol: 15, bubble: 6, recovery: 10, sectorCrisis: 18 }, jump: [-0.20, -0.08], dist: 1, neg: true }),
   debt: Object.freeze({ label: 'אזהרת אשראי', w: { growth: 10, recession: 16, highVol: 14, bubble: 12, recovery: 10, sectorCrisis: 16 }, jump: [-0.08, -0.03], dist: 1, neg: true }),
-  merger: Object.freeze({ label: 'הצעת רכישה', w: { growth: 12, recession: 6, highVol: 8, bubble: 15, recovery: 14, sectorCrisis: 6 }, jump: [0.20, 0.35], dist: 0, neg: false }),
+  merger: Object.freeze({ label: 'הצעת רכישה', w: { growth: 6, recession: 3, highVol: 4, bubble: 8, recovery: 7, sectorCrisis: 3 }, jump: [0.20, 0.35], dist: 0, neg: false }),
   fraud: Object.freeze({ label: 'חשד להונאה', w: { growth: 2, recession: 5, highVol: 6, bubble: 6, recovery: 2, sectorCrisis: 6 }, jump: [-0.70, -0.40], dist: 1, neg: true }),
 });
 export const EVENT_IDS = Object.freeze(Object.keys(EVENTS));

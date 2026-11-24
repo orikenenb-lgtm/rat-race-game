@@ -144,3 +144,9 @@ Balance (tools/balance-data/gates-w10.json, N = 36 per character): guide 60 % (w
 (maxMargin forced 97 %, smart 0 %). **Not met:** G-smart (smart's median won month 75 vs naive 74 — naive's few wins are fast, levered
 ones), G-time (median won rolls 106 > 100; won months 75 / 71), G-dom (A4: founder best in 3/3 cells, as in w9; ablation privateHeavy only
 −3 pp, the others −11…−56 pp). Next tuning step: a shorter world needs more drift, which lifts blind above 8 % — the trade-off is open.
+
+### Takeover frequency (after A2)
+`market` merger weights halved (catalog §3.5 as-built note): ≈ 0.9 takeovers a game-year instead of ≈ 1.6; bankruptcies unchanged at ≈ 0.4.
+Gates re-run (N = 36, `gates-w10.json`): G-guide 60 % met (worst floorTrader 53 %), G-reach met, G-loss met, W10-margin / M-dom / W10-forced met;
+G-smart (smart 57 % vs naive 31 %, median 74 vs 71 months), G-dom (founder 100 % of 3 cells) and G-time (104 rolls) stay open as before;
+**G-blind moved from 6 % to 12 % (NOT met)**. A 2/3 weight was also tried: G-guide fell to 56 % (worst 47 %), so the half weight was kept.

@@ -671,6 +671,8 @@ p_c,k = max(1, round(p_c,k−1 × (1 + r_c,k)))                      // ≥ 1 ag
 | merger הצעת רכישה | 12 | 6 | 8 | 15 | 14 | 6 | +20…+35 % premium. Then `merged` at that price next payday: holdings cash out, id retired |
 | fraud הונאה / "המייסדים נעלמו" | 2 | 5 | 6 | 6 | 2 | 6 | −40…−70 %, `halted` 1 month. 50 % chance of bankruptcy within 3 months (sealed at the event) |
 
+- **As built (engine lane, after A2):** the `merger` weights are half of this table (6 · 3 · 4 · 8 · 7 · 3). Measured over 100 seeds × 24 months: ≈ 0.9 takeovers and 0.4 bankruptcies per game-year (was ≈ 1.6 takeovers); companies ended by month 13 — median 1, p90 3, max 6 (was median 2, p90 4, max 7). Per-type frequencies still follow the (edited) table (`M-freq`).
+
 **Company pick weight** (draw 3):
 - base 10
 - negative events: × (1 + distress)
