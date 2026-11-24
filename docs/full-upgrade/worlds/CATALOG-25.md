@@ -153,6 +153,7 @@ tier 12    w25 ← 1 of (w12, w21, w22) + 1 of (w23, w24)
 - **No single long world blocks the map after w5.** Every world from w6 on has ≥ 2 routes, except w12 (only through w11), and nothing requires w12. Validator rule 4 (DESIGN §4.4) still applies once `estMin` is measured.
 - **Unchanged:** w1–w10 rules. **Changed** (planned worlds only): w11 adds w13 to its second clause. w10's mechanic becomes `['market','portfolio']`, minRules 7.
 - Locked-world cards render from these rules through `unlockText()` (no code change).
+- **As built w11 (wave A3, engine lane):** `js/worlds/mech/multinational.js`, goal `nw` ₪800M hold 2; gates N = 36 all met except G-dom — see `w11-multinational.md`.
 
 ---
 

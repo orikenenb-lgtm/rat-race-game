@@ -8,7 +8,8 @@ import w7 from './w7.js';
 import w8 from './w8.js';
 import w9 from './w9.js';
 import w10 from './w10.js';
+import w11 from './w11.js';
 import w13 from './w13.js';
 
-export const LAZY = [w5, w6, w7, w8, w9, w10, w13];
+export const LAZY = [w5, w6, w7, w8, w9, w10, w11, w13];
 for (const w of LAZY) registerWorld(w);
