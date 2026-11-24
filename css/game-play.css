@@ -1186,3 +1186,51 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 .sitemini .mt small,.landmini .mt small{line-height:1.3}
 .landmini .mt{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media (max-width:600px){ .wp-gantt li{grid-template-columns:minmax(0,1fr)} .wp-calls li{grid-template-columns:minmax(0,1fr) auto} .wp-calls li small{grid-column:1/-1;grid-row:2} }
+/* CATALOG-25 §3.9 — light candle view (js/render/candles-lite.js). Hollow = up, filled = down, line = flat (never colour alone). */
+.cdl-mini{margin:10px 0 4px;padding:8px 10px 10px;border-radius:12px;background:var(--paper2);border:1px solid var(--line)}
+.cdl-mini[hidden]{display:none}
+.cdl-mh{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 10px}
+.cdl-mh b{font-size:14px}.cdl-mh small{font-size:13px;color:var(--mut)}
+.cdl-host{width:100%;min-width:0;margin-top:4px}
+.cdl-chart{position:relative;width:100%;border-radius:10px;outline:none;touch-action:pan-y;cursor:crosshair;user-select:none;-webkit-user-select:none;background:var(--paper)}
+.cdl-chart:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.cdl-svg{display:block;width:100%;height:auto;overflow:visible}
+.cdl-svg .cdl-grid{stroke:var(--line);stroke-width:1;stroke-dasharray:2 3}
+.cdl-svg .cdl-ax{fill:var(--mut);font-size:12px;font-family:var(--font);font-variant-numeric:tabular-nums}
+.cdl-svg .cdl-sel{fill:var(--paper3);stroke:var(--focus);stroke-width:1;stroke-opacity:.55}
+.cdl-svg .cdl-wick{stroke-width:1.5}
+.cdl-svg .cdl-body{stroke-width:1.6}
+.cdl-svg .cdl-up .cdl-wick,.cdl-svg .cdl-up .cdl-body{stroke:var(--green)}.cdl-svg .cdl-up .cdl-body{fill:var(--paper)}
+.cdl-svg .cdl-down .cdl-wick,.cdl-svg .cdl-down .cdl-body{stroke:var(--red)}.cdl-svg .cdl-down .cdl-body{fill:var(--red)}
+.cdl-svg .cdl-flat .cdl-wick,.cdl-svg .cdl-flat .cdl-doji{stroke:var(--mut)}.cdl-svg .cdl-doji{stroke-width:2.2}
+.cdl-svg .cdl-open .cdl-body{stroke-dasharray:3 2}.cdl-svg .cdl-open{opacity:.9}
+.cdl-svg .cdl-skip{opacity:.55}.cdl-svg .cdl-skip .cdl-body,.cdl-svg .cdl-skip .cdl-doji{stroke-dasharray:1 2}
+.cdl-svg .cdl-buy{fill:var(--blue)}.cdl-svg .cdl-sell{fill:var(--accent-ink)}
+.cdl-svg .cdl-c.on .cdl-wick{stroke-width:2.4}
+.cdl-ro{margin:6px 0 0;font-size:14px;line-height:1.45;min-height:2.9em}
+.cdl-edu{font-size:13px}
+.cdl-more{margin-top:6px;width:100%}
+.cdl-cap,.cdl-leg{margin:4px 0 0;font-size:12px;color:var(--mut)}
+.cdl-leg{display:flex;flex-wrap:wrap;gap:2px 12px}
+.cdl-leg .lg{display:inline-block;width:9px;height:13px;vertical-align:-2px;border-radius:1px}
+.cdl-leg .lg.up{border:1.6px solid var(--green);background:var(--paper)}.cdl-leg .lg.down{background:var(--red);border:1.6px solid var(--red)}.cdl-leg .lg.flat{height:0;border-top:2.2px solid var(--mut);vertical-align:3px}
+.cdlm .cdl-tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 8px}
+.cdlm .cdl-tab[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.cdl-old{font-size:13px;color:var(--mut);margin-inline-start:4px}
+.cdl-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:4px 12px}
+.cdl-id{display:grid;min-width:0}.cdl-name{font-size:16px}.cdl-id small,.cdl-px small{font-size:13px;color:var(--mut)}
+.cdl-px{display:grid;justify-items:end;text-align:end}.cdl-px>b.num{font-size:22px;font-weight:800}
+.cdl-hold{margin:8px 0 2px;padding:4px 10px;border-radius:10px;background:var(--paper2)}
+.cdl-hold .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:14px;border-bottom:1px dashed var(--line)}.cdl-hold .row:last-child{border:0}
+.cdl-h3{font-size:15px;margin:12px 0 4px}
+.cdl-news{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:14px}
+.cdl-news li{padding:4px 0;border-bottom:1px dashed var(--line)}.cdl-news li:last-child{border:0}
+.cdl-nm{color:var(--mut);font-size:13px}.cdl-nd{white-space:nowrap}
+.cdl-tbl{margin-top:10px}.cdl-tbl summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-size:14px;font-weight:700}
+.cdl-tw{max-height:260px;overflow:auto}
+.cdl-tbl table{width:100%;border-collapse:collapse;font-size:13px}
+.cdl-tbl th,.cdl-tbl td{padding:3px 4px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
+.cdl-tbl thead th{position:sticky;top:0;background:var(--paper)}
+.cdl-sheet{margin-top:8px}
+.mh-more{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+@media (max-width:420px){ .cdl-tbl table{font-size:12px} .cdl-tbl th,.cdl-tbl td{padding:3px 2px} .cdl-px>b.num{font-size:19px} }

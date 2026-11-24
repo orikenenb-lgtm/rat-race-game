@@ -9,6 +9,7 @@ import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
 import { levelText as stageText, levelHint as stageHint } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
+import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
 
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -863,7 +864,7 @@ export function renderSheet(m, ctx) {
   <h3>הכנסות בחודש</h3>${m.incomeLines.map((x) => row(escI(x.label), sgn(x.amount), cls(x.amount))).join('')}
   <h3>הוצאות בחודש</h3>${m.expenseLines.map((x) => row(escI(x.label), fmtM(x.amount))).join('')}
   <div class="total"><span>תזרים חודשי</span>${num(sgn(m.cashflow), cls(m.cashflow))}</div>
-  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${m.savings ? `<div class="arow cashrow"><div><span>🛟 קרן חירום (חיסכון)</span>${m.emergency ? `<small class="note">${num(String(m.emergency.months))} חודשי הוצאות${m.emergency.rate ? ` · ${num(m.emergency.rate + '%')} בשנה` : ''}</small>` : ''}</div><div class="av2">${num(fmtM(m.savings))}</div></div>` : ''}${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}
+  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${m.savings ? `<div class="arow cashrow"><div><span>🛟 קרן חירום (חיסכון)</span>${m.emergency ? `<small class="note">${num(String(m.emergency.months))} חודשי הוצאות${m.emergency.rate ? ` · ${num(m.emergency.rate + '%')} בשנה` : ''}</small>` : ''}</div><div class="av2">${num(fmtM(m.savings))}</div></div>` : ''}${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}${candleSrc && st && st.prices && Object.keys(st.prices).length ? '<div class="loans cdl-sheet"><button type="button" data-act="candles">📈 מחירים, נרות וחדשות</button></div>' : ''}
   ${totA != null ? row('<b>סה"כ נכסים</b>', fmtM(totA)) : ''}
   <h3>התחייבויות</h3>${m.liabilities.length ? m.liabilities.map(liabRow).join('') + (totL != null ? row('<b>סה"כ התחייבויות</b>', fmtM(totL)) : '') : '<p class="empty">אין חובות.</p>'}
   <div class="total nw"><span>שווי נקי</span>${num(fmtM(m.netWorth), cls(m.netWorth))}</div>
@@ -1128,6 +1129,7 @@ function onCardClick(e) {
   const it = e.target.closest('[data-imp]');
   if (it) { evState.imp.ref = it.dataset.imp; sfx('click'); paintImpact(); return; }
   if (e.target.closest('[data-focus-open]')) { sfx('click'); evState.ctx.api && evState.ctx.api.focus && evState.ctx.api.focus(); return; }
+  const cf = e.target.closest('[data-cdl-full]'); if (cf) { sfx('click'); candlesFull(cf.dataset.cdlFull); return; }
   const q = e.target.closest('[data-q]');
   if (q) { const d = evState.ev.data; const s = q.dataset.q; evState.q = s === 'max' ? d.maxBuy : s === 'all' ? d.maxSell : s === 'zero' ? 0 : evState.q + +s; sfx('click'); tradeUpd(); return; }
   const b = e.target.closest('button[data-o]');
@@ -1445,7 +1447,7 @@ const big = (n, c) => `<b class="big num ${c ?? cls(n)}">${sgn(n)}</b>`;
 function renderEvent(first) {
   const { ev, ctx } = evState; const c = $('#evCard');
   c.className = 'card ev-' + ev.type + (ev.golden ? ' golden' : '') + (first ? '' : ' pop-off');
-  if (ev.type === 'trade') { if (first || !c.querySelector('#qs')) { c.innerHTML = tradeHtml(ev); } tradeUpd(true); return; }
+  if (ev.type === 'trade') { if (first || !c.querySelector('#qs')) { c.innerHTML = tradeHtml(ev); fillCandles(ev); } tradeUpd(true); return; }
   const fn = BODY[ev.type] || (() => '');
   let body = '';
   try { body = fn(ev, ctx) || ''; } catch (e) { console.error('card body', e); }
@@ -2065,12 +2067,49 @@ function compoundBox(d) {
   return `<div class="comp"><p class="mh">📈 קרן מחקה מדד — ריבית דריבית (בלי הבטחות)</p>${hist ? spark(hist, { color: 'var(--green)', w: 300, h: 40 }) : ''}${range}</div>`;
 }
 
+/* ---------- CATALOG-25 §3.9: light candle view. game.js registers the source (js/candlelog.js view model, built from the prices
+   the game really had); the UI only draws it: a compact chart in the trade card and the full view (💼 / the report / the card). */
+let candleSrc = null;
+/** fn() → Promise<view model | null> (js/candlelog.js viewModel) */
+export function setCandleSource(fn) { candleSrc = typeof fn === 'function' ? fn : null; }
+function fillCandles(ev) {
+  const host = $('#qCdl'); if (!host || !candleSrc) return;
+  const id = ev.id, tk = ev.data && ev.data.ticker;
+  Promise.resolve(candleSrc()).then((vm) => {
+    if (!vm || !evState || evState.ev.id !== id || !host.isConnected) return;
+    const s = vm.list.find((x) => x.tk === tk); if (!s) return;
+    host.innerHTML = cdlMini(s); host.hidden = false;
+    cdlMount(host.querySelector('.cdl-host'), s, { compact: true });
+  }).catch((e) => console.warn('candles', e));
+}
+/** the full view (a dialog over whatever is open); key = a listing key or a ticker (null → the first listing) */
+export async function candlesFull(key = null) {
+  if (!candleSrc) return;
+  let vm = null; try { vm = await candleSrc(); } catch (e) { console.warn('candles', e); }
+  if (!vm || !vm.list.length) { toast('אין כאן ניירות ערך למעקב'); return; }
+  const all = vm.list.concat(vm.ended);
+  let cur = (all.find((s) => s.key === key) || all.find((s) => s.tk === key) || vm.list[0]).key;
+  let chart = null;
+  const mount = (c) => { const s = all.find((x) => x.key === cur); const host = c.querySelector('.cdl-body .cdl-host'); if (chart) chart.destroy(); chart = s && host ? cdlMount(host, s, {}) : null; };
+  await modal({ tag: '📈 מחירים ונרות', color: '#2459b8', title: 'איך זזו המחירים', cls: 'cdlm', wide: true, html: cdlFull(vm, cur), dismissable: true,
+    actions: [{ label: 'סגירה', cls: 'primary' }], onOpen: (c) => mount(c),
+    onExtra: (e) => {
+      const b = e.target.closest('[data-cdl-tab]'); if (!b) return;
+      cur = b.dataset.cdlTab; sfx('click');
+      const c = $('#gmCard'); const f = c.querySelector('.cdl-full'); if (!f) return;
+      f.outerHTML = cdlFull(vm, cur); mount(c);
+      c.querySelector(`[data-cdl-tab="${CSS.escape(cur)}"]`)?.focus({ preventScroll: true });
+    } });
+  if (chart) chart.destroy();
+}
+
 /* ---------- trade window (v1.1: slider dir=ltr, clamp, ±steps, max/all/reset, repeated buy/sell, 'סיום') */
 function tradeHtml(ev) {
   const d = ev.data; const [s1, s2] = d.step || [10, 100]; const u = esc(d.unit);
   return `${head(ev)}${vlineHtml(evState && evState.verdict)}<div class="grid"><div class="row"><span>${esc(d.name)}</span><b class="big num" id="qprice">${fmtP(d.price)}</b></div>
     <div class="row"><span>יש לך</span><span class="num rtl" id="qhold"></span></div><div class="row" id="qgainRow" hidden><span>${gz('אם תמכור הכל עכשיו')}</span><b class="num" id="qgain"></b></div><div class="row"><span>מזומן</span><span class="num" id="qcash"></span></div>
     ${d.div ? `<div class="row"><span>תשלום חודשי ליחידה</span><span class="num pos">${fmtP(d.div)}</span></div>` : ''}</div>
+    <div class="cdl-mini" id="qCdl" data-tk="${esc(d.ticker)}" hidden></div>
     ${d.ticker === 'IDX' || d.kind === 'index' || d.index ? compoundBox(d) : ''}${realityLine(d)}
     ${d.wiped && d.wiped.qty ? `<p class="warn">המטבע הקודם (${esc(d.wiped.oldName)}) מת: ${N(d.wiped.qty)} יחידות ששוות היו ${num(fmtM(d.wiped.value))} — נמחקו.</p>` : ''}
     <label class="sr" for="qs">כמות ${u}</label><input type="range" id="qs" dir="ltr" min="0" step="1" value="0">
@@ -2798,7 +2837,7 @@ export function moneyHub(H) {
   const row = (r) => `<li class="mh-row" data-row="${esc(r.id)}"><div class="mh-h"><span class="mh-i" aria-hidden="true">${esc(r.icon)}</span><div><b>${esc(r.title)}</b><small>${escI(r.value)}</small></div></div>
     <div class="mh-acts">${r.acts.map((a) => `<button type="button" class="chip" data-hub="${esc(a.act)}" ${a.on ? '' : 'disabled'}>${escI(a.label)}</button>`).join('')}</div></li>`;
   return modal({ tag: '💼 ניהול כסף', color: '#0f766e', title: 'הכסף שלך', cls: 'mhub',
-    html: `<p class="d">מזומן עכשיו: <b class="num">${escI(H.cashText)}</b>. כל פעולה פותחת את החשבון שלה לפני שהיא קורית.</p><ul class="mh-list">${H.rows.map(row).join('')}</ul>`,
+    html: `<p class="d">מזומן עכשיו: <b class="num">${escI(H.cashText)}</b>. כל פעולה פותחת את החשבון שלה לפני שהיא קורית.</p><ul class="mh-list">${H.rows.map(row).join('')}</ul>${(H.more || []).length ? `<div class="mh-more">${H.more.map((a) => `<button type="button" class="chip" data-hub="${esc(a.act)}">${escI(a.label)}</button>`).join('')}</div>` : ''}`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     onExtra: (e) => { const b = e.target.closest('button[data-hub]'); if (!b || b.disabled) return; chosen = b.dataset.hub; sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
     .then(() => chosen);

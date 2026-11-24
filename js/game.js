@@ -26,6 +26,7 @@ import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
 import { tileSheet, tileText, whereText, stepsTo, landedText, prepareWorldText } from './render/tiles.js';
 import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
 import { nextMilestone, moneyHubModel } from './hudgoal.js';
+import * as CL from './candlelog.js';   // CATALOG-25 §3.9: light candle view — candles rebuilt from st.actions (never saved)
 import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
 /* wave 3b — live rooms: a RemoteDriver (js/remote.js) holds the game on the server. D = null → a local game, nothing changes.
  * With D: every engine mutation is an intent (await), S is replaced in place by the server's redacted view, no saves/⚡/ghosts. */
@@ -303,6 +304,7 @@ async function initRenderer() {
   } else { lifeP = Promise.resolve(); lifeSettled = true; }
   const cam = $('#camBtn'); if (cam) { cam.hidden = scene.kind !== '3d'; cam.dataset.kind = scene.kind; }
   ui.boardTools({ onHome: homeView, onList: () => openTileList() }); ui.turnChip();
+  ui.setCandleSource?.(candleVm);            // CATALOG-25 §3.9: the trade card's compact chart + the full view read this
   ui.moneyHubBtn?.(() => openMoneyHub());   // wave 3a (J1 P0-4): one "💼 ניהול כסף" entry   // wave 1: "מבט ראשי", the tile list, the turn chip
   lastRect = ''; frame();
   syncLiteBtn();
@@ -402,6 +404,7 @@ function wireUI() {
     if (ab) { sfx('click'); if (innerWidth <= 820) ui.toggleSheet(false); onAssetPick(ab.dataset.assetOpen); return; }   // T5 CR-B2 keyboard path
     const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
     if (b.dataset.act === 'close') { ui.toggleSheet(false); return; }
+    if (b.dataset.act === 'candles') { sfx('click'); if (!busy) ui.candlesFull?.(b.dataset.tk || null); return; }   // §3.9 read-only view
     sheetAction(b.dataset.act);
   };
   addEventListener('keydown', (e) => {
@@ -1477,6 +1480,15 @@ async function doLoan(act) {
   if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
 }
 
+/* ============================================================ CATALOG-25 §3.9: the light candle view's data (js/candlelog.js)
+   A shadow game replays S.actions (exactly like E.replay) and samples the prices after every step: the candles hold only prices the
+   game really had, and the same log rebuilds them after a reload. Lazy (first chart), incremental, async in ~8 ms slices. */
+async function candleVm() {
+  const st = S; if (!st) return null;
+  const book = await CL.sync(st);
+  return st === S ? CL.viewModel(st, book) : null;
+}
+
 /* ============================================================ wave 3a (J1 P0-4): the money hub — a menu over the existing actions */
 async function openMoneyHub() {
   if (!S || S.over || summarized) return;
@@ -1484,8 +1496,10 @@ async function openMoneyHub() {
   const H = moneyHubModel(E.metrics(S));
   // past the ★ limit of a free run: "לסכם את הריצה" is here too (on phones the HUD has no room for the 🏁 button)
   if (canSummarize()) H.rows.push({ id: 'sum', icon: '🏁', title: 'הריצה', value: `עבר מועד הכוכבים (חודש ${S.maxMonths})`, acts: [{ act: 'summarize', label: 'לסכם את הריצה', on: true }] });
+  if (S.prices && Object.keys(S.prices).length && ui.candlesFull) H.more = [{ act: 'candles', label: '📈 מחירים, נרות וחדשות' }];   // §3.9: outside the rows (the rows stay the engine model)
   const act = await ui.moneyHub?.(H);
   if (!act || !S || S.over || busy || ui.isEventOpen()) return;
+  if (act === 'candles') { ui.candlesFull(null); return; }
   if (act === 'summarize') { summarizeRun(false); return; }
   if (act === 'world') { openWorldPanel(); return; }
   if (act === 'plan' || act === 'focus') { lifeChip(act); return; }
