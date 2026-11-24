@@ -14,9 +14,11 @@ const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const groups = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 /** share price as the engine prints it (E.fmtP): ₪0.05 / ₪15 / ₪1,234.5 */
 export const fmtP = (n) => '₪' + (n === 0 ? '0' : Math.abs(n) < 1 ? Math.abs(n).toFixed(2) : groups(+Math.abs(n).toFixed(2)));
-const fmtMoney = (n) => { const r = Math.round(n); return (r < 0 ? '−' : '') + '₪' + groups(Math.abs(r)); };
-const sgnP = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + fmtP(n);
-const sgnM = (n) => (Math.round(n) > 0 ? '+' : '') + fmtMoney(n);
+// a sign before ₪ gets a word joiner (U+2060), like ui.js escI: Chrome otherwise shows "+₪4" as "₪4+" inside the RTL card
+const WJ = '\u2060';
+const fmtMoney = (n) => { const r = Math.round(n); return (r < 0 ? '−' + WJ : '') + '₪' + groups(Math.abs(r)); };
+const sgnP = (n) => (n > 0 ? '+' + WJ : n < 0 ? '−' + WJ : '') + fmtP(n);
+const sgnM = (n) => (Math.round(n) > 0 ? '+' + WJ : '') + fmtMoney(n);
 const pctS = (x) => (x > 0 ? '+' : x < 0 ? '−' : '') + (Math.round(Math.abs(x) * 10) / 10) + '%';
 const N = (n) => Math.round(n).toLocaleString('en-US');
 const num = (s, c = '') => `<span class="num${c ? ' ' + c : ''}">${esc(s)}</span>`;
