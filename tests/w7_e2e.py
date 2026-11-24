@@ -119,7 +119,7 @@ async def run_map(b):
         meta = await pg.evaluate("import('./js/progress.js').then((P) => P.worldMap().map((m) => ({ id: m.id, playable: m.playable, unlocked: m.unlocked })))")
         pm = [m['id'] for m in meta if m['playable']]
         check(sc, 'meta: w1–w8 playable (the map and the UI agree)', pm[:8] == ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8'], pm)
-        check(sc, 'the map renders every P.worldMap() entry in order (12)', [c['id'] for c in cards] == [m['id'] for m in meta] and len(cards) == 12, [c['id'] for c in cards])
+        check(sc, f'the map renders every P.worldMap() entry in order ({len(meta)})', [c['id'] for c in cards] == [m['id'] for m in meta] and len(cards) == len(meta) >= 12, [c['id'] for c in cards])
         for wid, learn, motif in (('w7', 'צמיחה אוכלת מזומן', '🛍️'), ('w8', 'מימון בשלבים', '🏗️')):
             c = next((x for x in cards if x['id'] == wid), None)
             check(sc, f'{wid} is a playable card after the w5 escape (button, data-act=world), says what it teaches, difficulty, generated art {motif}',

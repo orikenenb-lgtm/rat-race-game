@@ -96,18 +96,18 @@ async def run_map(b):
         cards = await pg.evaluate(MAP)
         ids = [c['id'] for c in cards]
         meta = await pg.evaluate("import('./js/progress.js').then((P) => P.worldMap().map((m) => ({ id: m.id, playable: m.playable, unlocked: m.unlocked, lockText: m.lockText })))")
-        check(sc, 'the map renders every P.worldMap() entry in order (12)', ids == [m['id'] for m in meta] and len(ids) == 12, ids)
+        check(sc, f'the map renders every P.worldMap() entry in order ({len(meta)})', ids == [m['id'] for m in meta] and len(ids) == len(meta) >= 12, ids)
         play = [c for c in cards if not c['soon']]; soon = [c for c in cards if c['soon']]
         pm = [m['id'] for m in meta if m['playable']]
         check(sc, 'playable worlds are buttons (data-act=world), planned ones are "בקרוב" pins', [c['id'] for c in play] == pm and all(c['tag'] == 'BUTTON' and c['act'] == 'world' for c in play), play)
-        check(sc, 'no fake play button on a planned world (no button, no data-act)', all(c['tag'] != 'BUTTON' and not c['act'] and c['buttons'] == 0 for c in soon) and len(soon) == 12 - len(pm), soon)
+        check(sc, 'no fake play button on a planned world (no button, no data-act)', all(c['tag'] != 'BUTTON' and not c['act'] and c['buttons'] == 0 for c in soon) and len(soon) == len(meta) - len(pm), soon)
         w5 = next((c for c in cards if c['id'] == 'w5'), None)
         check(sc, 'w5 is unlocked through progress (★ in w1–w4) and shows what it teaches + difficulty', w5 and not w5['locked'] and 'עסק עונתי' in w5['learn'] and w5['diff'], w5)
         check(sc, 'later worlds use generated card art (no missing image), w1–w4 their painted cards', all(c['gen'] and not c['img'] for c in cards if c['id'] not in ('w1', 'w2', 'w3', 'w4')) and all(c['img'] for c in cards if c['id'] in ('w1', 'w2', 'w3', 'w4')), cards)
         lk = [c for c in soon if 'ייפתח' in c['line']]
         check(sc, 'planned worlds show their unlock rule ("ייפתח: ★ …", forks "★ באחד מ: …")', len(lk) == len(soon) and any('באחד מ' in c['line'] for c in soon), [c['line'] for c in soon])
         tr = await pg.evaluate("() => ({ n: document.querySelectorAll('.map-trail li').length, soon: (document.querySelector('.map-trail li.soon') || {}).textContent || '' })")
-        check(sc, 'the trail: the playable worlds + one "🔜 N" item', tr['n'] == len(pm) + 1 and str(12 - len(pm)) in tr['soon'], tr)
+        check(sc, 'the trail: the playable worlds + one "🔜 N" item', tr['n'] == len(pm) + 1 and str(len(meta) - len(pm)) in tr['soon'], tr)
         ov = await pg.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
         check(sc, 'no horizontal overflow', ov)
         await shot(pg, f'map_{vp}')
