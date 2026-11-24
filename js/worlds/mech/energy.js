@@ -389,13 +389,13 @@ energy.tiles.V = {
   describe(st, p, ev, ctx) {
     const s = p.site; const I = siteInfo(st, p, ctx); const T = TECH[s.tech];
     ev.tag = 'אתר לפרויקט אנרגיה'; ev.title = s.n;
-    ev.text = `${s.d} ${T.label}, ${s.mw} מגה־ואט. עלות הקמה ${ctx.fmtM(I.capex)} ב־${T.stages} שלבים. ייזום ${ctx.fmtM(I.dev)} עכשיו, ו־30% הון עצמי לפני שהבנק נכנס. היתרים: ${I.permit.lo}–${I.permit.hi} חודשים.`;
+    ev.text = `${s.d} ${T.label}, ${s.mw} מגה־ואט. עלות הקמה ${ctx.fmtM(I.capex)} ב־${T.stages} שלבים. ייזום ${ctx.fmtM(I.dev)} עכשיו, ו־${Math.round(DEV.eqReq * 100)}% הון עצמי לפני שהבנק נכנס. היתרים: ${I.permit.lo}–${I.permit.hi} חודשים.`;
     ev.mentor = ctx.mentorLine(st, 'siteAsk', {}) || 'תשתית היא כסף של היום תמורת כסף של מחר. כמה הון עצמי תצטרך, ומאיפה יגיע החיבור לרשת?';
     ev.data = { tech: s.tech, mw: s.mw, capex: I.capex, dev: I.dev, eqReq: DEV.eqReq, equityNeed: I.eqNeed, stages: T.stages, stageMonths: T.stageMonths, permit: I.permit, checked: !!p.checked, q: I.q, checkFee: DEV.checkFee,
       ebitda: I.ebitda, dcf: I.dcf, refiRoom: I.refiRoom, yieldPct: I.yieldPct, months: I.months, rate: EN(st).rate, spot: EN(st).spot, avg: EN(st).avg, capture: captureOf(st), ppa: ppaNow(st, s.tech),
       slots: { free: freeSlots(st).length, waiting: projs(st).filter((a) => !a.op.slot).length, queued: EN(st).queue.length }, active: projs(st).length, cashAfter: I.cashAfter, nextCalls: I.calls,
       partner: { share: STAKE.share, dev: I.devHalf, cashAfter: I.cashAfterHalf, nextCalls: I.callsHalf },
-      note: 'קודם ייזום והון עצמי (30%), ורק אז הבנק — ורק אם יש לפרויקט חיבור לרשת. כשהתחנה נגמרת: חוזה PPA קבוע או מכירה בשוק החופשי, ואפשר למחזר את ההון במימון מחדש.' };
+      note: `קודם ייזום והון עצמי (${Math.round(DEV.eqReq * 100)}%), ורק אז הבנק — ורק אם יש לפרויקט חיבור לרשת. כשהתחנה נגמרת: חוזה PPA קבוע או מכירה בשוק החופשי, ואפשר למחזר את ההון במימון מחדש.` };
     if (I.cashAfter < I.calls) ev.data.warning = `אחרי הייזום יישארו ${ctx.fmtM(Math.max(0, I.cashAfter))}, וההון העצמי של הפרויקטים הפתוחים הוא בערך ${ctx.fmtM(I.calls)}.`;
     const full = projs(st).length >= MAX_OPEN || projs(st).length + plants(st).filter((a) => a.op.tech !== 'line').length >= SLOTS; const L = ctx.loanFor(st, I.dev); const LH = ctx.loanFor(st, I.devHalf);
     ev.options = [

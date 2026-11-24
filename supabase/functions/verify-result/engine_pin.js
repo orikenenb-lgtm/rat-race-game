@@ -52,8 +52,8 @@ export const WORLD_PACKS = {
     "worlds/mech/stages.js": "785850301df3d65716b3793192ebf7e2a9e6dc15e71c61e2815313f43e9c1349",
     "worlds/w8.js": "f9e4d2c3b9acb5b1beef5d80539c5ec806cc85a2bf27f76935db9ace9f174aca",
   } },
-  "w9": { sha256: "11bd17a4c4fa9edb2b79284e263ba950e0bd187b2592ecc31f95dbcda3157485", chars: 82800, bytes: 91899, entry: "worlds/w9.js", files: {
-    "worlds/mech/energy.js": "86ff0f0df9f686dcabf12ab303112d84eccb13d3774cde080d32d4c60f9465e3",
+  "w9": { sha256: "b3382ace6059e4607e73178bf164c3a0b45a4e0b8166635c4b991a97dfe75dbf", chars: 82856, bytes: 91955, entry: "worlds/w9.js", files: {
+    "worlds/mech/energy.js": "a37e9aa4210931f43e57eb7b3aeab0b88761232b39478bdc0f1d07ea1b741ae4",
     "worlds/mech/stages.js": "785850301df3d65716b3793192ebf7e2a9e6dc15e71c61e2815313f43e9c1349",
     "worlds/w9.js": "eb1f6de2a9732e5ec4488f66e8a93964ef61f422d88e00882c8fa6c0537ecb15",
   } },
