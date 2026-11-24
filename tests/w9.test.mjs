@@ -52,7 +52,7 @@ function withPlant(seed = 21) { const st = E.createGame({ worldId: 'w9', charId:
 await test('start: rules 6; characters as specified (a 30 MW field with its slot / ₪60M cash / 2 kibbutz parcels and ₪10M); start equity ₪25–60M; goal passiveTarget', () => {
   assert.equal(E.createGame({ worldId: 'w9', seed: 3, rules: 4 }).rules, 6);
   const g = E.createGame({ worldId: 'w9', charId: 'gridEng', seed: 9 }); const r = E.metrics(g).worldIndicators.panel.rows[0];
-  assert.equal(g.cash, 25e6); assert.equal(r.tech, 'solar'); assert.equal(r.mw, 30); assert.equal(r.slot, true); assert.equal(r.phase, 'permit'); assert.ok(r.permit.lo >= 1, 'only the public permit range');
+  assert.equal(g.cash, 25e6); assert.equal(r.tech, 'solar'); assert.equal(r.mw, 30); assert.equal(r.slot, true); assert.equal(r.phase, 'permit'); assert.ok(r.permit.lo >= 1, 'only the public permit range'); { const pa = g.assets.find((a) => a.op && a.op.ck === 'proj'); const wait = pa.op.sb.permitAt - r.permit.from; assert.ok(r.permit.hi - r.permit.lo <= 12 && wait >= r.permit.lo && wait <= r.permit.hi, 'an honest range around the sealed wait, not derived from it'); assert.ok(r.permit.hi - 99 !== wait && r.permit.lo + 99 !== wait); }
   const f = E.createGame({ worldId: 'w9', charId: 'infraFund', seed: 9 }); assert.equal(f.cash, 60e6); assert.equal(f.assets.length, 0);
   const k = E.createGame({ worldId: 'w9', charId: 'kibbutz', seed: 9 }); assert.equal(k.cash, 10e6); assert.equal(E.metrics(k).worldIndicators.energy.sites.length, 2);
   for (const s of [g, f, k]) { const nw = E.metrics(s).netWorth; assert.ok(nw >= 25e6 && nw <= 60e6, s.charId + ' NW ' + nw); }

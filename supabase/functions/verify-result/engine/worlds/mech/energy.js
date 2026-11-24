@@ -168,7 +168,7 @@ function makeProject(st, site, fate, extra = {}) {
   const sb = newBuild({ now: st.month, permitAt: st.month + fate.permit, stages: T.stages, stageMonths: T.stageMonths, cost: capex - dev, land: dev + inKind, eqReq: DEV.eqReq,
     overrun: fate.over, delayAt: fate.delayAt, delay: fate.delay, failAt: -1, equity: dev + inKind });
   return { ck: 'proj', tech: site.tech, mw: site.mw, capex, sb, slot: false, q: fate.q, offtake: site.tech === 'solar' ? 'ppa' : 'merchant', stake: 1,
-    qShown: qRange(st, fate.q, !!extra.checked), permitShown: { lo: Math.max(1, fate.permit - 99), hi: fate.permit + 99 }, inKind, ...extra.op };
+    qShown: qRange(st, fate.q, !!extra.checked), permitShown: { ...permitRange(st, site), from: st.month }, inKind, ...extra.op };
 }
 /** The CF-quality range a player sees: wide, narrower for the grid engineer, ± 3 % after a resource study. */
 function qRange(st, q, checked) { if (checked) return { lo: round2(Math.max(DEV.qLo, q - DEV.qBand)), hi: round2(Math.min(DEV.qLo + DEV.qSpan, q + DEV.qBand)) }; if (isEng(st)) return { lo: round2(Math.max(DEV.qLo, q - DEV.engBand)), hi: round2(Math.min(DEV.qLo + DEV.qSpan, q + DEV.engBand)) }; return { lo: DEV.qLo, hi: round2(DEV.qLo + DEV.qSpan) }; }
