@@ -275,11 +275,13 @@ export function modal({ tag = '', color = '#2f6fdb', title = '', html = '', acti
   if (onOpen) try { onOpen(c); } catch (e) { console.error(e); }
   setTimeout(() => (c.querySelector('.acts button.primary:not(:disabled)') || c.querySelector('.acts button:not(:disabled)'))?.focus(), 40);
   const release = trapFocus(c);
+  const openedAt = performance.now();
   return new Promise((res) => {
     const close = (v) => { release(); m.hidden = true; c.onclick = null; m.onkeydown = null; restoreFocus(prevFocus); res(v); };
     c.onclick = (e) => {
       const b = e.target.closest('button[data-i]');
       if (!b) { if (onExtra) onExtra(e); return; }
+      if (ghostTap(e, openedAt)) return;   // P1: the second tap of a double tap that opened this dialog never answers it
       const a = actions[+b.dataset.i];
       sfx('click');
       if (a.fn && a.fn() === false) return;
@@ -1030,7 +1032,7 @@ export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
   if (gpOpen) goalPanel(false);   // wave 2: the card wins over the goal panel
   debtChip(null);                 // … and over the new-debt chip (the card is the next thing to read)
-  evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() } };
+  evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() }, shownAt: performance.now() };
   if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); stickyAside(); } // phones: the new card wins
   renderEvent(true);
   m.hidden = false;
@@ -1043,7 +1045,7 @@ export function openEvent(ev, ctx, onChoose) {
   return {
     update(nev) {
       if (!evState) return;
-      const prev = evState.ev; evState.ev = nev; evState.imp.cache.clear();
+      const prev = evState.ev; evState.ev = nev; evState.imp.cache.clear(); evState.shownAt = performance.now();   // P1: new buttons under the finger
       // a hint belongs to what was known when it was asked: an inspection (new facts) or a new card clears it
       if (evState.hint && (evState.hint.id !== nev.id || evState.hint.dd !== ddLevel(nev))) evState.hint = null;
       if (prev && prev.id !== nev.id) evState.imp.open = null;
@@ -1077,6 +1079,11 @@ function focusPrimary() {
   if (t) { t.setAttribute('tabindex', '-1'); t.focus({ preventScroll: true }); }
   else c.querySelector('.acts button:not(:disabled)')?.focus({ preventScroll: true });
 }
+/** P1 2026-11-24: a pointer tap that lands within GHOST_MS of a card / dialog opening or changing is the second half of a
+ *  double tap on whatever was under the finger before — never a decision (no double buy / sell / accept). Keyboard
+ *  activations (detail 0) and deliberate repeats after the window are unaffected. */
+const GHOST_MS = 320;
+function ghostTap(e, since) { return !!e && e.detail > 0 && performance.now() - since < GHOST_MS; }
 function onCardClick(e) {
   if (!evState) return;
   const sb = e.target.closest('[data-say]');
@@ -1093,6 +1100,7 @@ function onCardClick(e) {
   if (q) { const d = evState.ev.data; const s = q.dataset.q; evState.q = s === 'max' ? d.maxBuy : s === 'all' ? d.maxSell : s === 'zero' ? 0 : evState.q + +s; sfx('click'); tradeUpd(); return; }
   const b = e.target.closest('button[data-o]');
   if (!b || b.disabled) return;
+  if (ghostTap(e, evState.shownAt || 0)) return;
   const id = b.dataset.o;
   const opt = evState.ev.options.find((o) => o.id === id);
   sfx('click');

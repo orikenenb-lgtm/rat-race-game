@@ -87,6 +87,10 @@ PARAMS = {   # = the keys js/net.js sends (fakebackend_test.py asserts equality)
     'rr_claim_energy': AUTH,
     'rr_log_event': AUTH + ('p_kind', 'p_data'),
     'rr_group_feed': AUTH + ('p_group',),
+    'rr_admin_status': AUTH,
+    'rr_admin_claim': AUTH + ('p_code',),
+    'rr_admin_players': AUTH + ('p_q',),
+    'rr_admin_give': AUTH + ('p_to', 'p_amount'),
 }
 # Server contracts of the NOT-YET-APPLIED drafts (groups v2, competitions, rooms). Wave 3b: js/net.js now sends all of them (behind
 # the `rooms` flag), so they live in PARAMS (fakebackend_test.py asserts PARAMS == net.js); PARAMS_NEXT stays for future drafts.
@@ -197,6 +201,7 @@ class FakeBackend:
         self.events_today = collections.Counter(); self.verify_hits = collections.defaultdict(list)
         self.calls = collections.Counter(); self.log = []; self.blocked = []; self.unexpected = []
         self.requests = []          # (fn | 'verify', body) unredacted, in order — test-side inspection only
+        self.admins = set(); self.admin_code = 'TEST-ADMN-CODE'; self.admin_used = False   # migration 20261123_admin
         self.meta = {}              # free-form data a suite stores with dump() (e.g. which seeded player is "A")
         self.verify_queue = []; self._fail = {}; self._fail_net = {}; self._over = {}
         # assumed semantics (§2.6) — each one has a switch
@@ -786,6 +791,31 @@ class FakeBackend:
         p = self._auth(b); mine = [x for x in self.gifts if x['to'] == p['id'] and not x['claimed']]
         for x in mine: x['claimed'] = True
         return {'total': sum(x['amount'] for x in mine), 'from': [{'nickname': self.P[x['from']]['nickname'], 'kind': x['kind'], 'amount': x['amount']} for x in mine]}
+    # ---- owner (admin) — supabase/migrations/20261123_admin.sql
+    def _rr_admin_status(self, b):
+        p = self._auth(b); return {'admin': p['id'] in self.admins}
+    def _rr_admin_claim(self, b):
+        p = self._auth(b)
+        if p['id'] in self.admins: return {'admin': True}
+        code = str(b.get('p_code') or '').strip().upper()
+        if self.admin_used or self.admins or code != self.admin_code: self._err('bad_code')
+        self.admin_used = True; self.admins.add(p['id']); return {'admin': True}
+    def _rr_admin_players(self, b):
+        p = self._auth(b)
+        if p['id'] not in self.admins: self._err('not_admin')
+        q = str(b.get('p_q') or '').replace('%', '').replace('_', '').lower()
+        rows = [x for x in self.P.values() if not q or q in x['nickname'].lower()]
+        rows.sort(key=lambda x: x.get('created') or '', reverse=True)
+        return [{'id': x['id'], 'nickname': x['nickname'], 'stars': self._total(x), 'joined': (x.get('created') or '')[:10]} for x in rows[:60]]
+    def _rr_admin_give(self, b):
+        p = self._auth(b)
+        if p['id'] not in self.admins: self._err('not_admin')
+        n = b.get('p_amount')
+        if not isinstance(n, int) or not 1 <= n <= 99: self._err('bad_amount')
+        to = self.P.get(b.get('p_to'))
+        if not to: self._err('player_not_found')
+        self.gifts.append({'from': p['id'], 'to': to['id'], 'kind': 'admin', 'amount': n, 'day': self.day_key(), 'group': None, 'claimed': False})
+        return {'ok': True}
     def _rr_log_event(self, b):
         p = self._auth(b); kind = b.get('p_kind')
         if not isinstance(kind, str) or not self.kind_re.fullmatch(kind): self._err('bad_kind')

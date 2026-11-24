@@ -46,5 +46,7 @@ export function isUnlockedBy(id, stars = {}, opts = {}, seen = new Set()) {
 export function unlockText(id) {
   const m = BY_ID[id]; if (!m || !m.unlock || !m.unlock.length) return '';
   const nm = (x) => (BY_ID[x] ? BY_ID[x].name : x);
-  return m.unlock.map((c) => (c.any.length === 1 ? `★ ב${nm(c.any[0])}` : (c.count || 1) === 1 ? `★ באחד מ: ${c.any.map(nm).join(' · ')}` : `★ ב־${c.count} מתוך: ${c.any.map(nm).join(' · ')}`)).join(' וגם ');
+  // a 1★ rule is met by escaping the world at any speed (progress.js worldFinished) — say "לצאת", not "★"
+  const what = (c) => ((c.stars || 1) > 1 ? `${'★'.repeat(c.stars)} ` : 'לצאת מהמירוץ ');
+  return m.unlock.map((c) => (c.any.length === 1 ? `${what(c)}ב${nm(c.any[0])}` : (c.count || 1) === 1 ? `${what(c)}באחד מ: ${c.any.map(nm).join(' · ')}` : `${what(c)}ב־${c.count} מתוך: ${c.any.map(nm).join(' · ')}`)).join(' וגם ');
 }

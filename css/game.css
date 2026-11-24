@@ -70,6 +70,10 @@ body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--a
 /* ============================================================ base */
 *{box-sizing:border-box;min-width:0}
 html,body{height:100%}
+/* P1 2026-11-24: no double-tap zoom anywhere in the app (iOS Safari zooms on two quick taps). `manipulation` keeps panning,
+   scrolling and pinch-zoom; zero specificity, so the canvas / dice (touch-action:none) and any later rule still win.
+   Pinch-zoom stays on: the viewport has no user-scalable=no / maximum-scale. */
+:where(html,body,body *){touch-action:manipulation}
 body{margin:0;color:var(--ink);font:16px/1.5 var(--font);overflow:hidden;background:linear-gradient(180deg,var(--sky1) 0%,var(--sky2) 100%);transition:background .8s;-webkit-tap-highlight-color:transparent}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;background:light-dark(transparent,rgba(8,6,20,.32))}
 body[data-world=w2]::before,body[data-world=w4]::before{background:transparent}
