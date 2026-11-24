@@ -5,6 +5,7 @@ import { registerWorld } from './index.js';
 import w5 from './w5.js';
 import w6 from './w6.js';
 import w7 from './w7.js';
+import w8 from './w8.js';
 
-export const LAZY = [w5, w6, w7];
+export const LAZY = [w5, w6, w7, w8];
 for (const w of LAZY) registerWorld(w);

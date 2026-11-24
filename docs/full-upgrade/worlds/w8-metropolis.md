@@ -113,3 +113,37 @@ goalValue: WIP at cost-to-date (land + paid stages − debt); completed/held at 
 
 ## Size
 XL (the module is shared with w9). `mech/projects.js` ~1,000 lines, data ~350, tests ~600.
+
+## As built (rules 6 — engine lane, wave 3)
+
+Shipped in `js/worlds/mech/stages.js` (the shared staged-build core, **reused by w9**), `js/worlds/mech/projects.js` (the w8 module),
+`js/worlds/w8.js`, `tools/policies/projects.mjs`. Replaces the TUNE values above where they differ.
+
+| item | as built |
+|---|---|
+| draws (`world`) | **12 at init** (the sealed fate of the starting tower / the landowner's 3 plots, 4 each — every character draws 12), 1 per payday (buyer absorption 0.7–1.3), 4 per `Q` landing (permit months, overrun, build delay + its stage, contractor failure) |
+| board | 5 × `Q` "קרקע לפרויקט" (module tile, safe = `pass`) + 9 × `O` (a stalled project at 60 % of cost, a land-bank plot, a rented office building, index funds; golden: a plot with an approved plan) |
+| sites (`w8.sites`) | towers 80–90 units, boutique 40–48, urban renewal 120 (permit +4), mixed-use 100, logistics and offices (no presales, equity 40 %, plan hold); list × 1.06, land × 0.85 of the design numbers |
+| build core (`stages.js`) | permit → N stages × stageMonths (6 × 2, boutique 5 × 2, logistics 4 × 2); each month's stage cost is paid by equity until equity ≥ eqReq × (land + cost) (20 %, 40 % no-presale), then by the escrow, then by the loan **only if the module's gate is open**; otherwise the stage stalls (interest still capitalised); sealed delay stalls the stage it starts in; a contractor failure adds +20 % to the remaining stages and 3 months; value at cost = land + paid stages (+ escrow) |
+| land | the bank finances 50 % of the land with the project (its interest is capitalised); the owner pays the other half — that is the first equity |
+| presales | target share (`Z:presale` 0/30/40/60/100 %); at most 7 % of the units a month × demand × absorption; price list × (0.85 + 0.10 × % complete) × demand (±3 % developer / contractor); **20 % deposits go to the project's escrow** (they pay stages before the loan, never the owner's cash); the loan gate opens at 30 % presold |
+| demand and rate | demand = cycle (exp 1.08 / slow 1 / rec 0.86 / recov 0.95) × (1 − 5 % per point of policy rate above 4.5 %) × shocks, 0.6–1.3; construction loan 0.5 %/mo + rate ÷ 12; rate cards ±1.25 / −1 |
+| contractors | reliable +8 % cost, overrun 0–8 %; cheap overrun 0–35 %, failure 35 % (at a sealed stage); the contractor character builds −15 %, overrun halved |
+| permits | 1–8 months sealed (developer × 0.75, contractor × 1.15); the permit check (₪150k) shows ± 2 months |
+| completion | presale balances (80 %) + the remaining units at today's price, the loans settled (leftover escrow first); `plan: hold` keeps the unsold units as a rental block (rent 0.28 % of list a month, cap 5 % ± half the rate move, half the loans stay as a mortgage at rate + 1.5 %) |
+| bank call | a project stuck for money (equity or the presale gate) 3 months in a row is sold to a rival at 65 % of its cost |
+| holding costs (cash) | land waiting for its permit: 0.3 % of the land a month; a stalled site: 15 % of the stage's month (contractor standby) |
+| recovery | partner (buys 40 % at book, funds 40 % of future equity, takes 40 % of the result) · mezzanine (10 % of cost, + 0.6 %/mo) · pause · self-fund a gated stage · sell to a rival 65 % · sell a plot fast −20 % · sell a rental |
+| combination deal | landowner only: a developer builds and keeps **70 %** of the units (spec said 30–40 % to the developer — that does not cover construction); the owner keeps 30 %, pays nothing |
+| goal | legacy `netWorth` ₪250M with WIP at cost, hold 2 |
+| characters | developer: tower 3/6 (90 units, 30 presold, loan ₪33.5M), cash ₪3M, ★ 64 / 54 / 46 · landowner: 3 plots (₪9M / 8M / 11M), cash ₪4M, ★ 64 / 52 / 44 · contractor: cash ₪40M, builds −15 %, permits × 1.15, ★ 84 / 70 / 58 |
+| Z actions | `presale` · `plan` · `pause` · `selfFund` · `partner` · `mezz` · `sellProj` · `sellPlot` · `sellRent` · `develop` (plot: reliable / cheap / combo) |
+
+w9 reuse: `newBuild / buildMonth / stageCost / monthCost / equityGap / costToComplete / pctDone / valueAtCost` are world-agnostic (no presales, no
+draws, no hooks); w9 sets `gateOk` from its grid-slot rule, leaves `escrow` at 0, and turns a completed build into an operating plant.
+
+Balance (tools/balance-data/gates-w8.json, N = 36 per character): guide 61 % (worst contractor 56 %), blind 0 %, smart 59 % vs naive 0 %,
+every character ≥ 50 %, durable 97 %, median won rolls 81 (won months 59 / 59). Ablations: noPresale 3 % (−56 pp), presaleAll 40 % (−19),
+cheapContractorAlways 37 % (−22), maxOverlap 56 % (**−4 pp, < 5**); maxDebt 61 %. Open: G-dom — A4 gambler best in 3/3 cells (53 % vs smart
+59 %: the archetypes other than the gambler under-build), maxOverlap Δ 4 pp; the spec's world gate "≥ 50 % of smart losses from a liquidity
+squeeze" is not measured yet.

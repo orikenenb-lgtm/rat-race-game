@@ -130,4 +130,8 @@ Shipped in `js/worlds/mech/chain.js` / `js/worlds/w7.js` / `tools/policies/chain
 | characters | shopFounder (id renamed: `founder` is w4's) 3 trading shops + stock + pipeline, cash ₪3M, brand 75, ★ 66 / 54 / 47 · cfo cash ₪14M, 60-day terms, loans −0.3 pp/mo (rebate), ★ 72 / 56 / 46 · franchisor 8 franchises, cash ₪2.5M, 8 % royalty, ★ 80 / 74 / 64 |
 | Z actions | `cover` (0.5/1/1.5/2/3) · `hire` · `fire` · `terms` (30/60) · `close` · `convert` · `buyBack` · `clearance` · `franSys` · `dcLeaseback` |
 
-Balance: see the gate table in `tools/balance-data/gates-w7.json` (quoted in the commit message).
+Balance (tools/balance-data/gates-w7.json, N = 36 per character): guide 68 % (worst franchisor 64 %), blind 0 %, smart 69 % vs naive 0 %
+(bankrupt 100 %), every character ≥ 64 %, durable 100 %, median won rolls 89 (won months smart 65, guide 63). Ablations: openEveryBranch 38 %
+(−31 pp, **bankrupt 52 %** — growth eats cash), neverExpand 26 % (−43), franchiseAll 45 % (−23), noManagers 1 % (−68); maxDebt 46 % (bankrupt
+39 %). Open: G-dom A4 — the founder archetype (survey, then open with ≥ 2 months of fixed costs left) is best in 4/4 cells (79 % vs smart
+69 %): bolder-but-surveyed growth beats the 4-month cushion rule. (A pass that loosened the guide to 3 months made smart worse, 65 %.)

@@ -12,7 +12,7 @@ import w4 from './w4.js';
 import h from './h.js';
 /** Ids of the released lazy worlds (= js/worlds/meta.js status 'lazy'; tools/validate-worlds.mjs checks they agree). Kept here, not read
  *  from meta.js, so the engine — and the verifier's pinned core bundle — never carry the map data. */
-export const LAZY_IDS = Object.freeze(['w5', 'w6', 'w7']);
+export const LAZY_IDS = Object.freeze(['w5', 'w6', 'w7', 'w8']);
 
 export const WORLDS = [w1, w2, w3, w4];
 const BY_ID = Object.fromEntries([...WORLDS, h].map((w) => [w.id, w]));
