@@ -44,6 +44,14 @@ export const WORLD_STYLE = Object.freeze({
   // yellow #eab308, ink #854d0e, decor 'cranes' (w3's crane.glb in the background, procedural cranes on every project), 🏗️. The doc's
   // concrete #e5e7eb is ΔE76 6.5 from w4's board, so the board is a cool concrete #d6d1e6 (ΔE 11.3 to w6, 11.9 to w4, 16.3 to w7).
   w8: { name: 'מטרופולין הנדל"ן', mood: 'building site, clear sky', sky: ['#fde68a', '#93c5fd'], board: '#d6d1e6', edge: '#854d0e', center: '#ebe8f3', decor: 'cranes', accent: '#eab308', accent2: '#93c5fd', accentInk: ['#854d0e', '#facc15'], rim: '#eab308', rimGlow: false, motif: 'cranes', caption: 'הפרויקטים שלך' },
+  // worlds wave 4 — w9 מדבר האנרגיה (docs/full-upgrade/worlds/w9-energy.md "Visual language"): desert noon, sky #fef3c7 → #fbbf24 haze,
+  // ochre dunes #e9c46a (ΔE76 ≥ 25 from every world), the deep-blue panels #1e3a8a, electric cyan #06b6d4 (ink #155e75 / dark #67e8f9 —
+  // w4 owns #22d3ee), decor 'solar' (panel rows, w4's turbine.glb on the ridge, pylons with current pulses ∝ output), ☀️⚡.
+  w9: { name: 'מדבר האנרגיה', mood: 'desert noon', sky: ['#fef3c7', '#fbbf24'], board: '#e9c46a', edge: '#92400e', center: '#f6e7b8', decor: 'solar', accent: '#06b6d4', accent2: '#1e3a8a', accentInk: ['#155e75', '#67e8f9'], rim: '#06b6d4', rimGlow: false, motif: 'solar', caption: 'התחנות שלך', panels: '#1e3a8a' },
+  // w10 מרכז הפיננסים (docs/full-upgrade/worlds/w10-finance.md): a glass tower at blue hour, sky #0f172a → #3b82f6, a navy board #1e293b
+  // (ΔE76 11.8 to w2's slate, ≥ 66 to the rest), gold #d4af37 (ink #7a5a0a / dark #facc15 — the doc's #a16207 is 3.8 on --paper3), decor 'towers' with a ticker ribbon that
+  // flashes red on a margin call (still under reduced motion), 🏦📊.
+  w10: { name: 'מרכז הפיננסים', mood: 'glass towers at blue hour', sky: ['#0f172a', '#3b82f6'], board: '#1e293b', edge: '#0f172a', center: '#334155', decor: 'towers', accent: '#d4af37', accent2: '#3b82f6', accentInk: ['#7a5a0a', '#facc15'], rim: '#d4af37', rimGlow: true, motif: 'ticker', caption: 'המשרד שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -63,6 +71,8 @@ export const CHAR_STYLE = Object.freeze({
   opseng: '#0f766e', heir: '#b45309', trader: '#475569',                // w6
   shopFounder: '#be123c', cfo: '#1d4ed8', franchisor: '#7c3aed',        // w7
   developer: '#ca8a04', landowner: '#4d7c0f', contractor: '#ea580c',    // w8
+  gridEng: '#0891b2', infraFund: '#1e3a8a', kibbutz: '#65a30d',         // w9
+  allocator: '#a16207', blockHeir: '#7c2d12', floorTrader: '#be123c',   // w10
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -88,7 +98,10 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   factory_cnc: '⚙️', factory_plastic: '🧴', factory_food: '🥫', factory_recycle: '♻️', factory_metal: '🔩', factory_pack: '📦',
   // w7 / w8 model keys (procedural stand-ins in 3D, js/render/standins3d.js; no .glb files). w7's warehouse (the DC) keeps its 📦.
   store_street: '🏪', store_mall: '🛍️', store_outlet: '🏷️', store_airport: '✈️', stock_pallets: '📦', ecom_hub: '🌐', regional_office: '🏢',
-  tower_build: '🏗️', logistics_build: '🚚', office_build: '🏢', plot_fence: '🚧', tower_done: '🏙️' });
+  tower_build: '🏗️', logistics_build: '🚚', office_build: '🏢', plot_fence: '🚧', tower_done: '🏙️',
+  // w9 / w10 model keys (procedural stand-ins in 3D, js/render/standins910.js; no .glb files)
+  solar_field: '☀️', wind_farm: '🌬️', battery_yard: '🔋', solar_storage: '🔆', pylon_line: '🗼', h2_pilot: '🧪', grid_slot: '🔌', desert_plot: '🏜️',
+  stone_block: '🧱', vault: '🔒', glass_tower: '🏦' });
 export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
 
 
@@ -109,6 +122,14 @@ export const PLANT_LIGHT_COLOR = Object.freeze({ green: '#22c55e', amber: '#f59e
 export const BRANCH_STAGE_HE = Object.freeze(['בשיפוץ', 'נפתח', 'בהרצה', 'כמעט בשל', 'בשל']);
 const clampN = (x, a, b, d) => Math.max(a, Math.min(b, int(x, d)));
 const frac = (x) => (Number.isFinite(Number(x)) ? Math.max(0, Math.min(1, Math.round(Number(x) * 100) / 100)) : 0);
+/** w9 energy stages (energy.js cityModels stage: 0 permit / slot / plot, 1–3 build, 4 operating, 5 a failed hydrogen pilot) and techs. */
+export const ENERGY_STAGE_HE = Object.freeze(['בהיתרים', 'בבנייה', 'בבנייה', 'בבנייה', 'מחוברת ומייצרת', 'נסגר']);
+export const ENERGY_TECH_HE = Object.freeze({ solar: 'שדה סולארי', wind: 'חוות רוח', storage: 'אגירת סוללות', hybrid: 'סולארי עם אגירה', line: 'קו הולכה', h2: 'פיילוט מימן', slot: 'חיבור לרשת', site: 'קרקע לפרויקט' });
+export const OFFTAKE_HE = Object.freeze({ ppa: 'חוזה PPA', merchant: 'שוק חופשי', line: 'תעריף מפוקח' });
+/** w10 liquidity classes (portfolio.js cityModels cls): the words a block's look stands for (glass / stone / vault — never colour alone). */
+export const LIQ_CLASSES = Object.freeze(['daily', 'monthly', 'locked']);
+export const LIQ_HE = Object.freeze({ daily: 'נזיל תוך יומיים', monthly: 'נזילות חודשית', locked: 'נעול' });
+export const LIQ_COLOR = Object.freeze({ daily: '#7dd3fc', monthly: '#d6c7a1', locked: '#475569' });
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
 export function normLevel(level) {
   if (!level || typeof level !== 'object') return null;
@@ -159,6 +180,25 @@ export function normLevel(level) {
     return { kind: 'build', n, of: 4, pct, floors: plot ? 0 : clampN(level.floors, 0, 60, Math.round(pct * 20)), stalled, crane: !plot && !rental && !permit && !stalled && level.crane !== false,
       permit, presold: plot || rental ? 0 : frac(level.presold), rental, plot, activity: null, trouble: false };
   }
+  if (level.kind === 'energy') {   // w9 (energy.js cityModels): a project (permit 0 / build 1–3), a plant (4), a grid slot, a plot, the hydrogen pilot (5 = failed)
+    const tech = Object.prototype.hasOwnProperty.call(ENERGY_TECH_HE, level.tech) ? level.tech : 'solar';
+    const slot = tech === 'slot' || !!level.slot, plot = !slot && (tech === 'site' || !!level.fence);
+    const n = slot || plot ? 0 : clampN(level.n, 0, 5, 0);
+    const op = n === 4; const down = op && !!level.down;
+    const out = op ? Math.max(0, Math.min(1.5, Math.round((Number.isFinite(Number(level.output)) ? Number(level.output) : 1) * 100) / 100)) : 0;
+    const stalled = !op && !slot && !plot && n < 4 && !!level.stalled;
+    return { kind: 'energy', n, of: 4, tech, pct: op ? 1 : slot || plot ? 0 : frac(level.pct), units: clampN(level.units, 1, 12, 3), unconnected: !op && !plot && (slot || !!level.unconnected),
+      stalled, crane: !op && !slot && !plot && n >= 1 && n <= 3 && !stalled && level.crane !== false, output: down ? 0 : out, offtake: op ? (OFFTAKE_HE[level.offtake] ? level.offtake : 'merchant') : null,
+      stake: Math.max(0.1, Math.min(1, Number.isFinite(Number(level.stake)) ? Math.round(Number(level.stake) * 100) / 100 : 1)), down, spike: op && !!level.spike, slot, plot, failed: tech === 'h2' && n === 5,
+      activity: down ? { breakdown: true } : null, trouble: false };
+  }
+  if (level.kind === 'hold') {   // w10 (portfolio.js cityModels): a block per holding — its liquidity class, value, a margin call (daily), a frozen fund, a lock
+    const cls = LIQ_CLASSES.includes(level.cls) ? level.cls : 'daily';
+    const value = Number.isFinite(Number(level.value)) ? Math.max(0, Math.round(Number(level.value))) : 0;
+    const n = value <= 0 ? 0 : Math.max(1, Math.min(6, Math.round(Math.log10(Math.max(1, value / 1e6)) * 2.2) + 1));   // 1–6 floors: ₪1M → 1 … ₪100M+ → 6
+    return { kind: 'hold', n, of: 6, cls, value, call: cls === 'daily' && !!level.call, frozen: cls === 'monthly' && !!level.frozen, lockUntil: cls === 'locked' && Number.isFinite(Number(level.lockUntil)) ? int(level.lockUntil) : null,
+      activity: null, trouble: false };   // a margin call is named in the level text (never "העסק בבעיה")
+  }
   return null;
 }
 /** T5-L0/L1/L2 */
@@ -185,6 +225,15 @@ export function levelText(level) {
     if (L.permit) return 'ממתין להיתר בנייה';
     return `בבנייה: ${Math.round(L.pct * 100)}% · שלב ${L.n} מתוך 4${L.stalled ? ' · העבודה עומדת' : ''}${L.presold ? ` · ${Math.round(L.presold * 100)}% נמכרו על הנייר` : ''}`;
   }
+  if (L.kind === 'energy') {
+    if (L.slot) return 'חיבור פנוי לרשת · מחכה לפרויקט';
+    if (L.plot) return 'קרקע לפרויקט · עוד לא התחילו';
+    if (L.tech === 'h2') return L.failed ? 'הפיילוט נסגר' : L.n === 4 ? 'הפיילוט הצליח' : 'פיילוט בניסוי';
+    if (L.n === 4) return `מחוברת ומייצרת${L.down ? ' · מושבתת החודש' : ` · תפוקה ${Math.round(L.output * 100)}% מהרגיל`}${L.offtake ? ` · ${OFFTAKE_HE[L.offtake]}` : ''}${L.stake < 1 ? ` · ${Math.round(L.stake * 100)}% שלך` : ''}${L.spike ? ' · קפיצת מחיר' : ''}`;
+    if (L.n === 0) return `בהיתרים${L.unconnected ? ' · בלי חיבור לרשת' : ''}`;
+    return `בבנייה: ${Math.round(L.pct * 100)}% · שלב ${L.n} מתוך 3${L.stalled ? ' · העבודה עומדת' : ''}${L.unconnected ? ' · בלי חיבור לרשת' : ''}`;
+  }
+  if (L.kind === 'hold') return `${LIQ_HE[L.cls]}${L.call ? ' · קריאת מרווח' : ''}${L.frozen ? ' · קפוא החודש' : ''}${L.lockUntil != null ? ` · נעול עד חודש ${L.lockUntil}` : ''}`;
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
 /** T5-H0…H3 / T5-HU */
@@ -201,6 +250,12 @@ export function levelHint(level) {
   if (L.kind === 'build') return L.plot ? 'מגרש בלי פרויקט: אפשר להתחיל פרויקט או למכור, בלוח הפרויקטים.' : L.rental ? 'הדירות שלא נמכרו נשארו אצלך להשכרה.'
     : L.permit ? 'עד ההיתר אין בנייה, והקרקע עולה מס ואגרות כל חודש.' : L.stalled ? 'הברזנט = העבודה עומדת (אין הון עצמי, אין מספיק מכירות, או עיכוב). הריבית ממשיכה לרוץ.'
     : 'הקומות והעגורן = ההתקדמות. השווי של בניין שלא נגמר = מה ששולם עליו.';
+  if (L.kind === 'energy') return L.slot ? 'חיבור לרשת: בלעדיו הבנק לא מממן את הבנייה. פרויקט שמחכה לוקח אותו כשמתחילים לבנות.' : L.plot ? 'אפשר להתחיל פרויקט על הקרקע הזו בלוח התחנות.'
+    : L.n === 4 ? 'הזרם בקווים = התפוקה. תחנה שעובדת אפשר לממן מחדש בלוח התחנות — כסף עכשיו, החזר גבוה יותר כל חודש.'
+    : L.unconnected ? 'הכבל המנותק = אין חיבור לרשת. בלי חיבור הבנק לא מממן את הבנייה, והפרויקט נעצר.' : L.stalled ? 'העבודה עומדת: אין הון עצמי, אין חיבור או שהבנייה הושהתה. הריבית ממשיכה לרוץ.'
+    : 'הפאנלים מצטרפים שורה אחרי שורה. עד החיבור לרשת אין הכנסה.';
+  if (L.kind === 'hold') return L.cls === 'daily' ? 'זכוכית = נזיל: מניות וקרן מדד שאפשר למכור תוך יומיים. רצועת המניות מהבהבת באדום בקריאת מרווח.'
+    : L.cls === 'monthly' ? 'אבן = נזילות חודשית: קרן שאפשר לפדות רק ביום המשכורת הבא (או מיד, בהנחה).' : 'כספת = נעול: השקעה פרטית שאי אפשר למכור מהר, ואי אפשר ללוות כנגדה.';
   return HINTS[L.n];
 }
 /** '●●○' — 2D pips (visual only, aria-hidden). */
@@ -212,6 +267,8 @@ export function pipsText(level) {
   if (L.kind === 'stock') return '▮'.repeat(L.n) + '▯'.repeat(4 - L.n);
   if (L.kind === 'mgr') return '';
   if (L.kind === 'build') { if (L.plot) return '🚧'; if (L.rental) return '🔑'; if (L.permit) return '📋'; }   // w8
+  if (L.kind === 'energy') { if (L.slot) return '🔌'; if (L.plot) return '🏜️'; if (L.tech === 'h2') return L.failed ? '✖' : L.n === 4 ? '✔' : '🧪'; if (L.n === 0) return '📋'; if (L.n === 4) return L.down ? '⛔' : '▮'.repeat(Math.max(1, Math.min(3, Math.round(L.output * 3)))) + '▯'.repeat(3 - Math.max(1, Math.min(3, Math.round(L.output * 3)))); return '●'.repeat(L.n) + '○'.repeat(3 - L.n); }   // w9
+  if (L.kind === 'hold') return L.cls === 'daily' ? '▮'.repeat(L.n) : L.cls === 'monthly' ? '▭'.repeat(L.n) : '🔒';   // w10
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -239,6 +296,8 @@ export function kitParts(level) {
   if (L.kind === 'branch') { p.lights = L.n; p.fitout = L.fitout; p.flicker = L.flicker; p.franchise = !L.own; p.stockout = L.stockout; return p; }   // w7: on the model (paintBranch)
   if (L.kind === 'stock') { p.pallets = L.n; return p; }
   if (L.kind === 'mgr') { p.links = L.links; return p; }
+  if (L.kind === 'energy') { p.units = L.units; p.pct = L.pct; p.stage = L.n; p.crane = L.crane; p.stalled = L.stalled; p.cable = L.unconnected; p.output = L.output; p.down = L.down; p.offtake = L.offtake; p.stake = L.stake; p.slot = L.slot; p.fence = L.plot; p.failed = L.failed; return p; }   // w9 (standins910.js paintEnergy)
+  if (L.kind === 'hold') { p.cls = L.cls; p.floors = L.n; p.call = L.call; p.frozen = L.frozen; p.lock = L.lockUntil != null; return p; }   // w10 (paintHold)
   if (L.kind === 'build') { p.floors = L.floors; p.pct = L.pct; p.crane = L.crane; p.tarp = L.stalled; p.permit = L.permit; p.presold = L.presold; p.rental = L.rental; p.fence = L.plot; return p; }   // w8 (paintBuild)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }

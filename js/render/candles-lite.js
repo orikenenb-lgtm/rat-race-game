@@ -28,6 +28,8 @@ const WORD = { up: 'עלה', down: 'ירד', flat: 'לא זז' };
 const cls = (x) => (x > 0 ? 'pos' : x < 0 ? 'neg' : '');
 
 export const EDU = 'סימולציה בלבד: המחירים כאן נוצרים במשחק. נרות מהעבר לא מנבאים את העתיד.';
+/** w10's market screen (the owner's brief): one short line, always visible under the chart */
+export const SIM_NOTE = 'סימולציה — גרף ותוצאה במשחק אינם מבטיחים תוצאה בעולם האמיתי';
 export const FLAT_NOTE = 'המחיר זז רק כשיש חדשות — לכן הרבה נרות שטוחים.';
 
 /** the plain-text line for one candle (readout + aria-valuetext) */
@@ -37,6 +39,7 @@ export function candleText(s, c, { html = false } = {}) {
   const when = c.open ? `חודש ${n(String(c.m))} (עדיין פתוח)` : `חודש ${n(String(c.m))}`;
   const parts = [when, `פתיחה ${n(fmtP(c.o))}`, `גבוה ${n(fmtP(c.h))}`, `נמוך ${n(fmtP(c.l))}`, `${c.open ? 'עכשיו' : 'סגירה'} ${n(fmtP(c.c))}`,
     `${ARROW[d]} ${WORD[d]}${d === 'flat' ? '' : ` ${n(sgnP(ch), cls(ch))} (${n(pctS(pc), cls(ch))})`}`];
+  if (c.v != null) parts.push(`מחזור ${n(N(c.v))} מניות${c.n != null ? ` · ${n(N(c.n))} עסקאות` : ''}`);   // w10: volume (engine prints / shares)
   if (c.x) parts.push('חודש שעבר באותה הטלה (שני ימי משכורת בהטלה אחת)');
   if (c.b || c.s) parts.push(`העסקאות שלך: ${c.b ? `קנית ${n(N(c.b))}` : ''}${c.b && c.s ? ' · ' : ''}${c.s ? `מכרת ${n(N(c.s))}` : ''}`);
   const nw = (s.news || []).find((x) => x.m === c.m);
@@ -81,6 +84,9 @@ export function svgFor(s, { W = 340, H = 150, n = 36, sel = null, compact = fals
     if (c.s) g += `<path class="cdl-sell" d="M${cx} ${f(y(c.h) - 4)} l4 -7 h-8z"/>`;
     out.push(g + '</g>');
   });
+  // w10: volume bars along the bottom of the plot (engine volume per month; low, behind nothing — the readout / table carry the number)
+  const vmax = Math.max(0, ...shown.map((c) => +c.v || 0));
+  if (vmax > 0) shown.forEach((c, i) => { const hh = Math.max(1, ((+c.v || 0) / vmax) * plotH * 0.18); out.push(`<rect class="cdl-vol" x="${f(x0 + i * slot + slot / 2 - bw / 2)}" y="${f(padT + plotH - hh)}" width="${f(bw)}" height="${f(hh)}"/>`); });
   // month labels: first, middle, last (numbers only; the caption under the chart says "חודשי משחק")
   const lab = shown.length ? [...new Set([0, Math.floor((shown.length - 1) / 2), shown.length - 1])] : [];
   for (const i of lab) out.push(`<text class="cdl-ax cdl-mx" x="${f(x0 + i * slot + slot / 2)}" y="${f(H - 5)}" text-anchor="middle">${shown[i].m}</text>`);
@@ -106,7 +112,7 @@ export function mountChart(host, s, opts = {}) {
     sel = Math.max(0, Math.min(shown.length - 1, i | 0)); const c = shown[sel];
     band.setAttribute('x', String(Math.round((x0 + sel * slot) * 10) / 10));
     ch.setAttribute('aria-valuenow', String(sel + 1)); ch.setAttribute('aria-valuetext', candleText(s, c));
-    ro.innerHTML = candleText(s, c, { html: true }); ro.dataset.m = String(c.m);
+    ro.innerHTML = candleText(s, c, { html: true }); ro.dataset.m = String(c.m); ro.dataset.ohlc = [c.o, c.h, c.l, c.c].join(','); if (c.v != null) ro.dataset.v = String(c.v);
     host.querySelectorAll('.cdl-c.on').forEach((g) => g.classList.remove('on'));
     const g = host.querySelectorAll('.cdl-c')[sel]; if (g) g.classList.add('on');
     if (opts.onSelect) try { opts.onSelect(c, sel); } catch (e) { /* ignore */ }
@@ -137,6 +143,12 @@ export function miniHtml(s) {
     <p class="note cdl-edu">${esc(EDU)}</p><button type="button" class="chip cdl-more" data-cdl-full="${esc(s.key)}">📈 גרף מלא, חדשות ורווח/הפסד</button>`;
 }
 
+/** the month table (OHLC + change; + volume when the series has it — w10); `open` = shown expanded */
+export function tableHtml(s, { open = false } = {}) {
+  const vol = s.cand.some((c) => c.v != null);
+  const rows = s.cand.slice().reverse().map((c) => { const d = dirOf(c); return `<tr data-m="${esc(String(c.m))}"><th scope="row">${num(String(c.m))}${c.open ? ' <small>פתוח</small>' : ''}${c.x ? ' <small>בהטלה</small>' : ''}</th><td>${num(fmtP(c.o))}</td><td>${num(fmtP(c.h))}</td><td>${num(fmtP(c.l))}</td><td>${num(fmtP(c.c))}</td><td class="${cls(c.c - c.o)}">${ARROW[d]} ${d === 'flat' ? '' : num(pctS(c.o ? (c.c / c.o - 1) * 100 : 0))}</td>${vol ? `<td>${num(N(+c.v || 0))}</td>` : ''}</tr>`; }).join('');
+  return `<details class="cdl-tbl"${open ? ' open' : ''}><summary>טבלת חודשים: פתיחה · גבוה · נמוך · סגירה${vol ? ' · מחזור' : ''}</summary><div class="cdl-tw"><table><thead><tr><th scope="col">חודש</th><th scope="col">פתיחה</th><th scope="col">גבוה</th><th scope="col">נמוך</th><th scope="col">סגירה</th><th scope="col">שינוי</th>${vol ? '<th scope="col">מחזור (מניות)</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
 /** one listing's full body (the chart is mounted into .cdl-host afterwards) */
 export function bodyHtml(s, vm) {
   const H = s.hold;
@@ -150,8 +162,7 @@ export function bodyHtml(s, vm) {
   const news = (s.news || []).filter((x) => x.p1 !== x.p0 || /נמחקו|הושק/.test(x.text)).slice(0, 8);
   const newsHtml = news.length ? `<h3 class="cdl-h3">📰 מה הזיז את המחיר</h3><ul class="cdl-news">${news.map((x) => { const d = x.p1 > x.p0 ? 'up' : x.p1 < x.p0 ? 'down' : 'flat'; const pc = x.p0 ? (x.p1 / x.p0 - 1) * 100 : 0;
     return `<li><span class="cdl-nm">חודש ${num(String(x.m))}</span> ${esc(x.text)}${d === 'flat' ? '' : ` <span class="cdl-nd">${ARROW[d]} ${num(fmtP(x.p0))} ← ${num(fmtP(x.p1))} (${num(pctS(pc), cls(x.p1 - x.p0))})</span>`}</li>`; }).join('')}</ul>` : '<p class="note">עוד לא היו חדשות שהזיזו את המחיר.</p>';
-  const rows = s.cand.slice().reverse().map((c) => { const d = dirOf(c); return `<tr><th scope="row">${num(String(c.m))}${c.open ? ' <small>פתוח</small>' : ''}${c.x ? ' <small>בהטלה</small>' : ''}</th><td>${num(fmtP(c.o))}</td><td>${num(fmtP(c.h))}</td><td>${num(fmtP(c.l))}</td><td>${num(fmtP(c.c))}</td><td class="${cls(c.c - c.o)}">${ARROW[d]} ${d === 'flat' ? '' : num(pctS(c.o ? (c.c / c.o - 1) * 100 : 0))}</td></tr>`; }).join('');
-  const table = `<details class="cdl-tbl"><summary>טבלת חודשים: פתיחה · גבוה · נמוך · סגירה</summary><div class="cdl-tw"><table><thead><tr><th scope="col">חודש</th><th scope="col">פתיחה</th><th scope="col">גבוה</th><th scope="col">נמוך</th><th scope="col">סגירה</th><th scope="col">שינוי</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  const table = tableHtml(s);
   const partial = vm && vm.diverged ? `<p class="note">ההיסטוריה המלאה לא זמינה במשחק הזה — הנרות מתחילים בחודש ${num(String(vm.partialFrom ?? s.listedM))}.</p>` : '';
   return `<div class="cdl-head"><div class="cdl-id"><b class="cdl-name">${esc(s.name)}</b><small>סימול ${num(s.symbol)} · ${esc(s.generic ? `סוג: ${s.sector}` : `ענף: ${s.sector}`)}</small></div>
       <div class="cdl-px"><b class="num">${esc(fmtP(s.price))}</b><small>${s.live ? chgLine(s) : 'מחיר אחרון'}</small><small>${s.live ? `מאז ${s.listedM > 1 ? `ההנפקה (חודש ${num(String(s.listedM))})` : 'תחילת המשחק'}: ${num(sgnP(s.since), cls(s.since))} (${num(pctS(s.sincePct), cls(s.since))})` : ''}</small></div></div>

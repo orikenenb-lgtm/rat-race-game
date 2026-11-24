@@ -7,6 +7,7 @@
 // turns the right half into shutters; a closed asset (a water park in winter, a half-built park) is all dark. paintWindows() is the
 // only writer; scene.js calls it from applyLevelParts. Pure three.js, no DOM, no engine import.
 import * as THREE from 'three';
+import { W910 } from './standins910.js';   // w9 / w10 stand-ins (energy sites, holdings blocks)
 
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, ...o });
 const box = (g, w, h, d, c, x = 0, y = 0, z = 0, o) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c, o)); m.position.set(x, y + h / 2, z); g.add(m); return m; };
@@ -474,7 +475,7 @@ export function stepCrane(g, dt) {
 export function buildCrane(h = 6) { const g = new THREE.Group(); towerCrane(g, { x: 0, z: 0, h, jib: h * 0.6 }); return shadowAll(g); }
 
 /** Model names that are built here in every world (no GLB is ever requested for them). */
-const W78 = Object.freeze({ ...SHOP, ...SITE, stock_pallets: stockPallets, ecom_hub: ecomHub, regional_office: regionalOffice, tower_done: towerDone, plot_fence: plotFence });
+const W78 = Object.freeze({ ...SHOP, ...SITE, stock_pallets: stockPallets, ecom_hub: ecomHub, regional_office: regionalOffice, tower_done: towerDone, plot_fence: plotFence, ...W910 });
 export const STANDIN_NAMES = Object.freeze([...Object.keys(BUILD), ...Object.keys(PLANT), ...Object.keys(W78)]);
 /** Names built here only for a given asset folder (a name another world has a real .glb for). */
 const DIR_BUILD = Object.freeze({ w6: Object.freeze({ warehouse: warehouse6 }), w7: Object.freeze({ warehouse: warehouse7 }) });
@@ -491,6 +492,6 @@ export function buildStandin(name, dir = null) {
   const f = (own(BUILD, n) && BUILD[n]) || (own(PLANT, n) && PLANT[n]) || (own(W78, n) && W78[n]) || (d && DIR_BUILD[d] && DIR_BUILD[d][n]); if (!f) return null;
   const g = shadowAll(f()); g.userData.standin = name;
   if (g.userData.win) { g.userData.win.castShadow = false; g.userData.win.receiveShadow = false; }
-  for (const k of ['lamp', 'pips', 'lights', 'sign', 'beacon', 'tarp']) if (g.userData[k] && g.userData[k].isMesh) { g.userData[k].castShadow = false; g.userData[k].receiveShadow = false; }
+  for (const k of ['lamp', 'pips', 'lights', 'sign', 'beacon', 'tarp', 'pulses', 'ticker', 'leds', 'frost']) if (g.userData[k] && g.userData[k].isMesh) { g.userData[k].castShadow = false; g.userData[k].receiveShadow = false; }
   return g;
 }

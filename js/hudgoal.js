@@ -8,7 +8,7 @@ import { fmtM } from './engine.js';
 const nf = (n) => Math.round(+n || 0);
 const paydays = (n) => (n === 1 ? 'משכורת אחת' : n === 2 ? 'שתי משכורות' : `${n} משכורות`);
 const pts = (n) => (n === 1 ? 'נקודת השפעה אחת' : `${n} נקודות השפעה`);
-const PART_LABEL = { passive: 'הכנסה פסיבית מול הוצאות', netWorth: 'שווי נקי', impact: 'נקודות השפעה', benchmark: 'שווי מול "קנה והחזק"', passive12: 'ממוצע 12 חודשים: הכנסה מהנכסים' };
+const PART_LABEL = { passive: 'הכנסה פסיבית מול הוצאות', netWorth: 'שווי נקי', impact: 'נקודות השפעה', benchmark: 'שווי מול "קנה והחזק"', passive12: 'ממוצע 12 חודשים: הכנסה מהנכסים', opIncome: 'הכנסה תפעולית אחרי החזר חוב' };
 
 /** w7 liquidity (unit 'months'): months of the chain's fixed costs; 99 = the engine's "no fixed costs yet". */
 export const NO_FIXED = 99;
@@ -35,6 +35,7 @@ function gapText(p, goalType) {
     case 'impact': return p.gap === 1 ? 'חסרה נקודת השפעה אחת' : `חסרות ${nf(p.gap)} נקודות השפעה`;
     case 'benchmark': return `השווי שלך נמוך ב־${fmtM(p.gap)} משל "קנה והחזק"`;
     case 'passive12': return `חסרים ${fmtM(p.gap)} בחודש בממוצע השנתי (היעד: ${fmtM(p.target)} בחודש)`;
+    case 'opIncome': return `חסרים ${fmtM(p.gap)} בחודש של הכנסה תפעולית אחרי החזר החוב (היעד: ${fmtM(p.target)} בחודש)`;   // w9
     case 'liquidity': return `בקופה יש ${p.liquidText || ''} — ${monthsText(p.value)} של עלויות קבועות (${p.fixedText || ''} בחודש). צריך ${nf(p.target)} חודשים.`;   // w7
     default: return goalType ? `חסרים ${fmtM(p.gap)}` : null;
   }
@@ -43,10 +44,13 @@ function ruleText(goalType, parts) {
   const nw = parts.find((p) => p.key === 'netWorth'), im = parts.find((p) => p.key === 'impact');
   switch (goalType) {
     case 'passive': return 'יוצאים מהמירוץ כשההכנסה הפסיבית (כסף שנכסים מכניסים בלי לעבוד) מכסה את כל ההוצאות החודשיות.';
+    case 'nw':   // w10 (goal type 'nw', the same rule)
     case 'netWorth': return `יוצאים מהמירוץ בשווי נקי (כל מה שיש לך פחות החובות) של ${nw ? nw.targetText : ''}.`;
     case 'netWorthImpact': return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} וגם ${im ? pts(nf(im.target)) : ''}. שני הפסים חייבים להתמלא.`;
     case 'benchmark': return 'בסוף התקופה השווי שלך צריך להיות גבוה משל משקיע שקנה את המדד והחזיק.';
     case 'passive12': { const p = parts.find((x) => x.key === 'passive12'); return `יוצאים מהמירוץ כשהממוצע של 12 ימי המשכורת האחרונים — הכנסה מהנכסים, קיץ וחורף יחד — מגיע ל־${p ? p.targetText : ''} בחודש. חודש קיץ אחד לא מספיק.`; }
+    case 'passiveTarget': { const p = parts.find((x) => x.key === 'opIncome') || parts[0];   // w9: the plants' run-rate month after debt service
+      return `יוצאים מהמירוץ כשההכנסה התפעולית של התחנות — בחודש רגיל, אחרי החזר החוב של כל תחנה והריבית על הלוואות הבנק — מגיעה ל־${p ? p.targetText : ''} בחודש. חודש שמשי או קפיצת מחיר אחת לא נספרים.`; }
     case 'all': {   // w7: net worth AND liquidity (months of the chain's fixed costs) — both bars must fill
       const lq = parts.find((x) => x.key === 'liquidity');
       const bits = [nw ? `שווי נקי של ${nw.targetText}` : null, lq ? `קופה (מזומן, חיסכון והשקעות נזילות) של ${lq.targetText} של עלויות קבועות` : null, ...parts.filter((x) => x !== nw && x !== lq).map((x) => `${x.label} ${x.targetText}`)].filter(Boolean);
@@ -86,6 +90,9 @@ export function goalPanelModel(m, o = {}) {
     const sg = x && typeof x === 'object' ? x.starGate : null;
     if (sg && sg.label) gates.push({ key: sg.id || 'world', text: String(sg.label).replace(/^★+\s*/, ''), now: sg.ok ? 'כרגע ✓' : 'נעצר', ok: !!sg.ok });
   }
+  // w10: ★★★ also needs no forced liquidation (portfolio.js starGates 'noForced'; the count is worldIndicators.portfolio.forced)
+  const PFi = (m.worldIndicators || {}).portfolio;
+  if (PFi && PFi.forced != null && !gates.some((g) => g.key === 'noForced')) gates.push({ key: 'noForced', text: 'בלי אף מכירה כפויה', now: +PFi.forced ? `${nf(+PFi.forced)} מכירות כפויות` : 'כרגע ✓', ok: !+PFi.forced });
   let stars = null, starsNote = null;
   if (o.learn) starsNote = 'במשחק לימוד לא אוספים כוכבים — כאן רק לומדים.';
   else if (bench) {
@@ -152,7 +159,7 @@ export function milestoneLadder(m) {
     }
     for (const [f, word] of QUARTER) {
       const goal = t * f;
-      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : p.key === 'passive12' ? `ממוצע שנתי של ${fmtM(goal)} בחודש מהנכסים` : `שווי נקי של ${fmtM(goal)}`;
+      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'opIncome' ? `הכנסה תפעולית של ${fmtM(goal)} בחודש אחרי החזר החוב` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : p.key === 'passive12' ? `ממוצע שנתי של ${fmtM(goal)} בחודש מהנכסים` : `שווי נקי של ${fmtM(goal)}`;
       out.push({ id: `${p.key}${Math.round(f * 100)}`, icon: p.key === 'impact' ? '💗' : p.key === 'passive' || p.key === 'passive12' ? '💸' : '📈', title, value: v, target: p.key === 'impact' ? Math.ceil(goal) : Math.round(goal), unit: p.key === 'impact' ? 'n' : '₪', met: v >= goal && (p.key !== 'passive' || v > 0) });
     }
   }
@@ -199,7 +206,7 @@ export function moneyHubModel(m) {
   // worlds wave 1: a world with a panel descriptor (w5 "עונות ותפוסה") opens it from the hub too
   const WI = m.worldIndicators || {};
   if (WI.panel) {
-    const se = WI.season; const pl = WI.plant; const ch = WI.chain; const pj = WI.proj; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
+    const se = WI.season; const pl = WI.plant; const ch = WI.chain; const pj = WI.proj; const en = WI.energy; const pf = WI.portfolio; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
     // w6 (plant): lines, utilisation, lines down, runway (metrics values only)
     const down = pl ? (WI.panel.rows || []).filter((r) => r.down).length : 0;
     const value = se ? `ביקוש ${(Math.round((+se.tour || 0) * 100) / 100).toFixed(2)}${g && g.value != null ? ` · כרית לחורף ${Math.round(g.value * 10) / 10} חודשים` : ''}${se.line ? ` · קו עונתי ${fmtM(se.line)}` : ''}`
@@ -207,9 +214,12 @@ export function moneyHubModel(m) {
       // w7 (chain): branches (+ franchises), managers' span, liquidity months; w8 (projects): open projects, equity still owed, the rate
       : ch ? `${ch.branches} סניפים${ch.franchises ? ` · ${ch.franchises} בזכיינות` : ''} · ניהול ${ch.branches}/${ch.span} · קופה ${monthsText(ch.liqMonths)}`
       : pj ? `${pj.open} ${pj.open === 1 ? 'פרויקט פתוח' : 'פרויקטים פתוחים'}${pj.equityCalls ? ` · הון עצמי שעוד צריך ${fmtM(pj.equityCalls)}` : ''} · ריבית ${pj.rate}%${(pj.plots || []).length ? ` · ${pj.plots.length} מגרשים` : ''}`
+      // w9 (energy): operating income after debt service vs the target, the rate, free grid slots; w10 (portfolio): net worth, LTV, liquid vs owed
+      : en ? `הכנסה תפעולית ${fmtM(en.income)} מתוך ${fmtM(en.target)} בחודש · ריבית ${en.rate}%${en.slots ? ` · ${en.slots.free} חיבורים פנויים` : ''}`
+      : pf ? `שווי נקי ${fmtM(pf.nw)} · מינוף ${Math.round((+pf.ltv || 0) * 100)}%${pf.call ? ' · ⚠️ קריאת מרווח' : ''}${pf.unfunded ? ` · התחייבויות פתוחות ${fmtM(pf.unfunded)}` : ''}`
       : (WI.panel.title || '');
-    rows.push({ id: 'world', icon: se ? '🌴' : pl ? '🏭' : ch ? '🛍️' : pj ? '🏗️' : '🧭', title: WI.panel.title || 'לוח העולם', value,
-      acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : pl ? 'תחזוקה, משמרות וחוזים' : ch ? 'מלאי, מנהלים וסניפים' : pj ? 'מכירות מוקדמות, שלבים ומימון' : 'לפתוח', on: true }] });
+    rows.push({ id: 'world', icon: se ? '🌴' : pl ? '🏭' : ch ? '🛍️' : pj ? '🏗️' : en ? '☀️' : pf ? '📊' : '🧭', title: WI.panel.title || 'לוח העולם', value,
+      acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : pl ? 'תחזוקה, משמרות וחוזים' : ch ? 'מלאי, מנהלים וסניפים' : pj ? 'מכירות מוקדמות, שלבים ומימון' : en ? 'מימון מחדש, חוזים וחיבורים' : pf ? 'מניות, נרות, מינוף וקרנות' : 'לפתוח', on: true }] });
   }
   if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
   return { rows, cash: +m.cash || 0, cashText: fmtM(+m.cash || 0) };

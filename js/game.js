@@ -499,8 +499,11 @@ export function cityAudit() {
   const cm = E.cityModels(S);
   const chain = Object.fromEntries(cm.filter((m) => m.lights != null && 'franchise' in m).map((m) => [m.key, { stage: m.stage, own: !!m.own, fitout: !!m.fitout, flicker: !!m.flicker, stockout: !!m.stockout }]));
   const managers = cm.filter((m) => m.kind === 'manager').map((m) => m.key);
-  const proj = Object.fromEntries(cm.filter((m) => m.pct != null || m.fence || m.stage === 5).map((m) => [m.key, { stage: m.stage, pct: m.pct ?? null, floors: m.floors ?? null, stalled: !!m.stalled, crane: !!m.craneOn, permit: !!m.permit, presold: m.presold ?? 0, rental: m.stage === 5, plot: !!m.fence }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj };
+  const proj = Object.fromEntries(cm.filter((m) => m.tech == null && (m.pct != null || m.fence || m.stage === 5)).map((m) => [m.key, { stage: m.stage, pct: m.pct ?? null, floors: m.floors ?? null, stalled: !!m.stalled, crane: !!m.craneOn, permit: !!m.permit, presold: m.presold ?? 0, rental: m.stage === 5, plot: !!m.fence }]));
+  // w9: every plant / project / slot / plot (energy.js cityModels); w10: every holding block (portfolio.js cityModels: class, value, call)
+  const energy = Object.fromEntries(cm.filter((m) => m.tech != null).map((m) => [m.key, { tech: m.tech, stage: m.stage ?? 0, pct: m.pct ?? null, unconnected: !!m.unconnected, stalled: !!m.stalled, output: m.output ?? null, offtake: m.offtake || null, stake: m.stake ?? 1, down: !!m.down, slot: !!m.slot, plot: !!m.fence }]));
+  const hold = Object.fromEntries(cm.filter((m) => m.cls != null).map((m) => [m.key, { cls: m.cls, value: m.value ?? 0, call: !!m.call, frozen: !!m.frozen, lockUntil: m.lockUntil ?? null }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -519,6 +522,12 @@ function levelOf(entry, m) {
   if (entry.kind === 'manager') return { kind: 'mgr', links: entry.links || 6 };
   const CH = (m.worldIndicators || {}).chain;
   if (CH && entry.kind === 'inventory') return { kind: 'stock', cover: CH.coverNow };
+  // w9 (energy.js cityModels — every piece carries tech): a project (permit 0 / build 1–3, %, slot, stalled, crane), a plant (4: output, offtake,
+  // stake, down, a price spike), a free grid slot, the kibbutz's plot, the hydrogen pilot (5 = failed). Before w8: w9 pieces carry pct / fence too.
+  if (entry.tech != null) return { kind: 'energy', tech: entry.tech, n: entry.stage ?? 0, of: 4, pct: entry.pct ?? 0, units: entry.units || 3, unconnected: !!entry.unconnected, stalled: !!entry.stalled,
+    crane: !!entry.craneOn, output: entry.output ?? 0, offtake: entry.offtake || null, stake: entry.stake ?? 1, down: !!entry.down, spike: !!entry.spike, slot: !!entry.slot, fence: !!entry.fence };
+  // w10 (portfolio.js cityModels): a block per holding — liquidity class (daily glass / monthly stone / locked vault), value, a margin call, a frozen fund, a lock
+  if (entry.cls != null) return { kind: 'hold', cls: entry.cls, value: entry.value ?? 0, call: !!entry.call, frozen: !!entry.frozen, lockUntil: entry.lockUntil ?? null };
   // w8 (projects.js cityModels): a project (permit / stage / % / floors / stalled / crane / presold), a rental block (stage 5), a fenced plot
   if (entry.pct != null || entry.fence || entry.stage === 5) return { kind: 'build', n: entry.stage ?? 0, of: 4, pct: entry.pct ?? (entry.stage === 5 ? 1 : 0), floors: entry.floors ?? 0, stalled: !!entry.stalled,
     crane: !!entry.craneOn, permit: !!entry.permit, presold: entry.presold ?? 0, rental: entry.stage === 5, plot: !!entry.fence };
@@ -535,7 +544,7 @@ function syncLevels(animate) {
     if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1391,8 +1400,12 @@ async function applyOut(out, opts = {}) {
   if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream, S ? safe0(() => E.metrics(S).dream) : null); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
+  let mkt = 0, mktFirst = null;   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
   for (const n of out.news || []) {
     if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
+    if (n.kind === 'market' && n.text) { mkt++; if (!mktFirst || (mktFirst.rumor && !n.rumor)) mktFirst = n; continue; }
+    if (n.kind === 'portfolio' && n.text) { const hard = /קריאת מרווח|מכירה כפויה|נמכר בכפייה|קראה להון/.test(n.text); ui.toast('🏦 ' + n.text, { kind: hard ? 'bad' : '', keep: hard }); continue; }   // w10: calls are never dropped
+    if (n.kind === 'energy' && n.text) { const bad = /אזהרה|עומד|קראו להלוואות|קרא להלוואה|עיכוב/.test(n.text); ui.toast('☀️ ' + n.text, { kind: bad ? 'bad' : '', keep: /קראו להלוואות|אזהרה/.test(n.text) }); continue; }   // w9
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
@@ -1415,6 +1428,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'story') { ui.toast('📖 ' + n.text, { keep: true, ms: 4200 }); ui.announce?.(n.text); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
+  if (mkt) ui.toast(`📈 ${mktFirst.rumor ? '🗣️ שמועה: ' : ''}${mktFirst.text}${mkt > 1 ? ` · עוד ${mkt - 1} בלוח הבורסה` : ''}`);
   if (out.mentor) ui.mentor(out.mentor);
   if (out.toast) ui.toast(out.toast, { kind: 'bad' });
 }
@@ -1518,14 +1532,30 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null,
+    month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {
   if (!S || S.over || summarized) return;
   if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לפתוח את לוח העולם בין תורות'); return; }
-  if (!panelData() || typeof ui.worldPanel !== 'function') return;
+  const D0 = panelData(); if (!D0 || typeof ui.worldPanel !== 'function') return;
+  // w10: the market screen (companies, candles, a trade with its costs shown before the tap) — previews are the engine's own pure functions
+  if (D0.panel.id === 'market' && typeof ui.marketPanel === 'function') { await ui.marketPanel(panelData, (a) => worldAct(a.id, a.param), marketApi()); render(false); return; }
   await ui.worldPanel(panelData, (a) => worldAct(a.id, a.param));
   render(false);
+}
+/** w10: the order preview of js/worlds/mech/market.js (pure: preview / qtyFor / halfSpread read the state, never write it). The module is
+ *  already loaded by the world (ensureWorld('w10') imported it), so the import costs no request. */
+let MKT = null;
+function marketApi() {
+  if (!MKT) import('./worlds/mech/market.js').then((M) => { MKT = M; }).catch((e) => console.warn('market preview', e));
+  return {
+    ready: () => import('./worlds/mech/market.js').then((M) => { MKT = M; return true; }),
+    preview: (id, side, qty) => (S && S.mkt && MKT ? MKT.preview(S, id, side, qty) : null),
+    qtyFor: (id, cash) => (S && S.mkt && MKT ? MKT.qtyFor(S, id, cash) : 0),
+    block: (id) => (S && S.mkt && MKT ? MKT.tradeBlock(S, id) : 'לא אפשרי עכשיו'),
+    cash: () => (S ? S.cash : 0), month: () => (S ? S.month : 0),
+  };
 }
 /** one module action (E.worldAction) → {ok, error?, toast?}; applies the out like every other between-roll action */
 async function worldAct(id, param) {

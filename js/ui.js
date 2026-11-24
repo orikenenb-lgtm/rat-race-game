@@ -9,7 +9,9 @@ import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
 import { levelText as stageText, levelHint as stageHint } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
-import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
+import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';
+import * as MV from './render/marketview.js';   // w10: the market screen (HTML only; the engine's numbers)
+import { marketSeries } from './candlelog.js';  // w10: the engine's candles in the one chart component's series shape   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
 
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -28,7 +30,7 @@ const HEB = /[\u0590-\u05FF]/;
 let uiG = 'm';
 export function setGender(g) { uiG = g === 'f' ? 'f' : 'm'; }
 /** The engine's genderize for a UI string (data is written in the masculine form). */
-/* wave 2 (A3 #5): the engine's table (pinned) turns "אתה" into "את" but leaves a few verbs after it masculine ("לפני שאת מחליט").
+/* wave 2 (A3 #5): the engine's table (pinned) turns the masculine "you" into the feminine one but leaves a few verbs after it masculine ("לפני שאת מחליט").
    A UI-side pass completes those phrases for a female player — display only; the engine text and its table are unchanged. */
 const GZ_UI_W = { עובד: 'עובדת', משלם: 'משלמת', יודע: 'יודעת', גר: 'גרה', צריך: 'צריכה', עייף: 'עייפה', עומד: 'עומדת', מתאהב: 'מתאהבת', מרוויח: 'מרוויחה',
   מפריש: 'מפרישה', מפסיד: 'מפסידה', מחליט: 'מחליטה', מושך: 'מושכת', מגודר: 'מגודרת', חשוף: 'חשופה', בוחר: 'בוחרת' };   // the words that follow "אתה" in the data
@@ -64,6 +66,11 @@ const STAGE4 = ['בשיפוץ', 'נפתח', 'בהרצה', 'כמעט בשל', 'ב
 const pips4 = (n) => '●'.repeat(Math.max(0, Math.min(4, n | 0))) + '○'.repeat(4 - Math.max(0, Math.min(4, n | 0)));
 const PHASE_HE = { permit: 'ממתין להיתר', build: 'בבנייה', done: 'הושלם' };
 const CTR_HE = { reliable: 'קבלן אמין', cheap: 'קבלן זול' };
+/* w9 (energy) / w10 (market + portfolio): words for the HUD chip, the cards and the panels */
+const TECH_HE = { solar: 'שדה סולארי', wind: 'חוות רוח', storage: 'אגירת סוללות', hybrid: 'סולארי עם אגירה', line: 'קו הולכה', h2: 'פיילוט מימן' };
+const TECH_IC = { solar: '☀️', wind: '🌬️', storage: '🔋', hybrid: '🔆', line: '🗼', h2: '🧪' };
+const OFF_HE = { ppa: 'חוזה PPA קבוע', merchant: 'שוק חופשי', line: 'תעריף מפוקח' };
+const mwh = (x) => `${N(x)} ₪ למגה־ואט שעה`;
 let speed = 1;
 export function setSpeed(f) { speed = f; }
 const vibrate = (p = 12) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { /* ignore */ } };
@@ -110,7 +117,7 @@ export function nearMissText(end) {
   if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
   if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
   if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
-  if (end.starsBlockedBy && end.starsBlockedBy.label) return `יצאת בזמן של ★★★, אבל ${end.starsBlockedBy.label}.`;   // worlds: a module's star rule (w6)
+  if (end.starsBlockedBy && end.starsBlockedBy.label) { const l = String(end.starsBlockedBy.label); return `יצאת בזמן של ★★★, אבל ${/^★/.test(l) ? l : `★★★ רק ${l}`}.`; }   // worlds: a module's star rule (w6: '★★★ רק בלי עצירה…'; w10: 'בלי אף מכירה כפויה')
   return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
 }
 /* ============================================================ toasts */
@@ -402,6 +409,18 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const al = `${wi.panel.title || 'הפרויקטים'}: ${PJ.open} פתוחים${(PJ.plots || []).length ? `, ${PJ.plots.length} מגרשים` : ''}${(PJ.rentals || []).length ? `, ${PJ.rentals.length} בניינים מושכרים` : ''}, ריבית ${PJ.rate}%${PJ.equityCalls ? `, הון עצמי שעוד צריך ${mS(PJ.equityCalls)}` : ''}${st ? `, ${st} עומדים` : ''}`;
     text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">🏗️ ${num(String(PJ.open))}<span class="hb-w"> פרויקטים</span><span class="hb-b"> · ריבית ${num(PJ.rate + '%')}</span>${st ? ` ⛔${num(String(st))}` : ''}</button>`;   // phones: the count (+ stalled); the rate is in the panel
     if ((PJ.plots || []).length) extra = `<span class="hedge" title="מגרשים">🚧${num(String(PJ.plots.length))}</span>`;
+  }
+  else if (wi.energy && wi.panel) {   // w9: operating income after debt service vs the target, the rate — a button that opens the world panel (התחנות והפרויקטים)
+    const EN = wi.energy; key = 'opinc'; v = EN.income; goodUp = 1;
+    const al = `${wi.panel.title || 'התחנות'}: הכנסה תפעולית אחרי החזר חוב ${mS(EN.income)} מתוך ${mS(EN.target)} בחודש, ריבית ${EN.rate}%, ${(EN.slots || {}).free || 0} חיבורים פנויים לרשת${(EN.slots || {}).waiting ? `, ${EN.slots.waiting} פרויקטים מחכים לחיבור` : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">☀️ ${num(money(EN.income))}<span class="hb-w"> בחודש</span><span class="hb-b"> · ריבית ${num(EN.rate + '%')}</span>${(EN.slots || {}).waiting ? ` 🔌${num(String(EN.slots.waiting))}` : ''}</button>`;
+    if (EN.spike) extra = '<span class="hedge" title="קפיצה במחיר החשמל">🔥</span>';
+  }
+  else if (wi.portfolio && wi.panel) {   // w10: the regime and the LTV — a button that opens the market screen (הבורסה והתיק)
+    const PF = wi.portfolio; const R = (wi.market || {}).regime || {}; key = 'ltv'; v = PF.ltv; goodUp = -1;
+    const al = `${wi.panel.title || 'הבורסה'}: מצב השוק ${R.label || ''}, מינוף ${pctI(PF.ltv)}${PF.call ? ', קריאת מרווח פתוחה' : ''}, שווי נקי ${mS(PF.nw)}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">📊 <span class="hb-w">${esc(R.label || '')} · </span>מינוף ${num(pctI(PF.ltv))}${PF.call ? ' ⚠️' : ''}</button>`;
+    if (PF.hedge) extra = '<span class="hedge" title="הגנת אופציות פעילה">🛡️</span>';
   }
   else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
   if (key) {
@@ -812,6 +831,18 @@ export function renderSheet(m, ctx) {
     world = `<div class="wbox"><div class="wl"><span>🛍️ ${esc(wi.panel.title || 'הרשת')}: ${num(`${C.branches}/${C.span}`)}</span><b class="num">${esc(C.liqMonths >= 99 ? 'אין קבועות' : `קופה ${mo1(C.liqMonths)} ח׳`)}</b></div>
       <p class="note">${C.branches || C.franchises ? `${num(String(C.branches))} סניפים מול יכולת ניהול של ${num(String(C.span))} · עלויות קבועות ${num(mS(C.fixedMonth))} בחודש · קופה נזילה ${num(mS(C.liquid))} · מלאי ${num(mS(C.stock))}${C.transit ? ` + בדרך ${num(mS(C.transit))}` : ''}${C.payables ? ` · חוב לספקים ${num(mS(C.payables))}` : ''}${C.franchises ? ` · ${num(String(C.franchises))} בזכיינות` : ''}. ` : 'עוד אין לך סניפים: מיקום לסניף מגיע במשבצת "מיקום לסניף". '}${C.overSpan ? `⚠️ ${num(String(C.overSpan))} סניפים מעבר ליכולת הניהול. ` : ''}${C.lost ? `מכירות שאבדו כשנגמר המלאי: ${num(mS(C.lost))}.` : ''}</p>
       <div class="loans"><button data-act="world">🛍️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+  }
+  else if (wi.energy && wi.panel) {   // w9: the stations box; the full panel (gantt, calls, projects, plants, actions) opens from here
+    const EN = wi.energy;
+    world = `<div class="wbox"><div class="wl"><span>☀️ ${esc(wi.panel.title || 'התחנות')}</span><b class="num">${esc(mS(EN.income))} / ${esc(mS(EN.target))}</b></div>
+      <p class="note">הכנסה תפעולית אחרי החזר חוב, בחודש רגיל: ${num(mSg(EN.income), cls(EN.income))} מתוך ${num(mS(EN.target))}. ריבית ${num(EN.rate + '%')} · חשמל ${num(mwh(EN.px))} · ${num(String((EN.slots || {}).free || 0))} חיבורים פנויים${EN.equityCalls ? ` · הון עצמי שעוד צריך ${num(mS(EN.equityCalls))}` : ''}${EN.built ? ` · ${num(String(EN.built))} תחנות נבנו` : ''}.</p>
+      <div class="loans"><button data-act="world">☀️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+  }
+  else if (wi.portfolio && wi.panel) {   // w10: the portfolio box; the market screen opens from here
+    const PF = wi.portfolio; const R = (wi.market || {}).regime || {};
+    world = `<div class="wbox"><div class="wl"><span>📊 ${esc(wi.panel.title || 'הבורסה והתיק')} · ${esc(R.label || '')}</span><b class="num">מינוף ${esc(pctI(PF.ltv))}</b></div>
+      <p class="note">מניות וקרן מדד ${num(mS((PF.classes || {}).daily || 0))} · קרנות ${num(mS((PF.classes || {}).monthly || 0))} · פרטי ${num(mS((PF.classes || {}).locked || 0))}${PF.debt ? ` · הלוואה כנגד התיק ${num(mS(PF.debt))}` : ''}${PF.unfunded ? ` · התחייבויות פתוחות ${num(mS(PF.unfunded))}` : ''}${PF.call ? ' · <b class="neg">⚠️ קריאת מרווח</b>' : ''}${PF.forced ? ` · ${num(String(PF.forced))} מכירות כפויות` : ''}.</p>
+      <div class="loans"><button data-act="world">📊 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
   }
   else if (wi.proj && wi.panel) {   // w8: the projects box; the full panel (gantt, equity calls, rows, rentals, actions) opens from here
     const PJ = wi.proj;
@@ -1645,9 +1676,75 @@ function projDealHtml(P) {
   if (!P || P.pk == null) return '';
   return `<div class="mini projmini"><p class="mh">🏗️ ${num(String(P.units))} יחידות · מחירון ${num(mS(P.list))} · ${num(String(P.stages))} שלבים × ${num(String(P.stageMonths))} חודשים${P.done ? ` · ${num(String(P.done))} שלבים כבר בנויים` : ''} · בנייה ${num(mS(P.cost))} · הון עצמי ${esc(pctI(P.eqReq))}</p>${P.note ? `<p class="note">${escI(P.note)}</p>` : ''}</div>`;
 }
+/* ---------- w9 (energy): the power-site card (type 'mech', energy.js tiles.V.describe — the card stays open after the resource study) and
+   the deal blocks of a grid slot / an operating plant or line / the hydrogen pilot (data.slot / data.plant.tech / data.h2), the market card's
+   power numbers (data.energy). w10 (market + portfolio): the exchange card (tiles.W: data.market), the private deal (tiles.Y: data.private),
+   a fund deal block (data.fund) and the market card's portfolio numbers (data.portfolio). Engine values only. */
+function powerSiteHtml(d) {
+  const P = d.permit || {}; const S = d.slots || {}; const H = d.partner || {}; const q = d.q || {};
+  const rows = [row('הפרויקט', `${TECH_IC[d.tech] || ''} ${TECH_HE[d.tech] || d.tech} · ${d.mw} מגה־ואט`, 'wrap'),
+    row('עלות הקמה', `${mS(d.capex)} · ${d.stages} שלבים × ${d.stageMonths} חודשים`, 'wrap'),
+    row('ייזום עכשיו', mS(d.dev), 'neg'),
+    row('הון עצמי', `${pctI(d.eqReq)} מהעלות לפני שהבנק נכנס — עוד ${mS(d.equityNeed)} אחרי הייזום`, 'wrap'),
+    row('היתרים', `${P.lo}–${P.hi} חודשים · בערך ${d.months} חודשים עד שהתחנה מחוברת`, 'wrap'),
+    row('תפוקת האתר', `${Math.round((q.lo || 0) * 100)}–${Math.round((q.hi || 0) * 100)}% מהממוצע${d.checked ? ' (אחרי סקר)' : ' (לא נבדק)'}`, (d.checked ? '' : 'neg ') + 'wrap'),
+    row('חיבור לרשת', `${S.free || 0} פנויים${S.waiting ? ` · ${S.waiting} פרויקטים כבר מחכים` : ''}${S.queued ? ` · ${S.queued} בתור` : ''}`, ((S.free || 0) <= (S.waiting || 0) ? 'neg ' : '') + 'wrap'),
+    row('ריבית במשק · חשמל', `${d.rate}% · ${mwh(d.spot)} (ממוצע ${mwh(d.avg)})`, 'wrap'),
+    `<div class="row"><b>מזומן אחרי הייזום</b><b class="big num ${d.cashAfter < d.nextCalls ? 'neg' : ''}">${esc(mS(d.cashAfter))}</b></div>`,
+    row(`הון עצמי שעוד צריך${d.active ? ` (גם ל־${d.active} הפרויקטים הפתוחים)` : ''}`, mS(d.nextCalls), (d.cashAfter < d.nextCalls ? 'neg ' : '') + 'wrap')];
+  const mt = `<div class="mini sitemini enmini"><p class="mh">☀️ התחנה בחודש רגיל, כשהיא עובדת</p><div class="mt">
+    <div><small>לפני החזר חוב</small><b class="num ${cls(d.ebitda)}">${esc(mSg(d.ebitda))}</b><small>תשואה ${esc(String(d.yieldPct))}% בשנה על העלות</small></div>
+    <div><small>שווי היוון (DCF)</small><b class="num">${esc(mS(d.dcf))}</b><small>מקום למימון מחדש ${esc(mS(d.refiRoom))}</small></div>
+    <div><small>PPA עכשיו</small><b class="num">${esc(d.tech === 'storage' ? mS(d.ppa) : mwh(d.ppa))}</b><small>סולארי בשוק מקבל ${esc(pctI(d.capture))} מהמחיר</small></div></div>
+    <p class="note">🤝 עם שותף: הוא שם ${esc(pctI(H.share))} מהייזום ומכל קריאה להון — ומקבל ${esc(pctI(H.share))} מהתחנה. ייזום ${num(mS(H.dev))} · מזומן אחרי ${num(mS(H.cashAfter), H.cashAfter < H.nextCalls ? 'neg' : '')} · הון עצמי שעוד צריך ${num(mS(H.nextCalls))}.</p></div>`;
+  const chk = !d.checked ? `<p class="note">🔎 סקר משאבים (${num(mS(d.checkFee))}) מצמצם את טווח התפוקה. אחרי הסקר הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + mt + chk + (d.note ? `<p class="note">${escI(d.note)}</p>` : '') + (d.warning ? `<p class="warn" role="note">${escI(d.warning)}</p>` : '');
+}
+function energyDealHtml(d) {
+  let x = '';
+  if (d.slot) { const S = d.slot; x += `<div class="mini enmini"><p class="mh">🔌 חיבור לרשת: ${num(String(S.free))} פנויים · ${num(String(S.waiting))} פרויקטים מחכים · ${num(String(S.queued))} בתור (חיבור מהתור לוקח ${num(String(S.queueWait))} חודשים)</p>${S.note ? `<p class="note">${escI(S.note)}</p>` : ''}</div>`; }
+  if (d.plant && d.plant.tech) { const P = d.plant; x += `<div class="mini enmini"><p class="mh">${TECH_IC[P.tech] || ''} ${esc(TECH_HE[P.tech] || '')}${P.mw ? ` · ${num(String(P.mw))} מגה־ואט` : ''} · ${esc(OFF_HE[P.offtake] || P.offtake || '')}</p>
+    ${grid([row('בחודש רגיל לפני חוב', mSg(P.ebitda), cls(P.ebitda)), row('החזר חוב', mS(-(P.debtService || 0)), 'neg'), `<div class="row"><b>נשאר לך בחודש</b>${num(mSg(P.net), 'big ' + cls(P.net))}</div>`, row('שווי היוון (DCF)', mS(P.dcf)), row('מקום למימון מחדש מיד', mS(P.refiRoom), P.refiRoom > 0 ? 'pos' : '')])}${P.note ? `<p class="note">${escI(P.note)}</p>` : ''}</div>`; }
+  if (d.h2) { const H = d.h2; x += `<div class="mini enmini"><p class="mh">🧪 שורף ${num(mS(H.burn))} בחודש · ${num(String(H.months))} חודשים · סיכוי ${num(pctI(H.p))} לשווי ${num(mS(H.payoff))}, אחרת אפס</p>${H.note ? `<p class="note">${escI(H.note)}</p>` : ''}</div>`; }
+  if (d.fund) { const F = d.fund; x += `<div class="mini pfmini"><p class="mh">🧱 קרן · נזילות חודשית · תשואה ${num(String(F.yieldPct) + '%')} בשנה${F.dur ? ` · משך ${num(String(F.dur))} שנים` : ''} · אפשר ללוות כנגדה ${num(pctI(F.ltv))}</p>
+    <p class="note">רגישות: מניות ${num(String(F.beq || 0))} · אשראי ${num(String(F.bcr || 0))} · נדל"ן ${num(String(F.bpr || 0))}. ${esc(F.redeem || '')}.</p>${F.note ? `<p class="note">${escI(F.note)}</p>` : ''}</div>`; }
+  return x;
+}
+function exchangeHtml(d) {
+  const X = d.market || {}; const R = X.regime || {}; const I = X.idx || {}; const F = X.focus;
+  const ch = I.px != null ? MV.changeOf(I) : { d: 0, pct: 0 };
+  const rows = [row('מצב השוק', `${R.label || ''}${R.sectorLabel ? ` · ${R.sectorLabel}` : ''}`, 'wrap'), row(esc(I.name || 'המדד'), `${MV.pxT(I.px)} · ${ch.d > 0 ? '▲ עלה' : ch.d < 0 ? '▼ ירד' : '— לא זז'} ${Math.round(Math.abs(ch.pct) * 10) / 10}% החודש`, 'wrap'), row('התיק שלך בבורסה', mS(X.value || 0))];
+  if (F) { const fc = MV.changeOf(F); rows.push(row(`${esc(F.name)} (${esc(F.tk)})`, `${MV.pxT(F.px)} · ${fc.d > 0 ? '▲' : fc.d < 0 ? '▼' : '—'} ${Math.round(Math.abs(fc.pct) * 10) / 10}% · ${F.sectorLabel || ''}${F.seen ? ` · איכות ${F.seen.bandLabel}` : ''}`, 'wrap')); }
+  const news = (X.news || []).slice().reverse().slice(0, 4);
+  return grid(rows) + (news.length ? `<div class="mini"><p class="mh">📰 חדשות החודש</p><ul class="cdl-news">${news.map((x) => `<li${x.type === 'rumor' ? ' class="rumor"' : ''}>${x.type === 'rumor' ? '🗣️ שמועה: ' : ''}${esc(x.text)}</li>`).join('')}</ul></div>` : '')
+    + `<p class="mk-sim" role="note">⚠️ ${esc(MV_SIM)}</p>` + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+}
+const MV_SIM = 'סימולציה — גרף ותוצאה במשחק אינם מבטיחים תוצאה בעולם האמיתי';
+const PRIV_TYPE_HE = { pe: 'קרן פרייבט אקוויטי', vc: 'הון סיכון מאוחר', stake: 'אחזקה ישירה בחברה פרטית', prop: 'שותפות נדל"ן', credit: 'אשראי פרטי' };
+function privateHtml(d) {
+  const P = d.private || {}; const B = P.band || {};
+  const rows = [row('ההשקעה', `${PRIV_TYPE_HE[P.type] || P.type || ''} · ${mS(P.size)} (או חצי: ${mS(P.half)})`, 'wrap'),
+    row('מכפיל צפוי', `${B.lo}×–${B.hi}×${P.dd ? ' (אחרי בדיקה)' : ' (לא נבדק)'}`, (P.dd ? '' : 'neg ') + 'wrap'),
+    P.calls ? row('קריאות לכסף', `${P.calls.n} × ${mS(P.calls.each)}, כל ${P.calls.gap[0]}–${P.calls.gap[1]} חודשים — לא היום`, 'wrap') : '',
+    P.lock ? row('נעול', `${P.lock[0]}–${P.lock[1]} חודשים`, 'wrap') : '', P.distFrom ? row('חלוקות', `מחודש ${P.distFrom[0]}–${P.distFrom[1]} אחרי ההתחייבות`, 'wrap') : '',
+    row('אפשר ללוות כנגדה', `${pctI(P.ltv)} — שום דבר`, 'neg'),
+    `<div class="row"><b>נזיל (מזומן + מניות) מול התחייבויות פתוחות</b><b class="big num ${P.liquid < P.unfunded ? 'neg' : ''}">${esc(`${mS(P.liquid)} / ${mS(P.unfunded)}`)}</b></div>`,
+    row('נעול מתוך השווי, אחרי ההשקעה', pctI(P.share), P.share > 0.15 ? 'neg' : ''), row('מזומן אחרי', mS(P.cashAfter), P.cashAfter < 0 ? 'neg' : '')];
+  const chk = !P.dd ? `<p class="note">🔎 בדיקת נאותות (${num(mS(P.ddFee))}) מצמצמת את טווח המכפיל. אחרי הבדיקה הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + chk + (P.note ? `<p class="note">${escI(P.note)}</p>` : '');
+}
+function worldMktHtml(d) {   // a module market card's own numbers (w9 energy / w10 portfolio)
+  if (d.energy) { const X = d.energy; return grid([row('ריבית במשק', `${X.rate}%`), row('מחיר החשמל', `${mwh(X.spot)} (ממוצע ${mwh(X.avg)})`, 'wrap'), row('סולארי מקבל בשוק', pctI(X.capture)), X.ppaCut != null && X.ppaCut !== 1 ? row('תעריף לחוזים חדשים', `×${X.ppaCut}`) : '', X.months ? row('לכמה זמן', `${X.months} חודשים`) : '']); }
+  if (d.portfolio) { const X = d.portfolio; const M2 = d.market || {}; return grid([M2.regime ? row('מצב השוק', M2.regime.label || '') : '', M2.idx ? row('המדד', MV.pxT(M2.idx.px)) : '', row('ריבית במשק', `${X.rate}%`), row('מרווח אשראי', `${X.spread} נק׳ אחוז`),
+    row('מינוף (LTV)', `${pctI(X.ltv)}${X.ltv > 1 ? ' — קריאת מרווח' : ''}`, X.ltv > 1 ? 'neg' : ''), X.freezeUntil >= 0 && X.mk === 'freeze' ? row('קרנות קפואות עד', `חודש ${X.freezeUntil}`, 'neg') : '', X.mk === 'gate' ? row('קרנות אשראי נעולות עד', `חודש ${X.gateUntil}`, 'neg') : '', X.flash ? row('הירידה חוזרת', `במשכורת של חודש ${X.flash.back}`, 'pos') : '']) + `<p class="mk-sim" role="note">⚠️ ${esc(MV_SIM)}</p>`; }
+  return '';
+}
 const BODY = {
-  mech(ev) {   // a world module's tile card — w5 'N' (allotment), w6 'C' (supply contract), w7 'R' (site), w8 'Q' (land)
+  mech(ev) {   // a world module's tile card — w5 'N' (allotment), w6 'C' (supply contract), w7 'R' (site), w8 'Q' (land), w9 'V' (power site), w10 'W' / 'Y'
     const d = ev.data || {};
+    if (d.tech && d.mw != null && d.slots && d.partner) return powerSiteHtml(d);   // w9
+    if (d.market && d.market.idx) return exchangeHtml(d);                          // w10 'W'
+    if (d.private && d.private.band) return privateHtml(d);                         // w10 'Y'
     if (d.vol != null && d.delta && typeof d.delta === 'object') return contractHtml(d);
     if (d.site && d.mature && d.locs) return siteHtml(d);
     if (d.pk && d.contractors && d.cost && typeof d.cost === 'object') return landHtml(d);
@@ -1727,9 +1824,10 @@ const BODY = {
         <p class="note">משתנה = התזרים זז עם הריבית. קבועה = נעול, בלי הפתעות, אבל קצת יקר יותר היום.</p></div>`;
     }
     if (d.op) extra += opStripHtml(d);   // w5: an op-asset's 12 months (strip), its weakest month and the winter runway
-    if (d.plant) extra += plantDealHtml(d.plant, d.warning);   // w6: condition, breakdown risk, the month in a boom / normal / recession, delivery, runway
+    if (d.plant && !d.plant.tech) extra += plantDealHtml(d.plant, d.warning);   // w6: condition, breakdown risk, the month in a boom / normal / recession, delivery, runway
     if (d.chain && d.chain.ck) extra += chainDealHtml(d.chain);   // w7: a branch (fit-out + ramp), a DC (−2 % on goods), e-commerce
     if (d.proj && d.proj.pk) extra += projDealHtml(d.proj);       // w8: a stalled project (units, stages built, cost, equity)
+    extra += energyDealHtml(d);                                    // w9: a grid slot, an operating plant / line, the hydrogen pilot; w10: a fund
     if (d.cfAtUsd) {
       const imp = d.sens < 0;
       extra += `<div class="mini"><p class="mh">${d.usdLinked ? 'השווי צמוד לדולר.' : imp ? 'יבואן: משלם לספקים בדולרים — דולר חזק פוגע.' : 'יצואן: מוכר בדולרים — דולר חזק עוזר.'}</p><div class="mt">${d.cfAtUsd.map((x, i) => `<div class="${i === 1 ? 'cur' : ''}"><small>דולר ${usdTxt(x.usd)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b><small>שווי ${fmtC(x.value)}</small></div>`).join('')}</div>
@@ -1753,6 +1851,7 @@ const BODY = {
   },
   market(ev) {
     const d = ev.data;
+    if (d.energy || d.portfolio) return worldMktHtml(d);   // w9 / w10 module market cards
     if (d.kind === 'sell') {
       if (!d.offers.length) return '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
       return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.netAfterTax ?? o.net)}</b>${o.tax ? ` <small>(אחרי מס ${num(fmtM(o.tax))})</small>` : ''}<br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
@@ -2699,12 +2798,12 @@ export function renderNext(g, { show = true } = {}) {
 
 /* ============================================================ 3D upgrade wave 1 (team ג): tile sheet, tile list, board tools, turn chip */
 /** The small accessible sheet for one board tile (data from js/render/tiles.js tileSheet()): icon, full name, what happens there,
- *  "אתה כאן" / "עוד N צעדים". Opened by a tap / click / Enter on a tile (3D raycast or 2D button) or from the tile list. */
+ *  "you are here" (gz: masculine / feminine) / "עוד N צעדים". Opened by a tap / click / Enter on a tile (3D raycast or 2D button) or from the tile list. */
 export function tileSheet(d, { onList = null } = {}) {
   if (!d) return Promise.resolve();
   const html = `<div class="tsheet"><span class="tsicon" aria-hidden="true">${esc(d.emoji || '')}</span>
     <p class="d">${escI(d.desc || '')}</p>
-    <p class="twhere${d.here ? ' here' : ''}"><b>${esc(d.where)}</b>${d.short && d.short !== d.name ? `<small> · על הלוח: ${esc(d.short)}</small>` : ''}</p></div>`;
+    <p class="twhere${d.here ? ' here' : ''}"><b>${esc(gz(d.where))}</b>${d.short && d.short !== d.name ? `<small> · על הלוח: ${esc(d.short)}</small>` : ''}</p></div>`;
   const acts = [{ label: 'סגירה', cls: 'primary' }];
   if (onList) acts.push({ label: 'כל המשבצות', v: 'list' });
   return modal({ tag: `משבצת ${d.index + 1}`, color: '#2f6fdb', title: d.name, html, actions: acts, dismissable: true, cls: 'tinfo' })
@@ -2714,7 +2813,7 @@ export function tileSheet(d, { onList = null } = {}) {
 export function tileList(items, { pos = 0 } = {}) {
   let chosen = null;
   const rows = items.map((t) => `<li><button type="button" data-tile="${t.index}" class="${t.index === pos ? 'here' : ''}"${t.index === pos ? ' aria-current="location"' : ''}>
-    <span class="tn num" aria-hidden="true">${t.index + 1}</span><span aria-hidden="true">${esc(t.emoji)}</span><b>${esc(t.name)}</b><small>${esc(t.where)}</small></button></li>`).join('');
+    <span class="tn num" aria-hidden="true">${t.index + 1}</span><span aria-hidden="true">${esc(t.emoji)}</span><b>${esc(t.name)}</b><small>${esc(gz(t.where))}</small></button></li>`).join('');
   return modal({ tag: 'הלוח', color: '#2f6fdb', title: 'המשבצות בלוח', html: `<ol class="tlist" aria-label="המשבצות, לפי סדר המשחק">${rows}</ol>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true, cls: 'tlistc',
     onOpen: (c) => { setTimeout(() => { const h = c.querySelector('.tlist button.here'); if (h) { h.scrollIntoView({ block: 'center' }); h.focus({ preventScroll: true }); } }, 60); },
     onExtra: (e) => { const b = e.target.closest('button[data-tile]'); if (!b) return; chosen = Number(b.dataset.tile); sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
@@ -2857,6 +2956,19 @@ function gaugeHtml(g, pid = '') {
   // w6 gauges: utilisation %, cost coverage ×1.52, runway in months (w5: demand ×, runway). w7: liquidity months, span % of capacity
   // (high is bad), stock cover months (ref = the player's cover rule), brand 0–100. w8: cash ÷ equity still owed ×, the rate %, demand ×.
   const xRun = pid === 'proj' && g.id === 'runway';
+  // w9: operating income (₪) vs the target, the rate %, the spot price (₪/MWh) vs its 12-month average, solar capture %; w10: net worth (₪) vs the
+  // target, LTV % (over 100 % = a margin call), liquid in two days (₪) vs what is owed
+  if (g.unit === '₪' || g.id === 'spot' || g.id === 'capture' || g.id === 'ltv') {
+    const has2 = g.value != null && Number.isFinite(+g.value);
+    const f2 = (x) => (g.unit === '₪' ? mS(x) : g.id === 'spot' ? `₪${N(x)}` : pctI(x));
+    const min2 = g.min ?? 0, max2 = g.max ?? Math.max(g.ref ? g.ref * (g.unit === '₪' ? 1.25 : 1.6) : 1, has2 ? +g.value : 1);
+    const pos2 = (x) => Math.max(0, Math.min(100, ((x - min2) / Math.max(1e-9, max2 - min2)) * 100));
+    const bad = g.id === 'ltv' ? +g.value > g.ref : g.id === 'liquid' ? +g.value < g.ref : g.id === 'capture' ? +g.value < g.ref : g.id === 'spot' ? false : +g.value < g.ref;
+    const ref = g.id === 'ltv' ? `מעל ${f2(g.ref)} = קריאת מרווח` : g.id === 'liquid' ? `החובות וההתחייבויות: ${f2(g.ref)}` : g.id === 'spot' ? `ממוצע 12 חודשים: ${f2(g.ref)}` : g.id === 'capture' ? `מתחת ל־${f2(g.ref)} = מחיר צהריים נמוך לסולארי` : `היעד: ${f2(g.ref)}`;
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="${esc(g.id || '')}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(has2 ? f2(g.value) : 'אין עדיין')}</b></div>
+    <div class="wp-gbar" aria-hidden="true"><i style="width:${has2 ? pos2(+g.value) : 0}%"></i>${g.ref != null ? `<s style="inset-inline-start:${pos2(g.ref)}%"></s>` : ''}</div>
+    ${g.ref != null ? `<small>${esc(ref)}${bad ? (g.id === 'ltv' ? ' · גבוה' : ' · נמוך') : ''}</small>` : ''}</div>`;
+  }
   const fmtG = (x) => (g.id === 'tour' || g.id === 'demand' ? (g.id === 'tour' ? tourTxt(x) : xT(x)) : g.id === 'util' || g.id === 'span' ? pctI(x) : g.id === 'coverage' || xRun ? xT(x)
     : g.id === 'runway' || g.id === 'liq' || g.id === 'cover' ? `${Math.round(+x * 10) / 10} חודשים` : g.id === 'rate' ? `${Math.round(+x * 100) / 100}%` : g.id === 'brand' ? String(Math.round(+x)) : String(Math.round(+x * 100) / 100));
   const txt = !has ? (g.id === 'liq' || xRun ? '—' : 'אין עדיין') : fmtG(g.value);
@@ -2945,12 +3057,14 @@ function projsLine(PJ) {
 }
 /** w8: the timeline of every project — a bar of the permit + one cell per stage (filled = built), its state in words. Accessible: a list;
  *  every bar is an img whose name says the same as the words under it (the bar adds nothing a screen reader misses). */
+/** a permit range the module shows — w9's projects carry a placeholder (± 99 months) until the permit lands: shown as "unknown", never its numbers */
+const permitOk = (p) => !!(p && Number.isFinite(+p.lo) && Number.isFinite(+p.hi) && p.hi - p.lo <= 36);
 function ganttHtml(G) {
   if (!G || !G.length) return '';
   return `<section class="wp-sec"><h3>לוח זמנים</h3><ol class="wp-gantt">${G.map((r) => {
     const n = Math.max(1, r.stages | 0); const pct = Math.max(0, Math.min(1, +r.pct || 0));
-    const state = r.phase === 'permit' ? `ממתין להיתר${r.permit ? `: עוד ${r.permit.lo}–${r.permit.hi} חודשים` : ''}` : r.phase === 'done' ? 'הושלם' : `שלב ${Math.min(n, (r.stage | 0) + 1)} מתוך ${n} · ${Math.round(pct * 100)}%`;
-    const flags = [r.paused ? '⏸ מושהה' : '', r.delayed ? '⏳ עיכוב באתר' : '', r.phase === 'build' && r.gate === false ? '🔒 הבנק מחכה למכירות' : ''].filter(Boolean);
+    const state = r.phase === 'permit' ? `ממתין להיתר${permitOk(r.permit) ? `: עוד ${r.permit.lo}–${r.permit.hi} חודשים` : r.permit ? ' (עוד לא ידוע מתי)' : ''}` : r.phase === 'done' ? 'הושלם' : `שלב ${Math.min(n, (r.stage | 0) + 1)} מתוך ${n} · ${Math.round(pct * 100)}%`;
+    const flags = [r.paused ? '⏸ מושהה' : '', r.delayed ? '⏳ עיכוב באתר' : '', r.phase === 'build' && r.gate === false ? '🔒 הבנק מחכה למכירות' : '', r.slot === false ? '🔌 בלי חיבור לרשת — הבנק לא מממן' : ''].filter(Boolean);
     const cells = Array.from({ length: n }, (_, i) => { const f = Math.max(0, Math.min(1, pct * n - i)); return `<i class="gs${f >= 1 ? ' done' : f > 0 ? ' part' : ''}" style="--f:${Math.round(f * 100)}%"></i>`; }).join('');
     return `<li data-asset="${esc(r.assetId)}"><span class="gn">${esc(r.name)}</span><span class="gbarw" role="img" aria-label="${esc(`${r.name}: ${state}${flags.length ? ', ' + flags.join(', ') : ''}`)}"><i class="gp${r.phase === 'permit' ? ' on' : ''}">📋</i>${cells}</span><small class="gst">${esc(state)}${flags.length ? ` · ${esc(flags.join(' · '))}` : ''}</small></li>`;
   }).join('')}</ol><p class="note">📋 = ההיתר; כל משבצת = שלב. משבצת מלאה = שלב שכבר נבנה.</p></section>`;
@@ -2983,6 +3097,7 @@ function rowsHtml(rows, P) {
   if (P && P.id === 'plant') return plantRowsHtml(rows);
   if (P && P.id === 'chain') return chainRowsHtml(rows);   // w7
   if (P && P.id === 'proj') return projRowsHtml(rows);     // w8
+  if (P && P.id === 'energy') return energyRowsHtml(rows); // w9
   if (!rows || !rows.length) return '<p class="empty">עוד אין לך נכסים עונתיים. מלון, ספא או מרכז כנסים יופיעו כאן עם התפוסה שלהם.</p>';
   return `<section class="wp-sec"><h3>הנכסים שלך החודש</h3><ul class="wp-rows">${rows.map((r) => {
     const pct = r.closed ? 0 : Math.round((+r.occ || 0) * 100); const k = Math.round((r.closed ? 0 : (+r.occDecile || 0)) / 2);
@@ -3011,6 +3126,33 @@ function actionsHtml(acts, rows) {
   return `<section class="wp-sec"><h3>מה אפשר לעשות עכשיו</h3>${[...groups].map(([g, list]) => `<div class="wp-ag"><h4>${esc(g ? name(g) : 'כל העסק')}</h4><div class="wp-acts">${body(list)}</div></div>`).join('')}
     <p class="note">💡 = מה שהמנטור היה בוחר עכשיו. כל פעולה נכנסת לחודש הזה מיד (בלי להטיל קוביות).</p></section>`;
 }
+/* ---------- w9 (energy) panel: the line on top, the projects (rows), the plants (DCF, LTV, refinancing room, DSCR), sites, the pilot */
+function energyLine(EN) {
+  if (!EN) return '';
+  const sh = (EN.shocks || []).map((x) => ({ heat: '🔥 גל חום', sand: '🌪️ סופת חול', curtail: '⛔ הגבלת רשת', ppaCut: 'קיצוץ בתעריף' }[x.t] || '')).filter(Boolean);
+  return `<p class="wp-now">☀️ הכנסה תפעולית אחרי החזר חוב ${num(mSg(EN.income), cls(EN.income))} מתוך ${num(mS(EN.target))} בחודש · ריבית ${num(EN.rate + '%')} (בנייה ${num(String(Math.round(EN.buildRate * 1200) / 100) + '%')} בשנה) · חשמל ${num(mwh(EN.px))}${EN.spike ? ' <b>(קפיצה)</b>' : ''} · ממוצע ${num(mwh(EN.avg))} · סולארי מקבל ${num(pctI(EN.capture))} מהמחיר · PPA לסולארי עכשיו ${num(mwh(EN.ppaNow))}
+    · 🔌 ${num(String((EN.slots || {}).free || 0))} חיבורים פנויים${(EN.slots || {}).waiting ? ` · ${num(String(EN.slots.waiting))} פרויקטים מחכים לחיבור` : ''}${((EN.slots || {}).queue || []).length ? ` · בתור: ${EN.slots.queue.map((q) => `חודש ${num(String(q.at))}`).join(', ')}` : ''}
+    ${EN.refis ? ` · מימון מחדש ×${num(String(EN.refis))} (${num(mS(EN.refiCash))})` : ''}${EN.lpNext ? ` · חלוקה למשקיעים בחודש ${num(String(EN.lpNext))}` : ''}${EN.squeeze ? ` · <b class="neg">⚠️ ${num(`${EN.squeeze}/${EN.squeezeLimit}`)} חודשים שהתחנות לא מכסות את החוב</b>` : ''}${sh.length ? ` · ${sh.map((x) => esc(x)).join(' · ')}` : ''}</p>`;
+}
+function energyRowsHtml(rows) {
+  if (!rows || !rows.length) return '';
+  return `<section class="wp-sec"><h3>הפרויקטים בבנייה</h3><ul class="wp-rows">${rows.map((r) => {
+    const badges = [`<em class="b">${esc(PHASE_HE[r.phase] || r.phase || '')}</em>`, r.slot ? '<em class="b ok">🔌 מחובר לרשת</em>' : '<em class="b warn">🔌 בלי חיבור לרשת</em>', r.paused ? '<em class="b warn">⏸ מושהה</em>' : '', r.delayed ? '<em class="b warn">⏳ עיכוב באתר</em>' : '',
+      (r.stallRun || 0) > 0 ? `<em class="b warn">⛔ עומד ${esc(r.stallRun)} מתוך ${esc(r.callIn)} — אחר כך הבנק מוכר אותו</em>` : '', r.stake < 1 ? `<em class="b">🤝 ${esc(pctI(r.stake))} שלך</em>` : '', r.offtake ? `<em class="b">בסיום: ${esc(OFF_HE[r.offtake] || r.offtake)}</em>` : ''].join('');
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${(r.stallRun || 0) > 0 || r.paused || !r.slot ? 'red' : r.phase === 'permit' ? 'off' : r.delayed ? 'amber' : 'green'}"><div class="wp-rh"><b>${TECH_IC[r.tech] || ''} ${esc(r.name)}</b><small>${esc(TECH_HE[r.tech] || '')} · ${num(String(r.mw))} מגה־ואט</small>${badges}</div>
+      <div class="wp-rm"><span>${r.phase === 'permit' ? (permitOk(r.permit) ? `היתרים בעוד ${esc(r.permit.lo)}–${esc(r.permit.hi)} חודשים` : 'ממתין להיתרים — עוד לא ידוע מתי') : `שלב ${num(`${Math.min(r.stages, r.stage + 1)}/${r.stages}`)} · ${esc(pctI(r.pct))}`}</span><span>עלות הקמה ${num(mS(r.capex))}</span>${r.equityGap ? `<span class="neg">הון עצמי שעוד צריך ${num(mS(r.equityGap))}</span>` : ''}<span>הלוואת בנייה ${num(mS(r.loan))}</span><span>ריבית שנצברה ${num(mS(r.interest))}</span>${r.costToComplete ? `<span>עד הסוף ${num(mS(r.costToComplete))}</span>` : ''}${r.q ? `<span>תפוקת האתר ${num(`${Math.round(r.q.lo * 100)}–${Math.round(r.q.hi * 100)}%`)}</span>` : ''}<span>שווי ${num(mS(r.value))}</span><span>חוב ${num(mS(r.debt))}</span></div></li>`;
+  }).join('')}</ul></section>`;
+}
+function plantsHtml(rows, EN) {
+  const sites = (EN && EN.sites) || []; const h2 = (EN && EN.h2) || [];
+  if (!(rows || []).length && !sites.length && !h2.length) return '<section class="wp-sec"><h3>התחנות שלך</h3><p class="empty">עוד אין לך תחנות שעובדות. אתר לפרויקט מגיע במשבצת "אתר אנרגיה"; תחנה שעובדת וחיבור לרשת — במשבצת "הזדמנות".</p></section>';
+  const pl = (rows || []).map((r) => `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${r.down ? 'red' : r.cf < 0 ? 'amber' : 'green'}"><div class="wp-rh"><b>${TECH_IC[r.tech] || ''} ${esc(r.name)}</b><small>${esc(TECH_HE[r.tech] || '')}${r.mw ? ` · ${num(String(r.mw))} מגה־ואט` : ''}</small><em class="b">${esc(OFF_HE[r.offtake] || r.offtake || '')}${r.offtake === 'ppa' && r.ppa ? ` · ${r.tech === 'storage' ? esc(mS(r.ppa)) + ' למגה־ואט בחודש' : esc(mwh(r.ppa))}` : ''}</em>${r.stake < 1 ? `<em class="b">🤝 ${esc(pctI(r.stake))} שלך</em>` : ''}${r.down ? '<em class="b warn">⛔ מושבתת החודש</em>' : ''}${r.suggestedRefi ? '<em class="b ok">💡 שווה לממן מחדש</em>' : ''}</div>
+    <div class="wp-rm">${r.mwh ? `<span>${num(N(r.mwh))} מגה־ואט שעה · ${num(mwh(r.price))}</span>` : ''}<span>הכנסות ${num(mS(r.rev))}</span><span>תפעול ${num(mS(r.opex))}</span><span>החזר חוב ${num(mS(r.debtService))}</span><span class="${cls(r.cf)}">נשאר החודש ${num(mSg(r.cf), cls(r.cf))}</span><span class="${cls(r.runRate)}">בחודש רגיל ${num(mSg(r.runRate), cls(r.runRate))}</span>${r.dscr != null ? `<span>כיסוי החוב ×${num(String(r.dscr))}</span>` : ''}
+      <span>שווי היוון (DCF) ${num(mS(r.dcf))}</span><span>חוב ${num(mS(r.debt))}${r.ltv != null ? ` · ${num(pctI(r.ltv))} מהשווי (עד ${num(pctI(r.ltvMax))})` : ''}</span><span class="${r.refiRoom >= 1000000 ? 'pos' : ''}">מקום למימון מחדש ${num(mS(r.refiRoom))}</span><span>עוד ${num(String(r.tenor))} חודשי החזר</span></div></li>`).join('');
+  const st = sites.map((x) => `<li class="wp-row" data-asset="${esc(x.assetId)}" data-light="off"><div class="wp-rh"><b>🏜️ ${esc(x.name)}</b><em class="b">קרקע לפרויקט</em></div><div class="wp-rm"><span>${esc(TECH_HE[x.tech] || '')} · ${num(String(x.mw))} מגה־ואט</span><span>אפשר להתחיל בהיתרים — למטה</span></div></li>`).join('');
+  const hh = h2.map((x) => `<li class="wp-row" data-asset="${esc(x.assetId)}" data-light="${x.done ? (x.hit ? 'green' : 'red') : 'amber'}"><div class="wp-rh"><b>🧪 ${esc(x.name)}</b><em class="b${x.done && !x.hit ? ' warn' : ''}">${x.done ? (x.hit ? 'הצליח' : 'נסגר') : 'בניסוי'}</em></div><div class="wp-rm">${x.done ? '' : `<span class="neg">שורף ${num(mS(x.burn))} בחודש</span><span>התוצאה בחודש ${num(String(x.revealAt))}</span>`}</div></li>`).join('');
+  return `<section class="wp-sec"><h3>התחנות שלך</h3><ul class="wp-rows">${pl}${st}${hh}</ul><p class="note">"בחודש רגיל" = מה שנספר ליעד: תפוקה ממוצעת, מחיר ממוצע של 12 חודשים, אחרי החזר החוב. "נשאר החודש" = מה שבאמת נכנס.</p></section>`;
+}
 /** the season HUD numbers (w5 worldIndicators.season) as one line on top of the panel */
 function seasonLine(se) {
   if (!se) return '';
@@ -3018,12 +3160,13 @@ function seasonLine(se) {
 }
 /** w6–w8: actions that cannot be undone ask for a second tap (sell a line / the building, close / convert a branch, a clearance sale, sell
  *  the DC, a project, a plot or a rental); radio-like groups get a row label */
-const WP_CONFIRM = new Set(['sellLine', 'leaseback', 'close', 'convert', 'clearance', 'dcLeaseback', 'sellProj', 'sellPlot', 'sellRent']);
-const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט' };
-export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, month = 0 } = {}) {
+const WP_CONFIRM = new Set(['sellLine', 'leaseback', 'close', 'convert', 'clearance', 'dcLeaseback', 'sellProj', 'sellPlot', 'sellRent',
+  'sellStake', 'sellPlant', 'sellSlot', 'sellNow', 'secondary']);   // w9 / w10: a stake, a plant, a slot, a fund now (−5 %), a private stake (−25 %)
+const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט', offtake: 'בסיום: איך התחנה תמכור' };
+export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, month = 0 } = {}) {
   if (!P) return '';
-  const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || [])];   // w8: actions on rentals and plots are named too
-  return `${seasonLine(season)}${plantLine(plant)}${chainLine(chain)}${projsLine(proj)}<div class="wp-gauges">${(P.gauges || []).map((g) => gaugeHtml(g, P.id)).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${barsHtml(P.bars)}${P.id === 'proj' ? ganttHtml(P.gantt) + callsHtml(P.calls, proj, month) : ''}${rowsHtml(P.rows, P)}${P.id === 'proj' ? rentPlotHtml(proj, P) : ''}${actionsHtml(P.actions, names)}`;
+  const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || []), ...(P.plants || []), ...((energy && energy.sites) || []), ...((energy && energy.h2) || [])];   // w8 / w9: actions on rentals, plots, plants, sites are named too
+  return `${seasonLine(season)}${plantLine(plant)}${chainLine(chain)}${projsLine(proj)}${P.id === 'energy' ? energyLine(energy) : ''}<div class="wp-gauges">${(P.gauges || []).map((g) => gaugeHtml(g, P.id)).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${barsHtml(P.bars)}${P.id === 'proj' || P.id === 'energy' ? ganttHtml(P.gantt) + callsHtml(P.calls, proj, month) : ''}${rowsHtml(P.rows, P)}${P.id === 'proj' ? rentPlotHtml(proj, P) : ''}${P.id === 'energy' ? plantsHtml(P.plants, energy) : ''}${actionsHtml(P.actions, names)}`;
 }
 /**
  * Open the world panel. get() → {panel, season, target} (fresh each time); onAct(action) → Promise<{ok, error?, toast?}>.
@@ -3033,7 +3176,7 @@ export function worldPanel(get, onAct) {
   let D = get(); if (!D || !D.panel) return Promise.resolve();
   let busyAct = false;
   const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
-  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
+  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
     html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead
@@ -3058,3 +3201,90 @@ export function worldPanel(get, onAct) {
     } });
 }
 export const worldPanelOpen = () => !!document.querySelector('#gm:not([hidden]) #gmCard.wpanel');
+
+/* ============================================================ w10 מרכז הפיננסים: the market screen ("הבורסה והתיק")
+   get() → panelData (panel + worldIndicators.market / .portfolio); onAct(action) → E.worldAction; api = game.js marketApi (the engine's pure
+   market.preview / qtyFor / tradeBlock, cash, month). A trade is ALWAYS previewed: the form computes market.preview for the exact quantity
+   and the confirm button sends that quantity ("<id>:<b|s>:<qty>") — the costs on screen are the costs the engine charges. */
+const MKF = { mS, mSg, ex: (n) => fmtM(Math.round(+n || 0)) };
+export function marketPanel(get, onAct, api = {}) {
+  let D = get(); if (!D || !D.panel) return Promise.resolve();
+  const view = { tab: 'list', sel: null, side: 'b', unit: 'cash', amount: 0 };
+  let chart = null; let busyAct = false;
+  const coOf = (id) => { if (!id) return null; const MK = D.market || {}; if (id === 'IDX') return MK.idx; if (/^g\d+$/.test(id)) { const g = (MK.grave || [])[+id.slice(1)]; return g ? { ...g, sectorLabel: (MK.sectors || {})[g.sector] || '', status: g.reason } : null; } return (MK.cos || []).find((c) => c.id === id) || null; };
+  const actBtns = (pred) => { const acts = (D.panel.actions || []).map((a, i) => [a, i]).filter(([a]) => pred(a)); if (!acts.length) return '';
+    return `<div class="wp-acts">${acts.map(([a, i]) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${a.urgent ? ' urgent' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'}>${a.suggested ? '💡 ' : ''}${escI(a.label)}${a.preview && a.preview.qty ? `<small> · עמלה ${esc(mS(a.preview.commission))} · מרווח ${esc(mS(a.preview.spreadCost))}${a.preview.tax ? ` · מס ${esc(mS(a.preview.tax))}` : ''} · ${a.preview.side === 'b' ? 'יוצא' : 'נכנס'} ${esc(mS(a.preview.total))}</small>` : a.preview && a.preview.ltvAfter != null ? `<small> · מינוף אחרי ${esc(pctI(a.preview.ltvAfter))} · ריבית ${esc(mS(a.preview.monthly))} בחודש</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`).join('')}</div>`; };
+  const series = (c) => (c ? marketSeries(c, { news: (D.market || {}).news || [], live: c.status == null || c.status === 'listed' || c.status === 'halted', month: D.month }) : null);
+  const body = () => {
+    const MK = D.market || {}; const PF = D.portfolio || {};
+    const live = (MK.cos || []).filter((c) => c.status === 'listed' || c.status === 'halted');
+    const counts = { list: live.length + 1, closed: (MK.cos || []).length - live.length + (MK.grave || []).length, funds: (PF.funds || []).length + (PF.privates || []).length };
+    let main = '';
+    if (view.tab === 'list') main = MV.listHtml(MK, MKF, view.sel, D.month);
+    else if (view.tab === 'closed') main = MV.closedHtml(MK, MKF, view.sel);
+    else if (view.tab === 'funds') main = MV.fundsHtml(PF, MKF, actBtns);
+    else main = `<section class="wp-sec"><h3>מינוף, הגנה ומה המנטור היה עושה</h3>${actBtns((a) => !a.assetId)}<p class="note">💡 = מה שהמנטור היה בוחר עכשיו. מסחר במניה — מתוך הכרטיס שלה (העלויות מופיעות לפני האישור).</p></section>`;
+    const c = (view.tab === 'list' || view.tab === 'closed') ? coOf(view.sel) : null;
+    let detail = '';
+    if (c) {
+      const ro = c.status != null && c.status !== 'listed' && c.status !== 'halted';
+      const res = !ro && c.id !== 'IDX' ? actBtns((a) => a.coId === c.id && (a.id === 'research' || (a.id === 'trade' && a.guide))) : '';
+      const block = ro ? null : api.block ? api.block(c.id) : null;
+      detail = MV.detailHtml(c, series(c), MK, MKF, { readOnly: ro, research: res ? `<h4 class="cdl-h3">🔎 מחקר והצעות המנטור</h4>${res}` : '', trade: ro ? '' : MV.tradeFormHtml(c, view, api.cash ? api.cash() : 0, MKF, block) });
+    }
+    return `${MV.headHtml(MK, PF, D.month)}<div class="wp-gauges">${(D.panel.gauges || []).map((g) => gaugeHtml(g, 'market')).join('')}</div>${MV.ladderHtml(D.panel.ladder, MKF, PF)}${MV.tabsHtml(view.tab, counts)}${detail}${main}`;
+  };
+  const pv = () => {
+    const c = coOf(view.sel); const box = $('#mkPv'); if (!c || !box) return;
+    const side = view.side === 's' && c.held && c.held.qty ? 's' : 'b'; const amt = Math.max(0, Math.floor(+view.amount || 0));
+    const qty = side === 's' ? Math.min(amt, c.held.qty) : view.unit === 'qty' ? amt : (api.qtyFor ? api.qtyFor(c.id, amt) : 0);
+    const P = amt && api.preview ? api.preview(c.id, side, qty) : null;
+    box.innerHTML = MV.previewHtml(P ? { ...P, side } : amt ? { side, qty: 0 } : null, c, MKF, api.cash ? api.cash() : 0);
+  };
+  const mount = (card) => {
+    if (chart) { chart.destroy(); chart = null; }
+    const host = card.querySelector('.mk-detail .cdl-host'); const c = coOf(view.sel);
+    if (host && c) chart = cdlMount(host, series(c), { label: `נרות חודשיים של ${c.name} (${c.tk}). חיצים לבחירת חודש` });
+    pv();
+  };
+  const draw = (card, keepScroll = true) => { const b = card.querySelector('.wp-body'); if (!b) return; const st = card.scrollTop; b.innerHTML = body(); if (keepScroll) card.scrollTop = st; mount(card); };
+  const act = async (a, card) => {
+    if (busyAct) return; busyAct = true; sfx('click');
+    let r = null; try { r = await onAct(a); } catch (x) { r = { ok: false, error: x && x.message }; }
+    busyAct = false;
+    const c = $('#gmCard'); if (!c || !c.classList.contains('mpanel')) return;
+    D = get() || D; if (a.id === 'trade') view.amount = 0;
+    if (view.sel && !coOf(view.sel)) view.sel = null;   // a company that left the list (its claims paid) — back to the list
+    draw(c);
+    const msg = c.querySelector('.wp-msg'); if (msg) { msg.textContent = r && r.ok === false ? (r.error || 'לא אפשרי עכשיו') : (r && r.toast) || 'בוצע'; msg.className = 'wp-msg ' + (r && r.ok === false ? 'neg' : 'pos'); }
+    void card;
+  };
+  return (api.ready ? api.ready() : Promise.resolve()).catch(() => null).then(() => modal({ tag: 'הבורסה והתיק', color: '#a16207', title: D.panel.title || 'הבורסה והתיק', cls: 'wpanel mpanel', wide: true,
+    html: `<div class="wp-body">${body()}</div><p class="wp-msg" aria-live="polite"></p>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    onOpen: (c) => {
+      mount(c);
+      c.oninput = (e) => { if (e.target.id === 'mkAmt') { view.amount = +e.target.value || 0; pv(); } };
+      setTimeout(() => { const h = c.querySelector('#gmTitle'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } c.scrollTop = 0; }, 80);
+    },
+    onExtra: async (e) => {
+      const c = $('#gmCard');
+      const t = e.target.closest('[data-mtab]'); if (t) { view.tab = t.dataset.mtab; view.sel = null; sfx('click'); draw(c, false); c.querySelector(`[data-mtab="${view.tab}"]`)?.focus({ preventScroll: true }); return; }
+      const co = e.target.closest('[data-mco]'); if (co) { const id = co.dataset.mco; view.sel = view.sel === id ? null : id; view.side = 'b'; view.unit = 'cash'; view.amount = 0; sfx('click'); draw(c); if (view.sel) { const d = c.querySelector('#mkDetail'); d?.scrollIntoView({ block: 'start' }); d?.querySelector('.cdl-chart')?.focus({ preventScroll: true }); } return; }
+      const sd = e.target.closest('[data-mside]'); if (sd && !sd.disabled) { view.side = sd.dataset.mside; view.amount = 0; draw(c); c.querySelector(`[data-mside="${view.side}"]`)?.focus({ preventScroll: true }); return; }
+      const un = e.target.closest('[data-munit]'); if (un) { view.unit = un.dataset.munit; view.amount = 0; draw(c); c.querySelector(`[data-munit="${view.unit}"]`)?.focus({ preventScroll: true }); return; }
+      const q = e.target.closest('[data-mq]'); if (q) { view.amount = +q.dataset.mq || 0; const inp = c.querySelector('#mkAmt'); if (inp) inp.value = String(view.amount); pv(); return; }
+      const go = e.target.closest('[data-mgo]'); if (go && !go.disabled && go.dataset.mgo) {
+        if (go.classList.contains('risky') && go.dataset.arm !== '1') { go.dataset.arm = '1'; go.classList.add('arm'); const m0 = c.querySelector('.wp-msg'); if (m0) { m0.textContent = 'מכירה אי אפשר לבטל. לחיצה נוספת מאשרת.'; m0.className = 'wp-msg neg'; } return; }
+        await act({ id: 'trade', param: go.dataset.mgo }, c); return; }
+      const b = e.target.closest('button[data-wact]'); if (!b || b.disabled) return;
+      const a = (D.panel.actions || [])[+b.dataset.wact]; if (!a) return;
+      if (WP_CONFIRM.has(a.id) && b.dataset.arm !== '1') {
+        c.querySelectorAll('button[data-arm="1"]').forEach((x) => { x.dataset.arm = ''; x.classList.remove('arm'); });
+        b.dataset.arm = '1'; b.classList.add('arm'); sfx('click');
+        const m0 = c.querySelector('.wp-msg'); if (m0) { m0.textContent = `אי אפשר לבטל את זה. לחיצה נוספת על הכפתור מאשרת: ${a.label}`; m0.className = 'wp-msg neg'; }
+        return;
+      }
+      await act(a, c);
+    } })).then((v) => { if (chart) chart.destroy(); const c = $('#gmCard'); if (c) c.oninput = null; return v; });
+}

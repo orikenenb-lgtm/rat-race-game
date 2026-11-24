@@ -5,7 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
-import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
+import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';
+import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
 import { flattenModel, flatEnabled, LIT_RE, isSharedFlat, litCopy, flatFallback, FLAT_KEY } from './render/flatten.js';
@@ -459,7 +460,7 @@ export function worldModelNames(w) {
   if (w.mechanic === 'history' || w.id === 'h') for (const n of HISTORY_MODELS) set.add('history/' + n); // T5 CR-05: only for h
   return [...set].filter((n) => !hasStandin(n, assetDir(w)));   // w5 / w6: stand-in models are built, never fetched (no 404); w6's warehouse only in w6
 }
-const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine', cranes: 'w3/crane' };   // w8: w3's real crane.glb in the background (procedural if it fails)
+const DECOR_MODEL = { skyline: 'skyline', sea: 'crane', stars: 'turbine', cranes: 'w3/crane', solar: 'w4/turbine' };   // w9: w4's real turbine.glb on the ridge (procedural if it fails; kept by releaseOtherWorlds)   // w8: w3's real crane.glb in the background (procedural if it fails)
 function landmarkNames(w) {
   const list = [];
   for (const m of Object.values(w.models || {})) if (m && !list.includes(m)) list.push(m);
@@ -634,6 +635,10 @@ function drawIcon(g, icon, x, y, c) {
     case 'crane': // w8 tile Q: a tower crane (mast, jib, counter-weight, hook)
       g.fillRect(x - 24, y - 40, 10, 86); g.fillRect(x - 44, y - 44, 92, 9); g.fillRect(x - 46, y - 44, 16, 20); g.lineWidth = 5;
       P(); g.moveTo(x + 34, y - 36); g.lineTo(x + 34, y + 4); g.stroke(); g.fillRect(x + 26, y + 4, 16, 12); g.fillRect(x - 40, y + 40, 50, 8); break;
+    case 'bolt': // w9 tile V: a lightning bolt
+      P(); g.moveTo(x + 8, y - 50); g.lineTo(x - 26, y + 6); g.lineTo(x - 2, y + 6); g.lineTo(x - 12, y + 50); g.lineTo(x + 28, y - 8); g.lineTo(x + 4, y - 8); g.closePath(); g.fill(); break;
+    case 'lock': // w10 tile Y: a padlock
+      g.lineWidth = 10; P(); g.arc(x, y - 14, 22, Math.PI, 0); g.stroke(); g.fillRect(x - 34, y - 14, 68, 52); g.save(); g.globalCompositeOperation = 'destination-out'; P(); g.arc(x, y + 6, 8, 0, 7); g.fill(); g.fillRect(x - 3, y + 6, 6, 18); g.restore(); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -663,10 +668,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -785,10 +790,12 @@ const LIGHTS = {
   stacks: { hemi: 1.12, sun: 2.2, exp: 1.02, env: 0.38, sunPos: [-11, 21, 13], fill: ['#fbbf24', 3] },  // w6: morning haze, a soft high sun
   storefronts: { hemi: 1.0, sun: 2.0, exp: 1.03, env: 0.38, sunPos: [15, 11, 9], fill: ['#ef8354', 5] },   // w7: dusk on the shopping street, a low warm sun
   cranes: { hemi: 1.15, sun: 2.6, exp: 1.04, env: 0.42, sunPos: [10, 24, 12], fill: ['#93c5fd', 3] },     // w8: a clear day on the building site
+  solar: { hemi: 1.2, sun: 2.8, exp: 1.05, env: 0.4, sunPos: [4, 28, 8], fill: ['#fbbf24', 3] },            // w9: desert noon, the sun high
+  towers: { hemi: 0.85, sun: 1.6, exp: 1.02, env: 0.42, sunPos: [-12, 16, 10], fill: ['#3b82f6', 8] },    // w10: blue hour between glass towers
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null; linkHook = null;
+  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 };
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -892,7 +899,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1023,6 +1030,7 @@ function decorHistory(T) {
 function spreadDecor(list, k) {
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
   for (const o of list) {
+    if (o.userData.noSpread) continue;   // w9 pulses / w10 ribbon: placed every frame with K already in their positions
     if (o.isInstancedMesh) {
       for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, m); m.decompose(p, q, sc); p.x *= k; p.z *= k; m.compose(p, q, sc); o.setMatrixAt(i, m); }
       o.instanceMatrix.needsUpdate = true; o.computeBoundingSphere && o.computeBoundingSphere();
@@ -1290,6 +1298,96 @@ function decorCranes(T) {
     for (const it of city.values()) stepCrane(it.obj, dt || 0);   // the player's working sites (standins3d.js)
     for (const [j, v] of jibs) j.rotation.y += (dt || 0) * v;
   });
+}
+/** w9 מדבר האנרגיה: desert noon — ochre dunes, solar arrays in the background (deep-blue rows), w4's turbines on the ridge (turbine.glb; a
+ *  procedural one if it is not there), a high-voltage line around the board whose current pulses run ∝ the player's plants' output (the mean of
+ *  their energyState.output: no plant / no output → no pulse). Updaters only while the scene animates, never under reduced motion. */
+function decorSolar(T) {
+  island(31, std('#e3c27a', { roughness: 1 }), '#a16207');
+  const d = new THREE.Object3D();
+  // dunes
+  const du = scatter(dn(16), 17, 29, { seed: 91, frontMin: 19 });
+  const dune = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), std('#d9b46a', { roughness: 1, flatShading: true }), du.length);
+  du.forEach((p, i) => { d.position.set(p.x, -0.75, p.z); d.rotation.set(0, p.a, 0); d.scale.set(2.4 + p.k * 3, 0.5 + p.k * 0.9, 1.6 + p.k * 2); d.updateMatrix(); dune.setMatrixAt(i, d.matrix); });
+  dune.receiveShadow = true; own(dune); worldGroup.add(dune);
+  // solar arrays behind the board: rows of deep-blue panels on short legs
+  const ar = scatter(dn(10), 17, 26, { backOnly: true, seed: 57 }).filter((p) => p.z < -4);
+  const rowsPer = 5; const pan = new THREE.InstancedMesh(new THREE.BoxGeometry(3.2, 0.06, 0.55), std('#1e3a8a', { roughness: 0.25, metalness: 0.45 }), ar.length * rowsPer);
+  let pi = 0; ar.forEach((p) => { for (let r = 0; r < rowsPer; r++) { d.position.set(p.x + Math.cos(p.a) * 0.2, -0.45, p.z + (r - 2) * 0.85); d.rotation.set(-0.45, 0, 0); d.scale.setScalar(1); d.updateMatrix(); pan.setMatrixAt(pi++, d.matrix); } });
+  pan.count = pi; pan.castShadow = true; own(pan); worldGroup.add(pan);
+  // turbines on the ridge (w4's turbine.glb when it loaded)
+  const tb = scatter(dn(7), 22, 30, { backOnly: true, seed: 17 });
+  const blades = [];
+  tb.forEach((p, i) => {
+    const real = ready.get(modelUrl('w4', 'turbine'));
+    if (real) { const m = inst('w4/turbine'); const sc = 2.4 + p.k * 1.2; m.position.set(p.x, -0.72, p.z); m.scale.setScalar(sc); m.rotation.y = Math.atan2(p.x, p.z) + Math.PI; worldGroup.add(m); return; }
+    const g = new THREE.Group(); g.position.set(p.x, -0.72, p.z); g.rotation.y = Math.atan2(p.x, p.z); g.userData.ownTree = true;
+    const h = 7 + p.k * 3; const tw = own(new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.26, h, 8), std('#f1f5f9'))); tw.position.y = h / 2; g.add(tw);
+    const hub = new THREE.Group(); hub.position.set(0, h, 0.3); g.add(hub);
+    for (let k = 0; k < 3; k++) { const b = own(new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.0, 0.06), std('#f8fafc'))); b.position.set(Math.sin(k * 2.094) * 1.5, Math.cos(k * 2.094) * 1.5, 0); b.rotation.z = -k * 2.094; hub.add(b); }
+    worldGroup.add(g); blades.push([hub, 0.5 + i * 0.07]);
+  });
+  // the high-voltage line around the board: pylons, one wire ring, current pulses along it
+  const R = 15.2, NP = 12; const pyl = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 3.2, 0.16), std('#64748b', { roughness: 0.6 }), NP); const arm = new THREE.InstancedMesh(new THREE.BoxGeometry(1.1, 0.1, 0.1), std('#64748b'), NP);
+  for (let i = 0; i < NP; i++) { const a = (i / NP) * Math.PI * 2; d.position.set(Math.sin(a) * R, -0.72 + 1.6, Math.cos(a) * R); d.rotation.set(0, a, 0); d.scale.setScalar(1); d.updateMatrix(); pyl.setMatrixAt(i, d.matrix); d.position.y = -0.72 + 3.0; d.updateMatrix(); arm.setMatrixAt(i, d.matrix); }
+  pyl.castShadow = true; [pyl, arm].forEach((m) => { own(m); worldGroup.add(m); });
+  const wire = own(new THREE.Mesh(new THREE.TorusGeometry(R, 0.03, 4, 96), new THREE.MeshBasicMaterial({ color: '#1f2937' }))); wire.rotation.x = Math.PI / 2; wire.position.y = -0.72 + 3.0; worldGroup.add(wire);
+  const NPU = 18; const pulses = own(new THREE.InstancedMesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: '#67e8f9' }), NPU)); pulses.count = 0; pulses.frustumCulled = false; pulses.name = 'energy:pulses'; pulses.userData.noSpread = true; worldGroup.add(pulses);
+  let ph = 0;
+  const flow = () => { let s = 0, n = 0; for (const it of city.values()) { const e = it.obj.userData.energyState; if (e && e.op) { s += e.output || 0; n++; } } return n ? { v: s / n, n } : { v: 0, n: 0 }; };
+  updaters.add((t, dt) => {
+    for (const [h, v] of blades) h.rotation.z -= (dt || 0) * v;
+    for (const it of city.values()) stepEnergy(it.obj, dt || 0);   // the player's plants: pulses along their wires, blades ∝ output
+    const f = flow(); pulses.count = f.v > 0 ? Math.min(NPU, 6 + f.n * 2) : 0; energyFlow = f;
+    if (!pulses.count) return;
+    ph = (ph + (dt || 0) * 0.05 * Math.min(1.5, f.v)) % 1;
+    for (let i = 0; i < pulses.count; i++) { const a = (ph + i / pulses.count) * Math.PI * 2; d.position.set(Math.sin(a) * R * K, -0.72 + 3.0, Math.cos(a) * R * K); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.updateMatrix(); pulses.setMatrixAt(i, d.matrix); }
+    pulses.instanceMatrix.needsUpdate = true;
+  });
+}
+let energyFlow = { v: 0, n: 0 };
+/** w10 מרכז הפיננסים: glass towers at blue hour — a navy plaza, towers with lit window bands behind the board, and a gold ticker ribbon around
+ *  the tallest one that runs (updater) and turns red on a margin call (syncTicker from the holdings' levels — also under reduced motion, still). */
+let tickerDecor = null;
+function decorTowers(T) {
+  island(31, std('#1e293b', { roughness: 0.9 }), '#0f172a');
+  const ring = own(new THREE.Mesh(new THREE.RingGeometry(12.2, 14.6, 72), std('#334155', { roughness: 0.6, metalness: 0.2 }))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring);
+  const d = new THREE.Object3D();
+  const tw = scatter(dn(22), 17, 29, { backOnly: true, seed: 63 });
+  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#ffffff', { roughness: 0.15, metalness: 0.5 }), tw.length);
+  const win = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), tw.length * 3);
+  const tones = ['#1d4ed8', '#334155', '#475569', '#1e40af', '#64748b', '#0f172a'], lit = ['#fde68a', '#93c5fd', '#fef3c7'];
+  let tallest = null;
+  tw.forEach((p, i) => { const h = 6 + p.k * 12, w = 1.6 + p.k * 1.4, rot = Math.atan2(-p.x, -p.z);
+    d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, rot, 0); d.scale.set(w, h, w); d.updateMatrix(); body.setMatrixAt(i, d.matrix); body.setColorAt(i, new THREE.Color(tones[i % tones.length]));
+    const fx = Math.sin(rot), fz = Math.cos(rot);
+    for (let k = 0; k < 3; k++) { d.position.set(p.x + fx * (w / 2 + 0.01), -0.72 + h * (0.3 + k * 0.22), p.z + fz * (w / 2 + 0.01)); d.rotation.set(0, rot, 0); d.scale.set(w * 0.8, 0.3, 1); d.updateMatrix(); win.setMatrixAt(i * 3 + k, d.matrix); win.setColorAt(i * 3 + k, new THREE.Color(lit[(i + k) % lit.length])); }
+    if (!tallest || h > tallest.h) tallest = { ...p, h, w }; });
+  body.castShadow = true; body.receiveShadow = true; [body, win].forEach((m) => { own(m); worldGroup.add(m); });
+  // the ticker ribbon: a band of small gold "characters" around the tallest tower, near its top
+  if (tallest) {
+    const N = 60; const tk = own(new THREE.InstancedMesh(new THREE.BoxGeometry(0.28, 0.32, 0.05), new THREE.MeshBasicMaterial({ color: '#d4af37' }), N)); tk.name = 'ticker:ribbon'; tk.frustumCulled = false; tk.userData.noSpread = true; worldGroup.add(tk);
+    const band = own(new THREE.Mesh(new THREE.BoxGeometry(tallest.w + 0.16, 0.6, tallest.w + 0.16), std('#0b1220', { roughness: 0.4 }))); band.position.set(tallest.x, -0.72 + tallest.h * 0.86, tallest.z); worldGroup.add(band);
+    tickerDecor = { tk, N, x: tallest.x, z: tallest.z, y: -0.72 + tallest.h * 0.86, r: tallest.w / 2 + 0.11, ph: 0, call: false };
+    placeRibbon(); syncTicker();
+  }
+  updaters.add((t, dt) => {
+    for (const it of city.values()) stepTicker(it.obj, dt || 0, t || 0);   // the player's glass tower: its own band
+    if (!tickerDecor) return; tickerDecor.ph = (tickerDecor.ph + (dt || 0) * 0.03) % 1; placeRibbon();
+    if (tickerDecor.call) tickerDecor.tk.material.color.set(Math.floor((t || 0) * 3) % 2 ? '#7f1d1d' : '#dc2626');
+  });
+}
+function placeRibbon() {
+  const D0 = tickerDecor; if (!D0) return; const o = new THREE.Object3D(); const r = D0.r;
+  for (let i = 0; i < D0.N; i++) { const f = ((i / D0.N) + D0.ph) % 1; const side = Math.floor(f * 4); const tt = (f * 4) % 1; const a = -r + 2 * r * tt; const on = (i % 5) !== 4;   // gaps between the "tickers"
+    const [x, z, ry] = side === 0 ? [a, r, 0] : side === 1 ? [r, -a, Math.PI / 2] : side === 2 ? [-a, -r, Math.PI] : [-r, a, -Math.PI / 2];
+    o.position.set(D0.x * K + x, D0.y, D0.z * K + z); o.rotation.set(0, ry, 0); o.scale.setScalar(on ? 1 : 0.001); o.updateMatrix(); D0.tk.setMatrixAt(i, o.matrix); }
+  D0.tk.instanceMatrix.needsUpdate = true;
+}
+/** a margin call on any daily block → the ribbon is red (still under reduced motion; it blinks only while the scene animates) */
+function syncTicker() {
+  if (!tickerDecor) return; let call = false; for (const it of city.values()) if (it.level && it.level.kind === 'hold' && it.level.call) call = true;
+  tickerDecor.call = call; tickerDecor.tk.material.color.set(call ? '#dc2626' : '#d4af37'); invalidate();
 }
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
@@ -1694,6 +1792,8 @@ function applyLevelParts(it) {
   if (it.level && it.level.kind === 'stock') { paintStock(it.obj, it.level); return; }    // w7: pallet stacks = months of stock
   if (it.level && (it.level.kind === 'mgr')) return;                                    // w7: a regional office (its light lines: linkHook)
   if (it.level && it.level.kind === 'build') { paintBuild(it.obj, it.level); return; }    // w8: slabs, crane, tarp, permit board, presale banner
+  if (it.level && it.level.kind === 'energy') { paintEnergy(it.obj, it.level); return; }  // w9: rows / turbines / boxes, crane, barrier, loose cable vs wire, pulses
+  if (it.level && it.level.kind === 'hold') { paintHold(it.obj, it.level); syncTicker(); return; }   // w10: floors ∝ value, ticker red on a call, frost, vault
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1750,7 +1850,8 @@ export function highlight(key) { try { hlKey = key && city.has(key) ? key : null
 /** for tests and the info modal: the level object an item currently shows */
 export function levelOf(key) {
   const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
-  const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState } : null;
+  const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
+    : ud.energyState ? { ...ud.energyState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
   return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
 }
 export function shield(keys) {
@@ -1817,7 +1918,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
@@ -2176,6 +2277,7 @@ export function perfStats() {
   return { calls: r.render.calls, triangles: r.render.triangles, geos: r.memory.geometries, textures: r.memory.textures, texMB: +(texBytes() / 1048576).toFixed(1),
     dpr: renderer.getPixelRatio(), tier, lowPower, shadows: renderer.shadowMap.enabled, antialias: !!renderer.getContextAttributes()?.antialias, framesRendered, lastTurnMs: Math.round(turnMs),
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
+    decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null },   // w9 pulses / w10 ribbon (tests)
     paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
     kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
     shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };

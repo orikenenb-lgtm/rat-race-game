@@ -67,6 +67,8 @@ body[data-world=w5]{--accent-ink:light-dark(#9a3412,#ff9f7f)}
 body[data-world=w6]{--accent-ink:light-dark(#9a3412,#fb923c)}
 body[data-world=w7]{--accent-ink:light-dark(#9b1c24,#ff8a93);--accent:#ec5562}   /* w7: the UI fill is a lighter red than the 3D awning #e63946 so --ink on it stays ≥ 4.5 */
 body[data-world=w8]{--accent-ink:light-dark(#854d0e,#facc15)}
+body[data-world=w9]{--accent-ink:light-dark(#155e75,#67e8f9)}
+body[data-world=w10]{--accent-ink:light-dark(#7a5a0a,#facc15)}   /* w10: the doc's #a16207 is 3.8:1 on --paper3 — a darker gold */
 body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--accent2:#c8a24a}
 
 /* ============================================================ base */

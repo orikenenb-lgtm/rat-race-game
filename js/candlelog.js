@@ -228,6 +228,35 @@ export function viewModel(st, book) {
   const ended = book.ended.slice().reverse().map((k) => book.series[k]).filter(Boolean).map((s) => seriesView(s, st, false));
   return { month: st.month, list, ended, diverged: !!book.diverged, partialFrom: book.partialFrom };
 }
+/* ------------------------------------------------------------------ w10: the ENGINE's candles (market.js) in the same series shape
+   The market module keeps real monthly candles per company (st.mkt.cos[id].cand rows [month, o, h, l, c, prints, volume] + the open
+   candle {o, h, l, c, n, v}; prices in integer agorot). This only converts them for the one chart component (candles-lite.js): ₪ = agorot
+   / 100 (exact), the open candle's month = the last closed one + 1. No replay shadow, nothing computed beyond the shape. */
+const ag = (x) => Math.round(+x || 0) / 100;
+/** engine row → candle {m, o, h, l, c, n, v} (₪) */
+export const rowCandle = (r) => ({ m: r[0], o: ag(r[1]), h: ag(r[2]), l: ag(r[3]), c: ag(r[4]), n: r[5] || 0, v: r[6] || 0 });
+/**
+ * A company (worldIndicators.market.cos[] / idx / a grave entry) → a candles-lite series. opts: {news: market.news[] (this company's lines
+ * become the candle news), live (default: listed / halted), month (fallback month of an open candle without history)}.
+ */
+export function marketSeries(co, { news = [], live = null, month = null } = {}) {
+  const cand = (co.cand || []).map(rowCandle);
+  const isLive = live != null ? live : co.status == null ? true : co.status === 'listed' || co.status === 'halted';
+  if (isLive && co.open) { const last = cand[cand.length - 1]; cand.push({ m: last ? last.m + 1 : (co.listedM ?? month ?? 1), o: ag(co.open.o), h: ag(co.open.h), l: ag(co.open.l), c: ag(co.open.c), n: co.open.n || 0, v: co.open.v || 0, open: true }); }
+  const lastC = cand[cand.length - 1]; const prevClose = cand.length > 1 ? cand[cand.length - 2].c : (lastC ? lastC.o : 0);
+  const price = co.px != null ? ag(co.px) : co.endPx != null ? ag(co.endPx) : lastC ? lastC.c : 0;
+  const first = cand.length ? cand[0].o : price;
+  const r2x = (x) => Math.round(x * 100) / 100;
+  const own = (news || []).filter((x) => x && x.coId === co.id);
+  const evs = (co.ev || []).map((e) => ({ m: e.m, p0: 0, p1: 0, text: `${e.label}${e.pct ? ` (${e.pct > 0 ? '+' : '−'}${Math.round(Math.abs(e.pct) * 100)}%)` : ''}` }));
+  const flat = cand.filter((c) => c.h === c.l).length;
+  const H = co.held;
+  return { key: co.id, tk: co.id, name: co.name, symbol: co.tk, sector: co.sectorLabel || co.sector || '', generic: false, kind: co.id === 'IDX' ? 'index' : 'stock', unit: co.id === 'IDX' ? 'יחידות' : 'מניות', live: isLive,
+    listedM: co.listedM ?? (cand[0] ? cand[0].m : 1), endedM: co.endedM ?? null, dead: false, wiped: null, first,
+    price, chg: r2x(price - prevClose), chgPct: prevClose ? r2x((price / prevClose - 1) * 100) : 0, since: r2x(price - first), sincePct: first ? r2x((price / first - 1) * 100) : 0,
+    cand, news: [...own.map((x) => ({ m: x.m, p0: 0, p1: 0, text: x.text })), ...evs].sort((a, b) => b.m - a.m), flatShare: cand.length ? flat / cand.length : 0,
+    hold: H ? { qty: H.qty, basis: H.basis, value: H.value, avg: H.qty ? r2x(H.basis / H.qty) : 0, pnl: H.pnl, pnlPct: H.basis ? r2x((H.value / H.basis - 1) * 100) : 0 } : null };
+}
 /** The invariants of one series (tests + a debug guard): low ≤ open,close ≤ high, positive, integers of the price grid, o = previous c. */
 export function checkSeries(s) {
   const errs = []; const all = s.cand.concat([s.open]);

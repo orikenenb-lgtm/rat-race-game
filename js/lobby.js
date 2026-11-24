@@ -64,8 +64,8 @@ const LAZY_ERR = 'לא הצלחנו לטעון את העולם. בדוק את ה
 const PAINTED = new Set(['w1', 'w2', 'w3', 'w4']);
 const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛍️', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑' };
 // generated card art: w5–w8 from their WORLD_STYLE skies, later worlds a placeholder pair
-const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ef8354', '#2b2d42'], w8: ['#fde68a', '#93c5fd'], w9: ['#ffe9a8', '#e07a2f'],
-  w10: ['#dfe7ff', '#2b3f8c'], w11: ['#d8f3ea', '#2a8c6f'], w12: ['#f5e1b0', '#8a5a14'] };
+const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ef8354', '#2b2d42'], w8: ['#fde68a', '#93c5fd'], w9: ['#fef3c7', '#fbbf24'],
+  w10: ['#3b82f6', '#0f172a'], w11: ['#d8f3ea', '#2a8c6f'], w12: ['#f5e1b0', '#8a5a14'] };
 function artHtml(id, alt = '', extra = '') {
   if (PAINTED.has(id)) return `<img src="${cardArt(id)}" alt="${esc(alt)}" ${extra}>`;
   const [a, b] = GEN_SKY[id] || ['#e8e0d0', '#8c7b62'];
@@ -93,7 +93,8 @@ const waHref = (text) => 'https://wa.me/?text=' + encodeURIComponent(text);
 const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
 const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '🩺', scale: '⚖️', chef: '🧑‍🍳', chip: '📱', box: '📦', avocado: '🥑', anchor: '⚓', rocket: '🚀', gear: '⚙️', heart: '💗', hotel: '🏨', music: '🎪', factory: '🏭',
-  shop: '🏪', chart: '📊', handshake: '🤝', crane: '🏗️', land: '🌾', hardhat: '👷' };   // w7 shopFounder / cfo / franchisor · w8 developer / landowner / contractor
+  shop: '🏪', chart: '📊', handshake: '🤝', crane: '🏗️', land: '🌾', hardhat: '👷',
+  bolt: '⚡', briefcase: '💼', sun: '☀️' };   // w9 gridEng / infraFund / kibbutz · w10 allocator (chart) / blockHeir (factory) / floorTrader (bolt)   // w7 shopFounder / cfo / franchisor · w8 developer / landowner / contractor
 const ACH_ICON = {
   seed: '🌱', shield: '🛡️', gold: '🪙', pillow: '🛟', card: '💳', arrows: '🔁', chart: '📈', cap: '🎓', crown: '👑', feather: '🪶', piggy: '🐷',
   phoenix: '🔥', scissors: '✂️', house: '🏠', fox: '🦊', moon: '🌙', lock: '🔒', hammer: '🔨', tower: '🏙️', umbrella: '☂️', scale: '⚖️',

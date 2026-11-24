@@ -279,6 +279,14 @@ function paintLevel(it, L) {
       hidden(el('span', 'b2d-corner-b', c, L.plot ? '🚧' : L.rental ? '🔑' : L.permit ? '📋' : L.stalled ? '⛔' : '🏗️'));
       c.dataset.light = L.stalled ? 'stalled' : L.permit || L.plot ? 'off' : 'on'; c.dataset.run = String(Math.round(L.pct * 100));
       c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
+    } else if (L.kind === 'energy') {   // w9: 🔌 a slot / no connection, 🏜️ a plot, 📋 permits, ⛔ stalled, 🏗️ building, ☀️ / 🌬️ / 🔋 operating, 🧪 the pilot; a % bar
+      const op = L.n === 4; const TI = { solar: '☀️', wind: '🌬️', storage: '🔋', hybrid: '🔆', line: '🗼', h2: '🧪' };
+      hidden(el('span', 'b2d-corner-b', c, L.slot ? '🔌' : L.plot ? '🏜️' : L.tech === 'h2' ? (L.failed ? '✖' : '🧪') : op ? (L.down ? '⛔' : TI[L.tech] || '☀️') : L.unconnected ? '🔌' : L.n === 0 ? '📋' : L.stalled ? '⛔' : '🏗️'));
+      c.dataset.light = op ? (L.down ? 'stalled' : 'on') : L.stalled || L.unconnected ? 'stalled' : L.n === 0 || L.slot || L.plot ? 'off' : 'build'; c.dataset.run = String(Math.round((op ? L.output : L.pct) * 100));
+      c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
+    } else if (L.kind === 'hold') {   // w10: the liquidity class (glass / stone / vault), ⚠️ a margin call, ❄️ frozen, 🔒 locked
+      hidden(el('span', 'b2d-corner-b', c, L.call ? '⚠️' : L.frozen ? '❄️' : L.cls === 'locked' ? '🔒' : L.cls === 'monthly' ? '🧱' : '🏦'));
+      c.dataset.light = L.call ? 'call' : L.frozen ? 'off' : 'on'; c.dataset.run = L.cls;
     } else { delete c.dataset.light; delete c.dataset.run; }
     if (L.kind === 'biz') {
       const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');
