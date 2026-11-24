@@ -226,7 +226,9 @@ async def run_play(b):
     if row:
         await pg.click('#gmCard .mh-row[data-row="world"] button[data-hub="world"]'); await pg.wait_for_selector('#gmCard.wpanel', timeout=10000)
         check(sc, '💼 → the projects panel opens', await pg.locator('#gmCard.wpanel').count() == 1)
-        await pg.locator('#gmCard .acts button.primary').click(); await pg.wait_for_timeout(400)
+        for _ in range(6):   # the panel replaces the hub in the same #gmCard: a click during the swap can land on the hub's old button — close until #gm is gone
+            if await pg.evaluate("() => document.querySelector('#gm').hidden"): break
+            await pg.locator('#gm .acts button.primary').first.click(); await pg.wait_for_timeout(500)
     await pg.click('#hGoalBtn'); await pg.wait_for_selector('#goalPanel:not([hidden])', timeout=5000)
     gp = await pg.evaluate("() => document.querySelector('#goalPanel').textContent")
     check(sc, 'goal panel: net worth ₪250 מיליון, the gap and the ladder', '250 מיליון' in gp and 'שווי נקי' in gp and 'הדרך ליעד' in gp, gp[:300])

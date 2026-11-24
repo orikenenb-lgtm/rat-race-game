@@ -105,7 +105,7 @@ async def run_map(b):
         check(sc, 'w5 is unlocked through progress (★ in w1–w4) and shows what it teaches + difficulty', w5 and not w5['locked'] and 'עסק עונתי' in w5['learn'] and w5['diff'], w5)
         check(sc, 'later worlds use generated card art (no missing image), w1–w4 their painted cards', all(c['gen'] and not c['img'] for c in cards if c['id'] not in ('w1', 'w2', 'w3', 'w4')) and all(c['img'] for c in cards if c['id'] in ('w1', 'w2', 'w3', 'w4')), cards)
         lk = [c for c in soon if 'ייפתח' in c['line']]
-        check(sc, 'planned worlds show their unlock rule ("ייפתח: ★ …", forks "★ באחד מ: …")', len(lk) == len(soon) and any('באחד מ' in c['line'] for c in soon), [c['line'] for c in soon])
+        check(sc, 'planned worlds show their unlock rule ("ייפתח: ★ …", forks "★ באחד מ: …")', len(lk) == len(soon) and (any('באחד מ' in c['line'] for c in soon) or not any('·' in c['line'] for c in soon)), [c['line'] for c in soon])   # a fork is named whenever a planned world has one (w12 alone needs w11 since b8ab166)
         tr = await pg.evaluate("() => ({ n: document.querySelectorAll('.map-trail li').length, soon: (document.querySelector('.map-trail li.soon') || {}).textContent || '' })")
         check(sc, 'the trail: the playable worlds + one "🔜 N" item', tr['n'] == len(pm) + 1 and str(len(meta) - len(pm)) in tr['soon'], tr)
         ov = await pg.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
