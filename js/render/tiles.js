@@ -46,6 +46,14 @@ export const TILE_TEXT = Object.freeze({
   // built them from the modules' constants (MODULE_TEXT below).
   division: { short: 'חטיבה', desc: 'חטיבה למכירה: הרווח שלה הוא טווח, והמוכר יודע יותר ממך. אפשר לבדוק קודם, לקנות בערבות המטה או מגודרת, או לוותר.' },
   produce: { short: 'בורסה', desc: 'בורסת התוצרת: חוזה ייצוא על חלק מהיבול של שדה בגידול, או זכויות מים לשנות בצורת. אפשר לקבל או לסרב.' },
+  // w14 רובע הבנקים — tile J (credit.js tiles.J); w17 גבעת המעבדות — tile V (adapters/trials.js tiles.V); w18 חוף הסערות — tile Z (insure.js
+  // tiles.Z); w19 פעמון הבורסה — tile W (adapters/bell.js tiles.W); w20 רחוב הקרנות — tile W (adapters/funds.js tiles.W). Number-free until
+  // prepareWorldText() built them from the modules' constants (MODULE_TEXT below).
+  bankOffer: { short: 'הצעה לבנק', desc: 'הצעה לבנק: תיק הלוואות בהנחה, הלוואה גדולה אחת, או המפקידים של בנק שקרס. ועדת אשראי מצמצמת את הטווח של איכות הלווים. אפשר לוותר.' },
+  candidate: { short: 'מולקולה', desc: 'מולקולה למכירה: הסיכויים של כל שלב מודפסים, האיכות האמיתית לא. אפשר לבדוק קודם, לקנות או לוותר.' },
+  policyBook: { short: 'פוליסות', desc: 'תיק פוליסות למכירה: הפרמיה ידועה, יחס התביעות האמיתי מתגלה רק עם הזמן. אפשר לבדוק קודם, לקנות או לוותר.' },
+  boltOn: { short: 'רכישה', desc: 'רכישה משלימה: מפעל או רשת קטנה. משלמים במזומן ובחוב — או במניות חדשות שמדללות את החלק שלך. אפשר לוותר.' },
+  mandate: { short: 'משקיע', desc: 'משקיע חדש רוצה להכניס כסף לקרן בדמי ניהול מוזלים. אפשר לקבל, לקבל עם נעילה לשנה, או לוותר.' },
   privateDeal: { short: 'עסקה פרטית', desc: 'השקעה פרטית: נעולה לשנים, בלי מחיר יומי, ואי אפשר ללוות כנגדה. אפשר לבדוק את המנהל, להשקיע הכל או חצי, או לוותר.' },
 });
 
@@ -73,6 +81,14 @@ const BY_NAME = Object.freeze({
   'משבר בחברה': { short: 'משבר', desc: 'משבר בחברה: השרתים נופלים, גל נטישה, תביעת פטנט או חודש בלי משכורת. כמה חודשי מזומן ביד עוזרים לעבור אותו בלי לגייס בכל מחיר.' },
   // w16: the crisis tile (w16.crises: hail on one growing field, a broken combine, a fire at the field's edge, a month without a draw)
   'פגע בשדה': { short: 'פגע בשדה', desc: 'פגע בשדה: ברד שמוריד 30% מהיבול של שדה אחד, קומביין שהתקלקל, שריפה או חודש בלי משיכה. בגלל זה נועלים רק את הקצה הנמוך של הטווח.' },
+  // w14 / w17 / w18 / w19 / w20: the crisis tiles (their decks: w14 a branch fraud, the regulator's stress test, a class action, a month
+  // without salary · w17 the CRO collapses, a patent suit, a batch recall · w18 an inland flood, a claims-fraud ring, a class action · w19 an
+  // outage in a division, a class action · w20 the trading system goes down, a client's suit)
+  'משבר בבנק': { short: 'משבר', desc: 'משבר בבנק: מעילה בסניף, מבחן קיצון של המפקח, תביעה ייצוגית או חודש בלי משכורת. הון מעל המינימום עוזר לעבור אותו בלי שהמפקח ייכנס.' },
+  'תקלה במעבדה': { short: 'תקלה', desc: 'תקלה במעבדה: חברת הניסויים קורסת ומעכבת ניסוי בשלושה חודשים, תביעה על פטנט, ריקול של אצווה או חודש בלי משכורת.' },
+  'נזק בחוף': { short: 'נזק בחוף', desc: 'נזק בחוף: שיטפון בפנים הארץ שביטוח המשנה לסערות לא מכסה, טבעת הונאה בתביעות, תביעה ייצוגית או חודש בלי משכורת.' },
+  'תקלה בחברה': { short: 'תקלה', desc: 'תקלה בחברה: תקלה שעוצרת חטיבה לחודש, תביעה ייצוגית של בעלי מניות או חודש בלי משכורת.' },
+  'תקלה בקרן': { short: 'תקלה', desc: 'תקלה בקרן: מערכת המסחר נופלת, לקוח תובע או חודש בלי משכורת. מזומן בצד עוזר לעבור אותה בלי למשוך מהקרן.' },
   'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
 /** Per-world name overrides where two worlds share a tile name (w12's crisis tile is also "משבר בקבוצה", with other cards than w11's). */
@@ -82,6 +98,16 @@ const pctW = (x) => `${Math.round(x * 100)}%`;
 const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
 /** mechanic id → (its module namespace) → { tile type: {short, desc} } */
 const MODULE_TEXT = {
+  // w14 (credit.js REG.min): a loan book at a discount, a big loan, a failed rival's depositors — never below the regulator's minimum
+  credit: (M) => (M && M.REG && M.SEGS ? { bankOffer: { short: 'הצעה לבנק', desc: `הצעה לבנק: תיק הלוואות בהנחה, הלוואה גדולה אחת, או המפקידים של בנק שקרס. ועדת אשראי מצמצמת את הטווח של איכות הלווים. קנייה שתוריד את יחס ההון מתחת ל־${pctW(M.REG.min)} — אסורה. אפשר לוותר.` } } : {}),
+  // w17 (adapters/trials.js TR.ddFee / ddBand, SLOTS): a candidate for sale — the printed odds, due diligence narrows the sealed quality
+  trials: (M) => (M && M.TR && M.SLOTS ? { candidate: { short: 'מולקולה', desc: `מולקולה למכירה: הסיכויים של כל שלב מודפסים, האיכות האמיתית לא. בדיקה (${Math.round(M.TR.ddFee / 1e6)} מיליון ₪) מצמצמת אותה ל־±${Math.round(M.TR.ddBand * 100)} נקודות. עד ${M.SLOTS} מולקולות במעבדה. אפשר לוותר.` } } : {}),
+  // w18 (insure.js IN.band / ddBand): a book of policies — the true loss ratio shows over time; the price comes out of the insurer's capital
+  insure: (M) => (M && M.IN && M.IN.band ? { policyBook: { short: 'פוליסות', desc: `תיק פוליסות למכירה: יחס התביעות האמיתי מתגלה רק עם הזמן (±${Math.round(M.IN.band * 100)}% לפני בדיקה, ±${Math.round(M.IN.ddBand * 100)}% אחריה). המחיר יוצא מההון של החברה ומוריד את כושר הפירעון. אפשר לוותר.` } } : {}),
+  // w19 (adapters/bell.js): a bolt-on — cash and debt, or new shares that dilute you
+  bell: (M) => (M && M.BL && M.FLOATS ? { boltOn: { short: 'רכישה', desc: 'רכישה משלימה: מפעל או רשת קטנה במכפיל קרוב לזה של הענף. משלמים במזומן ובחוב — או במניות חדשות (רק לחברה רשומה) שמדללות את החלק שלך. אפשר לוותר.' } } : {}),
+  // w20 (adapters/funds.js FL.gate): a mandate — new money at a fee cut; with a 12-month lock at a deeper cut
+  funds: (M) => (M && M.FL && M.FL.gate ? { mandate: { short: 'משקיע', desc: 'משקיע חדש רוצה להכניס כסף לקרן בדמים מוזלים. לקבל, לקבל עם נעילה לשנה (בדמים נמוכים עוד יותר) — או לוותר. כסף חם בורח בחודש רע.' } } : {}),
   // w12 (holding.js HD.down, HD.fee / minFee, SLOTS): a division for sale — the down payment from HQ, due diligence, the cap on divisions
   holding: (M) => (M && M.HD && M.SLOTS ? { division: { short: 'חטיבה', desc: `חטיבה למכירה: הרווח שלה הוא טווח. ${pctW(M.HD.down)} מהמטה והשאר חוב על החטיבה — בערבות המטה (ריבית זולה) או מגודרת. בדיקה מצמצמת את הטווח. עד ${M.SLOTS} חטיבות. אפשר לוותר.` } } : {}),
   // w16 (adapters/harvest.js HV.water): an export contract on part of a growing field's crop, or water rights for drought years
@@ -101,7 +127,7 @@ const MODULE_TEXT = {
   season: (M) => (M && M.ALLOT ? { allot: { short: 'הקצאה', desc: `מפעיל תיירות רוצה חלק מהחדרים של המלון שלך ל־${M.ALLOT.months} חודשים, ב־${pctW(M.ALLOT.disc)} הנחה, ו${partW(M.ALLOT.upfront)} מראש. אפשר לקבל, להציע ${pctW(M.ALLOT.counterDisc)} הנחה במקום, או לוותר.` } } : {}),
 };
 const MOD_TYPE = {};
-const ADAPTER_IDS = new Set(['harvest']);   // MODULE_TEXT ids that are rule adapters (js/worlds/adapters/), not mech modules   // tile type → {short, desc}, filled by prepareWorldText
+const ADAPTER_IDS = new Set(['harvest', 'trials', 'bell', 'funds']);   // MODULE_TEXT ids that are rule adapters (js/worlds/adapters/), not mech modules   // tile type → {short, desc}, filled by prepareWorldText
 /**
  * Build the module tile texts of a loaded world from its mechanic modules' exported constants. The module file is already in the
  * browser's module map (the world file imports it), so this costs no request. Idempotent; resolves to the types it filled.
@@ -123,7 +149,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'], [/^globe$/, '🌍'], [/^crown$/, '👑'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'], [/^globe$/, '🌍'], [/^crown$/, '👑'], [/^flask$/, '🧪'], [/^umbrella$/, '☂️'], [/^bell$/, '🔔'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -173,16 +199,29 @@ export const MARKET_WORDS = Object.freeze({
   'mk:recession': { t: 'מיתון רב־מדינתי' }, 'mk:review': { t: 'סוכנות הדירוג בודקת' }, 'mk:antitrust': { t: 'בדיקת הגבלים עסקיים' },
   // w16 (adapters/harvest.js market: c.mk)
   'mk:drought': { t: 'בצורת בעמק' }, 'mk:ban': { t: 'איסור ייצוא בחו"ל' }, 'mk:glut': { t: 'יבול שיא בעולם' }, 'mk:usdUp': { t: 'הדולר מתחזק' }, 'mk:usdDown': { t: 'הדולר נחלש' }, 'mk:subsidy': { t: 'מענק השקיה' }, 'mk:pest': { t: 'מזיק בכותנה' },
+  // w14 (credit.js market: c.mk; 'rate' in w14's words: MARKET_WORDS_W.w14)
+  'mk:slump': { t: 'מחירי הדירות צונחים' }, 'mk:rumor': { t: 'שמועה ברשתות על הבנק' }, 'mk:calm': { t: 'דוח רבעוני חזק' },
+  // w17 (adapters/trials.js market: c.mk)
+  'mk:compete': { t: 'מתחרה מקבלת אישור' }, 'mk:safety': { t: 'אות בטיחות' }, 'mk:fast': { t: 'מסלול מהיר' }, 'mk:generic': { t: 'ערעור גנרי' }, 'mk:pricing': { t: 'רפורמת מחירים' }, 'mk:bull': { t: 'בועת ביוטק' }, 'mk:winter': { t: 'חורף בביוטק' },
+  // w18 (insure.js market: c.mk)
+  'mk:court': { t: 'פסק דין שמייקר תביעות ישנות' }, 'mk:spike': { t: 'ביטוח משנה מתייקר' }, 'mk:rule': { t: 'כלל הון חדש' }, 'mk:crash': { t: 'ירידה חדה בשוק ההון' }, 'mk:grow': { t: 'ביקוש לביטוח עולה' },
+  // w19 (adapters/bell.js market: c.mk)
+  'mk:mood': { t: 'מצב הרוח בשוק זז' }, 'mk:lockup': { t: 'תום תקופת החסימה' }, 'mk:rotate': { t: 'כסף עובר בין ענפים' },
+  // w20 (adapters/funds.js market: c.mk; 'ban' / 'fraud' in w20's words: MARKET_WORDS_W.w20)
+  'mk:squeeze': { t: 'סחיטת שורט' }, 'mk:unwind': { t: 'פירוק עסקה צפופה' }, 'mk:conference': { t: 'כנס משקיעים' }, 'mk:analyst': { t: 'אנליסט בכיר עוזב' },
   'mk:shock': { t: 'הבורסה זזה בחדות' }, 'mk:spread': { t: 'מרווחי האשראי מתפוצצים' }, 'mk:prop': { t: 'מחירי הנדל"ן זזים' }, 'mk:flash': { t: 'קריסה בזק' }, 'mk:gate': { t: 'קרן נועלת פדיונות' },
 });
 /** Per-world market words where a kind means something else in that world (w10's 'freeze' is a liquidity freeze, not a permit freeze). */
 export const MARKET_WORDS_W = Object.freeze({ w10: Object.freeze({ 'mk:freeze': Object.freeze({ t: 'הקפאת נזילות' }) }),
   w11: Object.freeze({ 'mk:tariff': Object.freeze({ t: 'מכסים חדשים' }), 'mk:boom': Object.freeze({ t: 'פריחה במדינה אחת' }) }), w15: Object.freeze({ 'mk:viral': Object.freeze({ t: 'חודש ויראלי' }) }),
-  w12: Object.freeze({ 'mk:energy': Object.freeze({ t: 'משבר אנרגיה' }), 'mk:boom': Object.freeze({ t: 'השווקים עולים' }) }) });
+  w12: Object.freeze({ 'mk:energy': Object.freeze({ t: 'משבר אנרגיה' }), 'mk:boom': Object.freeze({ t: 'השווקים עולים' }) }),
+  w14: Object.freeze({ 'mk:rate': Object.freeze({ t: 'בנק ישראל משנה את הריבית' }) }), w20: Object.freeze({ 'mk:ban': Object.freeze({ t: 'איסור על מכירה בחסר' }), 'mk:fraud': Object.freeze({ t: 'הונאה נחשפת בחברה' }) }) });
 const marketWord = (k, world) => ((world && MARKET_WORDS_W[world.id]) || {})[k] || MARKET_WORDS[k];
 /** Per-world words where a kind means something else in that world (w7's 'warehouse' card is a leased commercial building). */
 export const DEAL_WORDS_W = Object.freeze({ w7: Object.freeze({ warehouse: 'מבנה מסחרי מושכר' }), w11: Object.freeze({ warehouse: 'מחסנים ומרכזי הפצה' }),
-  w12: Object.freeze({ building: 'מרכזים לוגיסטיים ופארקי תעשייה' }), w16: Object.freeze({ solar: 'גגות ושדות סולאריים', side: 'חנות וצימרים במשק' }) });
+  w12: Object.freeze({ building: 'מרכזים לוגיסטיים ופארקי תעשייה' }), w16: Object.freeze({ solar: 'גגות ושדות סולאריים', side: 'חנות וצימרים במשק' }),
+  w14: Object.freeze({ building: 'דירות, משרדים וחנויות ליד הבורסה' }), w17: Object.freeze({ building: 'בנייני מעבדות ודירות לחוקרים', side: 'חברת שירותי ניסויים' }),
+  w18: Object.freeze({ building: 'נכסים מניבים על החוף' }), w19: Object.freeze({ building: 'נכסים מניבים' }), w20: Object.freeze({ building: 'נכסים מניבים במרכז העסקים' }) });
 const dealWord = (k, world) => ((world && DEAL_WORDS_W[world.id]) || {})[k] || DEAL_WORDS[k];
 const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH', 'IDX']);
 /** deal card → DEAL_WORDS key */

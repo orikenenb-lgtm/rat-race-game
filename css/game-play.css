@@ -1348,3 +1348,17 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 .hd-g .wp-gl,.hv-g .wp-gl{flex-wrap:wrap;row-gap:2px}.hd-g .wp-gl b,.hv-g .wp-gl b{margin-inline-start:auto}
 @media (max-width:420px){ .hvtbl th,.hvtbl td{padding:4px 3px;font-size:12px} .divs .wp-rm,.fields .wp-rm{font-size:12px} }
 .wp-armnote{margin:6px 0 0;padding:6px 8px;border-radius:8px;border:2px dashed var(--red,#b91c1c);font-size:13px;font-weight:700;color:var(--red,#b91c1c);background:var(--paper)}
+/* ===== w14 "הבנק" / w17 "המעבדה" / w18 "חברת הביטוח" / w19 "החברה בבורסה" / w20 "הקרן" panels and their tile cards: the row lists (a head line
+   with chips, the numbers, the action groups), the accessible tables (shared .hvtbl), the gauges' value wrap */
+.crs .wp-rh,.trs .wp-rh,.ins .wp-rh,.bls .wp-rh,.fds .wp-rh{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.crs .pr-n,.trs .pr-n,.ins .pr-n,.bls .pr-n,.fds .pr-n{display:grid;min-width:0;flex:1 1 160px}.crs small,.trs .pr-n small,.ins .pr-n small,.bls .pr-n small,.fds small{color:var(--mut);font-size:12px}
+.trs .dk,.ins .dk,.bls .dk{font-size:22px}.trs .wp-rm small{color:var(--mut)}
+.crs .pr-acts,.trs .pr-acts,.ins .pr-acts,.bls .pr-acts,.fds .pr-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.crs .chip,.trs .chip,.ins .chip,.bls .chip,.fds .chip,.cr-g~.wp-sec .chip,.ins-g~.wp-sec .chip,.bl-g~.wp-sec .chip,.fd-g~.wp-sec .chip,.tr-g~.wp-sec .chip{min-height:44px}
+.fds .wp-row{padding-block:6px}.fds .wp-rh b{min-width:7.5em}
+.trow.empty{opacity:.8}.trow[data-state="drug"]{border-inline-start:4px solid #ca8a04}.trow[data-state="dec"]{border-inline-start:4px dashed #d97706}
+.crow[data-light="amber"]{border-inline-start:4px dashed #d97706}.irow[data-light="amber"]{border-inline-start:4px dashed #dc2626}
+.frow2[data-light="green"]{border-inline-start:4px solid #16a34a}.frow2[data-light="red"]{border-inline-start:4px dashed #dc2626}
+.cr-g .wp-gl,.tr-g .wp-gl,.ins-g .wp-gl,.bl-g .wp-gl,.fd-g .wp-gl{flex-wrap:wrap;row-gap:2px}.cr-g .wp-gl b,.tr-g .wp-gl b,.ins-g .wp-gl b,.bl-g .wp-gl b,.fd-g .wp-gl b{margin-inline-start:auto}
+.crtbl td,.instbl td,.fdtbl td{white-space:nowrap}
+@media (max-width:420px){ .crs .wp-rm,.trs .wp-rm,.ins .wp-rm,.bls .wp-rm{font-size:12px} .crtbl th,.crtbl td,.instbl th,.instbl td,.fdtbl th,.fdtbl td{padding:4px 3px;font-size:12px} }

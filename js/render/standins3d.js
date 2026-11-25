@@ -11,6 +11,7 @@ import { W910 } from './standins910.js';   // w9 / w10 stand-ins (energy sites, 
 import { W13 } from './standins13.js';     // w13 stand-ins (the stadium, a sponsor's billboard, the club shop)
 import { W1115_DIR } from './standins1115.js';   // w11: its own port warehouse (w3 keeps warehouse.glb)
 import { W1216_DIR } from './standins1216.js';   // w16: the farm (its warehouse key; w3 keeps warehouse.glb)
+import { W1420 } from './standins1420.js';   // w14 / w17 / w18 / w19 / w20: the bank hall, the lab, the insurer, the exchange, the trading floor
 
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, ...o });
 const box = (g, w, h, d, c, x = 0, y = 0, z = 0, o) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c, o)); m.position.set(x, y + h / 2, z); g.add(m); return m; };
@@ -478,14 +479,16 @@ export function stepCrane(g, dt) {
 export function buildCrane(h = 6) { const g = new THREE.Group(); towerCrane(g, { x: 0, z: 0, h, jib: h * 0.6 }); return shadowAll(g); }
 
 /** Model names that are built here in every world (no GLB is ever requested for them). */
-const W78 = Object.freeze({ ...SHOP, ...SITE, stock_pallets: stockPallets, ecom_hub: ecomHub, regional_office: regionalOffice, tower_done: towerDone, plot_fence: plotFence, ...W910, ...W13 });
+const W78 = Object.freeze({ ...SHOP, ...SITE, stock_pallets: stockPallets, ecom_hub: ecomHub, regional_office: regionalOffice, tower_done: towerDone, plot_fence: plotFence, ...W910, ...W13, ...W1420 });
 export const STANDIN_NAMES = Object.freeze([...Object.keys(BUILD), ...Object.keys(PLANT), ...Object.keys(W78)]);
 /** Names built here only for a given asset folder (a name another world has a real .glb for). */
 const DIR_BUILD = Object.freeze({ w6: Object.freeze({ warehouse: warehouse6 }), w7: Object.freeze({ warehouse: warehouse7 }), ...W1115_DIR, ...W1216_DIR,
   // w12: the HQ / office deals (tower), the trophy division (hotel) and a side business (warehouse) reuse existing stand-ins in w12's folder —
   // no assets/w12/*.glb is ever requested; w2 keeps tower.glb / hotel.glb, w3 warehouse.glb. w16: the farm shop (business) is w7's street shop.
   w12: Object.freeze({ tower: () => towerDone(), hotel: () => BUILD.resort(), warehouse: () => warehouse7() }),
-  w16: Object.freeze({ ...W1216_DIR.w16, business: () => SHOP.store_street() }) });
+  w16: Object.freeze({ ...W1216_DIR.w16, business: () => SHOP.store_street() }),
+  // w17: a trial-services company / a side business (business) is w7's street shop in w17's folder — no assets/w17/business.glb is requested
+  w17: Object.freeze({ business: () => SHOP.store_street() }) });
 const base = (name) => String(name || '').split('/').pop();
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 /** Is `name` (in asset folder `dir`) a procedural stand-in? A 'dir/name' model keeps its own folder. */

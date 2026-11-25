@@ -8,7 +8,8 @@ import { COUNTRY_BAND, COUNTRY_IDS, MOTION, labelColor, worldStyle, normLevel, k
 import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';
 import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';
 import { paintSub, paintApp, cloudCount } from './render/standins1115.js';
-import { paintDiv, paintFarm } from './render/standins1216.js';   // w12: a division's guarantee anchor / fence, health, deficit, storm · w16: the farm's fields, hedges, irrigation, silo   // w11: a subsidiary's country band, manager token + trust ring, supply marks · w15: the app's runway fuse + user cloud
+import { paintDiv, paintFarm } from './render/standins1216.js';
+import { paintBank, paintLab, paintIns, paintList, paintFund } from './render/standins1420.js';   // w14 / w17 / w18 / w19 / w20: the bank, the lab's flasks, the insurer's lines, the listed company, the fund's book   // w12: a division's guarantee anchor / fence, health, deficit, storm · w16: the farm's fields, hedges, irrigation, silo   // w11: a subsidiary's country band, manager token + trust ring, supply marks · w15: the app's runway fuse + user cloud
 import { paintClub, paintBillboard } from './render/standins13.js';   // w13: the stadium (stands ∝ seats, crowd ∝ fill, crane while building), billboards   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
@@ -654,6 +655,15 @@ function drawIcon(g, icon, x, y, c) {
     case 'crown': // w12 tile Z: a crown (a band with three points and three jewels)
       P(); g.moveTo(x - 46, y + 30); g.lineTo(x - 46, y - 24); g.lineTo(x - 22, y + 2); g.lineTo(x, y - 40); g.lineTo(x + 22, y + 2); g.lineTo(x + 46, y - 24); g.lineTo(x + 46, y + 30); g.closePath(); g.fill();
       g.save(); g.globalCompositeOperation = 'destination-out'; for (const dx of [-24, 0, 24]) { P(); g.arc(x + dx, y + 18, 6, 0, 7); g.fill(); } g.restore(); break;
+    case 'flask': // w17 tile V: a lab flask (a narrow neck over a wide cone, the liquid line)
+      P(); g.moveTo(x - 12, y - 46); g.lineTo(x - 12, y - 14); g.lineTo(x - 42, y + 38); g.lineTo(x + 42, y + 38); g.lineTo(x + 12, y - 14); g.lineTo(x + 12, y - 46); g.closePath(); g.fill();
+      g.fillRect(x - 20, y - 52, 40, 8); g.save(); g.globalCompositeOperation = 'destination-out'; g.fillRect(x - 28, y + 8, 56, 5); g.restore(); break;
+    case 'umbrella': // w18 tile Z: an umbrella (a scalloped canopy, the shaft and its hook)
+      P(); g.moveTo(x - 48, y); g.quadraticCurveTo(x, y - 62, x + 48, y); for (let k = 3; k >= 0; k--) g.quadraticCurveTo(x - 48 + 24 * k + 12, y - 10, x - 48 + 24 * k, y); g.closePath(); g.fill();
+      g.lineWidth = 8; P(); g.moveTo(x, y); g.lineTo(x, y + 36); g.arc(x - 10, y + 36, 10, 0, Math.PI); g.stroke(); break;
+    case 'bell': // w19 tile W: the exchange's bell (a flared cup, the clapper, the yoke)
+      P(); g.moveTo(x - 42, y + 30); g.quadraticCurveTo(x - 30, y + 18, x - 28, y - 10); g.quadraticCurveTo(x - 26, y - 42, x, y - 42); g.quadraticCurveTo(x + 26, y - 42, x + 28, y - 10); g.quadraticCurveTo(x + 30, y + 18, x + 42, y + 30); g.closePath(); g.fill();
+      P(); g.arc(x, y + 38, 9, 0, 7); g.fill(); g.fillRect(x - 6, y - 54, 12, 14); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -683,10 +693,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך', w11: 'הקבוצה שלך', w15: 'האפליקציה שלך', w12: 'האימפריה שלך', w16: 'המשק שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך', w11: 'הקבוצה שלך', w15: 'האפליקציה שלך', w12: 'האימפריה שלך', w16: 'המשק שלך', w14: 'הבנק שלך', w17: 'המעבדה שלך', w18: 'חברת הביטוח שלך', w19: 'החברה שלך', w20: 'הקרן שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'], globe: ['#115e59', '#f59e0b'], servers: ['#a5b4fc', '#7c3aed'] , tower: ['#e7efe9', '#166534'], silos: ['#dbd58a', '#0284c7'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'], globe: ['#115e59', '#f59e0b'], servers: ['#a5b4fc', '#7c3aed'] , tower: ['#e7efe9', '#166534'], silos: ['#dbd58a', '#0284c7'], columns: ['#d6cdbd', '#475569'], labs: ['#d1f2ea', '#0d9488'], lighthouse: ['#c7d2e4', '#4f46e5'], bell: ['#57493a', '#d97706'], screens: ['#162033', '#22d3ee'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -811,11 +821,16 @@ const LIGHTS = {
   globe: { hemi: 0.78, sun: 1.9, exp: 1.03, env: 0.36, sunPos: [-8, 22, 12], fill: ['#5eead4', 6] },        // w11: a world map at night, a teal glow from the globe
   servers: { hemi: 0.95, sun: 2.1, exp: 1.04, env: 0.4, sunPos: [8, 24, 10], fill: ['#a78bfa', 7] },
   tower: { hemi: 1.1, sun: 2.4, exp: 1.02, env: 0.42, sunPos: [-12, 22, 12], fill: ['#fde68a', 3] },     // w12: marble and bronze in a soft high light
-  silos: { hemi: 1.1, sun: 2.7, exp: 1.04, env: 0.38, sunPos: [18, 12, 8], fill: ['#fdba74', 5] },       // w16: golden hour over the fields, a low warm sun       // w15: violet dusk over the server rows  // w13: a night match — the "sun" is the floodlights, high and white
+  silos: { hemi: 1.1, sun: 2.7, exp: 1.04, env: 0.38, sunPos: [18, 12, 8], fill: ['#fdba74', 5] },
+  columns: { hemi: 1.0, sun: 2.2, exp: 1.02, env: 0.4, sunPos: [16, 13, 9], fill: ['#fbbf24', 4] },      // w14: stone and brass at dusk, a low warm sun
+  labs: { hemi: 1.15, sun: 2.6, exp: 1.04, env: 0.42, sunPos: [-10, 24, 12], fill: ['#5eead4', 3] },      // w17: a clean bright sky over the lab hill
+  lighthouse: { hemi: 0.9, sun: 1.8, exp: 1.02, env: 0.38, sunPos: [-14, 18, 8], fill: ['#a5b4fc', 6] },   // w18: storm light on the coast
+  bell: { hemi: 0.8, sun: 1.9, exp: 1.03, env: 0.4, sunPos: [6, 22, 12], fill: ['#fbbf24', 7] },          // w19: the exchange floor, warm lamps in the dark
+  screens: { hemi: 0.72, sun: 1.5, exp: 1.03, env: 0.36, sunPos: [-8, 20, 10], fill: ['#22d3ee', 9] },    // w20: night, the screens' cyan glow       // w16: golden hour over the fields, a low warm sun       // w15: violet dusk over the server rows  // w13: a night match — the "sun" is the floodlights, high and white
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null; globeDecor = null; cloudDecor = null; hqDecor = null; siloDecor = null;
+  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null; globeDecor = null; cloudDecor = null; hqDecor = null; siloDecor = null; decor1420 = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -919,7 +934,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights, globe: decorGlobe, servers: decorServers, tower: decorTower, silos: decorSilos }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights, globe: decorGlobe, servers: decorServers, tower: decorTower, silos: decorSilos, columns: decorColumns, labs: decorLabs, lighthouse: decorLighthouse, bell: decorBell, screens: decorScreens }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1562,6 +1577,118 @@ function syncCables() {
 }
 /** w16 ארץ השדות: fields at golden hour — a wheat-olive island with furrowed field strips around the board (gold, green and soil rows),
  *  grain silos and a water tower in the back, a line of cypresses. Nothing moves (no updater), also under reduced motion. */
+/* ---------- w14 / w17 / w18 / w19 / w20 decor (CATALOG-25 wave A3 / A4). Nothing moves (no updater), also under reduced motion and on the
+ *  low tier (dn() thins the counts); w18's storm clouds follow the insurer's level (syncStorm), nothing else reads the city. */
+let decor1420 = null;
+/** a row of instanced columns along an arc behind the board (backOnly scatter) + their capitals */
+function colonnade(n, r0, r1, seed, shaftCol, capCol, hMin = 2.5, hK = 3.5) {
+  const pts = scatter(dn(n), r0, r1, { backOnly: true, seed }); const d = new THREE.Object3D();
+  const shaft = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.34, 0.4, 1, 12), std(shaftCol, { roughness: 0.55 }), pts.length);
+  const cap = new THREE.InstancedMesh(new THREE.BoxGeometry(1.05, 0.32, 1.05), std(capCol, { roughness: 0.4, metalness: 0.4 }), pts.length);
+  pts.forEach((p, i) => { const h = hMin + p.k * hK; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, 0, 0); d.scale.set(1, h, 1); d.updateMatrix(); shaft.setMatrixAt(i, d.matrix);
+    d.position.set(p.x, -0.72 + h + 0.16, p.z); d.scale.set(1, 1, 1); d.updateMatrix(); cap.setMatrixAt(i, d.matrix); });
+  shaft.castShadow = true; [shaft, cap].forEach((m) => { own(m); worldGroup.add(m); }); return pts.length;
+}
+const flatRing = (r0, r1, col, o = {}) => { const ring = own(new THREE.Mesh(new THREE.RingGeometry(r0, r1, 72), std(col, o))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring); return ring; };
+/** w14 רובע הבנקים: stone and brass — a sandstone island, a brass ring, a colonnade behind, and the bank's façade behind the board's centre
+ *  (steps, eight columns, a pediment) with a round brass vault door leaning beside it. Still. */
+function decorColumns(T) {
+  island(31, std('#d6cdbd', { roughness: 0.85 }), '#57534e'); flatRing(12.3, 14.3, '#b45309', { roughness: 0.35, metalness: 0.6 });
+  const cols = colonnade(18, 17, 28, 141, '#f5f5f4', '#b45309');
+  const hall = new THREE.Group(); hall.name = 'decor:bankHall'; hall.position.set(0, -0.72, -17); hall.scale.setScalar(0.7);
+  for (let k = 0; k < 3; k++) { const st = own(new THREE.Mesh(new THREE.BoxGeometry(14 - k * 0.8, 0.45, 4.6 - k * 0.5), std('#e7e2d6', { roughness: 0.7 }))); st.position.y = 0.22 + k * 0.45; hall.add(st); }
+  const body = own(new THREE.Mesh(new THREE.BoxGeometry(12, 6, 2.6), std('#e7e2d6', { roughness: 0.6 }))); body.position.set(0, 4.35, -0.9); body.castShadow = true; hall.add(body);
+  const sh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.42, 0.48, 6, 14), std('#f5f5f4', { roughness: 0.5 }), 8); const o = new THREE.Object3D();
+  for (let i = 0; i < 8; i++) { o.position.set(-5.25 + i * 1.5, 4.35, 0.9); o.updateMatrix(); sh.setMatrixAt(i, o.matrix); } sh.castShadow = true; own(sh); hall.add(sh);
+  const ent = own(new THREE.Mesh(new THREE.BoxGeometry(12.8, 0.6, 3.4), std('#d6cdbd', { roughness: 0.6 }))); ent.position.set(0, 7.65, 0); hall.add(ent);
+  const ped = own(new THREE.Mesh(new THREE.CylinderGeometry(7.6, 7.6, 3.2, 3), std('#e7e2d6', { roughness: 0.6 }))); ped.rotation.set(Math.PI / 2, 0, Math.PI / 2); ped.scale.set(1, 1, 0.26); ped.position.set(0, 8.4, 0); hall.add(ped);
+  worldGroup.add(hall);
+  const vault = own(new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.5, 32), std('#b45309', { roughness: 0.3, metalness: 0.75 }))); vault.name = 'decor:vault'; vault.rotation.set(Math.PI / 2 - 0.25, 0, 0.4); vault.position.set(13, 1.7, -12); vault.castShadow = true; worldGroup.add(vault);
+  const hub = own(new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.7, 16), std('#78350f', { roughness: 0.4, metalness: 0.6 }))); hub.rotation.copy(vault.rotation); hub.position.copy(vault.position); worldGroup.add(hub);
+  decor1420 = { kind: 'columns', columns: cols, hall: true, vault: true };
+}
+/** w17 גבעת המעבדות: a lab hill — a mint island, glass lab blocks and greenhouse domes behind, a helix sculpture on a plinth. Still. */
+function decorLabs(T) {
+  island(32, std('#a7e3d6', { roughness: 0.9 }), '#115e59'); flatRing(12.3, 14.2, '#0d9488', { roughness: 0.5 });
+  const d = new THREE.Object3D(); const pts = scatter(dn(14), 17, 29, { backOnly: true, seed: 171 });
+  const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#f8fafc', { roughness: 0.45 }), pts.length);
+  const glass = new THREE.InstancedMesh(new THREE.BoxGeometry(1.02, 0.25, 1.02), std('#5eead4', { roughness: 0.1, metalness: 0.35 }), pts.length * 2);
+  pts.forEach((p, i) => { const h = 2.2 + p.k * 3.4, w = 2.2 + p.k * 1.6; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, p.a, 0); d.scale.set(w, h, w * 0.7); d.updateMatrix(); blocks.setMatrixAt(i, d.matrix);
+    for (let k = 0; k < 2; k++) { d.position.set(p.x, -0.72 + h * (0.35 + k * 0.35), p.z); d.scale.set(w, 1, w * 0.7); d.updateMatrix(); glass.setMatrixAt(i * 2 + k, d.matrix); } });
+  blocks.castShadow = true; [blocks, glass].forEach((m) => { own(m); worldGroup.add(m); });
+  const dp = scatter(dn(5), 20, 27, { backOnly: true, seed: 173 });
+  const domes = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ccfbf1', transparent: true, opacity: 0.6, roughness: 0.1 }), dp.length);
+  dp.forEach((p, i) => { d.position.set(p.x * 0.92, -0.72, p.z * 0.92); d.rotation.set(0, 0, 0); d.scale.setScalar(1.6 + p.k); d.updateMatrix(); domes.setMatrixAt(i, d.matrix); }); own(domes); worldGroup.add(domes);
+  // the helix: two strands of 24 beads on a plinth behind the board's centre
+  const helix = new THREE.Group(); helix.name = 'decor:helix'; helix.position.set(0, -0.72, -17.5);
+  const pl = own(new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.7, 0.8, 20), std('#e2e8f0', { roughness: 0.6 }))); pl.position.y = 0.4; helix.add(pl);
+  const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.28, 12, 8), std('#ffffff', { roughness: 0.4 }), 48);
+  for (let i = 0; i < 24; i++) for (let s2 = 0; s2 < 2; s2++) { const a = i * 0.5 + s2 * Math.PI; d.position.set(Math.cos(a) * 1.1, 1.2 + i * 0.36, Math.sin(a) * 1.1); d.rotation.set(0, 0, 0); d.scale.setScalar(1); d.updateMatrix(); beads.setMatrixAt(i * 2 + s2, d.matrix); beads.setColorAt(i * 2 + s2, new THREE.Color(s2 ? '#0d9488' : '#f59e0b')); }
+  own(beads); helix.add(beads); worldGroup.add(helix);
+  decor1420 = { kind: 'labs', blocks: pts.length, domes: dp.length, helix: 48 };
+}
+/** w18 חוף הסערות: a sandy island in a dark sea, rocks, a lighthouse on the back rocks, white wave crests on a ring, and storm clouds that
+ *  gather over the coast in the storm season (they follow the insurer's 'ins' level: syncStorm — no updater). */
+function decorLighthouse(T) {
+  const sea = own(new THREE.Mesh(new THREE.CircleGeometry(120, 64), std(T.water || '#1e3a8a', { roughness: 0.25, metalness: 0.2 }))); sea.rotation.x = -Math.PI / 2; sea.position.y = -1.05; sea.receiveShadow = true; worldGroup.add(sea);
+  island(30, std('#d6c7a1', { roughness: 1 }), '#475569'); flatRing(12.3, 14.2, '#64748b', { roughness: 0.8 });
+  const d = new THREE.Object3D(); const rk = scatter(dn(22), 19, 29, { backOnly: true, seed: 181 });
+  const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), std('#64748b', { roughness: 1, flatShading: true }), rk.length);
+  rk.forEach((p, i) => { d.position.set(p.x, -0.6, p.z); d.rotation.set(p.a, p.k * 3, 0); d.scale.set(1 + p.k * 1.4, 0.7 + p.k, 1 + p.k); d.updateMatrix(); rocks.setMatrixAt(i, d.matrix); }); rocks.castShadow = true; own(rocks); worldGroup.add(rocks);
+  const crest = new THREE.InstancedMesh(new THREE.TorusGeometry(1, 0.06, 4, 16, Math.PI * 0.7), new THREE.MeshBasicMaterial({ color: '#e2e8f0' }), 36);
+  for (let i = 0; i < 36; i++) { const a = (i / 36) * Math.PI * 2; const r = 33 + (i % 3) * 2.5; d.position.set(Math.sin(a) * r, -0.98, Math.cos(a) * r); d.rotation.set(-Math.PI / 2, 0, a); d.scale.setScalar(1.6 + (i % 4) * 0.4); d.updateMatrix(); crest.setMatrixAt(i, d.matrix); } own(crest); worldGroup.add(crest);
+  const lh = new THREE.Group(); lh.name = 'decor:lighthouse'; lh.position.set(-11, -0.72, -16);
+  for (let k = 0; k < 5; k++) { const seg = own(new THREE.Mesh(new THREE.CylinderGeometry(1.15 - k * 0.12, 1.25 - k * 0.12, 1.8, 18), std(k % 2 ? '#dc2626' : '#f8fafc', { roughness: 0.6 }))); seg.position.y = 0.9 + k * 1.8; seg.castShadow = true; lh.add(seg); }
+  const lamp = own(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.1, 14), new THREE.MeshBasicMaterial({ color: '#fde68a' }))); lamp.position.y = 9.6; lh.add(lamp);
+  const cap = own(new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.2, 14), std('#1e293b', { roughness: 0.5 }))); cap.position.y = 10.75; lh.add(cap); worldGroup.add(lh);
+  const clouds = new THREE.Group(); clouds.name = 'decor:storm'; clouds.visible = false; worldGroup.add(clouds);
+  const cl = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), std('#334155', { roughness: 1 }), 30);
+  for (let i = 0; i < 30; i++) { const c = Math.floor(i / 5), a = -1.2 + c * 0.5; d.position.set(Math.sin(a) * 22 + (i % 5) * 1.6 - 3, 11 + (i % 2) * 0.8, -Math.abs(Math.cos(a)) * 18 - 2); d.rotation.set(0, 0, 0); d.scale.set(2.2 + (i % 3) * 0.6, 1.3, 1.8); d.updateMatrix(); cl.setMatrixAt(i, d.matrix); }
+  own(cl); clouds.add(cl); decor1420 = { kind: 'lighthouse', rocks: rk.length, crests: 36, lighthouse: true, clouds, storm: false };
+  syncStorm();
+}
+/** w18: the storm clouds are shown while the insurer's level is in the storm season (August–October) */
+function syncStorm() {
+  const D = decor1420; if (!D || D.kind !== 'lighthouse') return;
+  const L = [...city.values()].map((it) => it.level).find((x) => x && x.kind === 'ins'); const on = !!(L && L.season);
+  if (D.storm !== on) { D.storm = on; D.clouds.visible = on; invalidate(); }
+}
+/** w19 פעמון הבורסה: the exchange floor — a dark-oak island, a brass ring, the big bell on its frame behind the board's centre and a ticker
+ *  wall of lit panels in the back (fixed green / red marks). Still: the bell never swings. */
+function decorBell(T) {
+  island(31, std('#57493a', { roughness: 0.8 }), '#292524'); flatRing(12.3, 14.3, '#b45309', { roughness: 0.35, metalness: 0.6 });
+  const fr = new THREE.Group(); fr.name = 'decor:bell'; fr.position.set(0, -0.72, -17); fr.scale.setScalar(0.85);
+  for (const x of [-4.2, 4.2]) { const post = own(new THREE.Mesh(new THREE.BoxGeometry(0.7, 11, 0.7), std('#292524', { roughness: 0.6 }))); post.position.set(x, 5.5, 0); post.castShadow = true; fr.add(post); }
+  const beam = own(new THREE.Mesh(new THREE.BoxGeometry(9.4, 0.8, 0.8), std('#292524', { roughness: 0.6 }))); beam.position.y = 11; fr.add(beam);
+  const pts = [[0, 3.4], [0.9, 3.25], [1.3, 2.5], [1.5, 1.2], [2.1, 0.25], [2.4, 0]].map(([x, y]) => new THREE.Vector2(x, y));
+  const cup = own(new THREE.Mesh(new THREE.LatheGeometry(pts, 32), std('#b45309', { roughness: 0.28, metalness: 0.8, side: THREE.DoubleSide }))); cup.position.y = 7.2; cup.castShadow = true; fr.add(cup);
+  const cl = own(new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10), std('#78350f', { roughness: 0.4, metalness: 0.6 }))); cl.position.y = 7.0; fr.add(cl); worldGroup.add(fr);
+  const d = new THREE.Object3D(); const ps = scatter(dn(16), 18, 28, { backOnly: true, seed: 191 });
+  const panel = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 0.3), std('#111827', { roughness: 0.4 }), ps.length);
+  const marks = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), ps.length * 3);
+  ps.forEach((p, i) => { const rot = Math.atan2(-p.x, -p.z), h = 2.4 + p.k * 1.6, w = 3 + p.k * 1.5; d.position.set(p.x, 1.2 + h / 2, p.z); d.rotation.set(0, rot, 0); d.scale.set(w, h, 1); d.updateMatrix(); panel.setMatrixAt(i, d.matrix);
+    const fx = Math.sin(rot) * 0.18, fz = Math.cos(rot) * 0.18; for (let k = 0; k < 3; k++) { d.position.set(p.x + fx, 1.2 + h * (0.25 + k * 0.25), p.z + fz); d.scale.set(w * 0.8, 0.18, 1); d.updateMatrix(); marks.setMatrixAt(i * 3 + k, d.matrix); marks.setColorAt(i * 3 + k, new THREE.Color((i + k) % 3 ? '#22c55e' : '#ef4444')); } });
+  [panel, marks].forEach((m) => { own(m); worldGroup.add(m); });
+  decor1420 = { kind: 'bell', bell: true, panels: ps.length };
+}
+/** w20 רחוב הקרנות: trading screens at night — a dark island, a cyan ring, dark towers with lit window strips and walls of screens with
+ *  fixed bars. Still: nothing moves. */
+function decorScreens(T) {
+  island(31, std('#162033', { roughness: 0.8 }), '#020617'); flatRing(12.3, 14.3, '#0e7490', { roughness: 0.4, metalness: 0.3 });
+  const d = new THREE.Object3D(); const tw = scatter(dn(20), 18, 30, { backOnly: true, seed: 201 });
+  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#0f172a', { roughness: 0.35, metalness: 0.5 }), tw.length);
+  const win = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), tw.length * 5);
+  const tones = ['#22d3ee', '#67e8f9', '#f43f5e', '#4ade80', '#155e75'];
+  tw.forEach((p, i) => { const h = 5 + p.k * 9, w = 2 + p.k * 1.5, rot = Math.atan2(-p.x, -p.z); d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, rot, 0); d.scale.set(w, h, w); d.updateMatrix(); body.setMatrixAt(i, d.matrix);
+    const fx = Math.sin(rot) * (w / 2 + 0.02), fz = Math.cos(rot) * (w / 2 + 0.02); for (let k = 0; k < 5; k++) { d.position.set(p.x + fx, -0.72 + h * (0.15 + k * 0.17), p.z + fz); d.scale.set(w * 0.78, 0.22, 1); d.updateMatrix(); win.setMatrixAt(i * 5 + k, d.matrix); win.setColorAt(i * 5 + k, new THREE.Color(tones[(i * 3 + k) % tones.length])); } });
+  body.castShadow = true; [body, win].forEach((m) => { own(m); worldGroup.add(m); });
+  const wall = new THREE.Group(); wall.name = 'decor:screens'; wall.position.set(0, -0.72, -16.5); worldGroup.add(wall);
+  const fr = own(new THREE.Mesh(new THREE.BoxGeometry(15, 5.6, 0.5), std('#020617', { roughness: 0.4 }))); fr.position.y = 4.2; wall.add(fr);
+  const bars = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), 24);
+  for (let i = 0; i < 24; i++) { const v = Math.sin(i * 1.7) * 0.5 + Math.cos(i * 0.9) * 0.4; const h = 0.3 + Math.abs(v) * 1.9; d.position.set(-6.9 + i * 0.6, 4.2 + (v >= 0 ? h / 2 : -h / 2), 0.27); d.rotation.set(0, 0, 0); d.scale.set(0.4, h, 1); d.updateMatrix(); bars.setMatrixAt(i, d.matrix); bars.setColorAt(i, new THREE.Color(v >= 0 ? '#22c55e' : '#f43f5e')); }
+  own(bars); wall.add(bars);
+  decor1420 = { kind: 'screens', towers: tw.length, screens: 24 };
+}
 function decorSilos(T) {
   island(32, std('#a3b84a', { roughness: 1 }), '#713f12');
   const ring = own(new THREE.Mesh(new THREE.RingGeometry(12.3, 14.2, 72), std('#8a6a3a', { roughness: 1 }))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring);
@@ -1893,7 +2020,7 @@ function ensureGridRaw(count, animate = true) {
   let n = 4; while (n * n < count && n < 8) n++;
   if (n !== gridN) { gridN = n; relayout(animate); drawCenter(n); }
 }
-export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); syncCables(); }
+export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); syncCables(); syncStorm(); }
 export function hasKey(key) { return city.has(key); }
 /** wave 1 (A2 G-03): the keys the city shows now (SCENE_OPTIONAL) — game.js reconciles them with E.cityModels(S) + L:* */
 export function cityKeys() { return [...city.keys()]; }
@@ -1946,7 +2073,7 @@ export function spawn(key, model, opts = {}) {
 /** Shrink a model away. */
 export function despawn(key) {
   const it = city.get(key); if (!it) return;
-  city.delete(key); syncKit(); syncArcs(); syncCloud(); syncCables();
+  city.delete(key); syncKit(); syncArcs(); syncCloud(); syncCables(); syncStorm();
   const o = it.obj, s0 = o.scale.x;
   tween(reduced ? MOTION.t1 : D(MOTION.despawn), (p) => { o.scale.setScalar(Math.max(0.001, s0 * (1 - p))); if (!reduced) o.rotation.y += 0.08; }).then(() => dropObj(o));
 }
@@ -2000,6 +2127,11 @@ function applyLevelParts(it) {
   if (it.level && it.level.kind === 'sub') { paintSub(it.obj, it.level); syncArcs(); return; }   // w11: the country band, the manager + trust ring, supply marks; the decor's arcs
   if (it.level && it.level.kind === 'app') { paintApp(it.obj, it.level); syncCloud(); return; }
   if (it.level && it.level.kind === 'div') { paintDiv(it.obj, it.level); syncCables(); return; }   // w12: the guarantee anchor (+ the decor's cable) or the fence, health, deficit, storm
+  if (it.level && it.level.kind === 'bank') { paintBank(it.obj, it.level); return; }     // w14: the book's stacks, the capital column, the queue, the vault door
+  if (it.level && it.level.kind === 'lab') { paintLab(it.obj, it.level); return; }       // w17: a flask per candidate slot
+  if (it.level && it.level.kind === 'ins') { paintIns(it.obj, it.level); syncStorm(); return; }   // w18: the line umbrellas, XoL rings, solvency; the decor's storm clouds
+  if (it.level && it.level.kind === 'listco') { paintList(it.obj, it.level); return; }   // w19: the bell, the ticker, EBITDA bars, divisions, the activist
+  if (it.level && it.level.kind === 'fund') { paintFund(it.obj, it.level); return; }     // w20: the twelve positions, the AUM ring, the gate
   if (it.level && it.level.kind === 'farm') { paintFarm(it.obj, it.level); if (siloDecor) siloDecor.regime = it.level.regime; return; }   // w16: the fields, hedge bands, pipes, the silo  // w15: the runway fuse, the tower's user dots; the board's cloud   // w13: a lit billboard, dark once the contract ended
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
@@ -2058,6 +2190,8 @@ export function highlight(key) { try { hlKey = key && city.has(key) ? key : null
 export function levelOf(key) {
   const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
   const model = it.level.kind === 'div' && ud.divState ? { ...ud.divState } : it.level.kind === 'farm' && ud.farmState ? { ...ud.farmState, fields: ud.farmState.fields.map((f) => (f ? { ...f } : null)) }   // w12 / w16: the dress over a shared stand-in that keeps its own state
+    : ud.bankState ? { ...ud.bankState, stacks: ud.bankState.stacks.slice() } : ud.labState ? { ...ud.labState, flasks: ud.labState.flasks.map((f) => (f ? { ...f } : null)) } : ud.insState ? { ...ud.insState, lines: ud.insState.lines.map((x) => ({ ...x })) }   // w14 / w17 / w18
+    : ud.listState ? { ...ud.listState, bars: ud.listState.bars.slice(), divs: { ...ud.listState.divs } } : ud.fundState ? { ...ud.fundState, book: ud.fundState.book.slice() }   // w19 / w20
     : ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
     : ud.energyState ? { ...ud.energyState } : ud.clubState ? { ...ud.clubState } : ud.subState ? { ...ud.subState } : ud.appState ? { ...ud.appState } : ud.boardState ? { ...ud.boardState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
   return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
@@ -2126,7 +2260,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0', globe: '#99f6e4', servers: '#ddd6fe' , tower: '#e7e5e4', silos: '#e9d8a6' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0', globe: '#99f6e4', servers: '#ddd6fe' , tower: '#e7e5e4', silos: '#e9d8a6', columns: '#d6cdbd', labs: '#ccfbf1', lighthouse: '#cbd5e1', bell: '#a8a29e', screens: '#67e8f9' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
@@ -2489,7 +2623,8 @@ export function perfStats() {
       globe: globeDecor && theme && theme.decor === 'globe' ? { districts: Object.keys(globeDecor.districts).length, arcs: globeDecor.n, red: globeDecor.red, self: [...globeDecor.self], dim: [...globeDecor.dim] } : null,
       servers: cloudDecor && theme && theme.decor === 'servers' ? { dots: cloudDecor.shown, max: cloudDecor.N, rot: Math.round(cloudDecor.rot * 1000) / 1000 } : null,
       tower: hqDecor && theme && theme.decor === 'tower' ? { cables: hqDecor.n, red: hqDecor.red, fenced: hqDecor.fenced, keys: hqDecor.cables.children.map((c) => c.userData.key) } : null,
-      silos: siloDecor && theme && theme.decor === 'silos' ? { ...siloDecor } : null },   // w9 pulses / w10 ribbon (tests)
+      silos: siloDecor && theme && theme.decor === 'silos' ? { ...siloDecor } : null,
+      ...(decor1420 && theme && theme.decor === decor1420.kind ? { [decor1420.kind]: Object.fromEntries(Object.entries(decor1420).filter(([k]) => k !== 'clouds')) } : {}) },   // w14 columns / w17 labs / w18 lighthouse (+ storm) / w19 bell / w20 screens   // w9 pulses / w10 ribbon (tests)
     paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
     kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
     shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };

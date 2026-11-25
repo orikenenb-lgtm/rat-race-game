@@ -303,6 +303,26 @@ function paintLevel(it, L) {
       hidden(el('span', 'b2d-corner-b', c, L.distress ? '⚠️' : L.stormHit ? '🌩️' : L.fence ? '🚧' : '🔗'));
       c.dataset.light = L.distress ? 'stalled' : L.stormHit ? 'storm' : 'on'; c.dataset.run = L.struct === 'r' ? 'fence' : 'cable'; c.dataset.struct = L.struct;
       c.style.setProperty('--b2d-pct', `${L.health}%`);
+    } else if (L.kind === 'bank') {   // w14: 🏦 the bank, the capital ratio as the bar (20 % = full), 🚶 a queue, ⚠️ under 8 %
+      hidden(el('span', 'b2d-corner-b', c, L.cap < 0.08 ? '⚠️' : L.queue ? '🚶' : '🏦'));
+      c.dataset.light = L.cap < 0.08 || L.run ? 'stalled' : L.queue ? 'storm' : 'on'; c.dataset.run = String(Math.round(L.cap * 1000) / 10); c.dataset.conf = String(L.conf);
+      c.style.setProperty('--b2d-pct', `${Math.round(Math.min(1, L.cap / 0.2) * 100)}%`);
+    } else if (L.kind === 'lab') {   // w17: 🧪 the lab, 💊 a drug on the market, ✖ a failed readout; the share of slots in use as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.cracked ? '✖' : L.drugs ? '💊' : '🧪'));
+      c.dataset.light = L.cracked ? 'stalled' : L.drugs ? 'on' : L.trials ? 'build' : 'off'; c.dataset.run = `${L.drugs}/${L.trials}`;
+      c.style.setProperty('--b2d-pct', `${Math.round(((L.trials + L.drugs) / 8) * 100)}%`);
+    } else if (L.kind === 'ins') {   // w18: ☂️ the insurer, 🌀 the storm season, ⚠️ solvency under 100 %; solvency as the bar (200 % = full)
+      hidden(el('span', 'b2d-corner-b', c, L.solvency < 1 ? '⚠️' : L.season ? '🌀' : '☂️'));
+      c.dataset.light = L.solvency < 1 ? 'stalled' : L.season ? 'storm' : 'on'; c.dataset.run = String(Math.round(L.solvency * 100)); c.dataset.xol = String(L.xol);
+      c.style.setProperty('--b2d-pct', `${Math.round(Math.min(1, L.solvency / 2) * 100)}%`);
+    } else if (L.kind === 'listco') {   // w19: 🔔 listed (▲ / ▼ vs the peers), 🏢 private, 🚩 an activist; the price vs the peers as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.activist ? '🚩' : L.listed ? (L.price >= L.peer ? '🔔' : '🔻') : '🏢'));
+      c.dataset.light = L.activist ? 'stalled' : L.listed ? 'on' : 'off'; c.dataset.run = L.listed ? 'listed' : 'private';
+      c.style.setProperty('--b2d-pct', `${L.listed && L.peer ? Math.round(Math.min(1.5, L.price / L.peer) / 1.5 * 100) : 0}%`);
+    } else if (L.kind === 'fund') {   // w20: 📈 the fund, 🚧 the gate, 🏃 redemptions waiting; money managed vs its peak as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.gate ? '🚧' : L.pending ? '🏃' : '📈'));
+      c.dataset.light = L.gate ? 'stalled' : L.pending ? 'storm' : 'on'; c.dataset.run = `${L.longs}L${L.shorts}S`;
+      c.style.setProperty('--b2d-pct', `${Math.round(L.dd * 100)}%`);
     } else if (L.kind === 'farm') {   // w16: 🌾 the farm; the share of fields growing as the bar; 🏜️ in a drought
       hidden(el('span', 'b2d-corner-b', c, L.regime === 'drought' ? '🏜️' : L.hedged ? '🔒' : '🌾'));
       c.dataset.light = L.regime === 'drought' ? 'stalled' : L.n ? 'on' : 'off'; c.dataset.run = L.regime;

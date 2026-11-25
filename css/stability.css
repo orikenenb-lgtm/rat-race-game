@@ -203,3 +203,25 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 .b2d-card[data-kind="farm"]::after{background:linear-gradient(to left,#a16207 0 var(--b2d-pct,0%),rgba(161,98,7,.18) var(--b2d-pct,0%) 100%)}
 /* w16 tile H (#0284c7 with white text is 4.1:1 — large text only): a dark text shadow keeps the small tile name readable */
 .b2d-tile[data-type="produce"]{text-shadow:0 1px 1px rgba(8,47,73,.9),0 0 2px rgba(8,47,73,.8)}
+/* w14 (columns motif: a colonnade on the sandstone board; the bank card: the capital ratio as the bar, a dashed red border under 8 % or in a
+   run, amber when depositors queue) */
+.b2d-m-columns .b2d-center{background-image:repeating-linear-gradient(90deg,rgba(87,83,78,.16) 0 10px,transparent 10px 34px),linear-gradient(0deg,rgba(180,83,9,.14) 0 6px,transparent 6px)}
+.b2d-card[data-kind="bank"]{border-color:#475569}.b2d-card[data-kind="bank"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}.b2d-card[data-kind="bank"][data-light="storm"]{border-color:#d97706;border-style:dashed}
+/* w17 (flask motif: lab tiles on the mint board; the lab card: the slots in use as the bar, a dashed red border after a failed readout) */
+.b2d-m-flask .b2d-center{background-image:radial-gradient(circle at 30% 40%,rgba(13,148,136,.18) 0 22px,transparent 23px),radial-gradient(circle at 70% 64%,rgba(245,158,11,.16) 0 16px,transparent 17px),repeating-linear-gradient(0deg,rgba(17,94,89,.08) 0 1px,transparent 1px 18px)}
+.b2d-card[data-kind="lab"]{border-color:#0d9488}.b2d-card[data-kind="lab"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+/* w18 (umbrella motif: rain streaks on the storm board; the insurer card: solvency as the bar, amber dashed in the storm season, red dashed under 100 %) */
+.b2d-m-umbrella .b2d-center{background-image:repeating-linear-gradient(115deg,rgba(49,46,129,.14) 0 2px,transparent 2px 14px),radial-gradient(ellipse at 50% 30%,rgba(79,70,229,.18) 0 40px,transparent 41px)}
+.b2d-card[data-kind="ins"]{border-color:#4f46e5}.b2d-card[data-kind="ins"][data-light="storm"]{border-color:#d97706;border-style:dashed}.b2d-card[data-kind="ins"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+/* w19 (bell motif: a brass bell's rings on the oak floor; the company card: the price vs the peers as the bar, red dashed with an activist) */
+.b2d-m-bell .b2d-center{background-image:radial-gradient(circle at 50% 50%,transparent 0 26px,rgba(217,119,6,.22) 26px 29px,transparent 29px 44px,rgba(217,119,6,.14) 44px 46px,transparent 46px)}
+.b2d-card[data-kind="listco"]{border-color:#b45309}.b2d-card[data-kind="listco"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}.b2d-card[data-kind="listco"][data-light="off"]{border-style:dotted}
+/* w20 (screens motif: a grid of screens on the night board; the fund card: money managed vs its peak as the bar, amber dashed while
+   redemptions wait, red dashed when gated) */
+.b2d-m-screens .b2d-center{background-image:linear-gradient(90deg,rgba(34,211,238,.14) 1px,transparent 1px),linear-gradient(0deg,rgba(34,211,238,.14) 1px,transparent 1px);background-size:22px 16px}
+.b2d-card[data-kind="fund"]{border-color:#22d3ee}.b2d-card[data-kind="fund"][data-light="storm"]{border-color:#d97706;border-style:dashed}.b2d-card[data-kind="fund"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+.b2d-card[data-kind="bank"]::after,.b2d-card[data-kind="lab"]::after,.b2d-card[data-kind="ins"]::after,.b2d-card[data-kind="listco"]::after,.b2d-card[data-kind="fund"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;width:80%;
+  background:linear-gradient(to left,var(--b2d-bar,#0d9488) 0 var(--b2d-pct,0%),rgba(100,116,139,.22) var(--b2d-pct,0%) 100%)}
+.b2d-card[data-kind="bank"]{--b2d-bar:#475569}.b2d-card[data-kind="lab"]{--b2d-bar:#0d9488}.b2d-card[data-kind="ins"]{--b2d-bar:#4f46e5}.b2d-card[data-kind="listco"]{--b2d-bar:#b45309}.b2d-card[data-kind="fund"]{--b2d-bar:#0891b2}
+/* w17 tile V (#0d9488 with white text is 3.7:1 — large text on the 3D tile): a dark text shadow keeps the small 2D tile name readable */
+.b2d-tile[data-type="candidate"]{text-shadow:0 1px 1px rgba(4,47,46,.95),0 0 2px rgba(4,47,46,.85)}

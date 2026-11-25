@@ -77,6 +77,28 @@ export const WORLD_STYLE = Object.freeze({
   // irrigation blue #0284c7 (the tile H fill; ink #075985 / dark #7dd3fc; the UI fill is #38bdf8 so --ink on it stays ≥ 4.5), decor 'silos'
   // (grain silos + a water tower behind the board and furrowed field strips around it — still, also under reduced motion), 🌾.
   w16: { name: 'ארץ השדות', mood: 'fields at golden hour', sky: ['#fde68a', '#fdba74'], board: '#c9c46b', edge: '#713f12', center: '#dbd58a', decor: 'silos', accent: '#0284c7', accent2: '#eab308', accentInk: ['#075985', '#7dd3fc'], rim: '#a16207', rimGlow: false, motif: 'fields', caption: 'המשק שלך' },
+  // CATALOG-25 wave A3 / A4 (2026-11-25) — w14 / w17 / w18 / w19 / w20 have no visual sheet in their docs: designed here from the catalog
+  // lines and each world file's legacy theme. Every board is ΔE76 ≥ 10 from every other world's (tests/render_vocab + contrast).
+  // w14 רובע הבנקים: stone columns and brass at dusk — sky #fde68a → #c2410c (the world file's own sky, so the page and the 3D sky agree), a sandstone board #b8ab98 (ΔE 12.7 to h, the nearest), slate
+  // #475569 = the 3D accent and tile J (white 7.6:1), ink #334155 / dark #cbd5e1 (UI fill #94a3b8), decor 'columns' (a bank hall's colonnade
+  // and pediment behind the board, a round vault door; still), 🏛️.
+  w14: { name: 'רובע הבנקים', mood: 'stone columns and brass at dusk', sky: ['#fde68a', '#c2410c'], board: '#b8ab98', edge: '#57534e', center: '#d6cdbd', decor: 'columns', accent: '#475569', accent2: '#b45309', accentInk: ['#334155', '#cbd5e1'], rim: '#b45309', rimGlow: false, motif: 'columns', caption: 'הבנק שלך' },
+  // w17 גבעת המעבדות: a lab hill under a clean sky — sky #ccfbf1 → #5eead4 (the world file's own sky), a mint board #a7e3d6 (ΔE 12.6 to w12), teal #0d9488 = the 3D
+  // accent and tile V (white 3.7:1 — large text on the 3D tile, a dark text shadow on the 2D tile), ink #115e59 / dark #5eead4 (UI fill #2dd4bf),
+  // decor 'labs' (glass lab blocks, greenhouse domes and a helix sculpture on the hill; still), 🧪.
+  w17: { name: 'גבעת המעבדות', mood: 'a lab hill under a clean sky', sky: ['#ccfbf1', '#5eead4'], board: '#a7e3d6', edge: '#115e59', center: '#d1f2ea', decor: 'labs', accent: '#0d9488', accent2: '#f59e0b', accentInk: ['#115e59', '#5eead4'], rim: '#0d9488', rimGlow: false, motif: 'flask', caption: 'המעבדה שלך' },
+  // w18 חוף הסערות: a stormy coast — sky #94a3b8 → #312e81, a storm-slate board #8fa3bd (ΔE ≥ 20 from every world), indigo #4f46e5 = the 3D
+  // accent (tile Z #312e81, white 11.4:1), ink #3730a3 / dark #a5b4fc (UI fill #818cf8), decor 'lighthouse' (a lighthouse on the rocks, a wave
+  // ring, storm clouds that gather in the storm season — still; the clouds follow the insurer's level, no updater), ☂️🌊.
+  w18: { name: 'חוף הסערות', mood: 'a stormy coast', sky: ['#94a3b8', '#312e81'], board: '#8fa3bd', edge: '#312e81', center: '#c7d2e4', decor: 'lighthouse', accent: '#4f46e5', accent2: '#f97316', accentInk: ['#3730a3', '#a5b4fc'], rim: '#4f46e5', rimGlow: false, motif: 'umbrella', caption: 'חברת הביטוח שלך', sea: '#1e3a8a' },
+  // w19 פעמון הבורסה: the exchange floor at the opening bell — sky #374151 → #111827, a dark oak floor #3d3426 (ΔE 21.7 to w2), brass #b45309
+  // = the 3D accent and tile W (white 5.0:1), the ticker green #16a34a as the second accent, ink #7c2d12 / dark #fdba74 (UI fill #fbbf24),
+  // decor 'bell' (a brass bell on its frame behind the board and a ticker wall; still — the bell never swings), 🔔.
+  w19: { name: 'פעמון הבורסה', mood: 'the exchange floor at the opening bell', sky: ['#374151', '#111827'], board: '#3d3426', edge: '#b45309', center: '#57493a', decor: 'bell', accent: '#b45309', accent2: '#16a34a', accentInk: ['#7c2d12', '#fdba74'], rim: '#d97706', rimGlow: true, motif: 'bell', caption: 'החברה שלך' },
+  // w20 רחוב הקרנות: trading screens at night — sky #0b1020 → #020617, a night board #0b1020 (ΔE 11.7 to w10's navy), screen cyan #22d3ee =
+  // the 3D accent (tile W #0e7490, white 5.4:1), ink #155e75 / dark #22d3ee (UI fill #22d3ee), decor 'screens' (walls of trading screens and
+  // dark towers; the screens are lit, nothing moves), 📈.
+  w20: { name: 'רחוב הקרנות', mood: 'trading screens at night', sky: ['#0b1020', '#020617'], board: '#0b1020', edge: '#0e7490', center: '#162033', decor: 'screens', accent: '#22d3ee', accent2: '#f43f5e', accentInk: ['#155e75', '#22d3ee'], rim: '#22d3ee', rimGlow: true, motif: 'screens', caption: 'הקרן שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -103,6 +125,11 @@ export const CHAR_STYLE = Object.freeze({
   soloFounder: '#7c3aed', bigTechExec: '#1d4ed8', bootstrapper: '#15803d',   // w15
   chair: '#78350f', activist: '#be123c', thirdGen: '#0f766e',            // w12
   agronomist: '#4d7c0f', moshavFarmer: '#a16207', agriFund: '#1d4ed8',   // w16
+  riskChief: '#475569', familyBanker: '#b45309', fintechFounder: '#7c3aed',   // w14
+  scientist: '#0d9488', pharmaVet: '#1d4ed8', bioInvestor: '#be185d',      // w17
+  actuary: '#4338ca', topBroker: '#c2410c', mutualChair: '#15803d',        // w18
+  founderCeo: '#b45309', familyBoard: '#0f766e', turnaroundCeo: '#b91c1c',   // w19
+  quantAnalyst: '#0891b2', starPicker: '#ca8a04', endowmentPm: '#4d7c0f',    // w20
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -133,10 +160,12 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   solar_field: '☀️', wind_farm: '🌬️', battery_yard: '🔋', solar_storage: '🔆', pylon_line: '🗼', h2_pilot: '🧪', grid_slot: '🔌', desert_plot: '🏜️',
   stone_block: '🧱', vault: '🔒', glass_tower: '🏦',
   // w13 model keys (procedural stand-ins in 3D, js/render/standins13.js; no .glb files)
-  stadium: '🏟️', billboard: '📣', club_shop: '🧣' });
+  stadium: '🏟️', billboard: '📣', club_shop: '🧣',
+  // w14 / w17 / w18 / w19 / w20 model keys (procedural stand-ins in 3D, js/render/standins1420.js; no .glb files)
+  bank_hall: '🏦', lab_block: '🧪', insurer_hq: '☂️', exchange_floor: '🔔', trading_floor: '📈' });
 /** w11 / w15: the same model keys (regional_office, glass_tower, warehouse) read differently in these worlds — a subsidiary, the app's tower. */
 export const CITY_EMOJI_W = Object.freeze({ w11: Object.freeze({ regional_office: '🏢', glass_tower: '🏙️', warehouse: '📦' }), w15: Object.freeze({ glass_tower: '📱', regional_office: '🖥️' }),
-  w12: Object.freeze({ hotel: '👑', tower: '🏛️', warehouse: '📦', regional_office: '🚢', glass_tower: '🏦' }), w16: Object.freeze({ warehouse: '🌾', factory_pack: '☀️', business: '🧺' }) });
+  w12: Object.freeze({ hotel: '👑', tower: '🏛️', warehouse: '📦', regional_office: '🚢', glass_tower: '🏦' }), w16: Object.freeze({ warehouse: '🌾', factory_pack: '☀️', business: '🧺' }), w17: Object.freeze({ business: '🔬' }) });
 export function cityEmoji(model, worldId = null) { const name = String(model || '').split('/').pop(); return ((worldId && CITY_EMOJI_W[worldId]) || {})[name] || CITY_EMOJI[name] || '🏠'; }
 
 
@@ -189,6 +218,18 @@ export const CROP_HE = Object.freeze({ wheat: 'חיטה', cotton: 'כותנה', 
 export const CROP_EMOJI = Object.freeze({ wheat: '🌾', cotton: '☁️', avo: '🥑' });
 export const PHASE_HE = Object.freeze({ idle: 'מחכה לזריעה', grow: 'בגידול', young: 'מטע צעיר' });
 export const FIELD_REGIME_HE = Object.freeze({ normal: 'עונה רגילה', bumper: 'שנת שפע', drought: 'בצורת', glut: 'עודף עולמי' });
+/** w14 / w17 / w18 / w19 / w20: the words of the five new level kinds (the engines' own names; the 2D card and the accessible names) */
+export const SEG_HE = Object.freeze({ mort: 'משכנתאות', sme: 'עסקים קטנים', dev: 'יזמי נדל"ן', cons: 'אשראי צרכני', corp: 'חברות גדולות' });   // w14 credit.js SEG
+export const SEG_COLOR = Object.freeze({ mort: '#2563eb', sme: '#16a34a', dev: '#d97706', cons: '#db2777', corp: '#475569' });
+export const SEG_IDS = Object.freeze(['mort', 'sme', 'dev', 'cons', 'corp']);
+export const FLASK_HE = Object.freeze({ dec: 'מחכה להחלטה', run: 'בניסוי', drug: 'תרופה בשוק', dead: 'נכשלה', lab: 'במחקר' });   // w17 trials.js states
+export const STAGE_HE17 = Object.freeze(['שלב I', 'שלב II', 'שלב III', 'אישור', 'בשוק']);
+export const LINE_HE = Object.freeze({ car: 'רכב', coast: 'דירות בחוף', inland: 'דירות בפנים הארץ', health: 'בריאות', bi: 'אובדן הכנסות לעסקים' });   // w18 insure.js LN
+export const LINE_IDS = Object.freeze(['car', 'coast', 'inland', 'health', 'bi']);
+export const LINE_EMOJI = Object.freeze({ car: '🚗', coast: '🏖️', inland: '🏠', health: '🩺', bi: '🏢' });
+export const DIVB_HE = Object.freeze({ plant: 'המפעלים', chain: 'הרשת' });   // w19 bell.js DIVS
+const mm = (x) => { const v = Math.max(0, +x || 0); return v >= 1e9 ? `₪${(Math.round(v / 1e7) / 100).toLocaleString('en-US')} מיליארד` : `₪${Math.round(v / 1e6).toLocaleString('en-US')} מיליון`; };
+const r4 = (x) => (Number.isFinite(Number(x)) ? Math.round(Number(x) * 10000) / 10000 : 0);
 const divk = (x) => (DIV_KIND_HE[x] ? x : 'ret');
 const cropk = (x) => (CROP_HE[x] ? x : 'wheat');
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
@@ -281,6 +322,36 @@ export function normLevel(level) {
     return { kind: 'div', n: h >= 80 ? 3 : h >= 60 ? 2 : h >= 30 ? 1 : 0, of: 3, kind2: divk(level.kind2), home: String(level.home || ''), struct, cable: struct === 'g', fence: struct === 'r', health: h,
       distress: !!level.distress, support: level.support !== false, stormHit: !!level.stormHit, activity: null, trouble: !!level.distress };
   }
+  if (level.kind === 'bank') {   // w14 (credit.js cityModels): the bank — the capital ratio, the depositors' confidence, the queue at the door, the book by segment
+    const cap = Math.max(0, Math.min(1, r4(level.cap ?? level.capRatio))); const conf = clampN(level.conf, 0, 100, 70); const queue = clampN(level.queue, 0, 12, 0);
+    const segs = SEG_IDS.map((k) => { const x = (Array.isArray(level.segs) ? level.segs : Array.isArray(level.segments) ? level.segments : []).find((y) => y && y.seg === k) || {}; return { seg: k, book: Math.max(0, int(x.book)) }; });
+    const tot = segs.reduce((a, x) => a + x.book, 0);
+    return { kind: 'bank', n: cap >= 0.12 ? 3 : cap >= 0.1 ? 2 : cap >= 0.08 ? 1 : 0, of: 3, cap, conf, queue, segs: segs.map((x) => ({ seg: x.seg, book: x.book, share: tot ? Math.round((x.book / tot) * 100) / 100 : 0 })), run: conf < 30, activity: null, trouble: conf < 30 || cap < 0.08 };
+  }
+  if (level.kind === 'lab') {   // w17 (trials.js cityModels): the lab — 8 flask slots {state, stage, fill, cracked, licensed}, the plant
+    const fl = (Array.isArray(level.flasks) ? level.flasks : []).slice(0, 8).map((f) => (f && typeof f === 'object' ? { state: FLASK_HE[f.state] ? f.state : 'dec', stage: clampN(f.stage, 0, 4, 0), fill: frac(f.fill), cracked: !!f.cracked || f.state === 'dead', lic: !!f.lic } : null));
+    while (fl.length < 8) fl.push(null);
+    const own = fl.filter(Boolean); const drugs = own.filter((f) => f.state === 'drug').length;
+    return { kind: 'lab', n: Math.min(3, drugs), of: 3, flasks: fl, drugs, trials: own.filter((f) => f.state === 'run' || f.state === 'dec').length, cracked: own.filter((f) => f.cracked).length, plant: !!level.plant, activity: null, trouble: false };
+  }
+  if (level.kind === 'ins') {   // w18 (insure.js cityModels): the insurer — 5 lines {share of premium, price vs the market, closing}, solvency, XoL layers, the quota share, a cat bond, the storm season
+    const raw = Array.isArray(level.lines) ? level.lines : []; const lines = LINE_IDS.map((k) => { const x = raw.find((y) => y && y.line === k) || {}; return { line: k, prem: Math.max(0, int(x.prem)), rel: Math.round((Number(x.rel) || 0) * 100) / 100, stop: !!x.stop }; });
+    const tot = lines.reduce((a, x) => a + x.prem, 0); const sv = Math.max(0, Math.round((Number(level.solvency) || 0) * 1000) / 1000);
+    return { kind: 'ins', n: sv >= 1.5 ? 3 : sv >= 1.2 ? 2 : sv >= 1 ? 1 : 0, of: 3, solvency: sv, lines: lines.map((x) => ({ ...x, share: tot ? Math.round((x.prem / tot) * 100) / 100 : 0 })), xol: clampN(level.xol, 0, 3, 0), qs: !!level.qs, bond: !!level.bond,
+      season: !!(level.season ?? level.stormSeason), cats: clampN(level.cats, 0, 99, 0), activity: null, trouble: sv < 1 };
+  }
+  if (level.kind === 'listco') {   // w19 (bell.js cityModels): your company — listed or private, its price vs the peers, six months of EBITDA, the two divisions, an activist
+    const c = (Array.isArray(level.candle) ? level.candle : []).slice(-6).map((x) => Math.max(0, Number(x) || 0)); const top = Math.max(1e-9, ...c);
+    const dv = ['plant', 'chain'].map((k) => { const x = (Array.isArray(level.divs) ? level.divs : Array.isArray(level.divisions) ? level.divisions : []).find((y) => y && y.div === k); return x ? { div: k, ebitda: Math.max(0, int(x.ebitda)), growing: clampN(x.growing, 0, 9, 0) } : null; });
+    const price = Math.max(0, Math.round((Number(level.price) || 0) * 1000) / 1000), peer = Math.max(0, Math.round((Number(level.peer) || 0) * 1000) / 1000);
+    return { kind: 'listco', n: !level.listed ? 0 : price >= peer * 1.02 ? 3 : price >= peer * 0.9 ? 2 : 1, of: 3, listed: !!level.listed, price, peer, candle: c.map((x) => Math.round((x / top) * 100) / 100), divs: dv, activist: !!level.activist, activity: null, trouble: !!level.activist };
+  }
+  if (level.kind === 'fund') {   // w20 (funds.js cityModels): the fund — money managed vs its peak, redemptions waiting, the gate, 12 positions (long / short), the index product
+    const aum = Math.max(0, int(level.aum)); const peak = Math.max(aum, int(level.peak)); const pending = Math.max(0, int(level.pending));
+    const book = (Array.isArray(level.book) ? level.book : []).slice(0, 12).map((b) => ({ co: String((b && b.co) || ''), w: Math.max(-0.3, Math.min(0.3, Math.round((Number(b && b.w) || 0) * 1000) / 1000)) }));
+    const dd = peak ? Math.round((aum / peak) * 100) / 100 : 1;
+    return { kind: 'fund', n: level.gate ? 0 : dd >= 0.98 ? 3 : dd >= 0.9 ? 2 : 1, of: 3, aum, peak, dd, pending, gate: !!level.gate, book, longs: book.filter((b) => b.w > 0).length, shorts: book.filter((b) => b.w < 0).length, idx: !!(level.idx ?? level.idxProduct), activity: null, trouble: !!level.gate };
+  }
   if (level.kind === 'farm') {   // w16 (harvest.js cityModels): the farm — up to 6 fields {crop, phase, hedged share, irrigated}, the silo (t), the supply regime
     const fields = (Array.isArray(level.fields) ? level.fields : []).slice(0, 6).map((f) => (f && typeof f === 'object' ? { crop: cropk(f.crop), ph: PHASE_HE[f.ph] ? f.ph : 'idle', hedged: frac(f.hedged), irr: !!f.irr } : null));
     while (fields.length < 6) fields.push(null);
@@ -326,6 +397,11 @@ export function levelText(level) {
   if (L.kind === 'sub') return `${SUB_KIND_HE[L.kind2]} ב${COUNTRY_HE[L.country]} · ${L.self ? 'בניהול שלך' : L.managed ? `מנהל מקומי · אמון ${Math.round(L.trust * 100)}%${L.audited ? ' (נבדק)' : ' (לא נבדק)'}` : 'בלי מנהל'}${L.sup ? ` · ספק מ${COUNTRY_HE[L.sup]}` : ''}${L.disrupted ? ' · ⚠️ שיבוש אצל הספק' : ''}${L.dual ? ' · ספק שני' : ''}${L.hedged ? ' · מטבע מגודר' : ''}`;   // w11
   if (L.kind === 'app') return L.sold ? 'החברה נמכרה' : `${L.users.toLocaleString('en-US')} משתמשים · ${L.profitable ? 'רווחית — המזומן לא נגמר' : `מזומן ל־${L.runway} חודשים`} · החלק שלך ${Math.round(L.stake * 100)}%${L.net ? ' · אפקט רשת' : ''} · שוק: ${REGIME_HE[L.regime]}`;   // w15
   if (L.kind === 'div') return `${DIV_KIND_HE[L.kind2]} · ${L.fence ? 'מגודרת (גדר)' : 'בערבות המטה (כבל)'} · בריאות ${L.health}${L.distress ? ' · ⚠️ בגירעון' : ''}${L.support ? '' : ' · בלי תמיכת המטה'}${L.stormHit ? ' · 🌩️ בסערה' : ''}`;   // w12
+  if (L.kind === 'bank') return `יחס הון ${Math.round(L.cap * 1000) / 10}% · אמון המפקידים ${L.conf} מתוך 100${L.queue ? ' · תור בסניפים' : ''}${L.cap < 0.08 ? ' · ⚠️ מתחת למינימום' : ''}`;   // w14
+  if (L.kind === 'lab') return `${L.trials} מולקולות בצינור · ${L.drugs === 1 ? 'תרופה אחת בשוק' : `${L.drugs} תרופות בשוק`}${L.cracked ? ` · ${L.cracked} ניסויים נכשלו` : ''}${L.plant ? ' · מפעל ייצור' : ''}`;   // w17
+  if (L.kind === 'ins') return `כושר פירעון ${Math.round(L.solvency * 100)}% · ${L.xol ? `${L.xol} שכבות ביטוח משנה לסערות` : 'בלי ביטוח משנה לסערות'}${L.qs ? ' · ביטוח משנה יחסי' : ''}${L.bond ? ' · אג"ח קטסטרופה' : ''}${L.season ? ' · 🌀 עונת הסערות' : ''}`;   // w18
+  if (L.kind === 'listco') return L.listed ? `רשומה בבורסה · מניה ₪${L.price.toFixed(2)} מול ₪${L.peer.toFixed(2)} אצל המתחרים${L.activist ? ' · ⚠️ אקטיביסט' : ''}` : 'עוד לא רשומה בבורסה · אין מחיר שוק';   // w19
+  if (L.kind === 'fund') return `${mm(L.aum)} בניהול · ${L.longs} לונג, ${L.shorts} שורט${L.pending ? ` · ${mm(L.pending)} בבקשות פדיון` : ''}${L.gate ? ' · 🚧 פדיונות נעולים' : ''}${L.idx ? ' · קרן מדד' : ''}`;   // w20
   if (L.kind === 'farm') return `${L.of} שדות · ${L.n} בגידול${L.hedged ? ` · ${L.hedged} מגודרים` : ''} · ${FIELD_REGIME_HE[L.regime]}${L.silo ? ` · ${L.silo.toLocaleString('en-US')} טון בממגורה` : ''}`;   // w16
   if (L.kind === 'hold') return `${LIQ_HE[L.cls]}${L.call ? ' · קריאת מרווח' : ''}${L.frozen ? ' · קפוא החודש' : ''}${L.lockUntil != null ? ` · נעול עד חודש ${L.lockUntil}` : ''}`;
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
@@ -353,6 +429,11 @@ export function levelHint(level) {
   if (L.kind === 'sub') return L.self ? 'הבניין מואר = בניהול שלך: הכי יעיל, ועולה קשב.' : L.managed ? 'הטבעת סביב המנהל = האמון בו, רק לפי מה שנבדק. ביקורת מצמצמת את הטווח.' : 'בלי מנהל: החברה עובדת חלש עד מינוי מנהל או ניהול עצמי.';   // w11
   if (L.kind === 'app') return L.sold ? 'החברה נמכרה: המחיר קבוע — בלי סיכון, ובלי עלייה.' : 'הפתיל = חודשי המזומן. ענן המשתמשים מעל המגדל גדל עם המשתמשים. פחות מ־6 חודשים — הפתיל אדום.';   // w15
   if (L.kind === 'div') return L.fence ? 'הגדר = חטיבה מגודרת: ריבית גבוהה יותר, ואם היא קורסת — הבנקים לוקחים רק אותה.' : 'הכבל למגדל המטה = ערבות: ריבית זולה, אבל אם החטיבה נופלת — החוב שלה עובר למטה.';   // w12
+  if (L.kind === 'bank') return 'העמוד הימני = יחס ההון (קו אדום ב־8%, זהב ב־10%). חמש הערימות = ספר ההלוואות לפי סוג לווה. אנשים בתור בכניסה = מפקידים שמתחילים למשוך.';   // w14
+  if (L.kind === 'lab') return 'כל מבחנה = מולקולה: הנוזל עולה עם השלבים, זהב = תרופה בשוק, מבחנה סדוקה = ניסוי שנכשל, פקק כחול = הועברה לשותף.';   // w17
+  if (L.kind === 'ins') return 'חמש המטריות = הענפים לפי גודל הפרמיה: אדומה = מתחת למחיר השוק, אפורה = תיק בסגירה. הטבעות על הגג = שכבות ביטוח משנה. ענן = עונת הסערות.';   // w18
+  if (L.kind === 'listco') return L.listed ? 'הפעמון על הגג = חברה רשומה. שש העמודות = הרווח התפעולי בחצי השנה האחרונה; החץ = המחיר מול המתחרים; דגל אדום = אקטיביסט.' : 'בלי פעמון = עוד לא הנפקת. בלי הנפקה אין מחיר שוק — והיעד נמדד בבורסה.';   // w19
+  if (L.kind === 'fund') return 'שתים־עשרה העמודות = התיק: ירוק למעלה = לונג, אדום למטה = שורט. הטבעת = הכסף בניהול מול השיא. מחסום בדלת = פדיונות נעולים.';   // w20
   if (L.kind === 'farm') return 'כל רצועה = שדה. הצבע = הגידול, הסימון הכחול = כמה ממנו נעול בחוזה, הצינור = השקיה. הממגורה מתמלאת בקציר.';   // w16
   if (L.kind === 'hold') return L.cls === 'daily' ? 'זכוכית = נזיל: מניות וקרן מדד שאפשר למכור תוך יומיים. רצועת המניות מהבהבת באדום בקריאת מרווח.'
     : L.cls === 'monthly' ? 'אבן = נזילות חודשית: קרן שאפשר לפדות רק ביום המשכורת הבא (או מיד, בהנחה).' : 'כספת = נעול: השקעה פרטית שאי אפשר למכור מהר, ואי אפשר ללוות כנגדה.';
@@ -373,6 +454,9 @@ export function pipsText(level) {
   if (L.kind === 'sponsor') return L.expired ? '○' : '●';
   if (L.kind === 'sub') return L.self ? '★' : L.managed ? '●'.repeat(Math.max(1, Math.round((L.trust || 0) * 3))) + '○'.repeat(3 - Math.max(1, Math.round((L.trust || 0) * 3))) : '○○○';   // w11: trust in thirds
   if (L.kind === 'div') return '●'.repeat(L.n) + '○'.repeat(3 - L.n);   // w12: health in thirds (30 / 60 / 80)
+  if (L.kind === 'lab') return L.flasks.map((f) => (!f ? '' : f.cracked ? '✖' : f.state === 'drug' ? '◆' : f.state === 'lab' ? '◦' : f.fill >= 0.5 ? '▮' : '▯')).join('');   // w17: one mark per flask
+  if (L.kind === 'listco') return L.listed ? '🔔' + '●'.repeat(L.n) + '○'.repeat(3 - L.n) : '○○○';   // w19
+  if (L.kind === 'fund') return L.gate ? '🚧' : '●'.repeat(L.n) + '○'.repeat(3 - L.n);   // w20
   if (L.kind === 'farm') return L.fields.map((f) => (!f ? '' : f.ph === 'grow' ? '▮' : f.ph === 'young' ? '▴' : '▯')).join('');   // w16: one mark per field
   if (L.kind === 'app') return L.sold ? '✔' : L.profitable ? '▮▮▮' : '▮'.repeat(L.n) + '▯'.repeat(3 - L.n);   // w15: the runway (6 / 12 / profitable)
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
@@ -408,6 +492,11 @@ export function kitParts(level) {
   if (L.kind === 'sponsor') { p.lit = !L.expired; return p; }   // w13 (paintBillboard)
   if (L.kind === 'sub') { p.country = L.country; p.self = L.self; p.managed = L.managed; p.trust = L.trust; p.audited = L.audited; p.disrupted = L.disrupted; p.dual = L.dual; p.hedged = L.hedged; return p; }   // w11 (standins1115.js paintSub)
   if (L.kind === 'div') { p.kind2 = L.kind2; p.struct = L.struct; p.cable = L.cable; p.fenced = L.fence; p.health = L.health; p.distress = L.distress; p.support = L.support; p.stormHit = L.stormHit; return p; }   // w12 (standins1216.js paintDiv)
+  if (L.kind === 'bank') { p.cap = L.cap; p.conf = L.conf; p.queue = L.queue; p.segs = L.segs.map((x) => ({ seg: x.seg, share: x.share })); p.run = L.run; return p; }   // w14 (standins1420.js paintBank)
+  if (L.kind === 'lab') { p.flasks = L.flasks.map((f) => (f ? { ...f } : null)); p.plant = L.plant; return p; }   // w17 (paintLab)
+  if (L.kind === 'ins') { p.lines = L.lines.map((x) => ({ line: x.line, share: x.share, rel: x.rel, stop: x.stop })); p.solvency = L.solvency; p.xol = L.xol; p.qs = L.qs; p.bond = L.bond; p.season = L.season; return p; }   // w18 (paintIns)
+  if (L.kind === 'listco') { p.listed = L.listed; p.candle = L.candle.slice(); p.up = L.price >= L.peer; p.divs = L.divs.map((d) => (d ? { ...d } : null)); p.activist = L.activist; return p; }   // w19 (paintList)
+  if (L.kind === 'fund') { p.book = L.book.map((b) => b.w); p.dd = L.dd; p.pending = L.pending > 0; p.gate = L.gate; p.idx = L.idx; return p; }   // w20 (paintFund)
   if (L.kind === 'farm') { p.fields = L.fields.map((f) => (f ? { ...f } : null)); p.silo = L.silo; p.regime = L.regime; return p; }   // w16 (paintFarm)
   if (L.kind === 'app') { p.users = L.users; p.runway = L.runway; p.profitable = L.profitable; p.net = L.net; p.sold = L.sold; p.stake = L.stake; return p; }   // w15 (paintApp)
   if (L.kind === 'build') { p.floors = L.floors; p.pct = L.pct; p.crane = L.crane; p.tarp = L.stalled; p.permit = L.permit; p.presold = L.presold; p.rental = L.rental; p.fence = L.plot; return p; }   // w8 (paintBuild)

@@ -26,6 +26,7 @@ import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
 import { tileSheet, tileText, whereText, stepsTo, landedText, prepareWorldText } from './render/tiles.js';
 import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
 import { nextMilestone, moneyHubModel } from './hudgoal.js';
+import { NEWS as WV3NEWS } from './render/worldview1420.js';   // w14 / w17 / w18 / w19 / w20: the news kinds (icon, bad, keep)
 import * as CL from './candlelog.js';   // CATALOG-25 §3.9: light candle view — candles rebuilt from st.actions (never saved)
 import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
 /* wave 3b — live rooms: a RemoteDriver (js/remote.js) holds the game on the server. D = null → a local game, nothing changes.
@@ -512,7 +513,13 @@ export function cityAudit() {
   // w12: every division (holding.js cityModels); w16: the farm (harvest.js cityModels)
   const divs = Object.fromEntries(cm.filter((m) => m.struct != null && m.kind2 != null && m.country == null).map((m) => [m.key, { kind2: m.kind2, home: m.home || null, struct: m.struct, cable: !!m.cable, fence: !!m.fence, health: m.health ?? null, distress: !!m.distress, support: m.support !== false, stormHit: !!m.stormHit }]));
   const farm = Object.fromEntries(cm.filter((m) => Array.isArray(m.fields)).map((m) => [m.key, { fields: m.fields.map((f) => (f ? { crop: f.crop, ph: f.ph, hedged: f.hedged ?? 0, irr: !!f.irr } : null)), silo: m.silo ?? 0, regime: m.regime || null }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors, subs, app, divs, farm };
+  // w14 / w17 / w18 / w19 / w20: the bank, the lab, the insurer, the listed company, the fund (their cityModels, as the scene gets them)
+  const bank = Object.fromEntries(cm.filter((m) => m.vault && Array.isArray(m.segments)).map((m) => [m.key, { capRatio: m.capRatio, conf: m.conf, queue: m.queue, segments: m.segments.map((x) => ({ seg: x.seg, book: x.book })) }]));
+  const lab = Object.fromEntries(cm.filter((m) => Array.isArray(m.flasks)).map((m) => [m.key, { flasks: m.flasks.map((f) => (f ? { state: f.state, stage: f.stage, fill: f.fill, cracked: !!f.cracked, lic: !!f.lic } : null)), plant: !!m.plant }]));
+  const ins = Object.fromEntries(cm.filter((m) => Array.isArray(m.lines) && m.solvency != null).map((m) => [m.key, { lines: m.lines.map((x) => ({ line: x.line, prem: x.prem, rel: x.rel, stop: !!x.stop })), solvency: m.solvency, xol: m.xol, qs: !!m.qs, bond: !!m.bond, stormSeason: !!m.stormSeason, cats: m.cats }]));
+  const listco = Object.fromEntries(cm.filter((m) => Array.isArray(m.candle) && Array.isArray(m.divisions)).map((m) => [m.key, { listed: !!m.listed, price: m.price, peer: m.peer, candle: m.candle.slice(), divisions: m.divisions.map((d) => ({ ...d })), activist: !!m.activist }]));
+  const fund = Object.fromEntries(cm.filter((m) => Array.isArray(m.book) && m.aum != null).map((m) => [m.key, { aum: m.aum, peak: m.peak, pending: m.pending, gate: !!m.gate, book: m.book.map((b) => ({ co: b.co, w: b.w })), idxProduct: !!m.idxProduct }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors, subs, app, divs, farm, bank, lab, ins, listco, fund };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -530,6 +537,16 @@ function levelOf(entry, m) {
   if (entry.users != null && entry.runway != null) return { kind: 'app', users: entry.users, runway: entry.runway, net: !!entry.net, regime: entry.regime || 'growth', sold: !!entry.sold, stake: entry.stake ?? 0 };
   // w12 (holding.js cityModels): a division — its kind (home world), guaranteed (a cable to HQ) or ring-fenced (a fence), health, a deficit, HQ support, the storm
   if (entry.struct != null && entry.kind2 != null) return { kind: 'div', kind2: entry.kind2, home: entry.home || '', struct: entry.struct, health: entry.health ?? 70, distress: !!entry.distress, support: entry.support !== false, stormHit: !!entry.stormHit };
+  // w14 (credit.js cityModels): the bank — the capital ratio, the depositors' confidence, the queue at the door, the book by segment
+  if (entry.vault && Array.isArray(entry.segments)) return { kind: 'bank', cap: entry.capRatio ?? 0, conf: entry.conf ?? 70, queue: entry.queue ?? 0, segs: entry.segments };
+  // w17 (trials.js cityModels): the lab — a flask per candidate slot (state, stage, fill, cracked, licensed), the plant
+  if (Array.isArray(entry.flasks)) return { kind: 'lab', flasks: entry.flasks, plant: !!entry.plant };
+  // w18 (insure.js cityModels): the insurer — its lines (premium, price vs the market, closing), solvency, XoL, quota share, a cat bond, the storm season
+  if (Array.isArray(entry.lines) && entry.solvency != null) return { kind: 'ins', lines: entry.lines, solvency: entry.solvency, xol: entry.xol ?? 0, qs: !!entry.qs, bond: !!entry.bond, season: !!entry.stormSeason, cats: entry.cats ?? 0 };
+  // w19 (bell.js cityModels): the company — listed, the price vs the peers, six months of EBITDA, the divisions, an activist
+  if (Array.isArray(entry.candle) && Array.isArray(entry.divisions)) return { kind: 'listco', listed: !!entry.listed, price: entry.price ?? 0, peer: entry.peer ?? 0, candle: entry.candle, divisions: entry.divisions, activist: !!entry.activist };
+  // w20 (funds.js cityModels): the fund — money managed vs its peak, redemptions waiting, the gate, the book, the index product
+  if (Array.isArray(entry.book) && entry.aum != null) return { kind: 'fund', aum: entry.aum, peak: entry.peak ?? entry.aum, pending: entry.pending ?? 0, gate: !!entry.gate, book: entry.book, idx: !!entry.idxProduct };
   // w16 (harvest.js cityModels): the farm — its fields (crop, phase, hedged share, irrigated), the silo, the supply regime
   if (Array.isArray(entry.fields)) return { kind: 'farm', fields: entry.fields, silo: entry.silo ?? 0, regime: entry.regime || 'normal' };
   // w5 (season.js cityModels): occupancy decile / closed on the asset's own city piece; a closed wing from the panel rows
@@ -567,7 +584,7 @@ function syncLevels(animate) {
     if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || L.kind === 'sub' || L.kind === 'app' || L.kind === 'div' || L.kind === 'farm' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || L.kind === 'sub' || L.kind === 'app' || L.kind === 'div' || L.kind === 'farm' || L.kind === 'bank' || L.kind === 'lab' || L.kind === 'ins' || L.kind === 'listco' || L.kind === 'fund' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1423,7 +1440,7 @@ async function applyOut(out, opts = {}) {
   if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream, S ? safe0(() => E.metrics(S).dream) : null); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
-  let mkt = 0, mktFirst = null; const lg = []; let lgBad = false;   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
+  let mkt = 0, mktFirst = null; const lg = []; let lgBad = false; const wn = new Map();   // w14 / w17 / w18 / w19 / w20: a world's lines of one payday → ONE toast (important ones keep their own)   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
   for (const n of out.news || []) {
     if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
     if (n.kind === 'market' && n.text) { mkt++; if (!mktFirst || (mktFirst.rumor && !n.rumor)) mktFirst = n; continue; }
@@ -1433,6 +1450,9 @@ async function applyOut(out, opts = {}) {
       else { lg.push(n.text); if (/נפצע|עזב בלי תמורה|אוכל|שרים נגדך/.test(n.text)) lgBad = true; }
       continue; }
     if (n.kind === 'mn' && n.text) { const bad = /הונאה|שיבוש/.test(n.text); ui.toast('🌍 ' + n.text, { kind: bad ? 'bad' : '', keep: /הונאה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w11: a fraud is never dropped
+    if (WV3NEWS[n.kind] && n.text) { const R = WV3NEWS[n.kind];
+      if (R.keep.test(n.text)) { const bad = R.bad.test(n.text); ui.toast(R.ic + ' ' + n.text, { kind: bad ? 'bad' : R.gold && R.gold.test(n.text) ? 'gold' : '', keep: true }); if (bad) ui.announce?.(n.text); continue; }
+      if (!wn.has(n.kind)) wn.set(n.kind, { R, t: [], bad: false, gold: false }); const W = wn.get(n.kind); W.t.push(n.text); if (R.bad.test(n.text)) W.bad = true; if (R.gold && R.gold.test(n.text)) W.gold = true; continue; }
     if (n.kind === 'hd' && n.text) { const bad = /לא עמדה|קרסה|הפרה|גירעון|דירקטוריון|→|מיתון|משבר|זינוק/.test(n.text); ui.toast('👑 ' + n.text, { kind: bad ? 'bad' : /פריחה/.test(n.text) ? 'gold' : '', keep: /לא עמדה|קרסה|הפרה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w12: a group default / a lost division / a breach stay
     if (n.kind === 'hv' && n.text) { const bad = /קריאת מרווח|סגר את הגידור|בכוח|בצורת|ברד/.test(n.text); ui.toast('🌾 ' + n.text, { kind: bad ? 'bad' : /קציר/.test(n.text) ? 'gold' : '', keep: /בכוח|סגר את הגידור/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w16: a forced liquidation stays
     if (n.kind === 'pf' && n.text) { const bad = /נגמר הכסף|הפרת תנאי|חורף/.test(n.text); ui.toast('☁️ ' + n.text, { kind: bad ? 'bad' : /בועה|אפקט הרשת/.test(n.text) ? 'gold' : '', keep: /נגמר הכסף|הפרת תנאי/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w15: the emergency round / a covenant breach stay
@@ -1459,6 +1479,7 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'story') { ui.toast('📖 ' + n.text, { keep: true, ms: 4200 }); ui.announce?.(n.text); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
+  for (const W of wn.values()) ui.toast(W.R.ic + ' ' + W.t.join(' · '), { kind: W.bad ? 'bad' : W.gold ? 'gold' : '', ms: 3400 + 900 * Math.min(3, W.t.length - 1) });
   if (lg.length) ui.toast('⚽ ' + lg.join(' · '), { kind: lgBad ? 'bad' : '', ms: 3400 + 900 * Math.min(3, lg.length - 1) });
   if (mkt) ui.toast(`📈 ${mktFirst.rumor ? '🗣️ שמועה: ' : ''}${mktFirst.text}${mkt > 1 ? ` · עוד ${mkt - 1} בלוח הבורסה` : ''}`);
   if (out.mentor) ui.mentor(out.mentor);
@@ -1564,7 +1585,7 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null, multinational: wi.multinational || null, platform: wi.platform || null, holding: wi.holding || null, harvest: wi.harvest || null,
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null, multinational: wi.multinational || null, platform: wi.platform || null, holding: wi.holding || null, harvest: wi.harvest || null, credit: wi.credit || null, trials: wi.trials || null, insure: wi.insure || null, bell: wi.bell || null, funds: wi.funds || null,
     month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {
