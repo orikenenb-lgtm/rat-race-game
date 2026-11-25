@@ -214,11 +214,11 @@ export function hvChip(H, X, P) {
 export function hdBox(H, X, title) {
   return `<div class="wbox"><div class="wl"><span>👑 ${H.num(`${X.divs}/${X.maxDivs}`)} חטיבות · ${H.esc(X.rating)}</span><b>כיסוי ${H.num(`×${x2(X.coverage)}`)}</b></div>
       <p class="note">כיסוי נזילות: מזומן במטה ל־${H.num(`${mo(X.covMonths)} חודשים`)} של החזרים · ${H.num(String(X.guaranteed))} בערבות המטה · החזרי חוב בערבות ${H.num(H.mS(X.service))} בחודש · שווי ברוטו ${H.num(H.mS(X.gross))} · חוב ${H.num(H.mS(X.debt))}${X.storm ? ` · 🌩️ ${H.esc(X.storm.name)}` : ''}${X.defaults ? ` · <b class="neg">${H.num(String(X.defaults))} חדלויות פירעון</b>` : ''}.</p>
-      <div class="loans"><button data-act="world">👑 ${H.esc(title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">👑 ${H.esc(title || 'לוח המפה')}</button></div></div>`;
 }
 export function hvBox(H, X, title) {
   const growing = (X.slots || []).filter((s) => s && s.phase === 'grow').length;
   return `<div class="wbox"><div class="wl"><span>🌾 ${H.esc(title || 'המשק')} · ${H.esc(X.regimeLabel)}</span><b>${H.num(H.mSg(X.income))}</b></div>
       <p class="note">${H.num(String(growing))} שדות בגידול · עלויות ${H.num(H.mS(X.cost))} בחודש${X.margin ? ` · ביטחונות ${H.num(H.mS(X.margin))}` : ''}${X.forced ? ` · <b class="neg">${H.num(String(X.forced))} סגירות בכוח</b>` : ''} · מכסת מים ${H.num(pct(X.quota))}.</p>
-      <div class="loans"><button data-act="world">🌾 ${H.esc(title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🌾 ${H.esc(title || 'לוח המפה')}</button></div></div>`;
 }

@@ -1,5 +1,5 @@
 # w15 מגדלי הענן end to end in the real page (lobby + game), offline fake backend + guard:
-#   map   P.worldMap(): after a ★ in w10 (or w13), w15 is a playable card (button, what it teaches, generated art ☁️); locked otherwise
+#   map   P.worldMap(): once the map before it in the order of the worlds is finished (2026-11-25, linear), w15 is a playable card (button, what it teaches, generated art ☁️); locked otherwise
 #   pick  w15 card → its rules load lazily → the picker (soloFounder / bigTechExec / bootstrapper, 🚀 💼 🌱) → a game in w15 (body[data-world=w15],
 #         the violet sky, the ☁️ chip, the server-room decor with its user cloud; no 404 / page error / failed model)
 #   play  a fixed-seed soloFounder game: rolls through paydays to 'H' (פגישה עם משקיעים) tiles — the term sheet (the money, the %, the
@@ -25,10 +25,10 @@ SHOTS = OPT.get('shots'); ONLY = set(OPT['only'].split(',')) if OPT.get('only') 
 want = lambda s: ONLY is None or s in ONLY
 VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}}
 ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'])
-STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1, 'w6': 1, 'w7': 1, 'w8': 1, 'w9': 1, 'w10': 1})
+STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1, 'w6': 1, 'w7': 1, 'w8': 1, 'w9': 1, 'w10': 1})   # 2026-11-25 worlds / maps: every map before w15 in the order of the game finished (linear unlocks, groupsV 1)
 SEED = ("localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-tips-off','1'); localStorage.setItem('rr2-reveal', 'all');"
         "localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true,w5:true,w6:true,w7:true,w8:true,w9:true,w10:true,w11:true,w13:true,w15:true}));")
-UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
+UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, groupsV: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
           " seenWorlds: ['w1','w2','w3','w4','w5','w6','w7','w8','w9','w10'], onboarded: true, tutorialDone: true, gamesPlayed: 6, wins: 6 })); })();" % STARS)
 RESULTS = []; ERRS = []; SINKS = []; BAD = []
 if SHOTS: os.makedirs(SHOTS, exist_ok=True)
@@ -121,11 +121,11 @@ async def run_map(b):
     sc = 'map-desk'; ctx, pg = await page(b, 'desk')
     cards = await pg.evaluate(MAP)
     c = next((x for x in cards if x['id'] == 'w15'), None)
-    check(sc, 'after a ★ in w10, w15 is a playable map card (button, what it teaches, difficulty, generated art ☁️)',
+    check(sc, 'after every map before it (w1–w10), w15 is a playable map card (button, what it teaches, difficulty, generated art ☁️)',
           c and c['tag'] == 'BUTTON' and c['act'] == 'world' and not c['soon'] and not c['locked'] and 'מגייסים' in c['learn'] and c['diff'] and c['gen'] and c['motif'] == '☁️', c)
     r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 1, w6: 1, w7: 1, w8: 1, w9: 1 } });
       const m = P.worldMap().filter((x) => x.id === 'w15').map((x) => ({ id: x.id, unlocked: x.unlocked, lock: x.lockText })); P._reset && P._reset({ ...P.getProgress(), stars: %s }); return m; }""" % STARS)
-    check(sc, 'w15 stays locked without a ★ in w10 / w13, and says how to open it', r and r[0]['unlocked'] is False and (r[0]['lock'] or '').strip(), r)
+    check(sc, 'w15 stays locked without a w10 escape (the map before it), and says how to open it', r and r[0]['unlocked'] is False and 'מרכז הפיננסים' in (r[0]['lock'] or ''), r)
     await shot(pg, 'map_desk')
     await ctx.close()
 

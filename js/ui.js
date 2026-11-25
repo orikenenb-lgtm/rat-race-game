@@ -5,6 +5,7 @@ import { fmt, fmtM, sgn, fmtP, genderize, starThresholds, money as moneyOf } fro
 import { goalPanelModel, monthsText, partTag, meterLabel, isStreak, covX } from './hudgoal.js';
 import { displayLesson } from './data/lessons-meta.js';   // wave 3a: misleading lesson titles → display overrides   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
+import { mapLabel, mapNo, groupOf } from './worlds-groups.js';   // 2026-11-25: a level is a מפה inside one of 6 עולמות ("מפה 2 · הכסף הגדול")
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
@@ -332,7 +333,7 @@ export function applyTheme(w) {
 }
 export function worldBanner(w, sub = '') {
   const el = $('#banner'); if (!el) return;
-  el.innerHTML = `<small>עולם ${w.order}</small><b>${esc(w.name)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
+  el.innerHTML = `<small>${esc(mapLabel(w.id) || (w.order ? `מפה ${w.order}` : ''))}</small><b>${esc(w.name)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
   el.className = 'banner'; void el.offsetWidth; el.className = 'banner in';
   clearTimeout(el._t); el._t = setTimeout(() => { el.className = 'banner out'; }, (450 + 1600) * Math.max(0.5, Math.min(1, speed)));   // T5 §4.1: in 450, hold 1.6 s, out 350
 }
@@ -387,7 +388,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   } else if (w.mechanic === 'angel') { key = 'impact'; v = wi.impact; text = `השפעה ${num(`${wi.impact}/${wi.impactTarget}`)}`; goodUp = 1; }
   else if (wi.season) {   // w5: the month's season and the city's demand — a button that opens the world panel (עונות ותפוסה)
     const se = wi.season; key = 'tour'; v = se.tour; goodUp = 1;
-    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח העולם')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} <span class="hb-mf">${esc(MONTH_HE[se.cal - 1] || '')}</span><span class="hb-ms">${esc(MONTH_S[se.cal - 1] || '')}</span><span class="hb-b"> · ${esc(BAND_HE[se.band] || '')}</span> <span class="hb-w">· ביקוש </span>${num(tourTxt(se.tour))}</button>`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח המפה')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} <span class="hb-mf">${esc(MONTH_HE[se.cal - 1] || '')}</span><span class="hb-ms">${esc(MONTH_S[se.cal - 1] || '')}</span><span class="hb-b"> · ${esc(BAND_HE[se.band] || '')}</span> <span class="hb-w">· ביקוש </span>${num(tourTxt(se.tour))}</button>`;
     if (se.festival) extra = '<span class="hedge" title="פסטיבל החודש">🎪</span>';
   }
   else if (wi.plant && wi.panel) {   // w6: lines, utilisation and lines down — a button that opens the world panel (קווי ייצור)
@@ -450,7 +451,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const X = wi.harvest; key = 'farmInc'; v = X.income; goodUp = 1; const C = WV2.hvChip(WVH2, X, wi.panel);
     text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
   }
-  else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
+  else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח המפה')}</button>`; }   // any later world with a panel descriptor
   if (key) {
     if (ind.key === key && ind.v != null && v !== ind.v) { ind.dir = Math.sign(v - ind.v); ind.good = goodUp ? ind.dir * goodUp : 0; ind.t = performance.now(); }
     if (ind.key !== key) { ind.dir = 0; }
@@ -543,7 +544,7 @@ function goalPanelEl() {
   let el = $('#goalPanel'); if (el) return el;
   el = document.createElement('section'); el.id = 'goalPanel'; el.className = 'gpanel'; el.hidden = true;
   el.setAttribute('role', 'region'); el.setAttribute('aria-labelledby', 'gpH');
-  el.innerHTML = '<div class="gp-head"><h2 id="gpH" tabindex="-1">יעד העולם</h2><button type="button" class="ibtn gp-x" aria-label="לסגור את יעד העולם" title="סגירה">✕</button></div><div class="gp-body"></div>';
+  el.innerHTML = '<div class="gp-head"><h2 id="gpH" tabindex="-1">יעד המפה</h2><button type="button" class="ibtn gp-x" aria-label="לסגור את יעד המפה" title="סגירה">✕</button></div><div class="gp-body"></div>';
   el.querySelector('.gp-x').onclick = () => { sfx('click'); goalPanel(false, { focus: true }); };
   el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); goalPanel(false, { focus: true }); } });
   document.addEventListener('pointerdown', (e) => { if (gpOpen && !e.target.closest('#goalPanel, #hGoal')) goalPanel(false); }, { passive: true });
@@ -590,7 +591,7 @@ function goalPanelUpdate(m, ctx) {
   const btn = $('#hGoalBtn');
   let M = null;
   try { M = goalModelOf(m, ctx); } catch (e) { console.warn(e); }
-  if (btn) { const t = `יעד העולם — מה חסר לניצחון${M && M.summary ? `: ${iso(M.summary)}` : ''}`; if (btn.getAttribute('aria-label') !== t) { btn.setAttribute('aria-label', t); btn.title = 'יעד העולם — מה חסר לניצחון'; } }
+  if (btn) { const t = `יעד המפה — מה חסר לניצחון${M && M.summary ? `: ${iso(M.summary)}` : ''}`; if (btn.getAttribute('aria-label') !== t) { btn.setAttribute('aria-label', t); btn.title = 'יעד המפה — מה חסר לניצחון'; } }
   if (!gpOpen || !M) return;
   const body = $('#goalPanel .gp-body'); if (!body) return;
   const html = goalPanelHtml(M); if (gpHtml !== html) { gpHtml = html; body.innerHTML = html; }
@@ -831,7 +832,7 @@ export function renderSheet(m, ctx) {
   const el = $('#sheet'); if (!el) return;
   const w = ctx.world, st = ctx.st, wi = m.worldIndicators || {};
   const top = el.scrollTop;
-  const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד העולם';
+  const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד המפה';
   const hold = m.goalType !== 'benchmark' && m.goalHold && m.goalHold.need > 1 ? ` היעד צריך להחזיק ${m.goalHold.need} ימי משכורת ברצף.` : '';
   const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה ש${gw('אתה חייב', 'את חייבת')}.` : m.goalType === 'passive12' ? `היעד: ${escI(goalWords(w.goalLabel))}. נמדד בממוצע של 12 ימי משכורת: הקיץ צריך לממן את החורף.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
   let world = '';
@@ -852,32 +853,32 @@ export function renderSheet(m, ctx) {
     const P = wi.plant;
     world = `<div class="wbox"><div class="wl"><span>🏭 ${esc(wi.panel.title || 'קווי ייצור')}: ${num(`${P.lines}/${P.slots}`)}</span><b class="num">${P.utilisation != null ? `ניצולת ${esc(pctI(P.utilisation))}` : 'אין קווים'}</b></div>
       <p class="note">${P.lines ? `עלויות קבועות ${num(mS(P.fixedMonth))} בחודש · תזרים הקווים ${num(mSg(P.cfMonth), cls(P.cfMonth))}${P.runway != null ? ` · כרית ${num(String(Math.round(P.runway * 10) / 10))} חודשי קבועות` : ''}. ` : 'עוד אין לך קווי ייצור: קונים או מזמינים במשבצת "הזדמנות". '}${P.breakdowns ? `תקלות עד היום: ${num(String(P.breakdowns))}.` : ''}${P.penalties ? ` קנסות על חוזים: ${num(mS(P.penalties))}.` : ''}</p>
-      <div class="loans"><button data-act="world">🏭 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🏭 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.chain && wi.panel) {   // w7: the chain box; the full panel (gauges, branches, stock, actions) opens from here, the HUD chip and 💼
     const C = wi.chain;
     world = `<div class="wbox"><div class="wl"><span>🛍️ ${esc(wi.panel.title || 'הרשת')}: ${num(`${C.branches}/${C.span}`)}</span><b class="num">${esc(C.liqMonths >= 99 ? 'אין קבועות' : `קופה ${mo1(C.liqMonths)} ח׳`)}</b></div>
       <p class="note">${C.branches || C.franchises ? `${num(String(C.branches))} סניפים מול יכולת ניהול של ${num(String(C.span))} · עלויות קבועות ${num(mS(C.fixedMonth))} בחודש · קופה נזילה ${num(mS(C.liquid))} · מלאי ${num(mS(C.stock))}${C.transit ? ` + בדרך ${num(mS(C.transit))}` : ''}${C.payables ? ` · חוב לספקים ${num(mS(C.payables))}` : ''}${C.franchises ? ` · ${num(String(C.franchises))} בזכיינות` : ''}. ` : 'עוד אין לך סניפים: מיקום לסניף מגיע במשבצת "מיקום לסניף". '}${C.overSpan ? `⚠️ ${num(String(C.overSpan))} סניפים מעבר ליכולת הניהול. ` : ''}${C.lost ? `מכירות שאבדו כשנגמר המלאי: ${num(mS(C.lost))}.` : ''}</p>
-      <div class="loans"><button data-act="world">🛍️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🛍️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.energy && wi.panel) {   // w9: the stations box; the full panel (gantt, calls, projects, plants, actions) opens from here
     const EN = wi.energy;
     world = `<div class="wbox"><div class="wl"><span>☀️ ${esc(wi.panel.title || 'התחנות')}</span><b class="num">${esc(mS(EN.income))} / ${esc(mS(EN.target))}</b></div>
       <p class="note">הכנסה תפעולית אחרי החזר חוב, בחודש רגיל: ${num(mSg(EN.income), cls(EN.income))} מתוך ${num(mS(EN.target))}. ריבית ${num(EN.rate + '%')} · חשמל ${num(mwh(EN.px))} · ${num(String((EN.slots || {}).free || 0))} חיבורים פנויים${EN.equityCalls ? ` · הון עצמי שעוד צריך ${num(mS(EN.equityCalls))}` : ''}${EN.built ? ` · ${num(String(EN.built))} תחנות נבנו` : ''}.</p>
-      <div class="loans"><button data-act="world">☀️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">☀️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.portfolio && wi.panel) {   // w10: the portfolio box; the market screen opens from here
     const PF = wi.portfolio; const R = (wi.market || {}).regime || {};
     world = `<div class="wbox"><div class="wl"><span>📊 ${esc(wi.panel.title || 'הבורסה והתיק')} · ${esc(R.label || '')}</span><b class="num">מינוף ${esc(pctI(PF.ltv))}</b></div>
       <p class="note">מניות וקרן מדד ${num(mS((PF.classes || {}).daily || 0))} · קרנות ${num(mS((PF.classes || {}).monthly || 0))} · פרטי ${num(mS((PF.classes || {}).locked || 0))}${PF.debt ? ` · הלוואה כנגד התיק ${num(mS(PF.debt))}` : ''}${PF.unfunded ? ` · התחייבויות פתוחות ${num(mS(PF.unfunded))}` : ''}${PF.call ? ' · <b class="neg">⚠️ קריאת מרווח</b>' : ''}${PF.forced ? ` · ${num(String(PF.forced))} מכירות כפויות` : ''}.</p>
-      <div class="loans"><button data-act="world">📊 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">📊 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.multinational && wi.panel) {   // w11: the group box; the map panel opens from here
     const X = wi.multinational;
     const nm = (wi.panel.rows || []).filter((r) => r.mgr).length;
     world = `<div class="wbox"><div class="wl"><span>🌍 חברות־בנות ${num(`${X.subs}/${X.maxSubs}`)}</span><b>${nm ? num(`אמון ${pctI(X.trust)}`) : 'בלי מנהלים'}</b></div>
       <p class="note">קשב ${num(`${X.used}/${X.slots}`)} · רווח מגודר ${num(pctI(X.hedgedShare))} · שכר מנהלים ומטה ${num(mS(X.fixedMonth))} בחודש${X.localCash ? ` · מזומן בחו"ל ${num(mS(X.localCash))}` : ''}${X.frauds ? ` · <b class="neg">${num(String(X.frauds))} הונאות (${num(mS(X.fraudLoss))})</b>` : ''} · ${num(String(X.audits))} ביקורות.</p>
-      <div class="loans"><button data-act="world">🌍 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🌍 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.holding && wi.panel) world = WV2.hdBox(WVH2, wi.holding, wi.panel.title);   // w12: the group box; the group panel opens from here
   else if (wi.harvest && wi.panel) world = WV2.hvBox(WVH2, wi.harvest, wi.panel.title);   // w16: the farm box; the farm panel opens from here
@@ -885,25 +886,25 @@ export function renderSheet(m, ctx) {
     const X = wi.platform;
     world = `<div class="wbox"><div class="wl"><span>☁️ ${esc(wi.panel.title || 'האפליקציה')}${X.sold ? ' · נמכרה' : ''}</span><b>${num(X.sold ? mS(X.proceeds) : +X.runway >= 99 ? 'רווחית' : mo1(X.runway) + ' חודשי מזומן')}</b></div>
       <p class="note">${(+X.users || 0).toLocaleString('en-US')} משתמשים · הכנסה ${num(mS(X.mrr))} בחודש · ${X.cf >= 0 ? 'רווח' : 'שריפה'} ${num(mSg(X.cf), cls(X.cf))} · החלק שלך ${num(pctI(X.stake))} = ${num(mS(X.stakeValue))} · שוק: ${esc(X.regimeLabel || '')} (×${esc(String(X.mult))}).</p>
-      <div class="loans"><button data-act="world">☁️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">☁️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.league && wi.panel) {   // w13: the club box; the club panel (table, squad, stadium, actions) opens from here
     const LG = wi.league; const La = LG.last || {};
     world = `<div class="wbox"><div class="wl"><span>🏟️ ${esc(wi.panel.title || 'המועדון')} · ${esc(LG.divName)}</span><b class="num">מקום ${esc(String(LG.rank))}</b></div>
       <p class="note">עונה ${num(String(LG.season))} · מחזור ${num(`${LG.round}/${LG.rounds}`)}${LG.window ? ' · 🔁 חלון העברות' : ''} · הכנסות החודש ${num(mS(La.rev || 0))} · שכר ${num(mS(LG.wages))} · שכר מול הכנסות (12 חודשים) ${num(wrT(LG.wageRatio), LG.wageRatio > LG.wageRatioTarget ? 'neg' : '')} (יעד: עד ${num(pctI(LG.wageRatioTarget))}) · הסגל בספרים ${num(mS(LG.squadBook))} · בשוק ${num(mS(LG.squadMv))}${LG.ownerLoan ? ` · הלוואת בעלים ${num(mS(LG.ownerLoan))}` : ''}.</p>
-      <div class="loans"><button data-act="world">🏟️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🏟️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.proj && wi.panel) {   // w8: the projects box; the full panel (gantt, equity calls, rows, rentals, actions) opens from here
     const PJ = wi.proj;
     world = `<div class="wbox"><div class="wl"><span>🏗️ ${esc(wi.panel.title || 'הפרויקטים')}: ${num(String(PJ.open))}</span><b class="num">ריבית ${esc(PJ.rate + '%')}</b></div>
       <p class="note">${num(String(PJ.open))} ${PJ.open === 1 ? 'פרויקט פתוח' : 'פרויקטים פתוחים'}. ${PJ.equityCalls ? `הון עצמי שעוד צריך: ${num(mS(PJ.equityCalls))}${PJ.runway != null ? ` · המזומן מכסה ×${num(String(Math.round(PJ.runway * 100) / 100))}` : ''}. ` : ''}ביקוש לדירות ×${num(String(PJ.demand))} · הלוואת בנייה ${num(String(PJ.loanRate))}% בחודש${PJ.completed ? ` · ${num(String(PJ.completed))} פרויקטים הושלמו` : ''}${(PJ.plots || []).length ? ` · ${num(String(PJ.plots.length))} מגרשים` : ''}${(PJ.rentals || []).length ? ` · ${num(String(PJ.rentals.length))} בניינים מושכרים` : ''}${PJ.stallMonths ? ` · חודשי עמידה עד היום: ${num(String(PJ.stallMonths))}` : ''}.</p>
-      <div class="loans"><button data-act="world">🏗️ ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🏗️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.season) {   // w5: the season box; the full panel (strip, ring, rows, actions) opens from here, the HUD chip and 💼
     const se = wi.season; const rw = (wi.panel && (wi.panel.gauges || []).find((g) => g.id === 'runway')) || null;
     world = `<div class="wbox"><div class="wl"><span>${BAND_IC[se.band] || '🌴'} ${esc(MONTH_HE[se.cal - 1] || '')} · ${esc(BAND_HE[se.band] || '')}</span><b class="num">ביקוש ${esc(tourTxt(se.tour))}</b></div>
       <p class="note">${rw && rw.value != null ? `כרית לחורף: ${num(String(Math.round(rw.value * 10) / 10))} חודשי עלויות קבועות. ` : ''}${se.line ? `קו עונתי: ${num(fmtM(se.line))} (נסגר עד אוגוסט). ` : ''}${se.fixedMonth ? `עלויות קבועות של הנכסים: ${num(fmtM(se.fixedMonth))} בחודש.` : 'עוד אין נכסים עונתיים.'}</p>
-      <div class="loans"><button data-act="world">🌴 ${esc((wi.panel && wi.panel.title) || 'לוח העולם')}</button></div></div>`;
+      <div class="loans"><button data-act="world">🌴 ${esc((wi.panel && wi.panel.title) || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.ymText) {
     world = `<div class="wbox"><div class="wl"><span>🗞️ ${esc(wi.ymText)}</span>${wi.index != null ? `<b class="num">מדד ${Math.round(wi.index)}</b>` : ''}</div>${spark(wi.indexHist, { color: 'var(--accent)' })}
@@ -2724,13 +2725,13 @@ export function feedback(kind, p = {}) {
     return;
   }
   if (kind === 'milestone') { const t = T5S.M[p.q]; if (t) { sfx('coin'); toast('🎯 ' + t, { kind: 'gold', keep: true }); } return; }
-  if (kind === 'worldEntry') { if (p.world) worldBanner(p.world, T5S.W1); return; }
+  if (kind === 'worldEntry') { if (p.world) worldBanner(p.world, mapNo(p.world.id) === 1 && groupOf(p.world.id) ? fillT(T5S.W2, { g: groupOf(p.world.id).name }) : T5S.W1); return; }   // the first map of a world says the world
   if (kind === 'achievement') return achievementToast(p);
   if (kind === 'lesson') return lessonToast(p.list || [], p.open);
   if (kind === 'verdict') return verdict(p.decision || p, p.opts || {});
   if (kind === 'toast') return toast(p.text, p);
 }
-const T5S = { U1: 'העסק התקדם!', U2: 'שלב {n} מתוך 3 · {label}', D1: '{name}: חזרה לשלב "{label}". כדאי להציץ בלוח העסק.', W1: 'עולם חדש נפתח',
+const T5S = { U1: 'העסק התקדם!', U2: 'שלב {n} מתוך 3 · {label}', D1: '{name}: חזרה לשלב "{label}". כדאי להציץ בלוח העסק.', W1: 'מפה חדשה נפתחה', W2: 'עולם חדש: {g}',
   M: { 1: 'רבע מהדרך לחופש!', 2: 'חצי מהדרך לחופש!', 3: 'שלושה רבעים מהדרך. כמעט שם!' } };
 /** T5 §4.2: hold B / C / D (true) or release them (false) */
 export function holdFeedback(on) { fbHold = !!on; if (!fbHold) { pumpOv(); if (tq.length && !tBusy) nextToast(); } }
@@ -3353,7 +3354,7 @@ export function worldPanel(get, onAct) {
   let D = get(); if (!D || !D.panel) return Promise.resolve();
   let busyAct = false;
   const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
-  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d', multinational: '#92400e', platform: '#4c1d95', holding: '#14532d', harvest: '#075985' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
+  return modal({ tag: D.panel.title || 'לוח המפה', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d', multinational: '#92400e', platform: '#4c1d95', holding: '#14532d', harvest: '#075985' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח המפה', cls: 'wpanel', wide: true,
     html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead

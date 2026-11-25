@@ -2,7 +2,7 @@
 # Real copy (lobby + real game), offline fake backend + guard. The save is a real near-end w1 FREE game (tests/t6_fixture.mjs).
 #   A. play to the win; the moment the save says "over" (before the end screen) the page reloads →
 #      the lobby records the win on boot: w2 opens, a toast says so, the save is marked endSent, gamesPlayed +1 once
-#   B. a finished save whose end was never delivered, resumed from the world view → the end screen with "לעולם הבא",
+#   B. a finished save whose end was never delivered, resumed from the world view → the end screen with "למפה הבאה",
 #      and the game is NOT counted twice (persistent end signatures)
 #   C. another reload → nothing is recorded again
 # Usage: python3 tests/p0b_unrecorded_win.py [--real=http://localhost:8772/]
@@ -71,7 +71,7 @@ async def scenario(b, fx, how):
     view = await pg.evaluate("() => ({ end: !!document.querySelector('#start:not([hidden]) .lb-end'), next: !!document.querySelector('.lb-end [data-act=end-next][data-id=w2]'), toast: document.querySelector('#lb-toast')?.textContent || '' })")
     check(won == 'won', f'{how}: it was a win ({won})')
     check(p1['w2'] and p1['games'] == p0['games'] + 1 and p1['wins'] == p0['wins'] + 1 and p1['best'] is not None, f'{how}: the win is recorded exactly once — w2 open, games +1, wins +1 ({p0} → {p1})')
-    check(view['end'] and view['next'] or 'נפתח עולם חדש' in view['toast'], f'{how}: the player sees it (end screen with "לעולם הבא", or the "נפתח עולם חדש" message) {view}')
+    check(view['end'] and view['next'] or 'נפתחה מפה חדשה: העיר הגדולה' in view['toast'], f'{how}: the player sees it (end screen with "למפה הבאה", or the "🔓 נפתחה מפה חדשה: העיר הגדולה" message — 2026-11-25 maps / worlds) {view}')
     check(sv is None or sv['sent'], f'{how}: the finished save will not deliver its end again ({sv})')
     await pg.reload(); await pg.wait_for_selector('.lb-home, .lb-world', timeout=120000); await pg.wait_for_timeout(1500)
     p2 = await pg.evaluate(PROG)

@@ -5,10 +5,16 @@
 // API
 //   getProgress()                → copy of the progress object
 //   totalStars(p?) / title(p?) / nextTitle(p?) → {name, need} | null
-//   isUnlocked(worldId)          → the world's unlock rule from js/worlds/meta.js (a DAG: all clauses hold; a referenced world counts only
-//                                   when it is itself unlocked, so stars banked in a locked world via a daily challenge count once the
-//                                   chain reaches it). w1 always; w2–w4 unchanged (★ in the previous world). setUnlockAll(true) = owner override.
-//   worldMap()                   → the map for the lobby: every world (playable + planned) with unlocked / stars / lock text — meta only
+//   isUnlocked(mapId)            → 2026-11-25 (owner: "תחלק את המפות לעולמות"): LINEAR along js/worlds-groups.js ORDER — the first map is open;
+//                                   a later BUILT map opens once the built map before it is open and finished (worldFinished); an unbuilt
+//                                   map ("בקרוב") is skipped, never a wall. Stars banked in a locked map (daily) count once the chain reaches
+//                                   it. Nothing that was open is ever locked again: on the first load of a save from before the groups, every
+//                                   map open under the old meta.unlock graph is kept (P.kept, groupsV 1). w1–w4 unchanged. Admin /
+//                                   setUnlockAll(true) open every built map. A playable meta id outside ORDER falls back to meta.unlock.
+//   worldMap()                   → the map for the lobby in ORDER: every map (playable + planned, also the planned ones not in meta yet) with
+//                                   its world (group), number in the world, unlocked / stars / lock text — meta + worlds-groups only
+//   mapGroups()                  → the 6 worlds for the lobby: [{id, n, name, learn, icon, maps:[worldMap entries], done, total, open, built}]
+//   nextMapOf(id) / prevMapOf(id) → the next / previous BUILT map in ORDER (or null)
 //   ensureWorldRules(id)         → Promise: loads a lazy world's full rules before createGame / deserialize / resume / the character picker
 //   starThresholdsOf(id, charId) → ★ thresholds from meta (works before a lazy world's rules are loaded)
 //   nextGoal()                   → {text, sub, worldId}  ("המשימה הבאה")
@@ -28,6 +34,7 @@ import { WORLDS, getWorld, ensureWorld, isLoaded } from './worlds/index.js';
 import { starThresholds } from './engine.js';
 import { ACHIEVEMENTS, achievementById, checkMetaAchievements, titleFor, TITLES } from './achievements.js';
 import { WORLD_META, metaOf, isUnlockedBy, unlockText, playableMeta } from './worlds/meta.js';
+import { WORLD_GROUPS, ORDER, PLANNED, groupOf, mapNo, mapIndex, nextMap, prevMap, crossesWorld, openMaps } from './worlds-groups.js';
 
 const KEY = 'rr2-progress';
 /** Every playable world (core w1–w4 + released lazy worlds), map order — from meta, so the lobby never needs a lazy world's rules. */
@@ -35,6 +42,8 @@ const WIDS = playableMeta().map((m) => m.id);
 /** Worlds whose stars the server profile already knows (ranked or core). Lazy, unranked worlds stay local until the DB migration. */
 const SYNC_IDS = WORLD_META.filter((m) => m.playable && (m.ranked || m.status === 'core')).map((m) => m.id);
 
+/** 2026-11-25 the worlds / maps split: a save without groupsV ≥ 1 keeps (P.kept) every map the old unlock graph had open. */
+const GROUPS_V = 1;
 const LEARN_GAMES = 20;          // decision-quality history kept ("מה למדתי")
 const LEARN_WEIGHT_CAP = 30;     // old decisions count at most this much against a new game (recent play matters)
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -67,6 +76,7 @@ function fresh() {
     streak: 0, bestStreak: 0, lastDaily: null, dirty: false, seenWorlds: ['w1'], lastChar: {}, hadBankruptcy: false, onboarded: false, history: {},
     endSigs: [],   // P0b 2026-11-24: the last games already recorded (survives reloads — a game's end is never counted twice)
     cleared: {},   // P0 2026-11-24: worlds escaped in a practice (learning) game — they open the next world, never stars/best
+    groupsV: GROUPS_V, kept: [],   // 2026-11-25: maps open before the worlds / maps split (old meta.unlock graph) — never locked again
     learn: freshLearn(),
     // T4 §14.4 (local only — never in metaOf() / never synced)
     learnGames: 0, dream: null, dreams: {}, tutorialReplay: false, lastMode: 'normal', mentorPref: null,
@@ -87,6 +97,7 @@ function load() {
   cleanT4(p);
   p.cleared = cleanCleared(p);
   p.endSigs = cleanSigs(p.endSigs);
+  migrateGroups(p, raw);
   p.achievements = [...new Set(Array.isArray(p.achievements) ? p.achievements : [])];
   p.worldsPlayed = [...new Set(Array.isArray(p.worldsPlayed) ? p.worldsPlayed : [])];
   p.seenWorlds = [...new Set(Array.isArray(p.seenWorlds) ? p.seenWorlds : ['w1'])];
@@ -95,6 +106,19 @@ function load() {
 }
 /** (function declarations only up here: load() runs at import time, before any const below is initialised) */
 function endSigsMax() { return 40; }
+/** 2026-11-25: the first load of a save from before the worlds / maps split keeps every map the old meta.unlock graph opened (finished maps
+ *  count as ★, exactly as the old isUnlocked saw them) — the linear rule never closes a map a player already had. Later loads only clean. */
+function migrateGroups(p, raw) {
+  const ok = (x) => typeof x === 'string' && WIDS.includes(x);
+  const had = raw && typeof raw === 'object' && +raw.groupsV >= GROUPS_V;
+  const kept = new Set((Array.isArray(p.kept) ? p.kept : []).filter(ok));
+  if (!had) {
+    const fs = {}; for (const w of WIDS) fs[w] = Math.max(Math.max(0, Math.min(3, +p.stars[w] || 0)), worldFinished(w, p) ? 1 : 0);
+    for (const w of WIDS) if (w !== 'w1' && isUnlockedBy(w, fs, {})) kept.add(w);
+  }
+  p.kept = WIDS.filter((w) => kept.has(w));
+  p.groupsV = GROUPS_V;
+}
 function cleanSigs(a) { return (Array.isArray(a) ? a : []).filter((x) => typeof x === 'string' && x.length < 200).slice(-endSigsMax()); }
 /** P0b: a game end that was already recorded (this session or before a reload) is never recorded again. */
 function seenEnd(sig) { return P.endSigs.includes(sig); }
@@ -114,7 +138,7 @@ function cleanCleared(p) {
  *  any speed (a recorded best), a ★ (also banked from a daily), or a practice escape (cleared). */
 /** Stars as the unlock rules see them: a finished world counts as at least ★ (see worldFinished). */
 function finishedStars() { const o = {}; for (const w of WIDS) o[w] = Math.max(P.stars[w] || 0, worldFinished(w) ? 1 : 0); return o; }
-export function worldFinished(worldId, p = P) { return (p.stars[worldId] || 0) >= 1 || p.best[worldId] != null || !!(p.cleared && p.cleared[worldId]); }
+export function worldFinished(worldId, p = P) { return (p.stars[worldId] || 0) >= 1 || (p.best || {})[worldId] != null || !!(p.cleared && p.cleared[worldId]); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) { /* storage full / private mode */ } }
 
 const listeners = new Set();
@@ -135,14 +159,25 @@ export function nextTitle(p = P) {
 let ADMIN = false;
 export function setAdmin(on) { const was = ADMIN; ADMIN = !!on; if (was !== ADMIN) changed(); }
 export function isAdmin() { return ADMIN; }
+/** A map that can be played (registered in meta as playable) — the unlock rule skips every other one. */
+const built = (id) => WIDS.includes(id);
+/** The maps open under the linear rule + the kept ones (js/worlds-groups.js openMaps). */
+function openSet() { return new Set(openMaps({ finished: (id) => worldFinished(id), built, kept: P.kept })); }
 export function isUnlocked(worldId) {
   if (!WIDS.includes(worldId)) return false;
-  if (ADMIN) return true;
-  // hotfix 2026-11-23 + P0 2026-11-24 (main): a "★ in world X" rule is met by FINISHING X — an escape at any speed, a ★
-  // (also banked from a daily) or a practice escape (worldFinished). Rules that ask for more stars still need the stars.
-  return isUnlockedBy(worldId, finishedStars(), { all: !!P.unlockAll });
+  if (ADMIN || P.unlockAll) return true;
+  if (!ORDER.includes(worldId)) return isUnlockedBy(worldId, finishedStars(), {});   // a playable map that no world lists yet: the old rule
+  // 2026-11-25: linear along ORDER — finishing a map (an escape at any speed, a ★ also banked from a daily, or a practice escape:
+  // worldFinished) opens the next built map; kept maps (open before the split) stay open
+  return openSet().has(worldId);
 }
-export function unlockedWorlds() { return WIDS.filter(isUnlocked); }
+/** The open maps, in the order of the game (ORDER), then any playable map no world lists yet. */
+export function unlockedWorlds() { const o = openSet(); return [...ORDER, ...WIDS.filter((w) => !ORDER.includes(w))].filter((w) => WIDS.includes(w) && (ADMIN || P.unlockAll || (ORDER.includes(w) ? o.has(w) : isUnlocked(w)))); }
+/** The next / previous BUILT map in the order of the game (null at the ends). */
+export const nextMapOf = (id) => nextMap(id, built);
+export const prevMapOf = (id) => prevMap(id, built);
+/** The world (group) that a step into map `to` from map `from` opens, or null when both are in the same world. */
+export function newWorldOf(from, to) { return to && crossesWorld(from, to) ? groupOf(to) : null; }
 /** Owner / admin override: every playable world unlocked on this device (local only, never synced). */
 export function setUnlockAll(on) { const v = !!on; if (!!P.unlockAll !== v) { P.unlockAll = v; changed(); } return v; }
 /** ★ thresholds of a character from meta (lazy worlds too). Same numbers as engine starThresholds for a loaded world. */
@@ -153,17 +188,44 @@ export function starThresholdsOf(worldId, charId) {
 }
 /** Load a world's full rules (a no-op for w1–w4). Call before createGame / deserialize / resume / the character picker of a lazy world. */
 export function ensureWorldRules(worldId) { return ensureWorld(worldId); }
+/** A map's name: meta's (built or registered), else the planned name in js/worlds-groups.js. */
+export function mapName(id) { const m = metaOf(id); return (m && m.name) || (PLANNED[id] && PLANNED[id].name) || id; }
+/** How a map opens, in words: "לצאת מהשכונה" (the previous built map); for a planned one "תיפתח אחרי <the map before it>, כשתהיה מוכנה". */
+function lockTextOf(id) {
+  if (!ORDER.includes(id)) return unlockText(id);
+  if (!built(id)) { const i = ORDER.indexOf(id); return i > 0 ? `תיפתח אחרי ${mapName(ORDER[i - 1])}, כשתהיה מוכנה` : 'תיפתח כשתהיה מוכנה'; }
+  const pv = prevMap(id, built);
+  return pv ? `לצאת ${fromW(mapName(pv))}` : '';
+}
 /**
- * The world map (meta only): [{id, order, tier, name, tagline, learn, newHere, diff, estMin, status, playable, ranked, unlocked, stars, best,
- * lockText, characters}] — planned worlds included (playable:false, a "בקרוב" pin). The lobby can render the tiered DAG from this.
+ * The map for the lobby, in the order of the game (js/worlds-groups.js ORDER), then any playable meta map no world lists yet:
+ * [{id, order (position in ORDER), metaOrder, mapNo (position in its world), group {id, n, name}, tier, name, tagline, learn, newHere, diff,
+ *   estMin, status, playable, ranked, unlocked, finished, stars, best, lockText, prev, characters}] — planned maps included (playable:false,
+ * a "בקרוב" pin), also those not in meta.js yet (from PLANNED).
  */
 export function worldMap() {
-  return WORLD_META.map((m) => ({ id: m.id, order: m.order, tier: m.tier, name: m.name, tagline: m.tagline, learn: m.learn || null, newHere: m.newHere || null, diff: m.diff || null,
-    estMin: m.estMin ?? null, status: m.status, playable: !!m.playable, ranked: !!m.ranked, roomOk: !!m.roomOk, unlock: m.unlock, unlocked: m.playable ? isUnlocked(m.id) : false,
-    stars: P.stars[m.id] || 0, best: P.best[m.id] ?? null, lockText: unlockText(m.id), characters: m.characters || [] }));
+  const ids = [...ORDER, ...WORLD_META.map((m) => m.id).filter((id) => !ORDER.includes(id))];
+  return ids.map((id) => {
+    const m = metaOf(id); const pl = PLANNED[id] || {}; const g = groupOf(id); const playable = !!(m && m.playable);
+    return { id, order: mapIndex(id) || (m && m.order) || 0, metaOrder: m ? m.order : null, mapNo: mapNo(id), group: g ? { id: g.id, n: g.n, name: g.name } : null,
+      tier: m ? m.tier : null, name: (m && m.name) || pl.name || id, tagline: (m && m.tagline) || pl.tagline || '', learn: (m && m.learn) || null, newHere: (m && m.newHere) || null,
+      diff: (m && m.diff) || pl.diff || null, estMin: m ? m.estMin ?? null : null, status: m ? m.status : 'planned', playable, ranked: !!(m && m.ranked), roomOk: !!(m && m.roomOk),
+      unlock: m ? m.unlock : [], unlocked: playable ? isUnlocked(id) : false, finished: playable && worldFinished(id), stars: P.stars[id] || 0, best: P.best[id] ?? null,
+      lockText: lockTextOf(id), prev: prevMap(id, built), characters: (m && m.characters) || [] };
+  });
+}
+/** The 6 worlds for the lobby's chapters: each with its maps (worldMap entries), how many are finished / built / in it, and whether it is open
+ *  (any of its maps open) — a world whose maps are all planned is "בקרוב". */
+export function mapGroups() {
+  const W = worldMap(); const by = Object.fromEntries(W.map((x) => [x.id, x]));
+  return WORLD_GROUPS.map((g) => {
+    const maps = g.maps.map((id) => by[id]); const play = maps.filter((x) => x.playable);
+    return { id: g.id, n: g.n, name: g.name, icon: g.icon, learn: g.learn, maps, total: maps.length, built: play.length,
+      done: play.filter((x) => x.finished).length, open: play.some((x) => x.unlocked), soon: play.length === 0 };
+  });
 }
 /** The line a lobby shows before a private room in a world this player has not unlocked (BRIEF-worlds §8). */
-export const ROOM_LOCKED_NOTE = 'תשחק בעולם שעוד לא פתחת. התוצאה לא תיספר להתקדמות.';
+export const ROOM_LOCKED_NOTE = 'משחקים במפה שעוד לא נפתחה לך. התוצאה לא תיספר להתקדמות.';
 
 /* ---------------- Hebrew helpers for world names */
 export const inW = (name) => 'ב' + String(name).replace(/^ה/, '');   // בשכונה, בעיר הגדולה, בעמק העתיד
@@ -189,21 +251,23 @@ export function setLastChar(worldId, charId) { if (P.lastChar[worldId] !== charI
 
 /** The "next mission" shown above the map. */
 export function nextGoal() {
-  const lockedIdx = WIDS.findIndex((w) => !isUnlocked(w));
+  const seq = [...ORDER.filter(built), ...WIDS.filter((w) => !ORDER.includes(w))];   // every playable map, in the order of the game
+  const lockedId = seq.find((w) => !isUnlocked(w));
   const nt = nextTitle();
   const sub = nt ? `עוד ${nt.need === 1 ? '★ אחד' : nt.need + '★'} לדרגת ${nt.name}` : 'הגעת לדרגה הכי גבוהה. עכשיו תנצח את החברים.';
-  if (lockedIdx > 0) {
-    const next = metaOf(WIDS[lockedIdx]); const c = (next.unlock || [])[0] || { any: [WIDS[lockedIdx - 1]] };
-    const prev = metaOf(c.any.find((x) => isUnlocked(x) && !worldFinished(x)) || c.any[0]);
-    return { text: `לצאת מהמירוץ ${inW(prev.name)} כדי לפתוח את ${next.name}`, sub, worldId: prev.id };
+  if (lockedId && ORDER.includes(lockedId)) {
+    // 2026-11-25: the first closed map's previous built map is open and not finished yet (linear rule) — finish it
+    const pv = prevMap(lockedId, built) || 'w1'; const g = newWorldOf(pv, lockedId);
+    return { text: g ? `לצאת מהמירוץ ${inW(mapName(pv))} כדי לפתוח עולם חדש: ${g.name}` : `לצאת מהמירוץ ${inW(mapName(pv))} כדי לפתוח את המפה הבאה: ${mapName(lockedId)}`,
+      sub, worldId: pv, nextId: lockedId, newWorld: g ? g.id : null };
   }
-  const notMax = WIDS.find((w) => (P.stars[w] || 0) < 3);
+  const notMax = seq.find((w) => (P.stars[w] || 0) < 3);
   if (notMax) {
     const w = metaOf(notMax); const s = P.stars[notMax] || 0; const T = thresholdsFor(notMax);
     const lim = s === 1 ? T.t2 : T.t3;
     return { text: `${s === 1 ? '★★' : '★★★'} ${inW(w.name)}: לצאת תוך ${lim} חודשים עם ${T.charName}`, sub, worldId: w.id };
   }
-  return { text: `אגדה! כל ${WIDS.length * 3} הכוכבים שלך.`, sub: 'עכשיו תוכיח את זה באתגר היומי — אותן קוביות לכולם.', worldId: null };
+  return { text: `אגדה! כל ${seq.length * 3} הכוכבים שלך.`, sub: 'עכשיו תוכיח את זה באתגר היומי — אותן קוביות לכולם.', worldId: null };
 }
 
 /* ---------------- pawns */
@@ -265,7 +329,7 @@ export function recordLearnGame(e = {}) {
   const unlockedWorld = unlockedWorlds().find((w) => !unlockedBefore.includes(w)) || null;
   lastLearnSig = sig;
   lastLearnRes = { learn: true, worldId: wid, wouldStars: won ? Math.max(0, Math.min(3, Math.round(+e.stars || 0))) : 0, learnGames: P.learnGames,
-    newStars: P.stars[wid] || 0, prevStars: P.stars[wid] || 0, gained: 0, earned: 0, unlockedWorld, newPawns: [], newAchievements: [],
+    newStars: P.stars[wid] || 0, prevStars: P.stars[wid] || 0, gained: 0, earned: 0, unlockedWorld, unlockedGroup: groupIdOf(wid, unlockedWorld), newPawns: [], newAchievements: [],
     titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(), best: P.best[wid] ?? null, prevBest: P.best[wid] ?? null, newBest: false, bankedLocked: false };
   return lastLearnRes;
 }
@@ -368,18 +432,20 @@ export function recordGame(e = {}) {
   changed(); scheduleSync(300);
   lastSig = sig;
   lastResult = {
-    worldId: wid, prevStars, newStars: P.stars[wid], earned: got, gained: P.stars[wid] - prevStars, unlockedWorld, newPawns, newAchievements,
+    worldId: wid, prevStars, newStars: P.stars[wid], earned: got, gained: P.stars[wid] - prevStars, unlockedWorld, unlockedGroup: groupIdOf(wid, unlockedWorld), newPawns, newAchievements,
     titleBefore, titleAfter: titleFor(totalAfter), totalBefore, totalAfter, best: P.best[wid] ?? null, prevBest, newBest,
     bankedLocked: !wasUnlocked && got > prevStars, roomGuest,
   };
   return lastResult;
 }
 
+/** The world a finished map's end opened (its id) when the newly opened map is in another world, else null. */
+function groupIdOf(from, opened) { const g = opened ? newWorldOf(from, opened) : null; return g ? g.id : null; }
 /** The answer for an end that was already recorded: nothing new (no stars, unlocks, pawns or titles gained again). */
 function dupResult(e, learn) {
   const wid = WIDS.includes(e.worldId) ? e.worldId : 'w1';
   return { worldId: wid, learn: !!learn, duplicate: true, prevStars: P.stars[wid] || 0, newStars: P.stars[wid] || 0, earned: 0, gained: 0, wouldStars: 0,
-    unlockedWorld: null, newPawns: [], newAchievements: [], titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(),
+    unlockedWorld: null, unlockedGroup: null, newPawns: [], newAchievements: [], titleBefore: title(), titleAfter: title(), totalBefore: totalStars(), totalAfter: totalStars(),
     best: P.best[wid] ?? null, prevBest: P.best[wid] ?? null, newBest: false, bankedLocked: false, learnGames: P.learnGames };
 }
 
@@ -558,5 +624,5 @@ export function pushNow() { return pushSync(); }
 if (typeof addEventListener === 'function') addEventListener('online', () => { if (P.dirty) pushSync(); });
 
 /** Test/debug helper: replace local progress (used by tests only). */
-export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); P.cleared = cleanCleared(P); P.endSigs = cleanSigs(P.endSigs); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
-export { ACHIEVEMENTS, WIDS };
+export function _reset(p) { P = { ...fresh(), ...(p || {}) }; P.stars = { ...fresh().stars, ...(P.stars || {}) }; P.best = { ...(P.best || {}) }; P.learn = cleanLearn(P.learn); cleanT4(P); P.cleared = cleanCleared(P); P.endSigs = cleanSigs(P.endSigs); migrateGroups(P, p || null); session = new Set(); lastSig = null; lastResult = null; lastLearn = null; lastLearnSig = null; lastLearnRes = null; lastDreamSig = null; changed(); }
+export { ACHIEVEMENTS, WIDS, WORLD_GROUPS, ORDER };

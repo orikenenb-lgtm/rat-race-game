@@ -1,5 +1,5 @@
 # Worlds wave 3 — w7 רשתות המסחר end to end in the real page (lobby + game), offline fake backend + guard:
-#   map   the 12-world map from P.worldMap(): after a w5 escape w7 (and w8) are playable cards; without it w7 is locked and says how to open
+#   map   the map from P.worldMap(): once w6 / w7 are finished w7 and w8 are playable cards (2026-11-25, linear); without them locked, saying how to open
 #         it ("לצאת מהמירוץ בעיר התיירות" — any escape, also a practice one); what w7 teaches
 #   pick  w7 card → its rules load (ensureWorldRules) → the character picker (shopFounder / cfo / franchisor, pros / cons, 🏪 📊 🤝) → a game
 #         starts in w7 (body[data-world=w7], the 🛍️ chip, no 404 / page error / failed model: every w7 model is a procedural stand-in)
@@ -26,10 +26,10 @@ SHOTS = OPT.get('shots'); ONLY = set(OPT['only'].split(',')) if OPT.get('only') 
 want = lambda s: ONLY is None or s in ONLY
 VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}}
 ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'])
-STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1})
+STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1, 'w6': 1, 'w7': 1})   # 2026-11-25 worlds / maps: w1–w7 finished → w7 and w8 open (linear unlocks, groupsV 1)
 SEED = ("localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-tips-off','1'); localStorage.setItem('rr2-reveal', 'all');"
         "localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true,w5:true,w6:true,w7:true,w8:true}));")
-UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
+UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, groupsV: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
           " seenWorlds: ['w1','w2','w3','w4','w5'], onboarded: true, tutorialDone: true, gamesPlayed: 5, wins: 5 })); })();" % STARS)
 RESULTS = []; ERRS = []; SINKS = []; BAD = []
 if SHOTS: os.makedirs(SHOTS, exist_ok=True)
@@ -122,16 +122,18 @@ async def run_map(b):
         check(sc, f'the map renders every P.worldMap() entry in order ({len(meta)})', [c['id'] for c in cards] == [m['id'] for m in meta] and len(cards) == len(meta) >= 12, [c['id'] for c in cards])
         for wid, learn, motif in (('w7', 'צמיחה אוכלת מזומן', '🛍️'), ('w8', 'מימון בשלבים', '🏗️')):
             c = next((x for x in cards if x['id'] == wid), None)
-            check(sc, f'{wid} is a playable card after the w5 escape (button, data-act=world), says what it teaches, difficulty, generated art {motif}',
+            check(sc, f'{wid} is a playable card once the map before it is finished (button, data-act=world), says what it teaches, difficulty, generated art {motif}',
                   c and c['tag'] == 'BUTTON' and c['act'] == 'world' and not c['soon'] and not c['locked'] and learn in c['learn'] and c['diff'] and c['gen'] and c['motif'] == motif, c)
         soon = [c for c in cards if c['soon']]; planned = [m['id'] for m in meta if not m['playable']]
         check(sc, 'planned worlds stay "בקרוב" pins (no button)', [c['id'] for c in soon] == planned and 'w7' not in planned and 'w8' not in planned and all(c['buttons'] == 0 for c in soon), soon)
         if vp == 'desk':
             await shot(pg, 'map_desk')
-            # without a w5 escape, w7 and w8 are locked and say how to open them (the rule is "finish the world": escape at any speed or in practice)
-            r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 0 } });
+            # 2026-11-25 (linear along the worlds): without a w6 escape w7 and w8 are locked; each says the map before it (escape at any speed or in practice)
+            r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 1, w6: 0 } });
               const m = P.worldMap().filter((x) => x.id === 'w7' || x.id === 'w8').map((x) => ({ id: x.id, unlocked: x.unlocked, lock: x.lockText })); P._reset && P._reset({ ...P.getProgress(), stars: %s }); return m; }""" % STARS)
-            check(sc, 'w7 / w8 need a w5 escape: locked without it, "לצאת … עיר התיירות"', all(x['unlocked'] is False and 'לצאת' in (x['lock'] or '') and 'עיר התיירות' in (x['lock'] or '') for x in r) and len(r) == 2, r)
+            L = {x['id']: x for x in r}
+            check(sc, 'w7 / w8 need the map before them: locked without a w6 escape, "לצאת מאזור התעשייה" / "לצאת מרשתות המסחר"', len(r) == 2 and all(x['unlocked'] is False for x in r)
+                  and 'לצאת מאזור התעשייה' in (L['w7']['lock'] or '') and 'לצאת מרשתות המסחר' in (L['w8']['lock'] or ''), r)
         await ctx.close()
 
 async def run_pick(b):

@@ -292,7 +292,7 @@ async function initRenderer() {
   if (scene.kind !== '3d') { scene.buildWorld(w1); scene.placePawn(0); }
   ui.applyTheme(w1);
   frame();
-  if (!S) $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
+  if (!S) $('#mText').textContent = 'בחר מפה ודמות, ונתחיל.';
   initPhase = 'done';
   // life / history models (~2.5 MB) are not needed for the lobby: fetch them after boot, off the critical path
   // (startGame awaits the same promise, with its own loading stage)
@@ -657,7 +657,7 @@ async function startInner(cfg, my) {
   // every other way in (main.js resume after a 2D → 3D reload, a room start, the fallback lobby).
   if (cfg.worldId && cfg.worldId !== 'h' && typeof E.ensureWorld === 'function' && typeof E.isLoaded === 'function' && !E.isLoaded(cfg.worldId)) {
     try { await E.ensureWorld(cfg.worldId); }
-    catch (e) { console.warn('world rules', e); if (my !== gen) return false; busy = false; OV.hideLoading(); ui.toast('לא הצלחנו לטעון את העולם. בדוק את החיבור ונסה שוב.', { kind: 'bad', ms: 6000 }); bus.emit('lobby:open', {}); return false; }
+    catch (e) { console.warn('world rules', e); if (my !== gen) return false; busy = false; OV.hideLoading(); ui.toast('לא הצלחנו לטעון את המפה. בדוק את החיבור ונסה שוב.', { kind: 'bad', ms: 6000 }); bus.emit('lobby:open', {}); return false; }
     if (my !== gen) return false;
   }
   let Wt = null; try { Wt = E.getWorld(cfg.worldId); } catch (e) { Wt = null; }
@@ -1569,7 +1569,7 @@ function panelData() {
 }
 async function openWorldPanel() {
   if (!S || S.over || summarized) return;
-  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לפתוח את לוח העולם בין תורות'); return; }
+  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לפתוח את לוח המפה בין תורות'); return; }
   const D0 = panelData(); if (!D0 || typeof ui.worldPanel !== 'function') return;
   // w10: the market screen (companies, candles, a trade with its costs shown before the tap) — previews are the engine's own pure functions
   if (D0.panel.id === 'market' && typeof ui.marketPanel === 'function') { await ui.marketPanel(panelData, (a) => worldAct(a.id, a.param), marketApi()); render(false); return; }

@@ -22,7 +22,7 @@ ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--ena
 STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1})
 SEED = ("localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-tips-off','1'); localStorage.setItem('rr2-reveal', 'all');"
         "localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true,w5:true}));")
-UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
+UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, groupsV: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
           " seenWorlds: ['w1','w2','w3','w4'], onboarded: true, tutorialDone: true, gamesPlayed: 4, wins: 4 })); })();" % STARS)
 RESULTS = []; ERRS = []; SINKS = []; BAD = []
 if SHOTS: os.makedirs(SHOTS, exist_ok=True)
@@ -104,8 +104,8 @@ async def run_map(b):
         w5 = next((c for c in cards if c['id'] == 'w5'), None)
         check(sc, 'w5 is unlocked through progress (★ in w1–w4) and shows what it teaches + difficulty', w5 and not w5['locked'] and 'עסק עונתי' in w5['learn'] and w5['diff'], w5)
         check(sc, 'later worlds use generated card art (no missing image), w1–w4 their painted cards', all(c['gen'] and not c['img'] for c in cards if c['id'] not in ('w1', 'w2', 'w3', 'w4')) and all(c['img'] for c in cards if c['id'] in ('w1', 'w2', 'w3', 'w4')), cards)
-        lk = [c for c in soon if 'ייפתח' in c['line']]
-        check(sc, 'planned worlds show their unlock rule ("ייפתח: ★ …", forks "★ באחד מ: …")', len(lk) == len(soon) and (any('באחד מ' in c['line'] for c in soon) or not any('·' in c['line'] for c in soon)), [c['line'] for c in soon])   # a fork is named whenever a planned world has one (w12 alone needs w11 since b8ab166; none is planned since bfa0acb — both hold on an empty list)
+        lk = [c for c in soon if 'תיפתח' in c['line']]   # 2026-11-25: a planned map says "תיפתח אחרי <the map before it>, כשתהיה מוכנה"
+        check(sc, 'planned maps show when they open ("תיפתח אחרי …")', len(lk) == len(soon) and (any('באחד מ' in c['line'] for c in soon) or not any('·' in c['line'] for c in soon)), [c['line'] for c in soon])   # a fork is named whenever a planned world has one (w12 alone needs w11 since b8ab166; none is planned since bfa0acb — both hold on an empty list)
         tr = await pg.evaluate("() => ({ n: document.querySelectorAll('.map-trail li').length, soon: (document.querySelector('.map-trail li.soon') || {}).textContent || '' })")
         ns = len(meta) - len(pm)   # since bfa0acb (w12 registered) no planned world is left: no "🔜" item at all
         check(sc, 'the trail: the playable worlds + one "🔜 N" item while planned worlds remain (none once every world is playable)', tr['n'] == len(pm) + (1 if ns else 0) and (str(ns) in tr['soon'] if ns else tr['soon'] == ''), tr)

@@ -18,7 +18,7 @@ const ERR = {
   bad_nickname: 'כינוי צריך להיות 2–20 תווים',
   bad_name: 'שם קבוצה צריך להיות 2–40 תווים',
   bad_title: 'שם אתגר צריך להיות 2–50 תווים',
-  bad_world: 'עולם לא קיים',
+  bad_world: 'המפה לא קיימת',
   bad_profession: 'דמות לא קיימת',
   bad_days: 'משך אתגר: 1–30 ימים',
   too_many_challenges: 'יש כבר 5 אתגרים פעילים בקבוצה',
@@ -44,7 +44,7 @@ const ERR = {
   not_host: 'רק מי שפתח את החדר יכול לעשות את זה',
   room_started: 'המשחק בחדר כבר התחיל',
   room_not_playing: 'המשחק בחדר כבר לא פעיל',
-  bad_char: 'הדמות הזו לא קיימת בעולם הזה',
+  bad_char: 'הדמות הזו לא קיימת במפה הזו',
   bad_seat: 'השחקן כבר לא בחדר',
   not_ready: 'עוד לא כולם מוכנים',
   not_enough_players: 'צריך עוד שחקנים כדי להתחיל',
@@ -143,7 +143,7 @@ export const net = {
   checkpoint: (resultId, turn, state) => rpc('rr_checkpoint', { ...auth(), p_result: resultId, p_turn: Math.max(0, Math.floor(turn)), p_state: state }),
   /** stats may include {progress:0..1, stars, ...}; progress is used to rank unfinished/lost games */
   finish: ({ resultId, status, months, passive, expenses, netWorth, stats, worldId }) => (unrankedWorld(worldId || (stats && stats.world))
-    ? Promise.reject(Object.assign(new Error('העולם הזה עוד לא בטבלאות'), { code: 'unranked_world' }))   // worlds wave 0: meta ranked:false never reaches rr_finish
+    ? Promise.reject(Object.assign(new Error('המפה הזו עוד לא בטבלאות'), { code: 'unranked_world' }))   // worlds wave 0: meta ranked:false never reaches rr_finish
     : rpc('rr_finish', {
     ...auth(), p_result: resultId, p_status: status, p_months: Math.max(1, Math.min(200, Math.round(months))),
     p_passive: Math.round(passive), p_expenses: Math.max(0, Math.round(expenses)), p_net_worth: Math.round(netWorth), p_stats: stats || {},

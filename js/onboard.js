@@ -287,7 +287,7 @@ export async function afterTurn(h) {
     const pass = h.W.goal.type === 'passive';
     let text = 'כשהפס מתמלא — ניצחת. כל החלטה מזיזה אותו.';
     if (pass) { const m = E.metrics(h.S); const ex = m.expenses || 0; text = `הכנסה פסיבית ${fm(m.passive || 0)} מתוך ${fm(ex)} הוצאות: ${ex ? Math.round(((m.passive || 0) / ex) * 100) : 0}%. כשהפס מלא — יצאת מהמירוץ.`; }   // S-C6
-    await showCoach(h, 'meter', { target: '#hGoal', title: pass ? 'מד החופש' : 'היעד של העולם', text });
+    await showCoach(h, 'meter', { target: '#hGoal', title: pass ? 'מד החופש' : 'היעד של המפה', text });
     return;
   }
   if (hintBetween(h)) return;   // §4.4 "טיפ" — the practice chip waits for another turn

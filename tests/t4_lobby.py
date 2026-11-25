@@ -133,7 +133,7 @@ async def t_learn(b):
     end = await pg.inner_text('.end-card')
     check('בתרגול 🎓' in end and 'במשחק רגיל' in end and 'במצב תרגול לא נאספים כוכבים' in end, 'AC-L4 S-L1 + S-L3 + S-L5 on the learning end screen')
     check(await pg.locator('#endShare').count() == 0 and await pg.locator('[data-act=end-normal]').count() == 1 and await pg.locator('[data-act=end-learn]').count() == 1, 'AC-L4 no duel/share button; S-L6 + S-L7 present')
-    check(await pg.locator('.end-acts [data-act=end-next][data-id=w2]').count() == 1 and (p1.get('cleared') or {}).get('w1') is True, 'P0 a practice escape from w1 opens w2: "לעולם הבא" on the learning end screen + cleared.w1')
+    check(await pg.locator('.end-acts [data-act=end-next][data-id=w2]').count() == 1 and (p1.get('cleared') or {}).get('w1') is True, 'P0 a practice escape from w1 opens w2: "למפה הבאה" on the learning end screen + cleared.w1')
     keys2 = await pg.evaluate("Object.keys(localStorage)")
     check('rr2-save-learn-w1' not in keys2 and 'rr2-save-free-w1' in keys2, 'learning save cleared at the end; the normal save is kept')
     check(await pg.locator('.end-near').count() == 0 and await pg.locator('.end-gate').count() == 0, 'review m-1 the learning end screen shows no engine star line (end-near ★ / ★★★ gate)')

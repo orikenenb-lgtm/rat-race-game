@@ -23,10 +23,10 @@ SHOTS = OPT.get('shots'); ONLY = set(OPT['only'].split(',')) if OPT.get('only') 
 want = lambda s: ONLY is None or s in ONLY
 VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}}
 ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'])
-STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1})
+STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1})   # 2026-11-25 worlds / maps: every map before w6 in the order of the game finished (linear unlocks, groupsV 1)
 SEED = ("localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-tips-off','1'); localStorage.setItem('rr2-reveal', 'all');"
         "localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true,w5:true,w6:true}));")
-UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
+UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, groupsV: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
           " seenWorlds: ['w1','w2','w3','w4','w5'], onboarded: true, tutorialDone: true, gamesPlayed: 5, wins: 5 })); })();" % STARS)
 RESULTS = []; ERRS = []; SINKS = []; BAD = []
 if SHOTS: os.makedirs(SHOTS, exist_ok=True)
@@ -112,7 +112,7 @@ async def run_map(b):
         check(sc, 'meta: w1–w6 playable (later worlds as their meta says; the map and the UI agree)', pm[:6] == ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'], pm)
         check(sc, f'the map renders every P.worldMap() entry in order ({len(meta)})', [c['id'] for c in cards] == [m['id'] for m in meta] and len(cards) == len(meta) >= 12, [c['id'] for c in cards])
         w6 = next((c for c in cards if c['id'] == 'w6'), None)
-        check(sc, 'w6 is a playable card (button, data-act=world), unlocked by ★ in w5, shows what it teaches + difficulty + generated art',
+        check(sc, 'w6 is a playable card (button, data-act=world), unlocked by a w5 escape, shows what it teaches + difficulty + generated art',
               w6 and w6['tag'] == 'BUTTON' and w6['act'] == 'world' and not w6['soon'] and not w6['locked'] and 'מינוף תפעולי' in w6['learn'] and w6['diff'] and w6['gen'], w6)
         soon = [c for c in cards if c['soon']]
         planned = [m['id'] for m in meta if not m['playable']]
@@ -121,9 +121,9 @@ async def run_map(b):
         check(sc, f'the trail: {len(pm)} playable worlds + "🔜 {len(planned)}"', tr['n'] == len(pm) + (1 if planned else 0) and (not planned or str(len(planned)) in tr['soon']), tr)
         if vp == 'desk':
             # without a ★ in w5, w6 is locked and says how to open it
-            r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 0 } });
+            r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1 } });
               const m = P.worldMap().find((x) => x.id === 'w6'); const back = P._reset && P._reset({ ...P.getProgress(), stars: %s }); return { unlocked: m.unlocked, lock: m.lockText }; }""" % STARS)
-            check(sc, 'w6 needs a ★ in w5 (locked without it, "★ בעיר התיירות")', r['unlocked'] is False and 'עיר התיירות' in (r['lock'] or ''), r)
+            check(sc, 'w6 needs a w5 escape (the map before it; locked without it, "לצאת מעיר התיירות")', r['unlocked'] is False and 'עיר התיירות' in (r['lock'] or ''), r)
         await ctx.close()
 
 async def run_pick(b):

@@ -1,5 +1,5 @@
 # w11 התאגיד הבינלאומי end to end in the real page (lobby + game), offline fake backend + guard:
-#   map   P.worldMap(): after ★ in w6–w8 and one of w9 / w10 / w13, w11 is a playable card (button, what it teaches, generated art 🌍); locked otherwise
+#   map   P.worldMap(): once the map before it in the order of the worlds is finished (2026-11-25, linear), w11 is a playable card (button, what it teaches, generated art 🌍); locked otherwise
 #   pick  w11 card → its rules load lazily → the picker (ceo / oldExporter / pe, 💼 🚢 📊) → a game in w11 (body[data-world=w11], the night sky,
 #         the 🌍 chip, the globe decor with five districts and the supply arcs; no 404 / page error / failed model: the w11 models are procedural)
 #   play  a fixed-seed pe game: rolls to a 'Z' (הצעת רכישה) tile — the acquisition card (the country in words + its fictional band, the profit
@@ -24,10 +24,10 @@ SHOTS = OPT.get('shots'); ONLY = set(OPT['only'].split(',')) if OPT.get('only') 
 want = lambda s: ONLY is None or s in ONLY
 VP = {'desk': {'width': 1300, 'height': 820}, 'phone': {'width': 390, 'height': 844}, 'small': {'width': 360, 'height': 740}}
 ARGS = FB.chrome_args(MODE, ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'])
-STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1, 'w6': 1, 'w7': 1, 'w8': 1, 'w9': 1})
+STARS = json.dumps({'w1': 1, 'w2': 1, 'w3': 1, 'w4': 1, 'w5': 1, 'w6': 1, 'w7': 1, 'w8': 1, 'w9': 1, 'w10': 1, 'w13': 1, 'w15': 1, 'w16': 1})   # 2026-11-25 worlds / maps: every map before w11 in the order of the game finished (linear unlocks, groupsV 1)
 SEED = ("localStorage.setItem('rr2-onboarded','1'); localStorage.setItem('rr2-tips-off','1'); localStorage.setItem('rr2-reveal', 'all');"
         "localStorage.setItem('rr2-coach', JSON.stringify({w1:true,w2:true,w3:true,w4:true,w5:true,w6:true,w7:true,w8:true,w9:true,w10:true,w11:true,w13:true,w15:true}));")
-UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
+UNLOCK = ("(() => { if (localStorage.getItem('rr2-progress')) return; localStorage.setItem('rr2-progress', JSON.stringify({ v: 1, groupsV: 1, stars: %s, best: {}, achievements: [], pawn: 'classic',"
           " seenWorlds: ['w1','w2','w3','w4','w5','w6','w7','w8','w9','w10'], onboarded: true, tutorialDone: true, gamesPlayed: 6, wins: 6 })); })();" % STARS)
 RESULTS = []; ERRS = []; SINKS = []; BAD = []
 if SHOTS: os.makedirs(SHOTS, exist_ok=True)
@@ -121,11 +121,11 @@ async def run_map(b):
     sc = 'map-desk'; ctx, pg = await page(b, 'desk')
     cards = await pg.evaluate(MAP)
     c = next((x for x in cards if x['id'] == W), None)
-    check(sc, 'after ★ in w6–w8 and w9, w11 is a playable map card (button, what it teaches, difficulty, generated art 🌍)',
+    check(sc, 'after every map before it (worlds 1–3), w11 is a playable map card (button, what it teaches, difficulty, generated art 🌍)',
           c and c['tag'] == 'BUTTON' and c['act'] == 'world' and not c['soon'] and not c['locked'] and 'לסמוך' in c['learn'] and c['diff'] and c['gen'] and c['motif'] == '🌍', c)
-    r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 1, w6: 1 } });
+    r = await pg.evaluate("""async () => { const P = await import('./js/progress.js'); P._reset && P._reset({ ...P.getProgress(), stars: { w1: 1, w2: 1, w3: 1, w4: 1, w5: 1, w6: 1, w7: 1, w8: 1, w9: 1, w10: 1, w13: 1, w15: 1 } });
       const m = P.worldMap().filter((x) => x.id === 'w11').map((x) => ({ id: x.id, unlocked: x.unlocked, lock: x.lockText })); P._reset && P._reset({ ...P.getProgress(), stars: %s }); return m; }""" % STARS)
-    check(sc, 'w11 stays locked with one ★ in w6–w8 and none in w9 / w10 / w13, and says how to open it', r and r[0]['unlocked'] is False and (r[0]['lock'] or '').strip(), r)
+    check(sc, 'w11 (first map of world 4) stays locked without a w16 escape, and says how to open it', r and r[0]['unlocked'] is False and 'ארץ השדות' in (r[0]['lock'] or ''), r)
     await shot(pg, 'map_desk')
     await ctx.close()
 

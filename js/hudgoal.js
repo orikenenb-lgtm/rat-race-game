@@ -29,7 +29,7 @@ export function partTag(p) { return p.key === 'impact' ? 'השפעה' : isStreak
 export function meterLabel(m) {
   const P = m.goalParts || [];
   if (isCoverage(m)) return 'יעד הקבוצה'; if (isFarm(m)) return 'הכנסה ורצף';
-  return m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : P.some((p) => p.unit === 'months' && !isStreak(p)) ? 'שווי וקופה' : P.some((p) => p.cmp === 'le') ? 'שווי ושכר' : 'יעד העולם';
+  return m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : P.some((p) => p.unit === 'months' && !isStreak(p)) ? 'שווי וקופה' : P.some((p) => p.cmp === 'le') ? 'שווי ושכר' : 'יעד המפה';
 }
 /** w15: the liquidity part is the app's runway (cash ÷ the monthly burn; 99 = cash flow ≥ 0), not months of fixed costs */
 export const isRunway = (m) => !!(m && m.worldIndicators && m.worldIndicators.platform);
@@ -211,7 +211,7 @@ export function milestoneLadder(m) {
   if (parts.length) {
     const okP = (p) => (isLe(p) ? (+p.value || 0) <= (+p.target || 0) : (+p.value || 0) >= (+p.target || 0) && (p.key !== 'passive' || (+p.value || 0) > 0));
     const all = parts.every(okP);
-    out.push({ id: 'goal', icon: '🏁', title: m.goalType === 'passive' ? 'הכנסה פסיבית שמכסה את כל ההוצאות' : 'היעד של העולם', value: parts.length === 1 ? +parts[0].value || 0 : parts.filter(okP).length,
+    out.push({ id: 'goal', icon: '🏁', title: m.goalType === 'passive' ? 'הכנסה פסיבית שמכסה את כל ההוצאות' : 'היעד של המפה', value: parts.length === 1 ? +parts[0].value || 0 : parts.filter(okP).length,
       target: parts.length === 1 ? +parts[0].target || 0 : parts.length, unit: parts.length === 1 ? (parts[0].key === 'impact' ? 'n' : parts[0].unit === 'months' ? 'mo' : '₪') : 'n', met: all });
     const H = m.goalHold; if (H && H.need) out.push({ id: 'hold', icon: '⏳', title: `היעד מחזיק ${paydays(H.need)} ברצף`, value: Math.min(H.streak || 0, H.need), target: H.need, unit: 'n', met: (H.streak || 0) >= H.need });
   }
@@ -272,7 +272,7 @@ export function moneyHubModel(m) {
       : hd ? `${hd.divs} חטיבות · ${hd.guaranteed} בערבות · דירוג ${hd.rating} · כיסוי ${covX(hd.covMonths)} (${monthsText(hd.covMonths, 'cov')})${hd.storm ? ` · סערה: ${hd.storm.name}` : ''}`
       : hv ? `${hv.regimeLabel} · הכנסת המשק החודש ${fmtM(hv.income)} · ${((n) => (n === 1 ? 'שדה אחד' : `${n} שדות`))((hv.slots || []).filter((x) => x && x.phase === 'grow').length)} בגידול${hv.forced ? ` · ${hv.forced} סגירות בכוח` : ''}`
       : (WI.panel.title || '');
-    rows.push({ id: 'world', icon: se ? '🌴' : pl ? '🏭' : ch ? '🛍️' : pj ? '🏗️' : en ? '☀️' : pf ? '📊' : lg ? '🏟️' : mn ? '🌍' : pfm ? '☁️' : hd ? '👑' : hv ? '🌾' : '🧭', title: WI.panel.title || 'לוח העולם', value,
+    rows.push({ id: 'world', icon: se ? '🌴' : pl ? '🏭' : ch ? '🛍️' : pj ? '🏗️' : en ? '☀️' : pf ? '📊' : lg ? '🏟️' : mn ? '🌍' : pfm ? '☁️' : hd ? '👑' : hv ? '🌾' : '🧭', title: WI.panel.title || 'לוח המפה', value,
       acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : pl ? 'תחזוקה, משמרות וחוזים' : ch ? 'מלאי, מנהלים וסניפים' : pj ? 'מכירות מוקדמות, שלבים ומימון' : en ? 'מימון מחדש, חוזים וחיבורים' : pf ? 'מניות, נרות, מינוף וקרנות' : lg ? 'הטבלה, הסגל והאצטדיון' : mn ? 'מנהלים, ביקורות, ספקים ומטבעות' : pfm ? 'פרסום, קבוצות משתמשים וגיוסים' : hd ? 'ערבויות, תמיכה, צמיחה ומכירות' : hv ? 'גידולים, גידור, ממגורה וקרקע' : 'לפתוח', on: true }] });
   }
   if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
