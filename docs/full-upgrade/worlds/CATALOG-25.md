@@ -375,6 +375,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** counts for w23 and w24. Library: "כסף של אחרים", "שורט וסחיטה".
 - **Choices:** active share, gross/net exposure, shorts, the gate, launching a stable product.
 - **Recovery:** cut gross exposure, a gate (reputation), seed from your own money, the index product.
+- **As built (wave A5, engine lane):** rule adapter `js/worlds/adapters/funds.js` (`uses: market, portfolio`; 12 companies of the market pool with a sealed alpha, the index = their equal-weighted mean, flows / short / gate re-implemented inside — `market.js` and `portfolio.js` untouched, so the w10 / w15 / w16 packs stay pinned), 217 lines; tile W משקיע חדש (take / lock / pass); maxMonths 84; gates N = 36: the required gates met, G-dom and W20-flow (AUM part) open — see `w20-funds.md`.
 
 ### w21 · בית ההשקעות הפרטי (tier 10, diff 5)
 - **סיפור:** "קונים חברה בהלוואה, מתקנים אותה ומוכרים. לקרן יש תאריך סיום, והקונים לא תמיד מגיעים בזמן."
