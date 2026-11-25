@@ -35,7 +35,8 @@ const PORT = await import('../js/worlds/mech/portfolio.js');
 const W13 = await E.ensureWorld('w13');   // w13: the lazy world (tile H, the sponsor / facility deck, league news)
 const AUC = await import('../js/worlds/mech/auction.js');
 const W11 = await E.ensureWorld('w11'), W15 = await E.ensureWorld('w15');   // w11 / w15: the lazy worlds (tiles Z / H, their decks)
-const W12 = await E.ensureWorld('w12'), W16 = await E.ensureWorld('w16');   // w12 / w16: the lazy worlds (tiles Z / H, their decks)
+const W12 = await E.ensureWorld('w12'), W16 = await E.ensureWorld('w16');
+const W14 = await E.ensureWorld('w14'), W17 = await E.ensureWorld('w17'), W18 = await E.ensureWorld('w18'), W19 = await E.ensureWorld('w19'), W20 = await E.ensureWorld('w20');   // the CATALOG-25 A3 / A4 maps (tiles J / V / Z / W / W)   // w12 / w16: the lazy worlds (tiles Z / H, their decks)
 const HDM = await import('../js/worlds/mech/holding.js'), HVM = await import('../js/worlds/adapters/harvest.js');
 const MNM = await import('../js/worlds/mech/multinational.js');
 
@@ -55,7 +56,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w15', 'w16', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -79,7 +80,7 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w15', 'w16', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'h']) {
   const w = W(wid);
   for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, { ...T.MARKET_WORDS, ...((T.MARKET_WORDS_W || {})[wid] || {}) }]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
@@ -217,6 +218,27 @@ const uiKeys = new Set([...game.matchAll(/\bS\.ui\.(\w+)\s*(?:\?\?=|=(?!=))/g)].
   ok(['חנות האפליקציות', 'חודש ויראלי', 'פריצת מידע', 'הבועה', 'מהנדסת מפתח'].every((x) => tt(W15, 'market').includes(x)), 'w15 market tile: ' + tt(W15, 'market'));
   ok(/רגולטור/.test(tt(W11, 'crisis')) && /השרתים נופלים/.test(tt(W15, 'crisis')), 'w11 / w15 crisis tiles: their own wording');
   for (const W of [W11, W15]) ok(W.board.length === 40 && Object.values(W.tiles).every((t) => T.tileText(t, W).short.length <= T.SHORT_MAX), `${W.id}: 40 tiles, every short name ≤ 10`);
+}
+/* T-w14 / w17 / w18 / w19 / w20: tile J (bankOffer, 🏦), V (candidate, 🧪), Z (policyBook, ☂️), W (boltOn, 🔔), W (mandate, 📊): number-free until
+   prepareWorldText builds them from the modules' constants (credit.js REG.min; trials.js TR.ddFee / ddBand, SLOTS; insure.js IN.band / ddBand;
+   the bell / funds adapters); safe = pass; the crisis / market / deal tiles name what their decks do */
+{
+  const SP = [[W14, 'J', 'bankOffer', 'bank', '#475569', 8, '🏦'], [W17, 'V', 'candidate', 'flask', '#0d9488', 6, '🧪'], [W18, 'Z', 'policyBook', 'umbrella', '#312e81', 6, '☂️'], [W19, 'W', 'boltOn', 'bell', '#b45309', 6, '🔔'], [W20, 'W', 'mandate', 'chart', '#0e7490', 6, '📊']];
+  for (const [Wd, ch, type, icon, color, n, emoji] of SP) {
+    const t = Wd.tiles[ch]; ok(t && t.type === type && t.icon === icon && t.color === color && t.ink === '#ffffff' && [...Wd.board].filter((c) => c === ch).length === n, `${Wd.id} tile ${ch}: ${type} (${icon}, ${color} / white), ${n} on the board`);
+    ok(!/\d/.test(T.TILE_TEXT[type].desc), `${Wd.id} ${type} before prepareWorldText: number-free`);
+    ok((await T.prepareWorldText(Wd)).includes(type), `prepareWorldText builds ${Wd.id} ${type} (from ${Wd.mech[0].id})`);
+    const x = T.tileText(t, Wd); ok(x.emoji === emoji && x.short.length <= T.SHORT_MAX && /לוותר|או לוותר/.test(x.desc) && x.desc.length <= 180, `${Wd.id} ${ch} ${emoji} "${x.short}": ${x.desc}`);
+    ok(Wd.mech[0].tiles[ch].safe === 'pass', `${Wd.id} ${ch}: safe = pass`);
+    for (const tt of Object.values(Wd.tiles)) ok(T.tileText(tt, Wd).short.length <= T.SHORT_MAX, `${Wd.id}: tile ${tt.type} short name ≤ 10`);
+  }
+  const CR = await import('../js/worlds/mech/credit.js'), TRm = await import('../js/worlds/adapters/trials.js'), INm = await import('../js/worlds/mech/insure.js');
+  ok(T.tileText(W14.tiles.J, W14).desc.includes(`${Math.round(CR.REG.min * 100)}%`), 'w14 J text = credit.js REG.min');
+  ok(T.tileText(W17.tiles.V, W17).desc.includes(`${Math.round(TRm.TR.ddFee / 1e6)} מיליון`) && T.tileText(W17.tiles.V, W17).desc.includes(`עד ${TRm.SLOTS} מולקולות`), 'w17 V text = trials.js TR.ddFee / SLOTS');
+  ok(T.tileText(W18.tiles.Z, W18).desc.includes(`±${Math.round(INm.IN.band * 100)}%`) && T.tileText(W18.tiles.Z, W18).desc.includes(`±${Math.round(INm.IN.ddBand * 100)}%`), 'w18 Z text = insure.js IN.band / ddBand');
+  const tt = (Wd, type) => T.tileText(Object.values(Wd.tiles).find((t) => t.type === type), Wd).desc;
+  ok(/מעילה/.test(tt(W14, 'crisis')) && /חברת הניסויים/.test(tt(W17, 'crisis')) && /שיטפון/.test(tt(W18, 'crisis')) && /חטיבה/.test(tt(W19, 'crisis')) && /מערכת המסחר/.test(tt(W20, 'crisis')), 'the five crisis tiles: their own decks in words');
+  ok(/בנק ישראל/.test(tt(W14, 'market')) && /בועת ביוטק/.test(tt(W17, 'market')) && /ביטוח משנה/.test(tt(W18, 'market')) && /תום תקופת החסימה/.test(tt(W19, 'market')) && /סחיטת שורט/.test(tt(W20, 'market')) && !/איסור ייצוא/.test(tt(W20, 'market')), 'the five market tiles: their own news (w20 "ban" in its own words)');
 }
 /* T-w12 / w16: tile Z (division, 👑 crown, #166534 / #fff) and tile H (produce, 📊 bars, #0284c7 / #fff): number-free until prepareWorldText
    builds them from holding.js (HD.down, SLOTS) / adapters/harvest.js (HV.water); the deal / market / crisis tiles name what their decks do */

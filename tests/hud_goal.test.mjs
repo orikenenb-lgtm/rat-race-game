@@ -333,5 +333,43 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     const row = moneyHubModel(m).rows.find((r) => r.id === 'world'); ok(row && row.icon === '🌾' && row.title === 'השדות והגידור' && row.value.startsWith(m.worldIndicators.harvest.regimeLabel), `w16/${ch}/m${months}: 💼 row`, row);
   }
 }
+/* 13. w14 / w17 / w18 / w19 / w20: their modValue parts in their own units — w14 equity ₪ + capital ratio % + 12 months without the regulator;
+   w17 net worth + drugs that earn (a count); w18 net worth + solvency % + the 12-month combined ratio % (at most); w19 your stake at the market ₪ +
+   net debt ÷ EBITDA × (at most); w20 net worth + money managed ₪ — never ₪ for a ratio / multiple / count, never "fixed costs"; the rules, gaps,
+   rungs, tags, meter labels, 💼 rows; w20's ★★★ gate (no redemption gate) */
+{
+  const { moneyHubModel, milestoneLadder, partTag, meterLabel, nextMilestone } = await import('../js/hudgoal.js');
+  const play = (wid, ch, months) => { const st = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 300 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.id === 'pass' || x.id === 'decline') || os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  const SP = {
+    w14: { chars: ['riskChief', 'familyBanker', 'fintechFounder'], keys: 'equity,capRatio,noDefault:regulator', tags: 'הון,הון,רצף', meter: 'יעד הבנק', rule: ['שלושה יעדים יחד', 'יחס הון לפחות 10%', 'בלי התערבות המפקח'], hub: ['🏦', 'הבנק', 'יחס הון'],
+      fmt: (P) => /%$/.test(P[1].valueText) && P[1].targetText === 'לפחות 10%' && P[2].valueText.endsWith('חודשים') && P[2].targetText === '12 חודשים' && P[0].targetText === E.fmtM(7e8), rungs: ['יחס הון של 10% לפחות', '12 חודשים בלי התערבות המפקח'] },
+    w17: { chars: ['scientist', 'pharmaVet', 'bioInvestor'], keys: 'netWorth,productsEarning', tags: 'שווי,תרופות', meter: 'שווי ותרופות', rule: ['שני יעדים יחד', '2 תרופות שמרוויחות'], hub: ['🧪', 'המעבדה', 'מרוויחות'],
+      fmt: (P) => /תרופות|תרופה אחת/.test(P[1].valueText) && P[1].targetText === '2 תרופות' && !/₪/.test(P[1].valueText + P[1].targetText), rungs: ['תרופה ראשונה שמרוויחה', '2 תרופות שמרוויחות'] },
+    w18: { chars: ['actuary', 'topBroker', 'mutualChair'], keys: 'netWorth,solvency,combined12', tags: 'שווי,פירעון,משולב', meter: 'יעד חברת הביטוח', rule: ['שלושה יעדים יחד', 'כושר פירעון לפחות 120%', 'יחס משולב עד 100%'], hub: ['☂️', 'חברת הביטוח', 'כושר פירעון'],
+      fmt: (P) => /%$/.test(P[1].valueText) && P[1].targetText === 'לפחות 120%' && /%$/.test(P[2].valueText) && P[2].targetText === 'עד 100%' && P[2].cmp === 'le', rungs: ['כושר פירעון של 120% לפחות', 'יחס משולב של 100% לכל היותר'] },
+    w19: { chars: ['founderCeo', 'familyBoard', 'turnaroundCeo'], keys: 'stakeMkt,netDebtEbitda', tags: 'בורסה,חוב', meter: 'בורסה וחוב', rule: ['שני יעדים יחד', 'במחיר הבורסה', 'חוב נטו עד ×3'], hub: ['🔔', 'החברה בבורסה', 'חוב נטו'],
+      fmt: (P) => /^(×\d+\.\d\d|אין רווח תפעולי)$/.test(P[1].valueText) && P[1].targetText === 'עד ×3' && P[1].cmp === 'le' && P[0].targetText === E.fmtM(1.5e9), rungs: ['הנפקה בבורסה: הפעמון מצלצל', 'חוב נטו של ×3 לכל היותר מהרווח התפעולי'] },
+    w20: { chars: ['quantAnalyst', 'starPicker', 'endowmentPm'], keys: 'netWorth,aum', tags: 'שווי,בניהול', meter: 'שווי וכסף בניהול', rule: ['שני יעדים יחד', 'כסף בניהול'], hub: ['📈', 'הקרן', 'בניהול'],
+      fmt: (P) => P[1].targetText === E.fmtM(4e9) && P[1].valueText.startsWith('₪'), rungs: [`${E.fmtM(1e9)} בניהול`] },
+  };
+  for (const [wid, X] of Object.entries(SP)) { await E.ensureWorld(wid);
+    for (const ch of X.chars) for (const months of [1, 9]) {
+      const st = play(wid, ch, months); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld(wid), st.charId, m.rules) });
+      ok(m.goalType === 'all' && M.parts.map((p) => p.key).join() === X.keys && X.fmt(M.parts), `${wid}/${ch}/m${months}: the parts in their units (${M.parts.map((p) => `${p.valueText} / ${p.targetText}`).join(' ; ')})`, M.parts);
+      ok(X.rule.every((w) => M.rule.includes(w)) && !/עלויות קבועות/.test(M.rule + M.gaps.join(' ')), `${wid}/${ch}/m${months}: the rule`, M.rule);
+      ok(M.gaps.every((g) => g && !/^חסרים ₪0/.test(g)) && M.parts.every((p) => p.met || M.gaps.length > 0), `${wid}/${ch}/m${months}: the gaps`, M.gaps);
+      const L = milestoneLadder(m); ok(X.rungs.every((t) => L.some((x) => x.title === t)), `${wid}/${ch}/m${months}: the rungs`, L.map((x) => x.title));
+      const nx = nextMilestone(m); ok(!nx || (nx.valText && !/NaN|undefined/.test(nx.valText)), `${wid}/${ch}/m${months}: the next rung reads (${nx && nx.valText})`);
+      ok(m.goalParts.map((p) => partTag(p)).join() === X.tags && meterLabel(m) === X.meter, `${wid}/${ch}: HUD tags / meter label`);
+      const row = moneyHubModel(m).rows.find((r) => r.id === 'world'); ok(row && row.icon === X.hub[0] && row.title === X.hub[1] && row.value.includes(X.hub[2]) && row.acts[0].act === 'world' && !/NaN|undefined/.test(row.value), `${wid}/${ch}/m${months}: 💼 row "${row && row.value}"`, row);
+      if (wid === 'w20') ok(M.stars[2].gates.some((g) => g.key === 'noGate' && g.ok === !m.worldIndicators.funds.gates), 'w20: ★★★ needs no redemption gate (funds.js starGates)', M.stars[2].gates);
+    }
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);

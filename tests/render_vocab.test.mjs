@@ -423,5 +423,58 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   ok(/function syncCables/.test(scn) && /kind === 'div'\) \{ paintDiv\(it\.obj, it\.level\); syncCables\(\)/.test(scn) && /kind === 'farm'\) \{ paintFarm/.test(scn), 'scene: div → paintDiv + the cables; farm → paintFarm');
   ok(/case 'crown':/.test(scn) && /w12: 'האימפריה שלך'/.test(scn) && /w16: 'המשק שלך'/.test(scn), "scene: tile icon 'crown', the captions");
 }
+/* w14 / w17 / w18 / w19 / w20 — identity (board ΔE ≥ 10 from every world, the sky = the world file's), character colours, model emoji + stand-ins
+   (no .glb: bank_hall / lab_block / insurer_hq / exchange_floor / trading_floor are built; w17's business is w7's street shop in its folder), the
+   five level kinds bank / lab / ins / listco / fund (normalised, idempotent, their text / pips / parts), the cityModels fields game.js reads, still decor */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const s1420 = readFileSync(resolve(ROOT, 'js/render/standins1420.js'), 'utf8'); const s3d = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8');
+  const SPEC = { w14: { board: '#b8ab98', accent: '#475569', ink: ['#334155', '#cbd5e1'], decor: 'columns', motif: 'columns', chars: 'riskChief,familyBanker,fintechFounder', model: 'bank_hall', kind: 'bank' },
+    w17: { board: '#a7e3d6', accent: '#0d9488', ink: ['#115e59', '#5eead4'], decor: 'labs', motif: 'flask', chars: 'scientist,pharmaVet,bioInvestor', model: 'lab_block', kind: 'lab' },
+    w18: { board: '#8fa3bd', accent: '#4f46e5', ink: ['#3730a3', '#a5b4fc'], decor: 'lighthouse', motif: 'umbrella', chars: 'actuary,topBroker,mutualChair', model: 'insurer_hq', kind: 'ins' },
+    w19: { board: '#3d3426', accent: '#b45309', ink: ['#7c2d12', '#fdba74'], decor: 'bell', motif: 'bell', chars: 'founderCeo,familyBoard,turnaroundCeo', model: 'exchange_floor', kind: 'listco' },
+    w20: { board: '#0b1020', accent: '#22d3ee', ink: ['#155e75', '#22d3ee'], decor: 'screens', motif: 'screens', chars: 'quantAnalyst,starPicker,endowmentPm', model: 'trading_floor', kind: 'fund' } };
+  const { levelOfEntry } = { levelOfEntry: null };
+  for (const [wid, X] of Object.entries(SPEC)) {
+    const w = await E.ensureWorld(wid); const st = V.WORLD_STYLE[wid];
+    ok(st && st.board === X.board && st.accent === X.accent && st.accentInk.join() === X.ink.join() && st.decor === X.decor && st.motif === X.motif && st.caption && st.sky.join() === w.theme.sky.join(), `WORLD_STYLE.${wid} = the identity sheet (sky = the world file's)`);
+    for (const id of Object.keys(V.WORLD_STYLE)) if (id !== wid) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `${wid} board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+    const cs = w.characters.map((c) => c.id);
+    ok(cs.join() === X.chars && cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === 3, `CHAR_STYLE: ${X.chars}, distinct`);
+    for (const m of new Set(Object.values(w.models).filter(Boolean))) {
+      ok(V.cityEmoji(m, wid) !== '🏠', `2D emoji ${wid}/${m} (${V.cityEmoji(m, wid)})`);
+      ok(m === 'business' ? /w17: Object\.freeze\(\{ business: /.test(s3d) : new RegExp(`\\b${m}[:(,]`).test(s1420 + s3d + readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8')), `stand-in for ${wid}/${m} (no .glb is ever requested)`);
+    }
+    const g = E.createGame({ worldId: wid, charId: cs[0], seed: 7, mode: 'free' }); const cm = E.cityModels(g).find((c) => c.model === X.model);
+    ok(cm, `${wid} cityModels: the ${X.model} piece`, cm);
+  }
+  ok(/\.\.\.W1420 \}\);/.test(s3d) && !/\.glb['"`]/.test(s1420) && !/import\(|fetch\(|Loader/.test(s1420) && !/requestAnimationFrame|updaters/.test(s1420), 'standins1420: the five keys are built in every world, request no file and nothing steps');
+  // the five level kinds
+  const Bk = V.normLevel({ kind: 'bank', cap: 0.0791, conf: 25, queue: 9, segs: [{ seg: 'mort', book: 600e6 }, { seg: 'dev', book: 400e6 }] });
+  ok(Bk.kind === 'bank' && Bk.n === 0 && Bk.run && Bk.trouble && Bk.segs.length === 5 && Bk.segs[0].share === 0.6 && JSON.stringify(V.normLevel(Bk)) === JSON.stringify(Bk), 'bank level: normalised, idempotent', Bk);
+  ok(V.levelText(Bk) === 'יחס הון 7.9% · אמון המפקידים 25 מתוך 100 · תור בסניפים · ⚠️ מתחת למינימום' && V.pipsText(Bk) === '○○○' && V.kitParts(Bk).queue === 9 && V.kitParts(Bk).segs.length === 5, `bank text "${V.levelText(Bk)}"`);
+  const Lb = V.normLevel({ kind: 'lab', flasks: [{ state: 'run', stage: 1, fill: 0.31, cracked: false, lic: false }, { state: 'drug', stage: 4, fill: 1 }, { state: 'dead', stage: 2, fill: 0.5 }, null, { state: 'lab', fill: 0 }], plant: true });
+  ok(Lb.kind === 'lab' && Lb.flasks.length === 8 && Lb.drugs === 1 && Lb.trials === 1 && Lb.cracked === 1 && Lb.plant && JSON.stringify(V.normLevel(Lb)) === JSON.stringify(Lb), 'lab level: normalised, idempotent', Lb);
+  ok(V.levelText(Lb) === '1 מולקולות בצינור · תרופה אחת בשוק · 1 ניסויים נכשלו · מפעל ייצור' && V.pipsText(Lb) === '▯◆✖◦', `lab text "${V.levelText(Lb)}" / pips "${V.pipsText(Lb)}"`);
+  const In = V.normLevel({ kind: 'ins', lines: [{ line: 'car', prem: 300e6, rel: -0.15 }, { line: 'coast', prem: 100e6, rel: 0.05, stop: true }], solvency: 0.984, xol: 2, qs: true, bond: false, stormSeason: true, cats: 1 });
+  ok(In.kind === 'ins' && In.n === 0 && In.trouble && In.season && In.lines.length === 5 && In.lines[0].share === 0.75 && JSON.stringify(V.normLevel(In)) === JSON.stringify(In), 'ins level: normalised, idempotent', In);
+  ok(V.levelText(In) === 'כושר פירעון 98% · 2 שכבות ביטוח משנה לסערות · ביטוח משנה יחסי · 🌀 עונת הסערות', `ins text "${V.levelText(In)}"`);
+  const Ls = V.normLevel({ kind: 'listco', listed: true, price: 9.1, peer: 10, candle: [10e6, 11e6, 12e6], divisions: [{ div: 'plant', ebitda: 6e6, growing: 1 }], activist: true });
+  ok(Ls.kind === 'listco' && Ls.n === 2 && Ls.candle[2] === 1 && Ls.divs[0].growing === 1 && Ls.divs[1] === null && Ls.trouble && JSON.stringify(V.normLevel(Ls)) === JSON.stringify(Ls), 'listco level: normalised, idempotent', Ls);
+  ok(V.levelText(Ls) === 'רשומה בבורסה · מניה ₪9.10 מול ₪10.00 אצל המתחרים · ⚠️ אקטיביסט' && V.levelText(V.normLevel({ kind: 'listco', listed: false })) === 'עוד לא רשומה בבורסה · אין מחיר שוק', `listco text "${V.levelText(Ls)}"`);
+  const Fd = V.normLevel({ kind: 'fund', aum: 1.2e9, peak: 1.5e9, pending: 30e6, gate: false, book: [{ co: 'a', w: 0.2 }, { co: 'b', w: -0.1 }, { co: 'c', w: 0 }], idx: true });
+  ok(Fd.kind === 'fund' && Fd.n === 1 && Fd.dd === 0.8 && Fd.longs === 1 && Fd.shorts === 1 && JSON.stringify(V.normLevel(Fd)) === JSON.stringify(Fd), 'fund level: normalised, idempotent', Fd);
+  ok(V.levelText(Fd) === '₪1.2 מיליארד בניהול · 1 לונג, 1 שורט · ₪30 מיליון בבקשות פדיון · קרן מדד' && V.kitParts(Fd).book.join() === '0.2,-0.1,0', `fund text "${V.levelText(Fd)}"`);
+  for (const L of [Bk, Lb, In, Ls, Fd]) ok(V.levelHint(L).length > 40 && V.cardName('x', 'y', L).includes(V.levelText(L)), `${L.kind}: a hint and the card's accessible name`);
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  const dec = scn.slice(scn.indexOf('function decorColumns('), scn.indexOf('function decorSilos('));
+  ok(['columns: decorColumns', 'labs: decorLabs', 'lighthouse: decorLighthouse', 'bell: decorBell', 'screens: decorScreens'].every((x) => scn.includes(x)) && dec.length > 1000 && !/updaters\.add/.test(dec), 'the five decors add no updater (still, also under reduced motion)');
+  ok(["kind === 'bank') { paintBank", "kind === 'lab') { paintLab", "kind === 'ins') { paintIns(it.obj, it.level); syncStorm()", "kind === 'listco') { paintList", "kind === 'fund') { paintFund"].every((x) => scn.includes(x)), 'scene: each level kind → its painter (w18 also the storm clouds)');
+  ok(["case 'flask':", "case 'umbrella':", "case 'bell':"].every((x) => scn.includes(x)) && ["w14: 'הבנק שלך'", "w17: 'המעבדה שלך'", "w18: 'חברת הביטוח שלך'", "w19: 'החברה שלך'", "w20: 'הקרן שלך'"].every((x) => scn.includes(x)), 'scene: tile icons flask / umbrella / bell, the captions');
+  void levelOfEntry;
+}
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
