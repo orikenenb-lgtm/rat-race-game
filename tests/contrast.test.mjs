@@ -70,7 +70,7 @@ for (const t of TEXT) {
 /* ---------- A-1: --accent-ink for the 5 worlds × 2 modes (w1 = :root; others from body[data-world=…]) */
 const accentInk = { w1: tok('--accent-ink') };
 const accentFill = {};
-for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', 'h']) {
+for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15', 'h']) {
   const b = block(GAME, `body[data-world=${w}]`);
   ok(!!b, `game.css has body[data-world=${w}]`);
   const d = decls(b || '');
@@ -78,7 +78,7 @@ for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', '
   ok(!!accentInk[w], `body[data-world=${w}] sets --accent-ink as light-dark(hex,hex)`);
   if (d['--accent']) accentFill[w] = d['--accent'];
 }
-const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], w7: ['#9b1c24', '#ff8a93'], w8: ['#854d0e', '#facc15'], w9: ['#155e75', '#67e8f9'], w10: ['#7a5a0a', '#facc15'], w13: ['#7f1d1d', '#fca5a5'], h: ['#7a5520', '#c8a24a'] };
+const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], w7: ['#9b1c24', '#ff8a93'], w8: ['#854d0e', '#facc15'], w9: ['#155e75', '#67e8f9'], w10: ['#7a5a0a', '#facc15'], w13: ['#7f1d1d', '#fca5a5'], w11: ['#92400e', '#fbbf24'], w15: ['#4c1d95', '#c4b5fd'], h: ['#7a5520', '#c8a24a'] };
 for (const [w, p] of Object.entries(accentInk)) {
   if (!p) continue;
   ok(p.light.toLowerCase() === SPEC_INK[w][0] && p.dark.toLowerCase() === SPEC_INK[w][1], `--accent-ink ${w} matches the §3 identity sheet`);
@@ -122,9 +122,9 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
 }
 
 /* ---------- text on world accent FILLS uses --ink (§2.1, h fill becomes #c8a24a) */
-const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
+const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
 const fillOf = (w) => accentFill[w] || (worldsSrc[w].match(/accent:\s*'(#[0-9a-f]{6})'/i) || worldsSrc.w1.match(/accent:\s*'(#[0-9a-f]{6})'/i))[1];
-for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13', 'h']) {
+for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15', 'h']) {
   const f = fillOf(w), r = cr(tok('--ink').light, f);
   ok(r >= 4.5, `--ink on ${w} accent fill ${f} ≥ 4.5 (${f2(r)})`);
   table.push({ token: `--ink on accent ${w}`, light: `${f} ${f2(r)}` });
@@ -229,9 +229,12 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
     return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
   const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
   const ids = Object.keys(WORLD_STYLE);
-  for (const w of ['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13']) for (const o of ids) if (o !== w) { const d = dE(WORLD_STYLE[w].board, WORLD_STYLE[o].board); ok(d >= 10, `board ΔE76 ${w} ${WORLD_STYLE[w].board} ↔ ${o} ${WORLD_STYLE[o].board} = ${d.toFixed(1)} ≥ 10`); }
+  for (const w of ['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15']) for (const o of ids) if (o !== w) { const d = dE(WORLD_STYLE[w].board, WORLD_STYLE[o].board); ok(d >= 10, `board ΔE76 ${w} ${WORLD_STYLE[w].board} ↔ ${o} ${WORLD_STYLE[o].board} = ${d.toFixed(1)} ≥ 10`); }
   // the 3D accent and the UI fill: w7's UI fill is lighter than its awning red so --ink on it stays ≥ 4.5 (checked above); the 3D accents differ per world
-  ok(new Set(['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w13'].map((w) => WORLD_STYLE[w].accent)).size === 7, 'w5–w10, w13 accents are distinct');
+  ok(new Set(['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15'].map((w) => WORLD_STYLE[w].accent)).size === 9, 'w5–w11, w13, w15 accents are distinct');
+  // w11 tile Z: the ink #3a2400 on amber; w15 tile H: white on violet ≥ 4.5; the manager-token ring and the cohort bars are not the only carrier (words beside them)
+  ok(cr('#3a2400', '#f59e0b') >= 4.5, `w11 tile Z: #3a2400 on #f59e0b ≥ 4.5 (${f2(cr('#3a2400', '#f59e0b'))})`);
+  ok(cr('#ffffff', '#7c3aed') >= 4.5, `w15 tile H: #fff on #7c3aed ≥ 4.5 (${f2(cr('#ffffff', '#7c3aed'))})`);
   // w13 tile H: white on the club red ≥ 4.5; the age-ring badges (white digits on the ring colour) ≥ 4.5
   ok(cr('#ffffff', '#dc2626') >= 4.5, `w13 tile H: #fff on #dc2626 ≥ 4.5 (${f2(cr('#ffffff', '#dc2626'))})`);
   for (const c of ['#15803d', '#0e7490', '#1d4ed8', '#a16207', '#7c2d12']) ok(cr('#ffffff', c) >= 4.5, `w13 age ring badge: #fff on ${c} ≥ 4.5 (${f2(cr('#ffffff', c))})`);

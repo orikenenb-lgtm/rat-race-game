@@ -326,5 +326,43 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   ok(/floodlights: decorFloodlights/.test(scn) && !/function decorFloodlights[\s\S]{0,4000}?updaters\.add/.test(scn.slice(scn.indexOf('function decorFloodlights'), scn.indexOf('let floodState'))), 'the floodlights decor adds no updater (on with and without reduced motion)');
   ok(/case 'ball':/.test(scn) && /w13: 'המועדון שלך'/.test(scn), "scene: tile icon 'ball', the caption");
 }
+/* w11 / w15 — identity (board ΔE ≥ 10 from every world), character colours, model emoji + stand-ins (no .glb; w11 builds its own warehouse,
+   w3 keeps warehouse.glb), the 'sub' / 'app' level kinds (text, pips, model parts), the cityModels fields game.js reads, still decor */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const s1115 = readFileSync(resolve(ROOT, 'js/render/standins1115.js'), 'utf8'); const sAll = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8') + readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8') + s1115;
+  const SPEC = { w11: { sky: ['#020617', '#1e1b4b'], board: '#134e4a', edge: '#115e59', accent: '#f59e0b', ink: ['#92400e', '#fbbf24'], decor: 'globe', motif: 'globe', chars: 'ceo,oldExporter,pe' },
+    w15: { sky: ['#1e1b4b', '#4c1d95'], board: '#c7d2fe', edge: '#a5b4fc', accent: '#7c3aed', ink: ['#4c1d95', '#c4b5fd'], decor: 'servers', motif: 'cloud', chars: 'soloFounder,bigTechExec,bootstrapper' } };
+  for (const [wid, X] of Object.entries(SPEC)) {
+    const w = await E.ensureWorld(wid); const st = V.WORLD_STYLE[wid];
+    ok(st && st.sky.join() === X.sky.join() && st.board === X.board && st.edge === X.edge && st.accent === X.accent && st.accentInk.join() === X.ink.join() && st.decor === X.decor && st.motif === X.motif && st.caption, `WORLD_STYLE.${wid} = the identity sheet`);
+    for (const id of Object.keys(V.WORLD_STYLE)) if (id !== wid) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `${wid} board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+    const cs = w.characters.map((c) => c.id);
+    ok(cs.join() === X.chars && cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === 3, `CHAR_STYLE: ${X.chars}, distinct`);
+    for (const m of new Set(Object.values(w.models).filter(Boolean))) { ok(V.CITY_EMOJI[m], `CITY_EMOJI ${wid}/${m}`); ok(new RegExp(`\\b${m}[:(,]`).test(sAll) || new RegExp(`${m}: [a-zA-Z]+`).test(sAll), `stand-in for ${wid}/${m} (no .glb is ever requested)`); }
+  }
+  ok(/w11: Object\.freeze\(\{ warehouse: warehouse11 \}\)/.test(s1115) && /\.\.\.W1115_DIR/.test(sAll) && !/w3: Object\.freeze\(\{ warehouse/.test(sAll), 'w11 builds its own warehouse (DIR_BUILD); w3 keeps warehouse.glb');
+  ok(!/\.glb['"`]/.test(s1115) && !/import\(|fetch\(|Loader/.test(s1115) && !/requestAnimationFrame|step[A-Z]\w*\(/.test(s1115), 'standins1115 requests no file and nothing steps');
+  { const g = E.createGame({ worldId: 'w11', charId: 'ceo', seed: 7, mode: 'free' }); const cm = E.cityModels(g).filter((m) => m.country != null);
+    ok(cm.length === 3 && cm.every((c) => V.COUNTRY_IDS.includes(c.country) && c.kind2 && typeof c.self === 'boolean' && 'trust' in c && typeof c.disrupted === 'boolean' && V.COUNTRY_IDS.includes(c.supplier)), 'w11 cityModels: 3 subs with country / kind2 / self / trust / disrupted / supplier', cm); }
+  { const g = E.createGame({ worldId: 'w15', charId: 'soloFounder', seed: 7, mode: 'free' }); const a = E.cityModels(g).find((m) => m.users != null);
+    ok(a && a.model === 'glass_tower' && Number.isFinite(a.runway) && typeof a.net === 'boolean' && a.regime && a.sold === false && a.stake === 0.7, 'w15 cityModels: the app (users / runway / net / regime / sold / stake)', a); }
+  const Sb = V.normLevel({ kind: 'sub', country: 'br', supplier: 'us', kind2: 'distribution', self: false, managed: true, trust: 0.734, audited: false, disrupted: true, hedged: true });
+  ok(Sb.kind === 'sub' && Sb.trust === 0.73 && Sb.trouble && JSON.stringify(V.normLevel(Sb)) === JSON.stringify(Sb), 'sub level: normalised, idempotent');
+  ok(V.levelText(Sb) === 'הפצה בברזיל · מנהל מקומי · אמון 73% (לא נבדק) · ספק מארה״ב · ⚠️ שיבוש אצל הספק · מטבע מגודר' && V.pipsText(Sb) === '●●○', `sub text "${V.levelText(Sb)}" / pips "${V.pipsText(Sb)}"`);
+  const kp = V.kitParts(Sb); ok(kp.country === 'br' && kp.disrupted && kp.hedged && !kp.sign && !kp.scaffold, 'sub level: model parts only');
+  ok(V.pipsText(V.normLevel({ kind: 'sub', country: 'eu', self: true })) === '★' && V.COUNTRY_IDS.every((c) => V.COUNTRY_HE[c] && V.COUNTRY_BAND[c].length === 2), 'self-run = ★; every country has words + a fictional two-colour band');
+  const Ap = V.normLevel({ kind: 'app', users: 544267, runway: 8.34, net: false, regime: 'recovery', sold: false, stake: 0.616 });
+  ok(Ap.kind === 'app' && Ap.runway === 8.3 && Ap.n === 1 && !Ap.trouble && V.levelText(Ap) === '544,267 משתמשים · מזומן ל־8.3 חודשים · החלק שלך 62% · שוק: התאוששות' && V.pipsText(Ap) === '▮▯▯', `app text "${V.levelText(Ap)}"`);
+  const Ap2 = V.normLevel({ kind: 'app', users: 3e6, runway: 99, net: true, regime: 'bubble', stake: 0.4 }); ok(Ap2.profitable && V.levelText(Ap2).includes('רווחית') && V.pipsText(Ap2) === '▮▮▮' && V.normLevel({ kind: 'app', runway: 3 }).trouble, 'app: 99 = profitable, under 6 months = trouble');
+  ok(V.kitParts(Ap).runway === 8.3 && V.kitParts(Ap).users === 544267, 'app level: model parts (runway, users)');
+  ok(V.cityEmoji('glass_tower', 'w15') === '📱' && V.cityEmoji('glass_tower', 'w10') === '🏦', 'the 2D emoji of a shared model key per world');
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  ok(/globe: decorGlobe/.test(scn) && /servers: decorServers/.test(scn) && !/updaters\.add/.test(scn.slice(scn.indexOf('function decorGlobe'), scn.indexOf('let globeDecor'))), 'the globe decor adds no updater (still); the servers decor exists');
+  ok(/case 'globe':/.test(scn) && /w11: 'הקבוצה שלך'/.test(scn) && /w15: 'האפליקציה שלך'/.test(scn), "scene: tile icon 'globe', the captions");
+}
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

@@ -271,5 +271,31 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     }
   }
 }
+/* 11. w11 (goal nw ₪800M, hold 2) and w15 (goal all: stakeValue ₪800M AND liquidity = the app's runway ≥ 12 months, 99 = profitable): the
+   stake part in ₪ with its own label / gap / rung titles; the runway reads "רווחית" (never "אין עלויות קבועות"); the rule; the 💼 rows */
+{
+  const { moneyHubModel, milestoneLadder } = await import('../js/hudgoal.js');
+  const play = (wid, ch, months) => { const st = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 200 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.id === 'pass' || x.id === 'decline') || os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  await E.ensureWorld('w11'); await E.ensureWorld('w15');
+  for (const ch of ['ceo', 'oldExporter', 'pe']) { const st = play('w11', ch, 6); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w11'), st.charId, m.rules) });
+    ok(m.goalType === 'nw' && M.parts.length === 1 && M.parts[0].targetText === E.fmtM(800000000) && M.rule.includes(E.fmtM(800000000)), `w11/${ch}: one ₪800M net-worth part and its rule`, M.parts);
+    const X = m.worldIndicators.multinational; const row = moneyHubModel(m).rows.find((r) => r.id === 'world');
+    ok(row && row.icon === '🌍' && row.title === 'המפה והחברות־הבנות' && row.value.includes(`קשב ${X.used}/${X.slots}`) && row.value.includes(`${X.subs} חברות־בנות`), `w11/${ch}: 💼 row from the engine`, row); }
+  for (const ch of ['soloFounder', 'bigTechExec', 'bootstrapper']) for (const months of [1, 7]) {
+    const st = play('w15', ch, months); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w15'), st.charId, m.rules) });
+    const sv = M.parts.find((p) => p.key === 'stakeValue'), lq = M.parts.find((p) => p.key === 'liquidity'); const raw = m.goalParts.find((p) => p.key === 'liquidity');
+    ok(m.goalType === 'all' && sv && lq && sv.label === 'שווי החלק שלך בחברה' && sv.targetText === E.fmtM(800000000) && lq.runway === true, `w15/${ch}/m${months}: stake (₪) + runway parts`, M.parts);
+    ok(raw.value >= 99 ? lq.valueText === 'רווחית — המזומן לא נגמר' : lq.valueText === `${Math.round(raw.value * 10) / 10} חודשים`, `w15/${ch}/m${months}: runway "${lq.valueText}" (99 = profitable)`);
+    ok(M.rule.includes('החלק שלך בחברה') && M.rule.includes('לא לפי הסבב האחרון') && !/עלויות קבועות/.test(M.rule + M.gaps.join(' ')), `w15/${ch}/m${months}: the rule (stake at the market AND cash months), never "fixed costs"`, M.rule);
+    ok(sv.met || M.gaps.some((g) => g.startsWith('החלק שלך בחברה שווה')), `w15/${ch}/m${months}: the stake gap`, M.gaps);
+    const L = milestoneLadder(m); ok(L.filter((x) => /^stakeValue/.test(x.id)).every((x) => x.title.startsWith('החלק שלך בחברה שווה')) && L.some((x) => x.id === 'liquidity' && x.title.startsWith('מזומן ל־12')), `w15/${ch}/m${months}: the rungs read the stake / the runway`, L.map((x) => x.title));
+    const row = moneyHubModel(m).rows.find((r) => r.id === 'world'); ok(row && row.icon === '☁️' && row.title === 'האפליקציה והגיוסים' && row.acts[0].act === 'world', `w15/${ch}/m${months}: 💼 row`, row);
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);
