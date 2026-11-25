@@ -42,6 +42,10 @@ export const TILE_TEXT = Object.freeze({
   // prepareWorldText() built them from the modules' constants (MODULE_TEXT below).
   acquisition: { short: 'הצעת רכישה', desc: 'חברה־בת בחו"ל למכירה, עם המנהל שכבר יושב שם: הרווח שלה הוא טווח, והמנהל — לא ידוע. אפשר לבדוק קודם, לקנות או לוותר.' },
   investors: { short: 'משקיעים', desc: 'פגישה עם משקיעים: הצעת השקעה תמורת חלק מהחברה, או ענקית שרוצה לקנות את כולה. אפשר לקבל או לסרב.' },
+  // w12 האימפריה — tile Z (holding.js tiles.Z); w16 ארץ השדות — tile H (adapters/harvest.js tiles.H). Number-free until prepareWorldText()
+  // built them from the modules' constants (MODULE_TEXT below).
+  division: { short: 'חטיבה', desc: 'חטיבה למכירה: הרווח שלה הוא טווח, והמוכר יודע יותר ממך. אפשר לבדוק קודם, לקנות בערבות המטה או מגודרת, או לוותר.' },
+  produce: { short: 'בורסה', desc: 'בורסת התוצרת: חוזה ייצוא על חלק מהיבול של שדה בגידול, או זכויות מים לשנות בצורת. אפשר לקבל או לסרב.' },
   privateDeal: { short: 'עסקה פרטית', desc: 'השקעה פרטית: נעולה לשנים, בלי מחיר יומי, ואי אפשר ללוות כנגדה. אפשר לבדוק את המנהל, להשקיע הכל או חצי, או לוותר.' },
 });
 
@@ -67,13 +71,21 @@ const BY_NAME = Object.freeze({
   // w11 / w15: the crisis tiles (w11.crises: a regulator, a general strike, a class action, a cyber break-in · w15.crises: an outage, a churn wave, a patent suit)
   'משבר בקבוצה': { short: 'משבר', desc: 'משבר בקבוצה: רגולטור שבודק את המנהלים, שביתה כללית במדינה אחת, תביעה או חודש בלי משכורת. מנהלים שנבדקו ומזומן בצד עוזרים לעבור אותו.' },
   'משבר בחברה': { short: 'משבר', desc: 'משבר בחברה: השרתים נופלים, גל נטישה, תביעת פטנט או חודש בלי משכורת. כמה חודשי מזומן ביד עוזרים לעבור אותו בלי לגייס בכל מחיר.' },
+  // w16: the crisis tile (w16.crises: hail on one growing field, a broken combine, a fire at the field's edge, a month without a draw)
+  'פגע בשדה': { short: 'פגע בשדה', desc: 'פגע בשדה: ברד שמוריד 30% מהיבול של שדה אחד, קומביין שהתקלקל, שריפה או חודש בלי משיכה. בגלל זה נועלים רק את הקצה הנמוך של הטווח.' },
   'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
+/** Per-world name overrides where two worlds share a tile name (w12's crisis tile is also "משבר בקבוצה", with other cards than w11's). */
+const BY_NAME_W = Object.freeze({ w12: Object.freeze({ 'משבר בקבוצה': Object.freeze({ short: 'משבר', desc: 'משבר בקבוצה: מאבק ירושה שמעלה את הדיבידנד, מתקפת סייבר על המטה, תביעה ייצוגית או חודש בלי משכורת. מזומן במטה עוזר לעבור אותו בלי לגעת בחטיבות.' }) }) });
 /* ---------- worlds wave 1: module tiles get their text from the module's own constants (no copied numbers that drift) */
 const pctW = (x) => `${Math.round(x * 100)}%`;
 const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
 /** mechanic id → (its module namespace) → { tile type: {short, desc} } */
 const MODULE_TEXT = {
+  // w12 (holding.js HD.down, HD.fee / minFee, SLOTS): a division for sale — the down payment from HQ, due diligence, the cap on divisions
+  holding: (M) => (M && M.HD && M.SLOTS ? { division: { short: 'חטיבה', desc: `חטיבה למכירה: הרווח שלה הוא טווח. ${pctW(M.HD.down)} מהמטה והשאר חוב על החטיבה — בערבות המטה (ריבית זולה) או מגודרת. בדיקה מצמצמת את הטווח. עד ${M.SLOTS} חטיבות. אפשר לוותר.` } } : {}),
+  // w16 (adapters/harvest.js HV.water): an export contract on part of a growing field's crop, or water rights for drought years
+  harvest: (M) => (M && M.HV && M.HV.water ? { produce: { short: 'בורסה', desc: `בורסת התוצרת: חוזה ייצוא על חלק מהיבול של שדה בגידול — מחיר טוב, בלי ביטחונות, אבל אם היבול לא יספיק קונים את החסר ביוקר. או זכויות מים: עוד ${pctW(M.HV.water)} במכסה בבצורת. אפשר לסרב.` } } : {}),
   // w11 (multinational.js MN.down, MN.auditFee, SLOTS): the acquisition card — the down payment, the due-diligence fee, the cap on subsidiaries
   multinational: (M) => (M && M.MN && M.SLOTS ? { acquisition: { short: 'הצעת רכישה', desc: `חברה־בת בחו"ל למכירה, עם המנהל שלה: הרווח הוא טווח והמנהל לא ידוע. ${pctW(M.MN.down)} מקדמה, השאר הלוואה על החברה. בדיקה (${Math.round(M.MN.auditFee / 1000)} אלף ₪) מצמצמת את הטווח. עד ${M.SLOTS} חברות. אפשר לוותר.` } } : {}),
   // w15 (platform.js PF.raise): a term sheet (a share of the company for cash) or a giant's buyout
@@ -88,7 +100,8 @@ const MODULE_TEXT = {
   plant: (M) => (M && M.CONTRACT ? { contract: { short: 'חוזה', desc: `לקוח מציע חוזה ל־${M.CONTRACT.months} חודשים על ${pctW(M.CONTRACT.volMin)}–${pctW(M.CONTRACT.volMin + M.CONTRACT.volSpan)} מהקיבולת של קו, ב־${pctW(1 - M.CONTRACT.price)} פחות ממחיר השוק. אפשר לחתום, לבקש רק ${pctW(1 - M.CONTRACT.counterPrice)} הנחה, או לוותר.` } } : {}),
   season: (M) => (M && M.ALLOT ? { allot: { short: 'הקצאה', desc: `מפעיל תיירות רוצה חלק מהחדרים של המלון שלך ל־${M.ALLOT.months} חודשים, ב־${pctW(M.ALLOT.disc)} הנחה, ו${partW(M.ALLOT.upfront)} מראש. אפשר לקבל, להציע ${pctW(M.ALLOT.counterDisc)} הנחה במקום, או לוותר.` } } : {}),
 };
-const MOD_TYPE = {};   // tile type → {short, desc}, filled by prepareWorldText
+const MOD_TYPE = {};
+const ADAPTER_IDS = new Set(['harvest']);   // MODULE_TEXT ids that are rule adapters (js/worlds/adapters/), not mech modules   // tile type → {short, desc}, filled by prepareWorldText
 /**
  * Build the module tile texts of a loaded world from its mechanic modules' exported constants. The module file is already in the
  * browser's module map (the world file imports it), so this costs no request. Idempotent; resolves to the types it filled.
@@ -97,7 +110,7 @@ export async function prepareWorldText(world) {
   const done = [];
   for (const m of (world && world.mech) || []) {
     const id = m && m.id; if (!id || !MODULE_TEXT[id]) continue;
-    let M = null; try { M = await import(`../worlds/mech/${id}.js`); } catch (e) { M = null; }
+    let M = null; try { M = await import(ADAPTER_IDS.has(id) ? `../worlds/adapters/${id}.js` : `../worlds/mech/${id}.js`); } catch (e) { M = null; }   // w16: a rule adapter lives in adapters/
     const t = MODULE_TEXT[id](M); Object.assign(MOD_TYPE, t); done.push(...Object.keys(t));
   }
   return done;
@@ -110,7 +123,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'], [/^globe$/, '🌍'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'], [/^globe$/, '🌍'], [/^crown$/, '👑'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -156,14 +169,20 @@ export const MARKET_WORDS = Object.freeze({
   'mk:port': { t: 'נמל נסגר' }, 'mk:fxcrisis': { t: 'משבר מטבע' }, 'mk:election': { t: 'בחירות במדינה אחת' }, 'mk:shipping': { t: 'מחירי ההובלה מזנקים' }, 'mk:poach': { t: 'מנהל כוכב נחטף' },
   // w15 (platform.js market: c.mk)
   'mk:appstore': { t: 'חנות האפליקציות מעלה מחיר' }, 'mk:breach': { t: 'פריצת מידע' }, 'mk:rivalRound': { t: 'המתחרה גייס סבב ענק' }, 'mk:pop': { t: 'הבועה מתפוצצת' }, 'mk:copy': { t: 'ענקית מעתיקה פיצ׳ר' }, 'mk:engineer': { t: 'מהנדסת מפתח עוזבת' },
+  // w12 (holding.js market: c.mk; 'boom' / 'energy' read in w12's words: MARKET_WORDS_W.w12)
+  'mk:recession': { t: 'מיתון רב־מדינתי' }, 'mk:review': { t: 'סוכנות הדירוג בודקת' }, 'mk:antitrust': { t: 'בדיקת הגבלים עסקיים' },
+  // w16 (adapters/harvest.js market: c.mk)
+  'mk:drought': { t: 'בצורת בעמק' }, 'mk:ban': { t: 'איסור ייצוא בחו"ל' }, 'mk:glut': { t: 'יבול שיא בעולם' }, 'mk:usdUp': { t: 'הדולר מתחזק' }, 'mk:usdDown': { t: 'הדולר נחלש' }, 'mk:subsidy': { t: 'מענק השקיה' }, 'mk:pest': { t: 'מזיק בכותנה' },
   'mk:shock': { t: 'הבורסה זזה בחדות' }, 'mk:spread': { t: 'מרווחי האשראי מתפוצצים' }, 'mk:prop': { t: 'מחירי הנדל"ן זזים' }, 'mk:flash': { t: 'קריסה בזק' }, 'mk:gate': { t: 'קרן נועלת פדיונות' },
 });
 /** Per-world market words where a kind means something else in that world (w10's 'freeze' is a liquidity freeze, not a permit freeze). */
 export const MARKET_WORDS_W = Object.freeze({ w10: Object.freeze({ 'mk:freeze': Object.freeze({ t: 'הקפאת נזילות' }) }),
-  w11: Object.freeze({ 'mk:tariff': Object.freeze({ t: 'מכסים חדשים' }), 'mk:boom': Object.freeze({ t: 'פריחה במדינה אחת' }) }), w15: Object.freeze({ 'mk:viral': Object.freeze({ t: 'חודש ויראלי' }) }) });
+  w11: Object.freeze({ 'mk:tariff': Object.freeze({ t: 'מכסים חדשים' }), 'mk:boom': Object.freeze({ t: 'פריחה במדינה אחת' }) }), w15: Object.freeze({ 'mk:viral': Object.freeze({ t: 'חודש ויראלי' }) }),
+  w12: Object.freeze({ 'mk:energy': Object.freeze({ t: 'משבר אנרגיה' }), 'mk:boom': Object.freeze({ t: 'השווקים עולים' }) }) });
 const marketWord = (k, world) => ((world && MARKET_WORDS_W[world.id]) || {})[k] || MARKET_WORDS[k];
 /** Per-world words where a kind means something else in that world (w7's 'warehouse' card is a leased commercial building). */
-export const DEAL_WORDS_W = Object.freeze({ w7: Object.freeze({ warehouse: 'מבנה מסחרי מושכר' }), w11: Object.freeze({ warehouse: 'מחסנים ומרכזי הפצה' }) });
+export const DEAL_WORDS_W = Object.freeze({ w7: Object.freeze({ warehouse: 'מבנה מסחרי מושכר' }), w11: Object.freeze({ warehouse: 'מחסנים ומרכזי הפצה' }),
+  w12: Object.freeze({ building: 'מרכזים לוגיסטיים ופארקי תעשייה' }), w16: Object.freeze({ solar: 'גגות ושדות סולאריים', side: 'חנות וצימרים במשק' }) });
 const dealWord = (k, world) => ((world && DEAL_WORDS_W[world.id]) || {})[k] || DEAL_WORDS[k];
 const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH', 'IDX']);
 /** deal card → DEAL_WORDS key */
@@ -196,7 +215,7 @@ export function deckDesc(world, type) {
  */
 export function tileText(tile, world = null) {
   const t = tile || {}; const name = String(t.name || ''); const base = MOD_TYPE[t.type] || TILE_TEXT[t.type] || { short: name, desc: '' };
-  const over = BY_NAME[name];
+  const over = ((world && BY_NAME_W[world.id]) || {})[name] || BY_NAME[name];
   const short = over ? over.short : (name && name.length <= SHORT_MAX ? name : base.short) || name;
   const desc = (over && over.desc) || (world && deckDesc(world, t.type)) || base.desc;
   return { type: t.type || '', name: name || short, short, desc, emoji: tileEmoji(t.icon) };

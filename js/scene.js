@@ -7,7 +7,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { COUNTRY_BAND, COUNTRY_IDS, MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
 import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';
 import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';
-import { paintSub, paintApp, cloudCount } from './render/standins1115.js';   // w11: a subsidiary's country band, manager token + trust ring, supply marks · w15: the app's runway fuse + user cloud
+import { paintSub, paintApp, cloudCount } from './render/standins1115.js';
+import { paintDiv, paintFarm } from './render/standins1216.js';   // w12: a division's guarantee anchor / fence, health, deficit, storm · w16: the farm's fields, hedges, irrigation, silo   // w11: a subsidiary's country band, manager token + trust ring, supply marks · w15: the app's runway fuse + user cloud
 import { paintClub, paintBillboard } from './render/standins13.js';   // w13: the stadium (stands ∝ seats, crowd ∝ fill, crane while building), billboards   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
@@ -650,6 +651,9 @@ function drawIcon(g, icon, x, y, c) {
       P(); for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; g.lineTo(x + Math.cos(a) * 17, y + Math.sin(a) * 17); } g.closePath(); g.fill();
       for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; P(); g.moveTo(x + Math.cos(a) * 17, y + Math.sin(a) * 17); g.lineTo(x + Math.cos(a) * 40, y + Math.sin(a) * 40); g.stroke(); }
       break;
+    case 'crown': // w12 tile Z: a crown (a band with three points and three jewels)
+      P(); g.moveTo(x - 46, y + 30); g.lineTo(x - 46, y - 24); g.lineTo(x - 22, y + 2); g.lineTo(x, y - 40); g.lineTo(x + 22, y + 2); g.lineTo(x + 46, y - 24); g.lineTo(x + 46, y + 30); g.closePath(); g.fill();
+      g.save(); g.globalCompositeOperation = 'destination-out'; for (const dx of [-24, 0, 24]) { P(); g.arc(x + dx, y + 18, 6, 0, 7); g.fill(); } g.restore(); break;
     case 'x': P(); g.moveTo(x - 34, y - 34); g.lineTo(x + 34, y + 34); g.moveTo(x + 34, y - 34); g.lineTo(x - 34, y + 34); g.stroke(); break;
     default: P(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 18 : 42; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill();
   }
@@ -679,10 +683,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך', w11: 'הקבוצה שלך', w15: 'האפליקציה שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך', w11: 'הקבוצה שלך', w15: 'האפליקציה שלך', w12: 'האימפריה שלך', w16: 'המשק שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'], globe: ['#115e59', '#f59e0b'], servers: ['#a5b4fc', '#7c3aed'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'], globe: ['#115e59', '#f59e0b'], servers: ['#a5b4fc', '#7c3aed'] , tower: ['#e7efe9', '#166534'], silos: ['#dbd58a', '#0284c7'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -805,11 +809,13 @@ const LIGHTS = {
   towers: { hemi: 0.85, sun: 1.6, exp: 1.02, env: 0.42, sunPos: [-12, 16, 10], fill: ['#3b82f6', 8] },    // w10: blue hour between glass towers
   floodlights: { hemi: 0.8, sun: 2.1, exp: 1.04, env: 0.36, sunPos: [6, 26, 10], fill: ['#e0f2fe', 6] },
   globe: { hemi: 0.78, sun: 1.9, exp: 1.03, env: 0.36, sunPos: [-8, 22, 12], fill: ['#5eead4', 6] },        // w11: a world map at night, a teal glow from the globe
-  servers: { hemi: 0.95, sun: 2.1, exp: 1.04, env: 0.4, sunPos: [8, 24, 10], fill: ['#a78bfa', 7] },       // w15: violet dusk over the server rows  // w13: a night match — the "sun" is the floodlights, high and white
+  servers: { hemi: 0.95, sun: 2.1, exp: 1.04, env: 0.4, sunPos: [8, 24, 10], fill: ['#a78bfa', 7] },
+  tower: { hemi: 1.1, sun: 2.4, exp: 1.02, env: 0.42, sunPos: [-12, 22, 12], fill: ['#fde68a', 3] },     // w12: marble and bronze in a soft high light
+  silos: { hemi: 1.1, sun: 2.7, exp: 1.04, env: 0.38, sunPos: [18, 12, 8], fill: ['#fdba74', 5] },       // w16: golden hour over the fields, a low warm sun       // w15: violet dusk over the server rows  // w13: a night match — the "sun" is the floodlights, high and white
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null; globeDecor = null; cloudDecor = null;
+  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null; globeDecor = null; cloudDecor = null; hqDecor = null; siloDecor = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -913,7 +919,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights, globe: decorGlobe, servers: decorServers }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights, globe: decorGlobe, servers: decorServers, tower: decorTower, silos: decorSilos }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1513,6 +1519,74 @@ function syncCloud() {
   const C = cloudDecor; if (!C) return; const L = [...city.values()].map((it) => it.level).find((x) => x && x.kind === 'app');
   const n = !L || L.sold ? 0 : Math.min(C.N, cloudCount(L.users) * 3); C.pts.geometry.setDrawRange(0, n); C.pts.visible = n > 0; C.shown = n; C.pts.material.color.set(L && L.net ? '#67e8f9' : '#c4b5fd'); invalidate();
 }
+/** w12 האימפריה: marble and bronze — a pale marble island, a bronze ring, colonnades in the back, and the group's HQ TOWER behind the
+ *  board's centre (a marble base, a green glass shaft, a bronze crown). From its top a guarantee CABLE runs to every division HQ guarantees
+ *  (red while that division is in a deficit); a ring-fenced division has its own fence (standins1216.js). Nothing moves (no updater): the
+ *  cables are rebuilt from the city's 'div' levels (syncCables), the same with and without reduced motion. */
+function decorTower(T) {
+  island(31, std('#e7efe9', { roughness: 0.6 }), '#a8a29e');
+  const ring = own(new THREE.Mesh(new THREE.RingGeometry(12.3, 14.3, 72), std('#b45309', { roughness: 0.35, metalness: 0.6 }))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring);
+  // colonnades: marble columns in the back half
+  const cols = scatter(dn(30), 16, 28, { backOnly: true, seed: 121 }); const d = new THREE.Object3D();
+  const shaft = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.32, 0.38, 1, 10), std('#f5f5f4', { roughness: 0.5 }), cols.length);
+  const cap = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.3, 1), std('#b45309', { roughness: 0.35, metalness: 0.6 }), cols.length);
+  cols.forEach((p, i) => { const h = 2.5 + p.k * 3.5; d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, 0, 0); d.scale.set(1, h, 1); d.updateMatrix(); shaft.setMatrixAt(i, d.matrix);
+    d.position.set(p.x, -0.72 + h + 0.15, p.z); d.scale.set(1, 1, 1); d.updateMatrix(); cap.setMatrixAt(i, d.matrix); });
+  shaft.castShadow = true; [shaft, cap].forEach((m) => { own(m); worldGroup.add(m); });
+  // the HQ tower behind the board's centre
+  const hq = new THREE.Group(); hq.name = 'decor:hq'; hq.position.set(0, -0.72, -16.5); hq.scale.setScalar(0.62);   // low enough to stand in the overview's frame
+  const base = own(new THREE.Mesh(new THREE.BoxGeometry(6, 1.4, 6), std('#f5f5f4', { roughness: 0.5 }))); base.position.y = 0.7; hq.add(base);
+  const body = own(new THREE.Mesh(new THREE.BoxGeometry(3.6, 12, 3.6), std('#166534', { roughness: 0.15, metalness: 0.45 }))); body.position.y = 7.4; hq.add(body);
+  for (let k = 0; k < 5; k++) { const band = own(new THREE.Mesh(new THREE.BoxGeometry(3.75, 0.18, 3.75), std('#e7e5e4', { roughness: 0.5 }))); band.position.y = 2.6 + k * 2.4; hq.add(band); }
+  const crown = own(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.3, 1.4, 4), std('#b45309', { roughness: 0.3, metalness: 0.75 }))); crown.rotation.y = Math.PI / 4; crown.position.y = 14.1; hq.add(crown);
+  const tip = own(new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.2, 8), std('#d97706', { roughness: 0.3, metalness: 0.8 }))); tip.position.y = 15.9; hq.add(tip);
+  base.castShadow = body.castShadow = true; worldGroup.add(hq);
+  const cables = new THREE.Group(); cables.name = 'decor:cables'; cables.userData.noSpread = true; worldGroup.add(cables);
+  hqDecor = { hq, cables, n: 0, red: 0, fenced: 0 };
+  syncCables();
+}
+let hqDecor = null;
+/** w12: rebuild the guarantee cables from the HQ tower's top to every guaranteed division (rest pose of its slot), red in a deficit */
+function syncCables() {
+  const D = hqDecor; if (!D) return;
+  for (const o of [...D.cables.children]) { D.cables.remove(o); o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }
+  const top = new THREE.Vector3(); D.hq.updateMatrixWorld(true); top.set(0, 14.4, 1.8).applyMatrix4(D.hq.matrixWorld);
+  let red = 0, fenced = 0;
+  for (const it of city.values()) { const L = it.level; if (!L || L.kind !== 'div') continue; if (L.fence) { fenced++; continue; } if (!L.cable) continue;
+    const [x, z] = slotXZ(it.slot, gridN); const s = sOf(it); const end = new THREE.Vector3(x + 0.62 * s, CITY_Y + 1.0 * s, z - 0.55 * s);
+    const mid = new THREE.Vector3((top.x + end.x) / 2, Math.max(top.y, end.y) * 0.62 + 2, (top.z + end.z) / 2);
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(top.clone(), mid, end), 28, L.distress ? 0.07 : 0.05, 6, false), new THREE.MeshBasicMaterial({ color: L.distress ? '#dc2626' : '#b45309' }));
+    tube.name = 'decor:cable' + (L.distress ? ':red' : ''); tube.userData.key = it.obj.userData.key; D.cables.add(tube); if (L.distress) red++; }
+  D.n = D.cables.children.length; D.red = red; D.fenced = fenced;
+  invalidate();
+}
+/** w16 ארץ השדות: fields at golden hour — a wheat-olive island with furrowed field strips around the board (gold, green and soil rows),
+ *  grain silos and a water tower in the back, a line of cypresses. Nothing moves (no updater), also under reduced motion. */
+function decorSilos(T) {
+  island(32, std('#a3b84a', { roughness: 1 }), '#713f12');
+  const ring = own(new THREE.Mesh(new THREE.RingGeometry(12.3, 14.2, 72), std('#8a6a3a', { roughness: 1 }))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring);
+  // field strips: 4 rings of 18 strips in crop colours
+  const tones = ['#eab308', '#ca8a04', '#65a30d', '#7c4a21', '#f1f5f9', '#4d7c0f'];
+  const strips = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.06, 1), std('#ffffff', { roughness: 1 }), 72); const d = new THREE.Object3D(); let n = 0;
+  for (let r = 0; r < 4; r++) for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2 + r * 0.17; const rr = 16.5 + r * 3.4;
+    d.position.set(Math.sin(a) * rr, -0.69, Math.cos(a) * rr); d.rotation.set(0, a, 0); d.scale.set(rr * 0.3, 1, 2.9); d.updateMatrix(); strips.setMatrixAt(n, d.matrix); strips.setColorAt(n, new THREE.Color(tones[(i * 7 + r * 3) % tones.length])); n++; }
+  strips.receiveShadow = true; own(strips); worldGroup.add(strips);
+  // silos + a water tower in the back
+  const silos = new THREE.Group(); silos.name = 'decor:silos'; silos.position.set(-6, -0.72, -19);
+  for (let k = 0; k < 4; k++) { const h = 6 + (k % 2) * 1.6; const c = own(new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, h, 18), std('#cbd5e1', { roughness: 0.4, metalness: 0.55 }))); c.position.set(k * 2.7, h / 2, 0); c.castShadow = true; silos.add(c);
+    const cone = own(new THREE.Mesh(new THREE.ConeGeometry(1.35, 1.2, 18), std('#94a3b8', { roughness: 0.4, metalness: 0.6 }))); cone.position.set(k * 2.7, h + 0.6, 0); silos.add(cone); }
+  worldGroup.add(silos);
+  const wt = new THREE.Group(); wt.name = 'decor:waterTower'; wt.position.set(12, -0.72, -16);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const l = own(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 7, 6), std('#78716c'))); l.position.set(x, 3.5, z); wt.add(l); }
+  const tank = own(new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 2.4, 20), std('#0284c7', { roughness: 0.4 }))); tank.position.y = 8.2; tank.castShadow = true; wt.add(tank); worldGroup.add(wt);
+  // cypresses along the back edge
+  const pts = scatter(dn(22), 26, 30, { backOnly: true, seed: 161 });
+  const cyp = new THREE.InstancedMesh(new THREE.ConeGeometry(0.6, 3.4, 7), std('#3f6212', { roughness: 0.9, flatShading: true }), pts.length);
+  pts.forEach((p, i) => { const sc = 0.8 + p.k * 0.6; d.position.set(p.x, -0.72 + 1.7 * sc, p.z); d.rotation.set(0, p.a, 0); d.scale.setScalar(sc); d.updateMatrix(); cyp.setMatrixAt(i, d.matrix); });
+  cyp.castShadow = true; own(cyp); worldGroup.add(cyp);
+  siloDecor = { silos: 4, strips: n, regime: null };
+}
+let siloDecor = null;
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
   const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.2, 64), std('#ead8b0', { roughness: 1 })));
@@ -1813,10 +1887,13 @@ function relayout(animate = true) {
   syncKit();
 }
 function ensureGrid(count, animate = true) {
+  ensureGridRaw(count, animate); syncCables();   // w12: the cables follow the divisions' rest slots
+}
+function ensureGridRaw(count, animate = true) {
   let n = 4; while (n * n < count && n < 8) n++;
   if (n !== gridN) { gridN = n; relayout(animate); drawCenter(n); }
 }
-export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); }
+export function clearCity() { for (const it of city.values()) dropObj(it.obj); city.clear(); for (const o of [...cityGroup.children]) dropObj(o); fxGroup.clear(); hlKey = hoverKey = null; if (gridN !== 4) { gridN = 4; drawCenter(4); } syncKit(); syncCables(); }
 export function hasKey(key) { return city.has(key); }
 /** wave 1 (A2 G-03): the keys the city shows now (SCENE_OPTIONAL) — game.js reconciles them with E.cityModels(S) + L:* */
 export function cityKeys() { return [...city.keys()]; }
@@ -1869,7 +1946,7 @@ export function spawn(key, model, opts = {}) {
 /** Shrink a model away. */
 export function despawn(key) {
   const it = city.get(key); if (!it) return;
-  city.delete(key); syncKit(); syncArcs(); syncCloud();
+  city.delete(key); syncKit(); syncArcs(); syncCloud(); syncCables();
   const o = it.obj, s0 = o.scale.x;
   tween(reduced ? MOTION.t1 : D(MOTION.despawn), (p) => { o.scale.setScalar(Math.max(0.001, s0 * (1 - p))); if (!reduced) o.rotation.y += 0.08; }).then(() => dropObj(o));
 }
@@ -1921,7 +1998,9 @@ function applyLevelParts(it) {
   if (it.level && it.level.kind === 'club') { paintClub(it.obj, it.level); return; }      // w13: stands ∝ seats, crowd ∝ fill, crane + scaffold while building, tier stars
   if (it.level && it.level.kind === 'sponsor') { paintBillboard(it.obj, it.level); return; }
   if (it.level && it.level.kind === 'sub') { paintSub(it.obj, it.level); syncArcs(); return; }   // w11: the country band, the manager + trust ring, supply marks; the decor's arcs
-  if (it.level && it.level.kind === 'app') { paintApp(it.obj, it.level); syncCloud(); return; }  // w15: the runway fuse, the tower's user dots; the board's cloud   // w13: a lit billboard, dark once the contract ended
+  if (it.level && it.level.kind === 'app') { paintApp(it.obj, it.level); syncCloud(); return; }
+  if (it.level && it.level.kind === 'div') { paintDiv(it.obj, it.level); syncCables(); return; }   // w12: the guarantee anchor (+ the decor's cable) or the fence, health, deficit, storm
+  if (it.level && it.level.kind === 'farm') { paintFarm(it.obj, it.level); if (siloDecor) siloDecor.regime = it.level.regime; return; }   // w16: the fields, hedge bands, pipes, the silo  // w15: the runway fuse, the tower's user dots; the board's cloud   // w13: a lit billboard, dark once the contract ended
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1978,7 +2057,8 @@ export function highlight(key) { try { hlKey = key && city.has(key) ? key : null
 /** for tests and the info modal: the level object an item currently shows */
 export function levelOf(key) {
   const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
-  const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
+  const model = it.level.kind === 'div' && ud.divState ? { ...ud.divState } : it.level.kind === 'farm' && ud.farmState ? { ...ud.farmState, fields: ud.farmState.fields.map((f) => (f ? { ...f } : null)) }   // w12 / w16: the dress over a shared stand-in that keeps its own state
+    : ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
     : ud.energyState ? { ...ud.energyState } : ud.clubState ? { ...ud.clubState } : ud.subState ? { ...ud.subState } : ud.appState ? { ...ud.appState } : ud.boardState ? { ...ud.boardState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
   return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
 }
@@ -2046,7 +2126,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0', globe: '#99f6e4', servers: '#ddd6fe' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0', globe: '#99f6e4', servers: '#ddd6fe' , tower: '#e7e5e4', silos: '#e9d8a6' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
@@ -2407,7 +2487,9 @@ export function perfStats() {
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
     decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null, floodlights: floodState && theme && theme.decor === 'floodlights' ? { ...floodState } : null,
       globe: globeDecor && theme && theme.decor === 'globe' ? { districts: Object.keys(globeDecor.districts).length, arcs: globeDecor.n, red: globeDecor.red, self: [...globeDecor.self], dim: [...globeDecor.dim] } : null,
-      servers: cloudDecor && theme && theme.decor === 'servers' ? { dots: cloudDecor.shown, max: cloudDecor.N, rot: Math.round(cloudDecor.rot * 1000) / 1000 } : null },   // w9 pulses / w10 ribbon (tests)
+      servers: cloudDecor && theme && theme.decor === 'servers' ? { dots: cloudDecor.shown, max: cloudDecor.N, rot: Math.round(cloudDecor.rot * 1000) / 1000 } : null,
+      tower: hqDecor && theme && theme.decor === 'tower' ? { cables: hqDecor.n, red: hqDecor.red, fenced: hqDecor.fenced, keys: hqDecor.cables.children.map((c) => c.userData.key) } : null,
+      silos: siloDecor && theme && theme.decor === 'silos' ? { ...siloDecor } : null },   // w9 pulses / w10 ribbon (tests)
     paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
     kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
     shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };

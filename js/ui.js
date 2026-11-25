@@ -2,7 +2,7 @@
 // toasts, achievement toast, coach marks, flying coins. Generic helpers (toast/modal/confirmBox/achievementToast)
 // are also used by the lobby.
 import { fmt, fmtM, sgn, fmtP, genderize, starThresholds, money as moneyOf } from './engine.js';
-import { goalPanelModel, monthsText } from './hudgoal.js';
+import { goalPanelModel, monthsText, partTag, meterLabel, isStreak, covX } from './hudgoal.js';
 import { displayLesson } from './data/lessons-meta.js';   // wave 3a: misleading lesson titles → display overrides   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
 import { reducedMotion } from './motion.js';
@@ -10,7 +10,8 @@ import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
 import { levelText as stageText, levelHint as stageHint, ageBand, DIV_HE } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
 import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';
-import * as WV from './render/worldview1115.js';   // w11 / w15: cards, panels and the chip text (HTML only; the engine's numbers)
+import * as WV from './render/worldview1115.js';
+import * as WV2 from './render/worldview1216.js';   // w12 / w16: cards, panels, the chip / sheet text, the two-tap words (HTML only; the engine's numbers)   // w11 / w15: cards, panels and the chip text (HTML only; the engine's numbers)
 import * as MV from './render/marketview.js';   // w10: the market screen (HTML only; the engine's numbers)
 import { marketSeries } from './candlelog.js';  // w10: the engine's candles in the one chart component's series shape   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
 
@@ -441,6 +442,14 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">☁️ ${X.sold ? 'נמכרה' : `${prof ? 'רווחית' : `${num(+X.runway >= 10 ? String(Math.round(X.runway)) : mo1(X.runway))}<span class="hb-mf"> חודשי מזומן</span><span class="hb-ms"> ח׳</span>`}<span class="hb-b"> · חלק ${num(pctI(X.stake))}</span><span class="hb-w"> · ${esc(X.regimeLabel || '')}</span>`}${!X.sold && !prof && X.runway < 6 ? ' 🔥' : ''}</button>`;
     if (X.net && !X.sold) extra = '<span class="hedge" title="אפקט רשת פעיל">🌐</span>';
   }
+  else if (wi.holding && wi.panel) {   // w12: liquidity coverage (× and months) and the rating — a button to the group panel; 🌩️ a storm, ⚠️ a division in a deficit
+    const X = wi.holding; key = 'coverage'; v = X.coverage; goodUp = 1; const C = WV2.hdChip(WVH2, X, wi.panel);
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
+  }
+  else if (wi.harvest && wi.panel) {   // w16: the farm's income this month and the regime — a button to the farm panel; 🏜️ a drought, 🔒 hedged fields
+    const X = wi.harvest; key = 'farmInc'; v = X.income; goodUp = 1; const C = WV2.hvChip(WVH2, X, wi.panel);
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
+  }
   else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח העולם')}</button>`; }   // any later world with a panel descriptor
   if (key) {
     if (ind.key === key && ind.v != null && v !== ind.v) { ind.dir = Math.sign(v - ind.v); ind.good = goodUp ? ind.dir * goodUp : 0; ind.t = performance.now(); }
@@ -458,7 +467,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   const cv = $('#c'); if (cv) { const n = (m.assets || []).length; const t = n ? `לוח המשחק. בעיר שלך ${n === 1 ? 'נכס אחד' : n + ' נכסים'}. פרטים על כל נכס בדוח הכספי.` : 'לוח המשחק. עדיין אין נכסים בעיר.'; if (cv.getAttribute('aria-label') !== t) cv.setAttribute('aria-label', t); }
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
-  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : (m.goalParts || []).some((p) => p.unit === 'months') ? 'שווי וקופה' : (m.goalParts || []).some((p) => p.cmp === 'le') ? 'שווי ושכר' : 'יעד העולם';
+  const label = meterLabel(m);   // w12 'יעד הקבוצה' / w16 'הכנסה ורצף' (a no-event streak is not a cash box)
   const parts = m.goalParts || [];
   const pc = shownPct(m);
   const sig = m.goalType + parts.length;
@@ -467,7 +476,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     // wave 2 (A2 G-04): the meter is an inner role=meter (a meter's children are presentational) + a full-card toggle that opens "יעד העולם"
     for (const a of ['role', 'aria-label', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-valuetext']) g.removeAttribute(a);
     g.innerHTML = `<div class="gm" role="meter" aria-valuemin="0" aria-valuemax="100"><div class="gl"><span>${label}</span><b class="num"></b></div>` +
-      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${p.key === 'impact' ? 'השפעה' : p.unit === 'months' ? 'קופה' : p.cmp === 'le' ? 'שכר' : 'שווי'}</em>` : ''}</div>`).join('') +
+      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${partTag(p)}</em>` : ''}</div>`).join('') +
       '<div class="gsub"></div></div>' +
       `<button type="button" class="gx" id="hGoalBtn" aria-controls="goalPanel" aria-expanded="${gpOpen}"><span class="gchev" aria-hidden="true"></span></button>`;
     g.querySelector('.gx').onclick = (e) => { sfx('click'); goalPanel(!gpOpen, { focus: e.detail === 0 }); };
@@ -483,7 +492,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     b.querySelector('s').style.width = pend + '%';
   });
   const gh = m.goalHold && m.goalType !== 'benchmark' && m.goalHold.streak > 0 && m.goalHold.streak < m.goalHold.need ? ` · ⏳ מחזיק ${m.goalHold.streak}/${m.goalHold.need}` : '';
-  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : p.unit === 'months' ? (p.value >= 99 && wi.platform ? '🛟 רווחית' : `🛟 ${iso(p.value >= 99 ? '—' : mo1(p.value))}/${iso(String(p.target))} ח׳`) : p.cmp === 'le' ? `⚖️ שכר ${iso(pctI(p.value))} (עד ${iso(pctI(p.target))})` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // w7: liquidity in months   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
+  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : isStreak(p) ? `🛡️ ${iso(String(Math.round(p.value)))}/${iso(String(p.target))} ח׳` : p.unit === 'months' && wi.holding ? `🛟 ${iso(p.value >= 99 ? '—' : covX(p.value))}` : p.key === 'passive12' && wi.harvest ? `🌾 ${iso(money(p.value))} / ${iso(money(p.target))}` : p.unit === 'months' ? (p.value >= 99 && wi.platform ? '🛟 רווחית' : `🛟 ${iso(p.value >= 99 ? '—' : mo1(p.value))}/${iso(String(p.target))} ח׳`) : p.cmp === 'le' ? `⚖️ שכר ${iso(pctI(p.value))} (עד ${iso(pctI(p.target))})` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // w7: liquidity in months   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
   gm.setAttribute('aria-label', label);
   // T7 CR-01: a role=meter needs its value
   gm.setAttribute('aria-valuenow', String(pc));
@@ -870,6 +879,8 @@ export function renderSheet(m, ctx) {
       <p class="note">קשב ${num(`${X.used}/${X.slots}`)} · רווח מגודר ${num(pctI(X.hedgedShare))} · שכר מנהלים ומטה ${num(mS(X.fixedMonth))} בחודש${X.localCash ? ` · מזומן בחו"ל ${num(mS(X.localCash))}` : ''}${X.frauds ? ` · <b class="neg">${num(String(X.frauds))} הונאות (${num(mS(X.fraudLoss))})</b>` : ''} · ${num(String(X.audits))} ביקורות.</p>
       <div class="loans"><button data-act="world">🌍 ${esc(wi.panel.title || 'לוח העולם')}</button></div></div>`;
   }
+  else if (wi.holding && wi.panel) world = WV2.hdBox(WVH2, wi.holding, wi.panel.title);   // w12: the group box; the group panel opens from here
+  else if (wi.harvest && wi.panel) world = WV2.hvBox(WVH2, wi.harvest, wi.panel.title);   // w16: the farm box; the farm panel opens from here
   else if (wi.platform && wi.panel) {   // w15: the app box; the app panel opens from here
     const X = wi.platform;
     world = `<div class="wbox"><div class="wl"><span>☁️ ${esc(wi.panel.title || 'האפליקציה')}${X.sold ? ' · נמכרה' : ''}</span><b>${num(X.sold ? mS(X.proceeds) : +X.runway >= 99 ? 'רווחית' : mo1(X.runway) + ' חודשי מזומן')}</b></div>
@@ -917,7 +928,7 @@ export function renderSheet(m, ctx) {
   const angelDone = done.length ? `<p class="note">${done.length} השקעות נסגרו: ${done.map((x) => `${esc(x.name)} ${x.mult ? '×' + x.mult : '✗'}`).join(' · ')}</p>` : '';
   el.innerHTML = `<div class="sh-head"><div><h2>הדוח הכספי</h2><p class="sub">${esc(st.charName)} · ${esc(w.name)} · חודש ${m.month}${m.mode !== 'free' ? '/' + m.maxMonths : ''}</p></div><button class="ibtn sh-close" data-act="close" aria-label="סגירת הדוח">${ICON.close}</button></div>
   <div class="freedom"><div class="fl"><span>${esc(goalTitle)}</span><span class="num">${shownPct(m)}%</span></div>
-   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : p.unit === 'months' ? `${monthsText(p.value, !!wi.platform)} / ${p.target} חודשים` : p.cmp === 'le' ? `${pctI(p.value)} · היעד: עד ${pctI(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
+   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : isStreak(p) ? `${Math.round(p.value)} / ${p.target} חודשים ברצף` : p.unit === 'months' && wi.holding ? `${monthsText(p.value, 'cov')} (כיסוי ${covX(p.value)}) / ${p.target} חודשים` : p.unit === 'months' ? `${monthsText(p.value, !!wi.platform)} / ${p.target} חודשים` : p.cmp === 'le' ? `${pctI(p.value)} · היעד: עד ${pctI(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
    ${holdLine(m)}<p>${goalHelp}</p></div>
   ${world}
   ${m.econ ? `<div class="wbox econbox"><div class="wl"><span>📊 מד הכלכלה</span></div>${econBlockHtml(m.econ)}</div>` : ''}
@@ -1534,6 +1545,7 @@ function renderEvent(first) {
     : hasPlans ? planPicker(ev, ev.type === 'payday' && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '', ev.type === 'payday')
     : hasEffects ? effectChoices(ev)
     : ev.type === 'mech' && ev.data && ev.data.levels && ev.data.rounds ? auctionActions(ev)   // w13 the transfer market
+    : ev.type === 'mech' && ev.data && ((ev.data.rateG != null && Array.isArray(ev.data.beta)) || (ev.data.kind === 'export' && ev.data.range) || (ev.data.kind === 'water' && ev.data.quota != null)) ? WV2.riskActions(WVH2, ev)   // w12 Z / w16 H: cash · month · risk in words
     : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id) && !inDd(o), '', ev.type === 'doodad' || ev.type === 'tax');
   const bizM = ev.type === 'business' && ev.data.mode === 'manage';
   const focus = !(hasPlans && ev.type === 'payday') && (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
@@ -1831,6 +1843,7 @@ function leagueMktHtml(X) {
 }
 /** w11 / w15 (js/render/worldview1115.js): ui.js's own formatters, so the two worlds' HTML reads like every other card */
 const WVH = { esc, escI, num, mS, mSg, pctI, row, grid, cls, iso };
+const WVH2 = { ...WVH, sgn: mSg, tiny: (n) => money(n) };   // tiny: the HUD's own short money on phones (₪2.4M)   // w12 / w16: signed short money on the option lines
 const BODY = {
   mech(ev) {   // a world module's tile card — w5 'N' (allotment), w6 'C' (supply contract), w7 'R' (site), w8 'Q' (land), w9 'V' (power site), w10 'W' / 'Y'
     const d = ev.data || {};
@@ -1839,6 +1852,8 @@ const BODY = {
     if (d.private && d.private.band) return privateHtml(d);                         // w10 'Y'
     if (d.fairLo != null && d.mgr && d.slotsFree != null) return WV.acquisitionHtml(WVH, ev);   // w11 'Z' (dd re-describes the same card)
     if ((d.kind === 'term' || d.kind === 'buyout') && d.regime && d.mult != null) return WV.investorsHtml(WVH, ev);   // w15 'H'
+    if (d.fairLo != null && d.rateG != null && Array.isArray(d.beta)) return WV2.divisionHtml(WVH2, ev);   // w12 'Z' (dd re-describes the same card)
+    if ((d.kind === 'export' && d.range) || (d.kind === 'water' && d.quota != null)) return WV2.produceHtml(WVH2, ev);   // w16 'H'
     if (d.levels && d.rounds && d.value != null) return auctionHtml(ev);            // w13 'H' (auction.js: every round re-describes the same card)
     if (d.vol != null && d.delta && typeof d.delta === 'object') return contractHtml(d);
     if (d.site && d.mature && d.locs) return siteHtml(d);
@@ -1950,6 +1965,8 @@ const BODY = {
     if (d.league && d.league.mk) return leagueMktHtml(d.league);   // w13
     if (d.mn && d.mn.mk) return WV.mnNewsHtml(WVH, d.mn);   // w11
     if (d.pf && d.pf.mk) return WV.pfNewsHtml(WVH, d.pf);   // w15
+    if (d.hd && d.hd.mk) return WV2.hdNewsHtml(WVH2, d.hd);   // w12
+    if (d.hv && d.hv.mk) return WV2.hvNewsHtml(WVH2, d.hv);   // w16
     if (d.kind === 'sell') {
       if (!d.offers.length) return '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
       return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.netAfterTax ?? o.net)}</b>${o.tax ? ` <small>(אחרי מס ${num(fmtM(o.tax))})</small>` : ''}<br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
@@ -3312,17 +3329,19 @@ function leagueActsHtml(acts) {
 }
 /** w11 / w15 panel buttons: the action's index in panel.actions (data-wact), 💡 the mentor's pick, a sub-line (price / CAC / dilution) */
 function wvBtn(a, i, label, sub) {
-  return `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(`${a.suggested ? '💡 ' : ''}${label}${sub ? ` ${sub}` : ''}${!a.enabled && a.reason ? ` · ${a.reason}` : ''}${label !== a.label ? ` — ${a.label}` : ''}`)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(label)}${sub ? ` <small>${escI(sub)}</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
+  return `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) || WV2.needsArm(a) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(`${a.suggested ? '💡 ' : ''}${label}${sub ? ` ${sub}` : ''}${!a.enabled && a.reason ? ` · ${a.reason}` : ''}${label !== a.label ? ` — ${a.label}` : ''}`)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(label)}${sub ? ` <small>${escI(sub)}</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
 }
 function leaguePanelHtml(P, LG) {
   const acts = P.actions || [];
   return `${leagueLine(LG)}<div class="wp-gauges">${(P.gauges || []).map(leagueGauge).join('')}</div>${leagueTableHtml(P.table, LG)}${squadHtml(P, acts)}${leagueActsHtml(acts)}`;
 }
-export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, league = null, multinational = null, platform = null, month = 0 } = {}) {
+export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, league = null, multinational = null, platform = null, holding = null, harvest = null, month = 0 } = {}) {
   if (!P) return '';
   if (P.id === 'league') return leaguePanelHtml(P, league);   // w13
   if (P.id === 'multinational') return WV.mnPanelHtml(WVH, P, multinational, wvBtn);   // w11
   if (P.id === 'platform') return WV.pfPanelHtml(WVH, P, platform, wvBtn);   // w15
+  if (P.id === 'holding') return WV2.hdPanelHtml(WVH2, P, holding, wvBtn);   // w12
+  if (P.id === 'harvest') return WV2.hvPanelHtml(WVH2, P, harvest, wvBtn);   // w16
   const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || []), ...(P.plants || []), ...((energy && energy.sites) || []), ...((energy && energy.h2) || [])];   // w8 / w9: actions on rentals, plots, plants, sites are named too
   return `${seasonLine(season)}${plantLine(plant)}${chainLine(chain)}${projsLine(proj)}${P.id === 'energy' ? energyLine(energy) : ''}<div class="wp-gauges">${(P.gauges || []).map((g) => gaugeHtml(g, P.id)).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${barsHtml(P.bars)}${P.id === 'proj' || P.id === 'energy' ? ganttHtml(P.gantt) + callsHtml(P.calls, proj, month) : ''}${rowsHtml(P.rows, P)}${P.id === 'proj' ? rentPlotHtml(proj, P) : ''}${P.id === 'energy' ? plantsHtml(P.plants, energy) : ''}${actionsHtml(P.actions, names)}`;
 }
@@ -3334,7 +3353,7 @@ export function worldPanel(get, onAct) {
   let D = get(); if (!D || !D.panel) return Promise.resolve();
   let busyAct = false;
   const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
-  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d', multinational: '#92400e', platform: '#4c1d95' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
+  return modal({ tag: D.panel.title || 'לוח העולם', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d', multinational: '#92400e', platform: '#4c1d95', holding: '#14532d', harvest: '#075985' })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח העולם', cls: 'wpanel', wide: true,
     html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
     actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
     // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead
@@ -3343,11 +3362,13 @@ export function worldPanel(get, onAct) {
       const b = e.target.closest('button[data-wact]'); if (!b || b.disabled || busyAct) return;
       const a = (D.panel.actions || [])[+b.dataset.wact]; if (!a) return;
       const c0 = $('#gmCard');
-      if (WP_CONFIRM.has(a.id) && b.dataset.arm !== '1') {   // the first tap only arms the button (a sale cannot be undone)
+      if ((WP_CONFIRM.has(a.id) || WV2.needsArm(a)) && b.dataset.arm !== '1') {   // the first tap only arms the button (a sale cannot be undone; w12 a restructuring; w16 a hedge's deposit)
         c0?.querySelectorAll('button[data-arm="1"]').forEach((x) => { x.dataset.arm = ''; x.classList.remove('arm'); });
         b.dataset.arm = '1'; b.classList.add('arm'); sfx('click');
-        const at = WV.armText({ ...a, amountText: a.amount != null ? mS(a.amount) : '' }, D.platform);   // w15: the dilution before the confirming tap
+        const at = WV.armText({ ...a, amountText: a.amount != null ? mS(a.amount) : '' }, D.platform) || WV2.armText(a, D, WVH2);   // w15: the dilution before the confirming tap · w12 / w16: the sale, the ★ cap, the hedge's deposit
         const m0 = c0?.querySelector('.wp-msg'); if (m0) { m0.textContent = at || `אי אפשר לבטל את זה. לחיצה נוספת על הכפתור מאשרת: ${a.label}`; m0.className = 'wp-msg neg'; }
+        // the same words right under the armed button's group (the live line sits at the panel's end, out of view on a long panel)
+        c0?.querySelectorAll('.wp-armnote').forEach((x) => x.remove()); const host = b.closest('.wp-seg, .wp-acts'); if (host && m0) { const n = document.createElement('p'); n.className = 'wp-armnote neg'; n.setAttribute('aria-hidden', 'true'); n.textContent = m0.textContent; host.after(n); }
         return;
       }
       busyAct = true; sfx('click');

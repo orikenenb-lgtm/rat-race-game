@@ -62,10 +62,10 @@ async function ensureRules(id, { quiet = false } = {}) {
 const LAZY_ERR = 'לא הצלחנו לטעון את העולם. בדוק את החיבור ונסה שוב.';
 /** Card art: w1–w4 have painted cards; later worlds get a generated card (sky gradient + motif) — never a missing image. */
 const PAINTED = new Set(['w1', 'w2', 'w3', 'w4']);
-const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛍️', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑', w13: '🏟️', w15: '☁️' };
+const MOTIF = { w1: '🏘️', w2: '🏙️', w3: '⚓', w4: '🚀', w5: '🌴', w6: '🏭', w7: '🛍️', w8: '🏗️', w9: '☀️', w10: '🏦', w11: '🌍', w12: '👑', w13: '🏟️', w15: '☁️', w16: '🌾' };
 // generated card art: w5–w8 from their WORLD_STYLE skies, later worlds a placeholder pair
 const GEN_SKY = { w5: ['#ffd6a5', '#48cae4'], w6: ['#cfd8dc', '#607d8b'], w7: ['#ef8354', '#2b2d42'], w8: ['#fde68a', '#93c5fd'], w9: ['#fef3c7', '#fbbf24'],
-  w10: ['#3b82f6', '#0f172a'], w11: ['#1e1b4b', '#020617'], w12: ['#f5e1b0', '#8a5a14'], w13: ['#1e3a8a', '#0b1020'], w15: ['#4c1d95', '#1e1b4b'] };
+  w10: ['#3b82f6', '#0f172a'], w11: ['#1e1b4b', '#020617'], w12: ['#e7efe9', '#166534'], w13: ['#1e3a8a', '#0b1020'], w15: ['#4c1d95', '#1e1b4b'], w16: ['#fde68a', '#a16207'] };
 function artHtml(id, alt = '', extra = '') {
   if (PAINTED.has(id)) return `<img src="${cardArt(id)}" alt="${esc(alt)}" ${extra}>`;
   const [a, b] = GEN_SKY[id] || ['#e8e0d0', '#8c7b62'];
@@ -96,7 +96,7 @@ const CHAR_ICON = { book: '📚', truck: '🚚', laptop: '💻', stethoscope: '�
   shop: '🏪', chart: '📊', handshake: '🤝', crane: '🏗️', land: '🌾', hardhat: '👷',
   bolt: '⚡', briefcase: '💼', sun: '☀️',
   whistle: '📣', crown: '👑', sprout: '🌱',
-  ship: '🚢' };   // w11 ceo (briefcase) / oldExporter (ship) / pe (chart) · w15 soloFounder (rocket) / bigTechExec (briefcase) / bootstrapper (sprout)   // w13 coachOwner / localTycoon / academyDirector   // w9 gridEng / infraFund / kibbutz · w10 allocator (chart) / blockHeir (factory) / floorTrader (bolt)   // w7 shopFounder / cfo / franchisor · w8 developer / landowner / contractor
+  ship: '🚢', house: '🏡' };   // w12 chair (crown) / activist (chart) / thirdGen (sprout) · w16 agronomist (sprout) / moshavFarmer (house) / agriFund (briefcase)   // w11 ceo (briefcase) / oldExporter (ship) / pe (chart) · w15 soloFounder (rocket) / bigTechExec (briefcase) / bootstrapper (sprout)   // w13 coachOwner / localTycoon / academyDirector   // w9 gridEng / infraFund / kibbutz · w10 allocator (chart) / blockHeir (factory) / floorTrader (bolt)   // w7 shopFounder / cfo / franchisor · w8 developer / landowner / contractor
 const ACH_ICON = {
   seed: '🌱', shield: '🛡️', gold: '🪙', pillow: '🛟', card: '💳', arrows: '🔁', chart: '📈', cap: '🎓', crown: '👑', feather: '🪶', piggy: '🐷',
   phoenix: '🔥', scissors: '✂️', house: '🏠', fox: '🦊', moon: '🌙', lock: '🔒', hammer: '🔨', tower: '🏙️', umbrella: '☂️', scale: '⚖️',

@@ -509,7 +509,10 @@ export function cityAudit() {
   // w11: every subsidiary (multinational.js cityModels); w15: the app (platform.js cityModels)
   const subs = Object.fromEntries(cm.filter((m) => m.country != null && m.kind2 != null).map((m) => [m.key, { country: m.country, kind2: m.kind2, self: !!m.self, managed: !!m.managed, trust: m.trust ?? null, audited: !!m.audited, disrupted: !!m.disrupted, dual: !!m.dual, hedged: !!m.hedged, supplier: m.supplier || null }]));
   const app = Object.fromEntries(cm.filter((m) => m.users != null && m.runway != null).map((m) => [m.key, { users: m.users, runway: m.runway, net: !!m.net, regime: m.regime || null, sold: !!m.sold, stake: m.stake ?? null }]));
-  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors, subs, app };
+  // w12: every division (holding.js cityModels); w16: the farm (harvest.js cityModels)
+  const divs = Object.fromEntries(cm.filter((m) => m.struct != null && m.kind2 != null && m.country == null).map((m) => [m.key, { kind2: m.kind2, home: m.home || null, struct: m.struct, cable: !!m.cable, fence: !!m.fence, health: m.health ?? null, distress: !!m.distress, support: m.support !== false, stormHit: !!m.stormHit }]));
+  const farm = Object.fromEntries(cm.filter((m) => Array.isArray(m.fields)).map((m) => [m.key, { fields: m.fields.map((f) => (f ? { crop: f.crop, ph: f.ph, hedged: f.hedged ?? 0, irr: !!f.irr } : null)), silo: m.silo ?? 0, regime: m.regime || null }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors, subs, app, divs, farm };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
@@ -525,6 +528,10 @@ function levelOf(entry, m) {
     audited: !!entry.audited, disrupted: !!entry.disrupted, dual: !!entry.dual, hedged: !!entry.hedged };
   // w15 (platform.js cityModels): the app — users, runway (99 = cash flow ≥ 0), the network effect, the regime, sold, your stake
   if (entry.users != null && entry.runway != null) return { kind: 'app', users: entry.users, runway: entry.runway, net: !!entry.net, regime: entry.regime || 'growth', sold: !!entry.sold, stake: entry.stake ?? 0 };
+  // w12 (holding.js cityModels): a division — its kind (home world), guaranteed (a cable to HQ) or ring-fenced (a fence), health, a deficit, HQ support, the storm
+  if (entry.struct != null && entry.kind2 != null) return { kind: 'div', kind2: entry.kind2, home: entry.home || '', struct: entry.struct, health: entry.health ?? 70, distress: !!entry.distress, support: entry.support !== false, stormHit: !!entry.stormHit };
+  // w16 (harvest.js cityModels): the farm — its fields (crop, phase, hedged share, irrigated), the silo, the supply regime
+  if (Array.isArray(entry.fields)) return { kind: 'farm', fields: entry.fields, silo: entry.silo ?? 0, regime: entry.regime || 'normal' };
   // w5 (season.js cityModels): occupancy decile / closed on the asset's own city piece; a closed wing from the panel rows
   if (entry.occDecile != null || entry.closed) {
     const row = (((m.worldIndicators || {}).panel || {}).rows || []).find((r) => r.assetId === entry.key);
@@ -560,7 +567,7 @@ function syncLevels(animate) {
     if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || L.kind === 'sub' || L.kind === 'app' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || L.kind === 'sub' || L.kind === 'app' || L.kind === 'div' || L.kind === 'farm' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -1426,6 +1433,8 @@ async function applyOut(out, opts = {}) {
       else { lg.push(n.text); if (/נפצע|עזב בלי תמורה|אוכל|שרים נגדך/.test(n.text)) lgBad = true; }
       continue; }
     if (n.kind === 'mn' && n.text) { const bad = /הונאה|שיבוש/.test(n.text); ui.toast('🌍 ' + n.text, { kind: bad ? 'bad' : '', keep: /הונאה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w11: a fraud is never dropped
+    if (n.kind === 'hd' && n.text) { const bad = /לא עמדה|קרסה|הפרה|גירעון|דירקטוריון|→|מיתון|משבר|זינוק/.test(n.text); ui.toast('👑 ' + n.text, { kind: bad ? 'bad' : /פריחה/.test(n.text) ? 'gold' : '', keep: /לא עמדה|קרסה|הפרה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w12: a group default / a lost division / a breach stay
+    if (n.kind === 'hv' && n.text) { const bad = /קריאת מרווח|סגר את הגידור|בכוח|בצורת|ברד/.test(n.text); ui.toast('🌾 ' + n.text, { kind: bad ? 'bad' : /קציר/.test(n.text) ? 'gold' : '', keep: /בכוח|סגר את הגידור/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w16: a forced liquidation stays
     if (n.kind === 'pf' && n.text) { const bad = /נגמר הכסף|הפרת תנאי|חורף/.test(n.text); ui.toast('☁️ ' + n.text, { kind: bad ? 'bad' : /בועה|אפקט הרשת/.test(n.text) ? 'gold' : '', keep: /נגמר הכסף|הפרת תנאי/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w15: the emergency round / a covenant breach stay
     if (n.kind === 'energy' && n.text) { const bad = /אזהרה|עומד|קראו להלוואות|קרא להלוואה|עיכוב/.test(n.text); ui.toast('☀️ ' + n.text, { kind: bad ? 'bad' : '', keep: /קראו להלוואות|אזהרה/.test(n.text) }); continue; }   // w9
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
@@ -1555,7 +1564,7 @@ function panelData() {
   if (!S) return null;
   const m = E.metrics(S); const wi = m.worldIndicators || {};
   const part = (m.goalParts || [])[0] || {};
-  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null, multinational: wi.multinational || null, platform: wi.platform || null,
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null, multinational: wi.multinational || null, platform: wi.platform || null, holding: wi.holding || null, harvest: wi.harvest || null,
     month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
 }
 async function openWorldPanel() {

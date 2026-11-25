@@ -189,3 +189,17 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 .b2d-card[data-kind="app"]{border-color:#7c3aed}.b2d-card[data-kind="app"]::after{background:linear-gradient(to left,#7c3aed 0 var(--b2d-pct,0%),rgba(124,58,237,.18) var(--b2d-pct,0%) 100%)}
 .b2d-card[data-kind="app"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}.b2d-card[data-kind="app"][data-light="stalled"]::after{background:linear-gradient(to left,#dc2626 0 var(--b2d-pct,0%),rgba(220,38,38,.18) var(--b2d-pct,0%) 100%)}
 .b2d-card[data-kind="app"][data-light="off"]{border-style:dotted;opacity:.85}
+/* w12 (crown motif: marble veins on the verde board; a division card: 🔗 guaranteed = a bronze cable line along the top, 🚧 ring-fenced = a
+   dashed fence border, the health as the bar, a red dashed border in a deficit) */
+.b2d-m-crown .b2d-center{background-image:linear-gradient(115deg,transparent 0 46%,rgba(120,53,15,.12) 46% 47%,transparent 47%),linear-gradient(35deg,transparent 0 62%,rgba(22,101,52,.12) 62% 63.5%,transparent 63.5%),radial-gradient(circle at 50% 50%,rgba(180,83,9,.18) 0 34px,transparent 35px);background-size:90px 90px,130px 130px,auto}
+.b2d-card[data-kind="div"]{border-color:#166534}.b2d-card[data-kind="div"][data-struct="r"]{border-style:dashed;border-color:#57534e;border-width:3px}
+.b2d-card[data-kind="div"][data-struct="g"]::before{content:"";position:absolute;inset-inline:8%;top:5px;height:3px;border-radius:2px;pointer-events:none;background:#b45309}
+.b2d-card[data-kind="div"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+.b2d-card[data-kind="div"]::after,.b2d-card[data-kind="farm"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;width:80%;
+  background:linear-gradient(to left,#16a34a 0 var(--b2d-pct,0%),rgba(22,163,74,.18) var(--b2d-pct,0%) 100%)}
+/* w16 (fields motif: furrowed strips on the wheat-olive board; the farm card: the share of fields growing as the bar, a dashed red border in a drought) */
+.b2d-m-fields .b2d-center{background-image:repeating-linear-gradient(90deg,rgba(113,63,18,.16) 0 6px,transparent 6px 16px),repeating-linear-gradient(0deg,rgba(234,179,8,.18) 0 22px,rgba(101,163,13,.14) 22px 44px)}
+.b2d-card[data-kind="farm"]{border-color:#a16207}.b2d-card[data-kind="farm"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+.b2d-card[data-kind="farm"]::after{background:linear-gradient(to left,#a16207 0 var(--b2d-pct,0%),rgba(161,98,7,.18) var(--b2d-pct,0%) 100%)}
+/* w16 tile H (#0284c7 with white text is 4.1:1 — large text only): a dark text shadow keeps the small tile name readable */
+.b2d-tile[data-type="produce"]{text-shadow:0 1px 1px rgba(8,47,73,.9),0 0 2px rgba(8,47,73,.8)}

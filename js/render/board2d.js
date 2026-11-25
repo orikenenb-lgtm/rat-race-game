@@ -135,7 +135,7 @@ export function buildWorld(w) {
       const d = el('button', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl); d.type = 'button';
       d.style.gridColumn = String(gx + 1); d.style.gridRow = String(gz + 1);
       d.style.background = t.color || '#ddd'; d.style.color = t.ink || '#222';
-      d.dataset.i = String(i); d.tabIndex = i === 0 ? 0 : -1;
+      d.dataset.i = String(i); d.dataset.type = t.type || ''; d.tabIndex = i === 0 ? 0 : -1;
       d.dataset.label = `${tx.name}, משבצת ${i + 1} מתוך ${tiles.length}`; d.setAttribute('aria-label', d.dataset.label);
       hidden(el('span', 'b2d-ti', d, tileIcon(t.icon)));
       const nm = hidden(el('span', 'b2d-tn', d, tx.short)); nm.dir = 'rtl';
@@ -299,6 +299,14 @@ function paintLevel(it, L) {
       hidden(el('span', 'b2d-corner-b', c, L.sold ? '✔' : L.runway < 6 && !L.profitable ? '🔥' : L.net ? '🌐' : '📱'));
       c.dataset.light = L.sold ? 'off' : L.runway < 6 && !L.profitable ? 'stalled' : 'on'; c.dataset.run = L.profitable ? 'profit' : String(L.runway);
       c.style.setProperty('--b2d-pct', `${L.sold ? 0 : L.profitable ? 100 : Math.round(Math.min(36, L.runway) / 36 * 100)}%`);
+    } else if (L.kind === 'div') {   // w12: 🔗 guaranteed (a cable to HQ) / 🚧 ring-fenced (a fence border), ⚠️ a deficit, 🌩️ in the storm; the health as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.distress ? '⚠️' : L.stormHit ? '🌩️' : L.fence ? '🚧' : '🔗'));
+      c.dataset.light = L.distress ? 'stalled' : L.stormHit ? 'storm' : 'on'; c.dataset.run = L.struct === 'r' ? 'fence' : 'cable'; c.dataset.struct = L.struct;
+      c.style.setProperty('--b2d-pct', `${L.health}%`);
+    } else if (L.kind === 'farm') {   // w16: 🌾 the farm; the share of fields growing as the bar; 🏜️ in a drought
+      hidden(el('span', 'b2d-corner-b', c, L.regime === 'drought' ? '🏜️' : L.hedged ? '🔒' : '🌾'));
+      c.dataset.light = L.regime === 'drought' ? 'stalled' : L.n ? 'on' : 'off'; c.dataset.run = L.regime;
+      c.style.setProperty('--b2d-pct', `${L.of ? Math.round((L.n / L.of) * 100) : 0}%`);
     } else if (L.kind === 'hold') {   // w10: the liquidity class (glass / stone / vault), ⚠️ a margin call, ❄️ frozen, 🔒 locked
       hidden(el('span', 'b2d-corner-b', c, L.call ? '⚠️' : L.frozen ? '❄️' : L.cls === 'locked' ? '🔒' : L.cls === 'monthly' ? '🧱' : '🏦'));
       c.dataset.light = L.call ? 'call' : L.frozen ? 'off' : 'on'; c.dataset.run = L.cls;

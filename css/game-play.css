@@ -1333,3 +1333,18 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 .cohort .cb{fill:var(--accent-ink);opacity:.75}.cohort .cr{stroke:#0e7490;stroke-width:3}.cohort .ax{stroke:var(--line);stroke-width:1}
 .cohort-t summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700}
 @media (max-width:420px){ .mntbl th,.mntbl td,.pftbl th,.pftbl td{padding:4px 3px;font-size:12px} .acq-m .mtok.lg{width:44px;height:44px} }
+/* ===== w12 "מפת הקבוצה והערבויות" / the division card; w16 "השדות והגידור" / the produce card: the head chips, options with their risk in
+   words (a dashed left edge on a risky option — the words carry it), a health bar, the storm line, the field rows with their yield range */
+.div-h{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 6px}.div-h .b{margin:0}
+.rk-acts .rk-b.rk-on{border-inline-start:4px dashed var(--red,#b91c1c)}.rk-acts .rk-b small.sub{white-space:normal;line-height:1.3}.rk-acts .rk-b small.rk-w{color:var(--red,#b91c1c);font-weight:700}
+.hbar{display:inline-block;vertical-align:middle;width:56px;height:8px;border-radius:4px;background:var(--paper3);overflow:hidden;margin-inline-start:4px}.hbar i{display:block;height:100%;background:var(--accent-ink)}
+.storm-on{border:2px dashed var(--red,#b91c1c);border-radius:10px;padding:6px 8px}.storm-none{color:var(--mut)}
+.divs .wp-rh,.fields .wp-rh{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}.divs .pr-n,.fields .pr-n{display:grid;min-width:0;flex:1 1 160px}.divs .pr-n small,.fields .pr-n small{color:var(--mut);font-size:12px}
+.divs .dk,.fields .dk{font-size:22px}.divs .sr-w{font-size:12px;color:var(--mut);margin:4px 0 0}.divs .pr-acts,.fields .pr-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.divs .pr-acts .chip,.fields .pr-acts .chip{min-height:44px}
+.drow[data-struct="r"]{border-inline-start:4px dashed #57534e}.drow[data-struct="g"]{border-inline-start:4px solid #b45309}
+.frng{display:grid;gap:2px;font-size:13px;margin:4px 0}.frow.empty{opacity:.8}
+.hvtbl{width:100%;border-collapse:collapse;font-size:14px}.hvtbl th,.hvtbl td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:start;vertical-align:middle}
+.hvtbl thead th{font-size:12px;color:var(--mut);font-weight:700}.hvtbl td small{color:var(--mut);font-size:12px}
+.hd-g .wp-gl,.hv-g .wp-gl{flex-wrap:wrap;row-gap:2px}.hd-g .wp-gl b,.hv-g .wp-gl b{margin-inline-start:auto}
+@media (max-width:420px){ .hvtbl th,.hvtbl td{padding:4px 3px;font-size:12px} .divs .wp-rm,.fields .wp-rm{font-size:12px} }
+.wp-armnote{margin:6px 0 0;padding:6px 8px;border-radius:8px;border:2px dashed var(--red,#b91c1c);font-size:13px;font-weight:700;color:var(--red,#b91c1c);background:var(--paper)}
