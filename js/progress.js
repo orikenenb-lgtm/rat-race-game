@@ -88,6 +88,7 @@ function load() {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { raw = null; }
   const p = { ...fresh(), ...(raw && typeof raw === 'object' ? raw : {}) };
+  delete p.unlockAll;                 // never from storage (see save())
   p.stars = { ...fresh().stars, ...(p.stars || {}) };
   for (const w of WIDS) p.stars[w] = Math.max(0, Math.min(3, +p.stars[w] || 0));
   p.best = { ...(p.best || {}) };
@@ -139,7 +140,9 @@ function cleanCleared(p) {
 /** Stars as the unlock rules see them: a finished world counts as at least ★ (see worldFinished). */
 function finishedStars() { const o = {}; for (const w of WIDS) o[w] = Math.max(P.stars[w] || 0, worldFinished(w) ? 1 : 0); return o; }
 export function worldFinished(worldId, p = P) { return (p.stars[worldId] || 0) >= 1 || (p.best || {})[worldId] != null || !!(p.cleared && p.cleared[worldId]); }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) { /* storage full / private mode */ } }
+// unlockAll (the owner / test override) lives in memory only: never written, and a stored value is dropped on load (load() below) —
+// so no saved, imported or hand-edited progress can open every map; the owner's own "everything open" comes from ADMIN (server-confirmed).
+function save() { try { localStorage.setItem(KEY, JSON.stringify({ ...P, unlockAll: undefined })); } catch (e) { /* storage full / private mode */ } }
 
 const listeners = new Set();
 /** Subscribe to progress changes (returns unsubscribe). */
@@ -178,7 +181,7 @@ export const nextMapOf = (id) => nextMap(id, built);
 export const prevMapOf = (id) => prevMap(id, built);
 /** The world (group) that a step into map `to` from map `from` opens, or null when both are in the same world. */
 export function newWorldOf(from, to) { return to && crossesWorld(from, to) ? groupOf(to) : null; }
-/** Owner / admin override: every playable world unlocked on this device (local only, never synced). */
+/** Owner / test override: every playable map unlocked in THIS page session (memory only: never saved, never synced, dropped on load). */
 export function setUnlockAll(on) { const v = !!on; if (!!P.unlockAll !== v) { P.unlockAll = v; changed(); } return v; }
 /** ★ thresholds of a character from meta (lazy worlds too). Same numbers as engine starThresholds for a loaded world. */
 export function starThresholdsOf(worldId, charId) {

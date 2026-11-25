@@ -4,8 +4,10 @@
 #   2. bootstrap.sql: Supabase roles (postgres non-superuser, anon, authenticated, service_role, authenticator), schemas, pgcrypto
 #      in `extensions`, Supabase default privileges — once
 #   3. the production baseline (supabase/schema/production_baseline.sql via baseline.mjs), loaded AS postgres — once
-#   4. migrations, each AS postgres, each once (RR_STAGING_MIGRATIONS, default: the rooms draft, then groups v2 + competitions so
-#      backend_contract --live RR_DRAFTS=1 can run all its draft sections). Already applied ones are skipped (game.staging_applied).
+#   4. migrations, each AS postgres, each once (RR_STAGING_MIGRATIONS, default: the live 20261123_admin.sql + the read-only
+#      supabase/schema/production_supplement.sql (= the live public API), then the rooms draft, groups v2 + competitions so
+#      backend_contract --live RR_DRAFTS=1 can run all its draft sections, then the moderation + chat draft 20261126_admin_mod_chat.sql).
+#      A bare name is under supabase/migrations/, a name with a slash is relative to RR_SRC. Already applied ones are skipped (game.staging_applied).
 # --reset wipes $RR_STAGING_DIR first (stop.sh first). Leaves PostgreSQL running; start.sh starts the rest.
 set -euo pipefail
 . "$(dirname "$0")/env.sh"
@@ -56,8 +58,8 @@ if [ "$(adm -tAc "select to_regclass('game.players') is null")" = t ]; then
   node "$STAGING_HERE/baseline.mjs" "$RR_SRC" | as_pg -f -
   as_pg -c "create table game.staging_applied (file text primary key, sha256 text not null, at timestamptz not null default now()); alter table game.staging_applied enable row level security;"
 fi
-for f in ${RR_STAGING_MIGRATIONS:-20261124_rooms.sql 20261124_groups_v2.sql 20261124_competitions.sql}; do
-  p="$RR_SRC/supabase/migrations/$f"; sha="$(sha256sum "$p" | cut -c1-64)"
+for f in ${RR_STAGING_MIGRATIONS:-20261123_admin.sql supabase/schema/production_supplement.sql 20261124_rooms.sql 20261124_groups_v2.sql 20261124_competitions.sql 20261126_admin_mod_chat.sql}; do
+  case "$f" in */*) p="$RR_SRC/$f" ;; *) p="$RR_SRC/supabase/migrations/$f" ;; esac; sha="$(sha256sum "$p" | cut -c1-64)"
   old="$(as_pg -tAc "select sha256 from game.staging_applied where file = '$f'")"
   if [ -z "$old" ]; then
     stg_log "apply $f (as postgres)"; as_pg -f "$p"

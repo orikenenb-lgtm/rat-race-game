@@ -7,8 +7,11 @@
 // * All user text (nicknames, group names / descriptions, competition titles) goes through esc().
 // * The room game itself is driven by js/remote.js (RemoteDriver): this screen can play a whole room on its own (roll / choose /
 //   tools); when game.js carries the wave-3b hook (`setDriver`), "למסך המשחק" plays the same room on the 3D game screen.
-// * No free chat: reactions are ids from a fixed list (room_core.REACTIONS).
+// * Reactions are ids from a fixed list (room_core.REACTIONS). The in-room chat (js/roomchat.js, draft 20261126_admin_mod_chat.sql) is
+//   server-filtered (no links / phones / e-mails / @handles / bad words), members only, never part of the game state.
+// * Moderation: a banned player sees why on the hub (rr_ban_status) and cannot create / join; an admin-closed room says so.
 import { RemoteDriver, REACTIONS } from './remote.js';
+import { RoomChat } from './roomchat.js';
 import { fmtM, metrics } from './engine.js';
 import { DEFAULTS as FLAG_DEFAULTS } from './flags.js';
 /** Worlds a live room / competition can use = the server's room_core WORLDS (supabase/functions/room/room_core.js; tests/remote_driver
@@ -17,6 +20,7 @@ export const ROOM_WORLDS = Object.freeze(['w1', 'w2', 'w3', 'w4']);
 
 let A = null;                       // the lobby's helper object (lobby.js roomsApi())
 let DRV = null;                     // the driver of the room on screen (kept while that room's game screen is open)
+let CHAT = null;                    // the chat panel of that room (one persistent node, re-mounted after every repaint)
 let tmr = null;                     // 1 s timer for the countdown
 let lastKey = '';
 let installed = false;
@@ -41,7 +45,7 @@ const H = {
   end: { first_win: 'נגמר כשמישהו יוצא מהמירוץ', all: 'משחקים עד שכולם מסיימים' },
   privacy: { code: 'כל מי שיש לו את הקוד', group: 'רק חברי קבוצה' },
   seat: { joined: 'עוד לא מוכן', ready: 'מוכן ✓', playing: 'משחק', away: 'לא מגיב — טייס זהיר', finished: 'סיים', forfeit: 'פרש', left: 'יצא' },
-  reason: { first_win: 'מישהו יצא מהמירוץ', all_done: 'כולם סיימו', max_rounds: 'הגענו לסבב האחרון', abandoned: 'החדר ננטש', host: 'המארח ביטל', vote: 'בוטל בהצבעה', empty: 'כולם יצאו', expired: 'החדר חיכה יותר מדי זמן',
+  reason: { first_win: 'מישהו יצא מהמירוץ', all_done: 'כולם סיימו', max_rounds: 'הגענו לסבב האחרון', abandoned: 'החדר ננטש', host: 'המארח ביטל', vote: 'בוטל בהצבעה', empty: 'כולם יצאו', expired: 'החדר חיכה יותר מדי זמן', admin: 'מנהל המשחק סגר את החדר',
     version_changed: 'המשחק התעדכן לגרסה חדשה באמצע החדר, ואי אפשר להמשיך משחק ישן בגרסה חדשה. אפשר לפתוח חדר חדש' },
   ev: {
     created: '🏠 החדר נפתח', joined: '👋 {n} הצטרף', ready: '✅ {n} מוכן', unready: '⏸️ {n} עוד לא מוכן', left: '🚪 {n} יצא', host: '👑 {n} מארח עכשיו',
@@ -57,7 +61,10 @@ const H = {
   join: { members: 'כל חברי הקבוצה', members_before_start: 'רק מי שהיה בקבוצה לפני ההתחלה' },
 };
 const evText = (e, seats) => {
-  const t = H.ev[e.kind]; if (!t) return null;
+  let t = H.ev[e.kind]; if (!t) return null;
+  if (e.kind === 'forfeit' && ['admin', 'ban'].includes((e.data || {}).why)) t = '🚫 {n} הוצא מהמשחק על ידי מנהל המשחק';
+  if (e.kind === 'kicked' && ['admin', 'ban'].includes((e.data || {}).by)) t = '🚫 מנהל המשחק הוציא שחקן מהחדר';
+  if (e.kind === 'cancelled' && (e.data || {}).why === 'admin') t = '✖️ מנהל המשחק סגר את החדר';
   const s = seats.find((x) => x.seat === (e.data || {}).seat);
   return t.replace('{n}', s ? esc(s.nickname) : 'שחקן').replace('{r}', esc(e.round)).replace('{v}', esc((e.data || {}).votes)).replace('{of}', esc((e.data || {}).of));
 };
@@ -130,6 +137,7 @@ async function renderHub(code) {
   const me = A.net.me();
   if (!me) { A.html(`<div class="lb-shell rm-hub"><div class="lb-bar"><button class="chip" data-act="home">› ללובי</button></div><h1>${H.title}</h1><p class="lb-note">כדי לשחק בחדר צריך כינוי. בחר כינוי במסך הראשי ונחזור לכאן.</p><button class="primary" data-act="focus-nick">לבחור כינוי</button></div>`); return; }
   A.html(hubHtml(null, code));
+  banNote();
   if (code) {
     const f = $('form[data-rform="rjoin"]');
     if (f) { f.code.value = code; A.clearRoomParam(); try { await joinRoom(code, f); return; } catch (e) { showErr(e, f); } }
@@ -137,6 +145,18 @@ async function renderHub(code) {
   try { const rs = await A.net.myRooms(); const box = $('#rmMine'); if (box) box.innerHTML = mineHtml(rs || []); }
   catch (e) { const box = $('#rmMine'); if (box) box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
   loadGroupsForPrivacy();
+}
+/** a banned player sees why, and the create / join forms are off (the server refuses them anyway: banned) */
+async function banNote() {
+  if (!A.net.banStatus) return;
+  let b = null; try { b = await A.net.banStatus(); } catch (e) { return; }
+  if (!b || !b.banned) return;
+  const until = b.permanent ? 'עד שמנהל המשחק יבטל את ההשעיה' : `עד ${safe(() => new Date(b.until).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: 'numeric' }), '')}`;
+  const hub = $('.rm-hub'); if (!hub) return;
+  hub.querySelector('.rm-head').insertAdjacentHTML('afterend', `<section class="lb-card rm-banned" role="alert"><h2>⛔ החשבון שלך מושעה</h2>
+    <p>מנהל המשחק השעה את החשבון שלך ${esc(until)}. בינתיים אי אפשר לפתוח חדרים, להצטרף לחדרים, לכתוב בצ'אט או להצטרף לקבוצות.</p>
+    <p class="lb-note">אפשר להמשיך לשחק לבד בכל המפות שפתוחות לך. אם זו טעות — דבר עם מי שנתן לך את המשחק.</p></section>`);
+  for (const f of hub.querySelectorAll('form[data-rform="rjoin"], form[data-rform="rcreate"]')) for (const el of f.elements) el.disabled = true;
 }
 async function loadGroupsForPrivacy() {
   try { groupsCache.list = await A.net.myGroups(); } catch (e) { groupsCache.list = []; }
@@ -211,26 +231,56 @@ async function openRoom(id) {
   await DRV.heartbeat();
   await DRV.resumePending();
   safe(() => localStorage.setItem('rr2-room-last', id));
+  ensureChat(id);
   DRV.start(); startTimer();
   paint(true);
 }
 const tabConn = () => safe(() => { let c = sessionStorage.getItem('rr2-conn'); if (!c) { c = 'tab-' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); sessionStorage.setItem('rr2-conn', c); } return c; }, undefined);
-function stopRoom() { if (DRV) DRV.stop(); DRV = null; stopTimer(); lastPaintRoom = null; }
+function stopRoom() { if (DRV) DRV.stop(); DRV = null; if (CHAT) CHAT.stop(); CHAT = null; stopTimer(); lastPaintRoom = null; }
+function ensureChat(id) {
+  if (CHAT && CHAT.roomId === id) return CHAT;
+  if (CHAT) CHAT.stop();
+  if (!A.net.roomChatList) return (CHAT = null);
+  CHAT = new RoomChat({ net: A.net, roomId: id, isAdmin: () => !!(A.isAdmin && A.isAdmin()), toast: A.toast, sfx: A.sfx,
+    mySeat: () => (DRV && DRV.me ? DRV.me.seat : null), seatName: (n) => ((DRV && DRV.seats.find((x) => x.seat === n)) || {}).nickname || '' });
+  CHAT.onSent = () => paint();           // a repaint that waited for the typed message happens right after it is sent
+  CHAT.start();
+  return CHAT;
+}
 function startTimer() { stopTimer(); tmr = setInterval(() => { const el = $('#rmTimer'); if (el && DRV) el.innerHTML = timerText(DRV.secondsLeft()); }, 1000); }
 function stopTimer() { if (tmr) clearInterval(tmr); tmr = null; }
 const timerText = (s) => (s == null ? '' : `⏱ ${num(Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'))}`);
 const onRoomScreen = () => !!(DRV && document.querySelector(`.rm-room[data-room="${CSS.escape(DRV.roomId)}"]`)) || !!$('.rm-room');
 
 /** Re-render the room view when something visible changed (keeps focus + a typed quantity). */
+let paintLater = false; let paintDeferredAt = 0;
 function paint(force = false) {
   if (!DRV || !DRV.snap || !A.isLobbyVisible() || !onRoomScreen()) return;
+  // half a message typed in the chat: a poll's repaint waits (≤ 8 s) until it is sent or the input loses focus — a repaint would close
+  // the phone keyboard. An EMPTY focused input never blocks the room screen (it is re-focused after the repaint).
+  const ae = document.activeElement;
+  const typingChat = !force && CHAT && ae && CHAT.el.contains(ae) && ae.tagName === 'INPUT' && ae.value.trim() !== '';
+  if (typingChat && (!paintDeferredAt || Date.now() - paintDeferredAt < 8000)) {
+    if (!paintDeferredAt) paintDeferredAt = Date.now();
+    if (!paintLater) { paintLater = true; ae.addEventListener('blur', () => { paintLater = false; setTimeout(() => paint(), 0); }, { once: true }); }
+    return;
+  }
+  paintDeferredAt = 0;
   const d = DRV;
   const key = JSON.stringify([d.room.version, d.stateVersion, d.primary, !!d.inflight, d.me && d.me.done, d.me && d.me.rolled, A.hasGameHook()]);
   if (!force && key === lastKey) return;
   lastKey = key;
   const a = document.activeElement; const fk = a && a.dataset ? a.dataset.fk : null; const qty = $('#rmQty') ? $('#rmQty').value : null;
+  const chatFocus = CHAT && a && CHAT.el.contains(a) ? a : null;
+  const same = lastPaintRoom === d.roomId; const ov = document.getElementById('start'); const sc = ov ? ov.scrollTop : 0;
   A.html(roomHtml(d, !lastPaintRoom || lastPaintRoom !== d.roomId));
+  if (same && ov) ov.scrollTop = sc;                  // a poll's repaint keeps the reading position (the chat, the opponents)
   lastPaintRoom = d.roomId;
+  if (CHAT && CHAT.roomId === d.roomId) {
+    const sel = chatFocus && chatFocus.tagName === 'INPUT' ? [chatFocus.selectionStart, chatFocus.selectionEnd] : null;
+    CHAT.mount($('#rmChatSlot'));
+    if (chatFocus && chatFocus.isConnected) safe(() => { chatFocus.focus({ preventScroll: true }); if (sel) chatFocus.setSelectionRange(sel[0], sel[1]); });
+  }
   if (qty != null && $('#rmQty')) $('#rmQty').value = qty;
   if (fk) { const el = document.querySelector(`[data-fk="${CSS.escape(fk)}"]`); if (el) safe(() => el.focus({ preventScroll: true })); }
 }
@@ -244,7 +294,7 @@ function roomHtml(d, anim = true) {
   if (r.status === 'lobby') body = waitingHtml(d);
   else if (r.status === 'playing') body = playingHtml(d);
   else body = resultsHtml(d);
-  return `<div class="lb-shell rm-room is-${esc(r.status)} ${anim ? '' : 'rm-still'}" data-room="${esc(r.id)}">${head}${body}${logHtml(d)}</div>`;
+  return `<div class="lb-shell rm-room is-${esc(r.status)} ${anim ? '' : 'rm-still'}" data-room="${esc(r.id)}">${head}${body}<div id="rmChatSlot" class="rm-chat-slot"></div>${logHtml(d)}</div>`;
 }
 const pawn = (p) => A.pawnHtml(p || 'classic', null, 'sm');
 function seatsLobbyHtml(d) {
@@ -556,4 +606,4 @@ async function groupForm(f) {
   return A.reloadGroup(gid);
 }
 /** test hook */
-export const _debug = { driver: () => DRV };
+export const _debug = { driver: () => DRV, chat: () => CHAT };

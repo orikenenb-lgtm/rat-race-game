@@ -195,6 +195,7 @@ function roomsApi() {
   return {
     net, html, toast, sfx, go, worldOf, pawnHtml, waHref, baseUrl, isLobbyVisible: lobbyVisible,
     unlocked: () => P.unlockedWorlds(),
+    isAdmin: () => P.isAdmin(),            // UI only (owner tools in the room chat); the server checks game.is_admin on every call
     confirm: (text, yes) => confirmAsk(text, yes),
     viewIs: (k, id) => view.k === k && (id == null || view.id === id),
     clearRoomParam: () => { pendingRoom = null; safe(() => { if (new URLSearchParams(location.search).has('room')) history.replaceState(null, '', location.pathname); }); },
@@ -852,9 +853,10 @@ async function checkAdmin() {
 function adminHtml() {
   if (!net.hasMe()) return '';
   if (P.isAdmin()) return `<section class="lb-card pf-admin"><h2>🛡️ מנהל</h2>
-      <p class="lb-note">אצלך כל העולמות והכלים פתוחים, והזריקות מתמלאות בכל כניסה ללובי. כוכבים, שיאים ומשחקים מדורגים לא משתנים.</p>
-      <form class="lb-form" data-form="admin-search"><label for="pfAdminQ">לתת זריקות לשחקן</label><div class="inl"><input id="pfAdminQ" name="q" placeholder="חיפוש לפי כינוי (ריק = החדשים)" autocomplete="off"><button>לחפש</button></div><p class="err" aria-live="polite"></p></form>
-      <div id="pfAdminList" class="pf-admin-list" aria-live="polite"></div></section>`;
+      <p class="lb-note">אצלך כל המפות והכלים פתוחים, והזריקות מתמלאות בכל כניסה ללובי. כוכבים, שיאים ומשחקים מדורגים לא משתנים. רק לך יש את הכלים האלה — השרת בודק בכל פעולה.</p>
+      <form class="lb-form" data-form="admin-search"><label for="pfAdminQ">שחקנים — לתת זריקות או לנהל (השעיה, קבוצות, חדרים)</label><div class="inl"><input id="pfAdminQ" name="q" placeholder="חיפוש לפי כינוי (ריק = החדשים)" autocomplete="off"><button>לחפש</button></div><p class="err" aria-live="polite"></p></form>
+      <div id="pfAdminList" class="pf-admin-list" aria-live="polite"></div>
+      <div id="pfMod"></div></section>`;
   return `<details class="lb-card pf-admin-claim"><summary>קוד מנהל</summary>
       <form class="lb-form" data-form="admin-claim"><label for="pfAdminCode">קוד חד־פעמי של בעל המשחק</label><div class="inl"><input id="pfAdminCode" name="code" dir="ltr" autocomplete="off" placeholder="XXXX-XXXX-XXXX"><button>לאשר</button></div><p class="err" aria-live="polite"></p></form></details>`;
 }
@@ -864,7 +866,7 @@ async function loadAdminList(q) {
   try {
     const rows = (await net.adminPlayers(q)) || [];
     box.innerHTML = rows.length ? `<ul class="pf-admin-rows">${rows.map((r) => `<li><span class="pf-admin-who"><b>${esc(r.nickname)}</b><small>★ ${+r.stars || 0} · מ־${esc(String(r.joined || ''))}</small></span>
-        <span class="pf-admin-give">${[5, 10, 25].map((n) => `<button class="chip" data-act="admin-give" data-id="${esc(r.id)}" data-n="${n}" data-nick="${esc(r.nickname)}" aria-label="לתת ${n} זריקות ל${esc(r.nickname)}">+${n} ⚡</button>`).join('')}</span></li>`).join('')}</ul>`
+        <span class="pf-admin-give">${[5, 10, 25].map((n) => `<button class="chip" data-act="admin-give" data-id="${esc(r.id)}" data-n="${n}" data-nick="${esc(r.nickname)}" aria-label="לתת ${n} זריקות ל${esc(r.nickname)}">+${n} ⚡</button>`).join('')}<button class="chip" data-aact="player" data-id="${esc(r.id)}" aria-label="לנהל את ${esc(r.nickname)}">🛡️ ניהול</button></span></li>`).join('')}</ul>`
       : '<p class="lb-note">לא נמצאו שחקנים.</p>';
   } catch (e) { box.innerHTML = '<p class="lb-note">לא הצלחנו לטעון את הרשימה. נסה שוב.</p>'; }
 }
@@ -1659,6 +1661,12 @@ function renderProfile() {
   </div>`);
   refreshMuted();
   loadAdminList('');
+  adminMod();
+}
+/** the owner's moderation panel (js/admin.js, loaded on demand for an admin only — every call is checked by the server) */
+function adminMod() {
+  if (!P.isAdmin() || !$('#pfMod') || !net.adminRooms) return;
+  import('./admin.js').then((m) => m.mount({ net, toast, sfx })).catch((e) => { console.warn(e); const b = $('#pfMod'); if (b) b.innerHTML = '<p class="lb-note">לא הצלחנו לטעון את כלי הניהול. רענן את הדף.</p>'; });
 }
 
 /* -------- T4 F4 + T5 §7.3 settings: sound, "תצוגה ותנועה" (motion, graphics quality when the rendering lane ships it, מצב קל), help */

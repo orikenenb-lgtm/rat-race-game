@@ -41,9 +41,17 @@ class LocalStack:
         return p
     def _sql(self, text):
         return subprocess.run(['psql', self.db, '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', text], check=True, capture_output=True, text=True).stdout.strip()
+    def make_admin(self, p):
+        """the owner of the stack (test only): game.admins row through psql — the one-time code of 20261123_admin.sql is not known here"""
+        if not re.fullmatch(r'[0-9a-f-]{36}', p['id']): raise ValueError('bad id')
+        self._sql(f"insert into game.admins (player_id) values ('{p['id']}') on conflict do nothing")
+    def handle(self, fn, body):
+        """FakeBackend.handle-shaped: one PostgREST call → (status, json)"""
+        return self.rpc(fn, body)
     def rooms_dump(self):
         out = self._sql("""select coalesce(json_agg(json_build_object('id', r.id, 'status', r.status, 'results', r.results,
-            'seats', (select json_agg(json_build_object('seat', s.seat, 'state_version', s.state_version) order by s.seat) from game.room_seats s where s.room_id = r.id))), '[]')
+            'round', r.round, 'end_reason', r.end_reason,
+            'seats', (select json_agg(json_build_object('seat', s.seat, 'state_version', s.state_version, 'status', s.status, 'player_id', s.player_id) order by s.seat) from game.room_seats s where s.room_id = r.id))), '[]')
             from game.rooms r where r.status in ('lobby', 'playing') or r.finished_at > now() - interval '1 day'""")
         return {'rooms': json.loads(out)}
     def advance(self, days=0, hours=0, minutes=0, seconds=0):

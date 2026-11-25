@@ -190,6 +190,34 @@ export function cancel(room, player, now) {
   else event(room, 'cancel_vote', { seat: me.seat, votes, of: active.length }, now);
   touch(room, now); return ok({ status: room.status, votes, of: active.length });
 }
+/* ============================================================ owner moderation (= game.admin_seat_out / rr_admin_close_room of the
+ * draft 20261126_admin_mod_chat.sql; the SQL is the production path — these are the fake's model and the tests' reference) */
+/** The admin takes a player out of a room (kick, ban). lobby → the seat is freed (+ kicked: no way back by code; the host role moves;
+ *  an empty lobby is cancelled 'empty') · playing → forfeit like leaving (needs_tick: the next tick closes the round; the others play on)
+ *  + kicked (no chat). → 'removed' | 'forfeit' | 'none'. */
+export function adminSeatOut(room, pid, why, now) {
+  const s = seatOf(room, pid); if (!s) return 'none';
+  if ((room.status === 'lobby' || room.status === 'playing') && !(room.kicked || []).includes(pid)) (room.kicked ||= []).push(pid);
+  let out = 'none';
+  if (room.status === 'lobby') {
+    room.seats = room.seats.filter((x) => x !== s);
+    event(room, 'kicked', { seat: s.seat, by: why }, now);
+    if (!room.seats.length) { room.status = 'cancelled'; room.end_reason = 'empty'; room.finished_at = now; event(room, 'cancelled', { why: 'empty' }, now); }
+    else if (room.host_id === pid) { room.host_id = room.seats[0].player_id; event(room, 'host', { seat: room.seats[0].seat }, now); }
+    out = 'removed';
+  } else if (room.status === 'playing' && ACTIVE.has(s.status)) {
+    s.status = 'forfeit'; s.forfeit_round = room.round; room.needs_tick = true; event(room, 'forfeit', { seat: s.seat, why }, now); out = 'forfeit';
+  }
+  if (out !== 'none') touch(room, now);
+  return out;
+}
+/** The admin closes an open room: cancelled, end_reason 'admin', nobody ranked (like a cancel vote). */
+export function adminClose(room, now) {
+  if (room.status !== 'lobby' && room.status !== 'playing') fail('room_not_open', 409);
+  room.status = 'cancelled'; room.end_reason = 'admin'; room.finished_at = now; room.deadline = null; room.needs_tick = false; room.cancel_votes = [];
+  event(room, 'cancelled', { why: 'admin' }, now); touch(room, now);
+  return ok({ status: 'cancelled' });
+}
 export function heartbeat(room, player, connId, now) {
   const me = seatOf(room, player.id); if (!me) fail('not_in_room', 403);
   const c = typeof connId === 'string' && ID_RE.test(connId) ? connId : null;

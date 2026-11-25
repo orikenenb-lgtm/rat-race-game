@@ -75,6 +75,25 @@ const ERR = {
   attempt_open: 'יש לך ניסיון פתוח — סיים אותו קודם',
   attempts_used: 'ניצלת את כל הניסיונות בתחרות הזו',
   bad_before: 'בקשה לא תקינה',
+  // moderation + in-room chat (draft 20261126_admin_mod_chat.sql; docs/full-upgrade/ADMIN_CHAT.md)
+  banned: 'החשבון שלך הושעה על ידי מנהל המשחק: בינתיים אי אפשר להיכנס לחדרים, לכתוב בצ\'אט או להצטרף לקבוצות. אפשר להמשיך לשחק לבד.',
+  chat_empty: 'ההודעה ריקה',
+  chat_too_long: 'עד 120 תווים בהודעה',
+  chat_link: 'אי אפשר לשלוח קישורים בצ\'אט 🙂',
+  chat_phone: 'אסור לשתף מספרי טלפון בצ\'אט — שומרים על עצמנו 🙂',
+  chat_email: 'אסור לשתף כתובות מייל בצ\'אט — שומרים על עצמנו 🙂',
+  chat_handle: 'בלי שמות משתמש ורשתות חברתיות בצ\'אט — משחקים כאן 🙂',
+  chat_bad_word: 'בואו נשמור על שפה נעימה 🙂 ההודעה לא נשלחה',
+  chat_closed: 'הצ\'אט של החדר הזה כבר נסגר',
+  msg_not_found: 'ההודעה כבר לא קיימת',
+  cannot_report_self: 'אי אפשר לדווח על הודעה שלך',
+  not_admin: 'רק מנהל המשחק יכול לעשות את זה',
+  cannot_ban_self: 'אי אפשר להשעות את עצמך',
+  cannot_kick_self: 'אי אפשר להוציא את עצמך',
+  not_banned: 'השחקן לא מושעה',
+  bad_reason: 'סיבה: 2–200 תווים',
+  room_not_open: 'החדר כבר לא פתוח',
+  player_not_in_room: 'השחקן כבר לא בחדר',
 };
 
 let me = null;
@@ -197,6 +216,27 @@ export const net = {
   roomHeartbeat: (roomId, conn) => rpc('rr_room_heartbeat', { ...auth(), p_room: roomId, p_conn: conn || null }),
   roomReact: (roomId, kind) => rpc('rr_room_react', { ...auth(), p_room: roomId, p_kind: kind }),
   myRooms: () => rpc('rr_my_rooms', auth()),
+  /* ---------------- moderation + in-room chat (draft 20261126_admin_mod_chat.sql; ADMIN_CHAT.md). Every rule is the server's. */
+  /** {banned, until (ms | null), permanent} — my own ban (the reason is for the admin only) */
+  banStatus: () => rpc('rr_ban_status', auth()),
+  /** → {id, at}; refusals throw (code chat_link / chat_phone / chat_email / chat_handle / chat_bad_word / chat_too_long / rate_limited / banned …) */
+  roomChatSend: (roomId, text) => rpc('rr_room_chat_send', { ...auth(), p_room: roomId, p_text: String(text ?? '') }),
+  /** {msgs:[{id, seat, nickname, text, at, me}], hidden:[ids], last} — visible messages with id > since (the last 40) */
+  roomChatList: (roomId, since = null) => rpc('rr_room_chat_list', { ...auth(), p_room: roomId, p_since: since }),
+  roomChatReport: (msgId) => rpc('rr_room_chat_report', { ...auth(), p_msg: msgId }),
+  /** owner: days = null → permanent */
+  adminBan: (target, reason, days = null) => rpc('rr_admin_ban', { ...auth(), p_target: target, p_reason: reason, p_days: days }),
+  adminUnban: (target) => rpc('rr_admin_unban', { ...auth(), p_target: target }),
+  adminBans: () => rpc('rr_admin_bans', auth()),
+  adminPlayer: (target) => rpc('rr_admin_player', { ...auth(), p_target: target }),
+  adminRooms: () => rpc('rr_admin_rooms', auth()),
+  adminRoomChat: (roomId) => rpc('rr_admin_room_chat', { ...auth(), p_room: roomId }),
+  adminKickRoom: (roomId, target) => rpc('rr_admin_kick_room', { ...auth(), p_room: roomId, p_target: target }),
+  adminCloseRoom: (roomId) => rpc('rr_admin_close_room', { ...auth(), p_room: roomId }),
+  adminRemoveFromGroup: (groupId, target) => rpc('rr_admin_remove_from_group', { ...auth(), p_group: groupId, p_target: target }),
+  adminDeleteChat: (msgId) => rpc('rr_admin_delete_chat', { ...auth(), p_msg: msgId }),
+  adminReports: () => rpc('rr_admin_reports', auth()),
+  adminModLog: (before = null) => rpc('rr_admin_mod_log', { ...auth(), p_before: before }),
   /** Edge Function `room` {op: start | act | tick}. → body on 200; else throws Error{code, status, body} (409 stale carries the
    *  current {state_version, view}). A network failure throws code 'offline' — an `act` may then be resent with the SAME action_id. */
   async roomFn(op, roomId, extra = {}) {

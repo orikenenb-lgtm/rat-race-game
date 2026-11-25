@@ -116,10 +116,27 @@ PARAMS.update({
     'rr_room_heartbeat': AUTH + ('p_room', 'p_conn'),
     'rr_room_react': AUTH + ('p_room', 'p_kind'),
     'rr_my_rooms': AUTH,
+    # moderation + in-room chat (draft 20261126_admin_mod_chat.sql) — js/net.js sends all of them
+    'rr_ban_status': AUTH,
+    'rr_room_chat_send': AUTH + ('p_room', 'p_text'),
+    'rr_room_chat_list': AUTH + ('p_room', 'p_since'),
+    'rr_room_chat_report': AUTH + ('p_msg',),
+    'rr_admin_ban': AUTH + ('p_target', 'p_reason', 'p_days'),
+    'rr_admin_unban': AUTH + ('p_target',),
+    'rr_admin_bans': AUTH,
+    'rr_admin_player': AUTH + ('p_target',),
+    'rr_admin_rooms': AUTH,
+    'rr_admin_room_chat': AUTH + ('p_room',),
+    'rr_admin_kick_room': AUTH + ('p_room', 'p_target'),
+    'rr_admin_close_room': AUTH + ('p_room',),
+    'rr_admin_remove_from_group': AUTH + ('p_group', 'p_target'),
+    'rr_admin_delete_chat': AUTH + ('p_msg',),
+    'rr_admin_reports': AUTH,
+    'rr_admin_mod_log': AUTH + ('p_before',),
 })
 PARAMS_NEXT = {}
 OPTIONAL = {'p_ref', 'p_challenge', 'p_pawn', 'p_meta', 'p_group', 'p_char', 'p_since', 'p_conn', 'p_before', 'p_description', 'p_rules',
-            'p_invite_open', 'p_member_challenges'}
+            'p_invite_open', 'p_member_challenges', 'p_days'}
 ROOM_RPC = {'rr_room_create': 'create', 'rr_room_join': 'join', 'rr_room_ready': 'ready', 'rr_room_leave': 'leave', 'rr_room_kick': 'kick',
             'rr_room_cancel': 'cancel', 'rr_room_state': 'state', 'rr_room_heartbeat': 'heartbeat', 'rr_room_react': 'react', 'rr_my_rooms': 'my_rooms'}
 ROOM_MAX_BODY = 8192                      # Edge `room`: bodies are small intents (index.ts MAX_BODY)
@@ -202,6 +219,7 @@ class FakeBackend:
         self.calls = collections.Counter(); self.log = []; self.blocked = []; self.unexpected = []
         self.requests = []          # (fn | 'verify', body) unredacted, in order — test-side inspection only
         self.admins = set(); self.admin_code = 'TEST-ADMN-CODE'; self.admin_used = False   # migration 20261123_admin
+        self.bans = {}; self.mod_log = []                 # draft 20261126_admin_mod_chat: player → {reason, by, until (dt | None), at}; append-only log
         self.meta = {}              # free-form data a suite stores with dump() (e.g. which seeded player is "A")
         self.verify_queue = []; self._fail = {}; self._fail_net = {}; self._over = {}
         # assumed semantics (§2.6) — each one has a switch
@@ -326,7 +344,7 @@ class FakeBackend:
             if self.board_mode == 'v2': return (o1,) + tail
             return (1 if r.get('verified') is False else 0, o1, 0 if r.get('verified') is True else 1) + tail
         out = []
-        for r in sorted((r for r in self.R.values() if pred(r)), key=key)[:100]:
+        for r in sorted((r for r in self.R.values() if pred(r) and not self.banned(r['player'])), key=key)[:100]:
             p = self.P[r['player']]
             row = {'nickname': p['nickname'], 'status': r['status'], 'months': r['months'], 'net_worth': r['net_worth'], 'passive': r['passive'],
                    'expenses': r['expenses'], 'me': r['player'] == me, 'stars': self._total(p), 'pawn': p['pawn'], 'progress': prog(r)}
@@ -427,6 +445,7 @@ class FakeBackend:
         p = self._auth(b); n = self._txt(b.get('p_name'))
         if not 2 <= len(n) <= 40: self._err('bad_name')
         if len(self._groups_of(p['id'])) >= 20: self._err('too_many_groups')
+        if self.banned(p['id']): self._err('banned')          # = the ban guard on game.group_members (the insert of the owner)
         return self._group_out(self._new_group(p, n), p['id'])
     def _rr_join_group(self, b):
         p = self._auth(b); code = self._txt(b.get('p_code')).upper()[:32]
@@ -439,6 +458,7 @@ class FakeBackend:
             fails.append(t); self._err('group_not_found')
         if not member:
             if len(g['members']) >= 50: self._err('group_full')
+            if self.banned(p['id']): self._err('banned')      # = the ban guard on game.group_members
             g['members'].append(p['id']); self._handle(g, p['id']); g.get('bans', {}).pop(p['id'], None)
             self._feed_add(g['id'], p['id'], 'joined', None); self._glog(g, 'joined', p['id'])
         return self._group_out(g, p['id'])
@@ -720,7 +740,8 @@ class FakeBackend:
     def _room_ask(self, op, p, args):
         who = {'id': p['id'], 'nickname': p['nickname'], 'pawn': p['pawn']}
         m = self._room_side().ask({'op': op, 'player': who, 'groups': [g['id'] for g in self._groups_of(p['id'])], 'args': args,
-                                   'now': int(self.now().timestamp() * 1000)}, 60)
+                                   'now': int(self.now().timestamp() * 1000), 'banned': self.banned(p['id']),
+                                   'banned_ids': [k for k in self.bans if self.banned(k)]}, 60)
         return m['status'], m['body']
     def _room_rpc(self, fn, b):
         p = self._auth(b); op = ROOM_RPC[fn]
@@ -802,7 +823,7 @@ class FakeBackend:
         if p['id'] in self.admins: return {'admin': True}
         code = str(b.get('p_code') or '').strip().upper()
         if self.admin_used or self.admins or code != self.admin_code: self._err('bad_code')
-        self.admin_used = True; self.admins.add(p['id']); return {'admin': True}
+        self.admin_used = True; self.admins.add(p['id']); self._mod(p['id'], 'claim', p['id']); return {'admin': True}
     def _rr_admin_players(self, b):
         p = self._auth(b)
         if p['id'] not in self.admins: self._err('not_admin')
@@ -818,7 +839,104 @@ class FakeBackend:
         to = self.P.get(b.get('p_to'))
         if not to: self._err('player_not_found')
         self.gifts.append({'from': p['id'], 'to': to['id'], 'kind': 'admin', 'amount': n, 'day': self.day_key(), 'group': None, 'claimed': False})
+        self._mod(p['id'], 'give', to['id'], data={'amount': n})
         return {'ok': True}
+    # ---- moderation + in-room chat — draft supabase/migrations/20261126_admin_mod_chat.sql (rooms / chat live in tests/fakeroom.mjs)
+    def banned(self, pid):
+        b = self.bans.get(pid); return bool(b) and (b['until'] is None or b['until'] > self.now())
+    def ban(self, pid, reason='טסט', days=None, by=None):
+        """test helper: ban a player directly (like an admin would)."""
+        self.bans[pid] = {'reason': reason, 'by': by, 'until': None if days is None else self.now() + dt.timedelta(days=days), 'at': self.now()}
+    def _mod(self, admin, action, target=None, room=None, group=None, msg=None, data=None):
+        self.mod_log.append({'id': len(self.mod_log) + 1, 'admin': admin, 'action': action, 'target': target, 'room': room, 'group': group, 'msg': msg,
+                             'data': data or {}, 'at': self.now()})
+    def _ms(self, t): return int(t.timestamp() * 1000) if t else None
+    def _admin(self, b):
+        p = self._auth(b)
+        if p['id'] not in self.admins: self._err('not_admin')
+        return p
+    def _side_ok(self, op, p, args):
+        st, out = self._room_ask(op, p, args)
+        if st != 200: raise FakeError(out.get('error', 'server_error'), self.raise_status)
+        if isinstance(out, dict): out.pop('ok', None)
+        return out
+    def _rr_ban_status(self, b):
+        p = self._auth(b); x = self.bans.get(p['id']) if self.banned(p['id']) else None
+        return {'banned': bool(x), 'until': self._ms(x['until']) if x else None, 'permanent': bool(x) and x['until'] is None}
+    def _rr_room_chat_send(self, b):
+        p = self._auth(b); return self._side_ok('chat_send', p, {'room': b.get('p_room'), 'text': b.get('p_text')})
+    def _rr_room_chat_list(self, b):
+        p = self._auth(b); since = b.get('p_since')
+        return self._side_ok('chat_list', p, {'room': b.get('p_room'), 'since': since if isinstance(since, int) and not isinstance(since, bool) else None})
+    def _rr_room_chat_report(self, b):
+        p = self._auth(b); return self._side_ok('chat_report', p, {'msg': b.get('p_msg')})
+    def _rr_admin_ban(self, b):
+        p = self._admin(b); t = b.get('p_target')
+        if t == p['id']: self._err('cannot_ban_self')
+        if t not in self.P: self._err('player_not_found')
+        if t in self.admins: self._err('cannot_ban_self')
+        reason = str(b.get('p_reason') or '').strip(' ')
+        if not 2 <= len(reason) <= 200 or re.search(r'[\x01-\x1f\x7f]', reason): self._err('bad_reason')
+        days = b.get('p_days')
+        if days is not None and (not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 3650): self._err('bad_days')
+        self.ban(t, reason, days, by=p['id'])
+        n = self._side_ok('ban_sweep', p, {'target': t})['rooms']
+        self._mod(p['id'], 'ban', t, data={'reason': reason, 'days': days, 'rooms': n})
+        return {'banned': True, 'until': self._ms(self.bans[t]['until']), 'rooms': n}
+    def _rr_admin_unban(self, b):
+        p = self._admin(b); t = b.get('p_target')
+        if t not in self.bans: self._err('not_banned')
+        del self.bans[t]; self._mod(p['id'], 'unban', t); return {'banned': False}
+    def _rr_admin_bans(self, b):
+        self._admin(b)
+        rows = sorted(((k, v) for k, v in self.bans.items() if self.banned(k)), key=lambda kv: kv[1]['at'], reverse=True)[:100]
+        return [{'player_id': k, 'nickname': self.P[k]['nickname'], 'reason': v['reason'], 'until': self._ms(v['until']), 'at': self._ms(v['at']),
+                 'by': self.P[v['by']]['nickname'] if v.get('by') in self.P else None} for k, v in rows]
+    def _rr_admin_player(self, b):
+        p = self._admin(b); t = self.P.get(b.get('p_target')) if isinstance(b.get('p_target'), str) else None
+        if not t: self._err('player_not_found')
+        x = self.bans.get(t['id']) if self.banned(t['id']) else None
+        info = self._side_ok('player_info', p, {'target': t['id']})
+        return {'id': t['id'], 'nickname': t['nickname'], 'stars': self._total(t), 'joined': (t.get('created') or '')[:10], 'admin': t['id'] in self.admins,
+                'ban': {'reason': x['reason'], 'until': self._ms(x['until']), 'at': self._ms(x['at'])} if x else None,
+                'groups': sorted(({'id': g['id'], 'name': g['name'], 'owner': g['owner'] == t['id'], 'members': len(g['members'])} for g in self._groups_of(t['id'])), key=lambda g: g['name']),
+                'rooms': info['rooms'], 'blocked_24h': info['blocked_24h'], 'reported_24h': info['reported_24h']}
+    def _rr_admin_rooms(self, b):
+        p = self._admin(b); return self._side_ok('admin_rooms', p, {})
+    def _rr_admin_room_chat(self, b):
+        p = self._admin(b); return self._side_ok('admin_room_chat', p, {'room': b.get('p_room')})
+    def _rr_admin_kick_room(self, b):
+        p = self._admin(b); t = b.get('p_target')
+        if t == p['id']: self._err('cannot_kick_self')
+        out = self._side_ok('admin_kick', p, {'room': b.get('p_room'), 'target': t})
+        self._mod(p['id'], 'kick_room', t, room=b.get('p_room'), data={'result': out['result'], 'code': out.pop('code')})
+        return out
+    def _rr_admin_close_room(self, b):
+        p = self._admin(b); out = self._side_ok('admin_close', p, {'room': b.get('p_room')})
+        self._mod(p['id'], 'close_room', room=b.get('p_room'), data={'code': out.pop('code'), 'was': out.pop('was')})
+        return out
+    def _rr_admin_remove_from_group(self, b):
+        p = self._admin(b); g = self.G.get(b.get('p_group')) if isinstance(b.get('p_group'), str) else None
+        if not g: self._err('group_not_found')
+        t = b.get('p_target')
+        if t not in g['members']: self._err('member_not_found')
+        name = g['name']; g.setdefault('bans', {})[t] = g['code']; self._glog(g, 'removed', p['id'], t, {'by': 'admin'}); self._drop_member(g, t)
+        gone = g['id'] not in self.G
+        self._mod(p['id'], 'remove_group', t, group=g['id'], data={'name': name, 'group_deleted': gone})
+        return {'removed': True, 'group_deleted': gone}
+    def _rr_admin_delete_chat(self, b):
+        p = self._admin(b); out = self._side_ok('admin_hide', p, {'msg': b.get('p_msg')})
+        if out.get('changed'): self._mod(p['id'], 'hide_chat', out['sender'], room=out['room'], msg=b.get('p_msg'))
+        return {'hidden': True}
+    def _rr_admin_reports(self, b):
+        p = self._admin(b); return self._side_ok('admin_reports', p, {})
+    def _rr_admin_mod_log(self, b):
+        self._admin(b); before = b.get('p_before')
+        rows = [x for x in reversed(self.mod_log) if before is None or x['id'] < before][:50]
+        nick = lambda k: self.P[k]['nickname'] if k in self.P else None
+        return {'log': [{'id': x['id'], 'action': x['action'], 'admin': nick(x['admin']), 'target_id': x['target'], 'target': nick(x['target']), 'room_id': x['room'],
+                         'group_id': x['group'], 'msg_id': x['msg'], 'data': x['data'], 'at': self._ms(x['at'])} for x in rows],
+                'next_before': rows[-1]['id'] if len(rows) == 50 else None}
     def _rr_log_event(self, b):
         p = self._auth(b); kind = b.get('p_kind')
         if not isinstance(kind, str) or not self.kind_re.fullmatch(kind): self._err('bad_kind')
@@ -927,7 +1045,8 @@ class FakeBackend:
         def enc(o):
             if isinstance(o, dt.datetime): return {'__dt': o.isoformat()}
             raise TypeError(type(o))
-        d = {k: getattr(self, k) for k in ('P', 'G', 'C', 'R', 'feed', 'gifts')}
+        d = {k: getattr(self, k) for k in ('P', 'G', 'C', 'R', 'feed', 'gifts', 'bans', 'mod_log')}
+        d['admins'] = sorted(self.admins)
         d['events_today'] = [[list(k), v] for k, v in self.events_today.items()]
         d['offset_s'] = self._offset.total_seconds(); d['meta'] = self.meta; d['rooms'] = self.rooms_dump()
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -937,7 +1056,8 @@ class FakeBackend:
         fb = cls(**kw)
         with open(path, encoding='utf-8') as f:
             d = json.load(f, object_hook=lambda o: dt.datetime.fromisoformat(o['__dt']) if set(o) == {'__dt'} else o)
-        for k in ('P', 'G', 'C', 'R', 'feed', 'gifts'): setattr(fb, k, d.get(k, getattr(fb, k)))
+        for k in ('P', 'G', 'C', 'R', 'feed', 'gifts', 'bans', 'mod_log'): setattr(fb, k, d.get(k, getattr(fb, k)))
+        fb.admins = set(d.get('admins') or [])
         fb.events_today = collections.Counter({tuple(k): v for k, v in d.get('events_today', [])})
         fb._offset = dt.timedelta(seconds=d.get('offset_s', 0)); fb.meta = d.get('meta') or {}; fb._room_state = d.get('rooms')
         return fb

@@ -1078,3 +1078,32 @@ body.lb-lobby-open { overflow: hidden; }
 /* the trail of 17+ maps wraps under the heading instead of covering it */
 .map-head { flex-wrap: wrap; }
 .map-trail { flex-wrap: wrap; row-gap: 6px; min-width: 0; max-width: 100%; }
+
+/* owner moderation panel (js/admin.js) — inside .pf-admin; every destructive button arms first (.armed) and acts on the second tap */
+.pf-mod { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pf-mod button { touch-action: manipulation; }
+.pf-mod-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-mod-tabs [aria-selected="true"] { background: var(--gold); color: #1b1300; font-weight: 700; }
+.pf-mod-pane h4, .pf-mod-card h4 { margin: 12px 0 4px; }
+.pf-mod-rows, .pf-mod-rooms, .pf-mod-seats, .pf-mod-msgs, .pf-mod-log { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.pf-mod-rows > li, .pf-mod-rooms > li, .pf-mod-msgs > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 8px 10px; border-radius: 12px; background: var(--paper); }
+.pf-mod-rows > li > span:first-child, .pf-mod-msgs > li > span:first-child { display: flex; flex-direction: column; min-width: 0; }
+.pf-mod-rows small, .pf-mod-rooms small, .pf-mod-msgs small, .pf-mod-log small { color: var(--mut); }
+.pf-mod-rooms > li { flex-direction: column; align-items: stretch; }
+.pf-mod-rh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pf-mod-rh b { font: 800 18px/1 Rubik, sans-serif; letter-spacing: .12em; }
+.pf-mod-seats > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 8px; border-radius: 10px; background: var(--paper2); }
+.pf-mod-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+.pf-mod-text { font-size: 15px; overflow-wrap: anywhere; }
+.pf-mod-rep { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
+.pf-mod .is-hidden { opacity: .6; }
+.pf-mod .armed { background: var(--red) !important; color: #fff !important; border-color: var(--red) !important; font-weight: 700; }
+.pf-mod-card { padding: 10px 12px; border-radius: 14px; border: 2px solid var(--gold); background: var(--paper); }
+.pf-mod-ph { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pf-mod-ph h3 { margin: 0; }
+.pf-mod-ph button { margin-inline-start: auto; }
+.pf-mod-counts { margin: 6px 0; font-size: 14px; color: var(--mut); }
+.pf-mod-ban { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 10px; border-radius: 12px; background: light-dark(#ffe9e9, #4a1c1c); }
+.pf-mod-banf { margin-top: 8px; }
+.pf-mod-banf select, .pf-mod-banf input { min-height: 44px; font: inherit; font-size: 16px; }
+.pf-mod-log li { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
