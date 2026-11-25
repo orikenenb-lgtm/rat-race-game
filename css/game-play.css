@@ -1326,6 +1326,7 @@ body:has(#evm:not([hidden])) #boardTools{display:none}
 /* ===== w15 "האפליקציה והגיוסים": the dilution bar (before → after), the runway gauge as a fuse, the cohort chart */
 .dil{display:flex;gap:10px;align-items:center}.dil-b{position:relative;flex:1 1 auto;height:12px;border-radius:6px;background:var(--paper3);overflow:hidden}
 .dil-b i{position:absolute;inset-block:0;inset-inline-start:0;width:var(--a);background:repeating-linear-gradient(45deg,var(--accent-ink) 0 4px,transparent 4px 8px);opacity:.5}
+.pfmini .dil-n{display:block;font-size:12px;color:var(--mut);margin-top:4px}
 .dil-b s{position:absolute;inset-block:0;inset-inline-start:0;width:var(--b);background:var(--accent-ink)}
 .wp-gbar.fuse i{background:linear-gradient(to left,#f97316,var(--accent-ink))}
 .cohort{margin:4px 0 0}.cohort svg{width:100%;height:110px;display:block;background:var(--paper2);border-radius:10px}

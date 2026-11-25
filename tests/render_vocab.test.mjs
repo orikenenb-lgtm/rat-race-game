@@ -364,5 +364,17 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   ok(/globe: decorGlobe/.test(scn) && /servers: decorServers/.test(scn) && !/updaters\.add/.test(scn.slice(scn.indexOf('function decorGlobe'), scn.indexOf('let globeDecor'))), 'the globe decor adds no updater (still); the servers decor exists');
   ok(/case 'globe':/.test(scn) && /w11: 'הקבוצה שלך'/.test(scn) && /w15: 'האפליקציה שלך'/.test(scn), "scene: tile icon 'globe', the captions");
 }
+/* w15: the app panel names why a spend level is refused — the emergency round's freeze (a level ≤ the team's cap that the engine disables)
+   or the team's cap — on the button and in one line above the channels (never a silent grey button) */
+{
+  const WV = await import('../js/render/worldview1115.js');
+  const H = { esc: String, escI: String, num: String, mS: (x) => '₪' + x, mSg: String, pctI: String, row: () => '', grid: () => '', cls: () => '', iso: String };
+  const P = { gauges: [], rows: [], table: [{ id: 'search', name: 'חיפוש ממומן', level: 0, spend: 0, cac: 14 }], actions: [{ id: 'spend', param: 'search:1', label: 'a', enabled: false }, { id: 'spend', param: 'search:3', label: 'b', enabled: false }] };
+  const X = { cap: 1, stake: 0.5, users: 1, mrr: 1, arr: 1, arpu: 6, cost: 1, cf: -1, ev: 1, stakeValue: 1, raised: 0, rival: 0.2, mult: 5 };
+  const seen = []; const html = WV.pfPanelHtml(H, P, X, (a, i, l) => { seen.push(a.reason || ''); return ''; });
+  ok(html.includes('הפרסום מוקפא') && seen[0] === 'הפרסום מוקפא אחרי גיוס החירום' && seen[1] === 'צוות השיווק עוד קטן מדי לתקציב כזה', 'w15 freeze: the line + each refused level says why', seen);
+  const html2 = WV.pfPanelHtml(H, { ...P, actions: [{ id: 'spend', param: 'search:1', label: 'a', enabled: true }, { id: 'spend', param: 'search:3', label: 'b', enabled: false }] }, X, () => '');
+  ok(!html2.includes('הפרסום מוקפא'), 'w15: no freeze line when only the team cap blocks a level');
+}
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

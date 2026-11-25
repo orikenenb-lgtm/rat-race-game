@@ -84,6 +84,7 @@ async def main():
         await pg.evaluate("""() => { const bs = [...document.querySelectorAll('#evCard button[data-o]:not([disabled])')]; const pref = ['pass', 'skip', 'walk', 'decline', 'done', 'ok', 'close', 'continue', 'pay', 'cancel'];
           const b = pref.map((id) => bs.find((x) => x.dataset.o === id)).find(Boolean) || bs.find((x) => /^(pass|skip|done|ok|no)\b/.test(x.dataset.o)) || bs[bs.length - 1]; if (b) b.dataset.p1tap = '1'; }""")
         btn = pg.locator('#evCard button[data-p1tap="1"]').first
+        await btn.scroll_into_view_if_needed(); await pg.wait_for_timeout(300)   # a long card (the trade window) keeps its 'סיום' below the fold on a phone
         bb = await btn.bounding_box(); await pg.touchscreen.tap(bb['x'] + bb['width'] / 2, bb['y'] + bb['height'] / 2)
         await pg.wait_for_timeout(900)
         after = await pg.evaluate("() => document.querySelector('#evm').hidden ? '(closed)' : document.querySelector('#evTitle')?.textContent")

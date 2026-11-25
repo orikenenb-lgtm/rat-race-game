@@ -59,11 +59,11 @@ export function investorsHtml(H, ev) {
       `<div class="row"><b>נכנס לך במזומן</b><b class="big num pos">${H.esc(H.mS(d.mine))}</b></div>`, H.row('החלק שלך שווה היום (לפי השוק)', H.mS(d.stakeValue)), H.row('מצב השוק', rg, 'wrap')];
     return `<div class="pf-h"><span class="b">🏢 הצעת רכישה</span><span class="b">${H.esc(REGIME_HE[d.regime] || '')}</span></div>${H.grid(rows)}<p class="note">אחרי מכירה: המחיר קבוע — בלי סיכון ובלי עלייה, והמשחק ממשיך עם המזומן.</p>${d.note ? `<p class="note">${H.escI(d.note)}</p>` : ''}`;
   }
-  const dil = `<div class="mini pfmini"><p class="mh">✂️ הדילול — לפני שמחליטים</p><div class="dil" role="img" aria-label="${H.esc(`החלק שלך יורד מ־${pct1(d.stake)} ל־${pct1(d.stakeAfter)}`)}"><span class="dil-b" style="--a:${Math.round(d.stake * 100)}%;--b:${Math.round(d.stakeAfter * 100)}%"><i></i><s></s></span><span class="num rtl">${H.esc(pct1(d.stake))} ← ${H.esc(pct1(d.stakeAfter))}</span></div>
-    <p class="note">החלק שלך: ${H.num(pct1(d.stake))} היום, ${H.num(pct1(d.stakeAfter))} אחרי הכסף. ${d.k < 1 ? `המחיר ${H.num(pct(1 - d.k))} מתחת לשווי לפי השוק.` : d.k > 1 ? `המחיר ${H.num(pct(d.k - 1))} מעל השווי לפי השוק.` : 'המחיר = השווי לפי השוק.'}</p></div>`;
-  const rows = [`<div class="row"><b>נכנס לחברה</b><b class="big num pos">${H.esc(H.mS(d.amount))}</b></div>`, H.row('תמורת', `${pct(d.pct)} מהחברה`), H.row('שווי לפני הכסף', `${H.mS(d.pre)} (פי ${d.k} מהשווי לפי השוק)`, 'wrap'),
-    H.row('חודשי מזומן עכשיו', +d.runway >= 99 ? 'רווחית — המזומן לא נגמר' : `${Math.round(d.runway * 10) / 10} חודשים`, +d.runway < 6 ? 'neg' : ''), H.row('מצב השוק', rg, 'wrap')];
-  return `<div class="pf-h"><span class="b">💼 הצעת השקעה</span><span class="b">${H.esc(REGIME_HE[d.regime] || '')}</span></div>${H.grid(rows)}${dil}${d.note ? `<p class="note">${H.escI(d.note)}</p>` : ''}`;
+  const dil = `<div class="mini pfmini"><p class="mh">✂️ הדילול — לפני שמחליטים · החלק שלך</p><div class="dil" role="img" aria-label="${H.esc(`החלק שלך יורד מ־${pct1(d.stake)} ל־${pct1(d.stakeAfter)}`)}"><span class="dil-b" style="--a:${Math.round(d.stake * 100)}%;--b:${Math.round(d.stakeAfter * 100)}%"><i></i><s></s></span><span class="num rtl">${H.esc(pct1(d.stake))} ← ${H.esc(pct1(d.stakeAfter))}</span></div>
+    <small class="dil-n">${d.k < 1 ? `המחיר ${H.num(pct(1 - d.k))} מתחת לשווי לפי השוק` : d.k > 1 ? `המחיר ${H.num(pct(d.k - 1))} מעל השווי לפי השוק` : 'המחיר = השווי לפי השוק'} · ${H.esc(REGIME_HE[d.regime] || '')}, מכפיל ${d.mult}×</small></div>`;
+  const rows = [`<div class="row"><b>נכנס לחברה · תמורת ${H.num(`${pct(d.pct)}`)} מהחברה</b><b class="big num pos">${H.esc(H.mS(d.amount))}</b></div>`, H.row('שווי לפני הכסף', `${H.mS(d.pre)} (פי ${d.k} מהשווי לפי השוק)`, 'wrap'),
+    H.row('חודשי מזומן עכשיו', +d.runway >= 99 ? 'רווחית — המזומן לא נגמר' : `${Math.round(d.runway * 10) / 10} חודשים`, +d.runway < 6 ? 'neg' : '')];
+  return `<div class="pf-h"><span class="b">💼 הצעת השקעה</span><span class="b">${H.esc(REGIME_HE[d.regime] || '')}</span></div>${H.grid(rows)}${dil}`;   // the engine's note repeats the mentor's question: the term sheet stays short enough to sit below the HUD on a desk
 }
 /* ============================================================ news blocks */
 const MN_MK = { port: 'הנמל סגור לחודשיים — כל חברה שהספק שלה משם עובדת חלש', fxcrisis: 'המטבע צנח ב־25%', tariff: 'חצי שנה של רווח נמוך ב־15% למי שקונה משם', election: 'המחזור הכלכלי שם התהפך', shipping: 'שלושה חודשים: רווח נמוך ב־8% בכל החברות', boom: 'חצי שנה: רווח גבוה ב־12% לחברות שם', poach: 'החברה בלי מנהל עד מינוי חדש או ניהול עצמי' };
@@ -142,10 +142,14 @@ function pfLine(H, X) {
   return `<p class="wp-now">☁️ <b>${H.num((+X.users || 0).toLocaleString('en-US'))}</b> משתמשים · הכנסה ${H.num(H.mS(X.mrr))} בחודש (${H.num(H.mS(X.arr))} בשנה, ₪${X.arpu.toFixed ? X.arpu.toFixed(2) : X.arpu} למשתמש) · הוצאות ${H.num(H.mS(X.cost))} · ${X.cf >= 0 ? 'רווח' : 'שריפה'} ${H.num(H.mSg(X.cf), H.cls(X.cf))} בחודש
     · שוק: <b>${H.esc(X.regimeLabel || REGIME_HE[X.regime] || '')}</b> (מכפיל ${X.mult}×) · שווי החברה ${H.num(H.mS(X.ev))} · החלק שלך ${H.num(pct1(X.stake))} = ${H.num(H.mS(X.stakeValue))}${X.debt ? ` · הלוואת מיזם ${H.num(H.mS(X.debt))}` : ''} · גויסו ${H.num(H.mS(X.raised))}${X.ratchets ? ` · ${H.num(String(X.ratchets))} פיצויי מחיר למשקיעים` : ''}${X.crunches ? ` · <b class="neg">${H.num(String(X.crunches))} גיוסי חירום</b>` : ''}${X.breaches ? ` · <b class="neg">${H.num(String(X.breaches))} הפרות תנאי</b>` : ''} · המתחרה ${H.num(pct(X.rival))} מהשוק · צוות השיווק עד רמה ${X.cap}</p>`;
 }
-function channelsHtml(H, T, acts, btn) {
+function channelsHtml(H, T, acts, btn, X) {
   if (!T || !T.length) return '';
-  const by = new Map(); acts.forEach((a, i) => { if (a.id === 'spend') { const ch = String(a.param).split(':')[0]; if (!by.has(ch)) by.set(ch, []); by.get(ch).push([a, i]); } });
-  return `<section class="wp-sec"><h3>ערוצי הפרסום</h3><div class="tblwrap"><table class="pftbl"><caption class="sr">ערוצי הפרסום: רמת התקציב (0–3), ההוצאה בחודש ועלות משתמש חדש. עלות המשתמש עולה עם התקציב ועם גודל האפליקציה.</caption>
+  // a level the team could run (≤ cap) but the engine refuses = the emergency round's investors froze all marketing (platform.js spend: frozen)
+  const cap = X && X.cap != null ? +X.cap : 3; const lvOf = (a) => +String(a.param).split(':')[1] || 0;
+  const frozen = acts.some((a) => a.id === 'spend' && lvOf(a) > 0 && lvOf(a) <= cap && !a.enabled);
+  const why = (a) => (a.enabled || a.reason ? a : { ...a, reason: lvOf(a) > cap ? 'צוות השיווק עוד קטן מדי לתקציב כזה' : frozen ? 'הפרסום מוקפא אחרי גיוס החירום' : undefined });
+  const by = new Map(); acts.forEach((a, i) => { if (a.id === 'spend') { const ch = String(a.param).split(':')[0]; if (!by.has(ch)) by.set(ch, []); by.get(ch).push([why(a), i]); } });
+  return `<section class="wp-sec"><h3>ערוצי הפרסום</h3>${frozen ? '<p class="wp-now pf-frozen" role="note"><b class="neg">❄️ הפרסום מוקפא:</b> המשקיעים של גיוס החירום עצרו את כל הערוצים לשלושה חודשים. אפשר רק לעצור — לא להוסיף תקציב.</p>' : ''}<div class="tblwrap"><table class="pftbl"><caption class="sr">ערוצי הפרסום: רמת התקציב (0–3), ההוצאה בחודש ועלות משתמש חדש. עלות המשתמש עולה עם התקציב ועם גודל האפליקציה.</caption>
     <thead><tr><th scope="col">ערוץ</th><th scope="col">רמה</th><th scope="col">בחודש</th><th scope="col">עלות למשתמש</th></tr></thead><tbody>${T.map((c) => `<tr><th scope="row">${H.esc(c.name)}</th><td class="num">${'▮'.repeat(c.level)}${'▯'.repeat(3 - c.level)} ${c.level}</td><td class="num">${c.spend ? H.esc(H.mS(c.spend)) : '—'}</td><td class="num">₪${Math.round(c.cac)}</td></tr>`).join('')}</tbody></table></div>
     ${T.map((c) => (by.get(c.id) || []).length ? `<div class="wp-seg" role="group" aria-label="${H.esc(c.name)}: תקציב"><span class="wp-segl">${H.esc(c.name)}</span>${by.get(c.id).map(([a, i]) => btn(a, i, `רמה ${String(a.param).split(':')[1]}`, a.cac ? `₪${Math.round(a.cac)} למשתמש` : 'לעצור')).join('')}</div>` : '').join('')}</section>`;
 }
@@ -167,7 +171,7 @@ export function pfPanelHtml(H, P, X, btn) {
   const acts = P.actions || [];
   const rest = acts.map((a, i) => [a, i]).filter(([a]) => a.id !== 'spend');
   const sub = (a) => (a.id === 'raise' && a.stakeAfter != null && X ? `החלק שלך ${pct1(X.stake)} ← ${pct1(a.stakeAfter)}` : '');
-  return `${pfLine(H, X)}<div class="wp-gauges">${(P.gauges || []).map((g) => pfGauge(H, g, X)).join('')}</div>${channelsHtml(H, P.table, acts, btn)}${cohortsHtml(H, P.rows)}
+  return `${pfLine(H, X)}<div class="wp-gauges">${(P.gauges || []).map((g) => pfGauge(H, g, X)).join('')}</div>${channelsHtml(H, P.table, acts, btn, X)}${cohortsHtml(H, P.rows)}
     ${rest.length ? `<section class="wp-sec"><h3>כסף וגיוסים</h3><div class="wp-acts">${rest.map(([a, i]) => btn(a, i, a.label, sub(a))).join('')}</div><p class="note">סבב גיוס מוכר חלק מהחברה במחיר של השוק היום: הלחיצה הראשונה מראה כמה כסף נכנס וכמה מהחברה נשאר שלך, השנייה מאשרת.</p></section>` : ''}`;
 }
 /** the arm message of a two-tap action (shown in the panel's live line before the confirming tap) */

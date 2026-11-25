@@ -3312,7 +3312,7 @@ function leagueActsHtml(acts) {
 }
 /** w11 / w15 panel buttons: the action's index in panel.actions (data-wact), 💡 the mentor's pick, a sub-line (price / CAC / dilution) */
 function wvBtn(a, i, label, sub) {
-  return `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(`${a.suggested ? '💡 ' : ''}${label}${sub ? ` ${sub}` : ''}${label !== a.label ? ` — ${a.label}` : ''}${!a.enabled && a.reason ? ` · ${a.reason}` : ''}`)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(label)}${sub ? ` <small>${escI(sub)}</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
+  return `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(`${a.suggested ? '💡 ' : ''}${label}${sub ? ` ${sub}` : ''}${!a.enabled && a.reason ? ` · ${a.reason}` : ''}${label !== a.label ? ` — ${a.label}` : ''}`)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(label)}${sub ? ` <small>${escI(sub)}</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
 }
 function leaguePanelHtml(P, LG) {
   const acts = P.actions || [];
