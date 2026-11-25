@@ -2,6 +2,45 @@
 
 ## סיכום בעברית
 
+### עדכון 2026-11-26: כלי מנהל + צ'אט בחדרים
+
+פירוט מלא נמצא ב-`ADMIN_CHAT.md`.
+
+**שורה תחתונה:** מוכן כטיוטה. זה שחרור נפרד, והוא בא **אחרי** שחרור החדרים, באישור נפרד שלך.
+
+**מה נבנה:** מיגרציה חדשה `20261126_admin_mod_chat.sql`. היא טיוטה ולא הופעלה בשום מקום חוץ מבמכונה.
+- **רק אתה, כמנהל:**
+  - פותח את כל המפות.
+  - משעה שחקן (עם סיבה ומשך) ומבטל השעיה.
+  - מעיף שחקן מחדר: בחדר המתנה, או באמצע משחק, ואז השאר ממשיכים לשחק.
+  - סוגר חדר.
+  - מוציא שחקן מקבוצה.
+  - רואה דיווחים מהצ'אט, מסתיר הודעות ומשעה את מי ששלח אותן.
+  - רואה יומן פעולות שאי אפשר למחוק.
+- **כל פעולה הורסת דורשת לחיצה שנייה.**
+- **השרת בודק שאתה המנהל בכל פעולה.**
+- **צ'אט בחדר:**
+  - רק שחקני החדר.
+  - עד 120 תווים.
+  - השרת חוסם קישורים, טלפונים, מיילים, @שמות וקללות, בעברית ובאנגלית.
+  - עד 5 הודעות ב-10 שניות ועד 60 בשעה.
+  - משפטים מהירים, השתקה ו"דווח".
+  - נשמר 7 ימים.
+  - לא נוגע במשחק.
+
+**בדיקות** (מספרים אמיתיים, על `git archive` של `fcd614b`, 0 כישלונות):
+- **אופליין:** 939 מתוך 939.
+  - 452 בדיקות החדרים, כמו קודם.
+  - 195 בדיקות חדשות למנהל ולצ'אט.
+  - 292 בדיקות של הלובי, הקבוצות, p0b, p1_touch ו-admin_e2e.
+- **על ה-staging המקומי האמיתי:** 295 מתוך 295.
+  - 147 בדיקות החדרים, כמו קודם.
+  - 148 בדיקות חדשות: חוזה 75, צ'אט בדפדפן 35, מנהל בדפדפן 38.
+
+**מה דורש את האישור שלך:** ראה §7, סעיפים 7–10.
+
+---
+
 **שורה תחתונה: מוכן לשחרור לייצור, אחרי האישורים שלך. החוסם הגדול (B1) נבדק עכשיו על שרת אמיתי מקומי, ונמצא ותוקן בו באג שהיה שובר כל חדר.**
 
 **מה עשיתי:**
@@ -62,7 +101,7 @@ It is free and runs inside this machine on 127.0.0.1. No hosted Supabase project
 | piece | what | like Supabase |
 |---|---|---|
 | PostgreSQL 17.12 (PGDG apt) | initdb with superuser `supabase_admin`; scram over TCP | `postgres` is a non-superuser (createrole, createdb, replication, bypassrls) and owns `public` / `game` / `extensions`. anon / authenticated / service_role are NOLOGIN. `authenticator` (noinherit) is the PostgREST login. pgcrypto lives in `extensions`. Supabase's default privileges are on `public` |
-| schema | `production_baseline.sql` (FK-ordered by `baseline.mjs`), then rooms → groups v2 → competitions, each applied **as postgres**, each once (`game.staging_applied`) | the SQL editor / `psql "$DB_URL"` path of the runbook |
+| schema | `production_baseline.sql` (FK-ordered by `baseline.mjs`), then the live `20261123_admin.sql` + the read-only `production_supplement.sql` (= the live public API), then rooms → groups v2 → competitions → the moderation + chat draft `20261126_admin_mod_chat.sql`, each applied **as postgres**, each once (`game.staging_applied`) | the SQL editor / `psql "$DB_URL"` path of the runbook |
 | PgBouncer 1.26.1 | transaction pooling | Supavisor :6543 (needs `prepare:false`, which index.ts sets) |
 | PostgREST 13.0.4 (default), 12.2.3, 14.2 | `db-schemas=public`, `db-anon-role=anon` | the REST API |
 | Deno 2.9.8 + `edge_shim.ts` | runs `supabase/functions/room/index.ts` and `verify-result/index.ts` unchanged: captures their `Deno.serve`, injects `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_DB_URL`, and logs wall + CPU ms per request | the Edge Runtime |
@@ -74,7 +113,7 @@ Run it:
 bash tools/staging/install.sh                                       # once (apt + GitHub releases)
 RR_SRC=<export of commit C> bash tools/staging/setup.sh --reset     # DB + roles + baseline + drafts
 RR_STAGING_FAKETIME=1 bash tools/staging/start.sh                   # FAKETIME: tests can move the DB clock
-bash tools/staging/run_live.sh                                      # contract (rooms) + smoke + online_local
+bash tools/staging/run_live.sh                                      # contract (rooms) + smoke + online_local + admin_chat_contract
 . /tmp/rr-staging/target.env && python3 tests/rooms_e2e.py http://localhost:<site>/ --hook=… --local
 RR_POSTGREST=/opt/staging-bin/postgrest-v14.2 RR_EDGE_DB=direct …   # other PostgREST / a direct DB URL (stop.sh postgrest room verify-result first)
 bash tools/staging/stop.sh
@@ -139,6 +178,30 @@ Commit `a179c4f` (plus the `start.sh` FAKETIME-restart fix committed with this d
 - **`python3 tests/guard_lint.py`:** only the pre-existing `sql_drafts.test.mjs:7` note.
 - **Full contract (all sections, `RR_DRAFTS=1`):** 162 passed, 19 failed, 3 DIFF-ASSUMED. All 19 failures are in the pre-draft sections: the fake's model of older RPCs differs from `production_baseline.sql` (missing `rr_sync_progress2` / `rr_weekly`, `{ok:true}` vs `null` answers). Every groups v2 + competitions + rooms case passes on real PostgreSQL. This is for the backend owners (§5, F1).
 
+### 4.1 Moderation + chat (draft `20261126_admin_mod_chat.sql`) — run of 2026-11-26 on a `git archive` export of `fcd614b`
+
+Setup:
+- Private copies: `COPY_DIR=/tmp/admchat PORT_BASE=12000`.
+- A private stack: `RR_STAGING_DIR=/tmp/rr-staging-adm RR_STAGING_PORT=55421`, `setup.sh --reset` then `RR_STAGING_FAKETIME=1 start.sh`.
+- One suite at a time.
+
+| suite | offline (fake / PGlite) | live-local (real stack) |
+|---|---|---|
+| the §4 room regression (room_core 22, room_net 70, remote_driver 29, fairness 3, flags 16, sql_drafts 14, online_migration 12, backend_contract 185, online_smoke 25, rooms_e2e 76) | **452 / 452** | contract-rooms 43 (+1 DIFF-ASSUMED, 1 skip), smoke 27, online_local 22, rooms_e2e 55: **147 / 147** |
+| `node tests/admin_chat_sql.test.mjs` (PGlite: additive, only `game.board` + `game.room_purge` replaced, rollback exact, 84 filter cases in SQL, every rule) | **22 / 22** | (the draft applies as postgres on PG 17: `setup.sh`) |
+| `node tests/chat_rules.test.mjs` | **7 / 7** | — |
+| `node tests/admin_unlock.test.mjs` | **19 / 19** | — |
+| `node tests/admin_chat_contract.mjs` | **74 / 74** (fake) | `--live --local`: **75 / 75** |
+| `python3 tests/chat_e2e.py` | **35 / 35** | `--local`: **35 / 35** |
+| `python3 tests/admin_mod_e2e.py` | **38 / 38** | `--local`: **38 / 38** |
+| lobby_e2e 46, groups_e2e 54, p0b 21, p1_touch 13, admin_e2e 18, fakebackend_test 20, groups.test 120 | **292 / 292** | — |
+| **total** | **939 passed, 0 failed** | **295 passed, 0 failed** |
+
+Findings of this run:
+- **libfaketime on the stack:** a moved DB clock reaches each pooled PostgreSQL backend on its own schedule. About 10 calls on the old time were seen. So short windows (the 10 s chat limit) use real time in `--local`; minutes / hours still use the clock.
+- **The client's room screen used to scroll to the top on every poll repaint.** It now keeps the reading position (chat, opponents).
+- **A focused, half-typed chat message holds a poll repaint for ≤ 8 s.** This is so the phone keyboard stays open.
+
 ## 5. Gaps (status)
 
 | # | gap | status |
@@ -192,6 +255,21 @@ select proname, has_function_privilege('anon', oid, 'execute') from pg_proc wher
 select relname, relrowsecurity from pg_class where relnamespace = 'game'::regnamespace and relname like 'room%';                          -- all true
 ```
 
+**3b. Moderation + chat (a SEPARATE release, owner approval; after rooms are live and stable).**
+- Pre-check:
+```sql
+select to_regclass('game.rooms') is not null as rooms_live, to_regclass('game.bans') is null as fresh;   -- both true
+select count(*) from game.admins;                                                                       -- 1 (the owner)
+```
+- Apply: paste `supabase/migrations/20261126_admin_mod_chat.sql` (one transaction). Then run:
+```sql
+notify pgrst, 'reload schema';
+select proname, has_function_privilege('anon', oid, 'execute') from pg_proc where proname like 'rr_admin_%' or proname like 'rr_room_chat_%' or proname = 'rr_ban_status';   -- 20 rows (4 live rr_admin_* + 16 new), all true
+select tgname from pg_trigger where tgname in ('room_seats_ban_guard','group_members_ban_guard','admins_mod_log','energy_gifts_mod_log','mod_log_no_change','mod_log_no_truncate');   -- 6 rows
+```
+- The client (`js/net.js`, `js/rooms.js`, `js/roomchat.js`, `js/admin.js`) ships with the site. Without the migration, the chat cannot send ("משהו השתבש בשרת"), its list stays empty, and the new admin tabs show the error (the old ⚡ tools keep working). So apply the migration **before** deploying a site that has the chat, in the same window.
+- Smoke (owner): open a room with a second device, chat, send a phone number (it must be refused), report a message, then in the profile panel hide it, kick, and unban a test player.
+
 **4. Deploy the function from `C` (owner approval).**
 - `supabase functions deploy room --no-verify-jwt --project-ref <prod-ref>`.
 - Env: none to set (only the injected `SUPABASE_DB_URL`).
@@ -224,6 +302,9 @@ select count(*) from game.rooms where status = 'playing' and last_activity < now
 | R3 stop play | `supabase functions delete room` (or deploy a stub answering 503) | rooms freeze; RPCs still answer (leave / cancel work) |
 | R3b roll the function back | redeploy the previous `room` (+ site + verify-result) | rooms started by the new pin get 409 for 2 min, then close (S1). Roll back inside 2 minutes to keep them |
 | R4 remove everything | export if needed, then run the ROLLBACK block at the bottom of `rooms.sql` (now also drops `room_sweep` / `room_purge`) | all room data dropped; catalog = baseline (proved by `online_migration.test.mjs`) |
+| R5a stop chat only (instant) | `revoke execute on function public.rr_room_chat_send(uuid,text,uuid,text) from anon, authenticated;` | the panel shows the server's refusal; reading / reports / admin tools keep working; undo with `grant` |
+| R5b lift every ban (instant) | `delete from game.bans;` (logged nowhere: do it only on purpose) | everybody is back on boards / rooms / chat |
+| R5 remove moderation + chat | export if needed, then run the ROLLBACK block at the bottom of `20261126_admin_mod_chat.sql` **before** R4 | bans, mod log and chat dropped; `game.board` + `game.room_purge` restored byte for byte; triggers gone (proved by `admin_chat_sql.test.mjs`) |
 
 ## 7. Needs the owner's explicit approval
 
@@ -233,5 +314,9 @@ select count(*) from game.rooms where status = 'playing' and last_activity < now
 4. Flipping `rooms` to default ON (step 7).
 5. The retention policy: when to run `game.room_purge(N)` (step 9).
 6. Optional: a hosted staging project (step 1).
+7. Applying `20261126_admin_mod_chat.sql` to production (step 3b). It adds triggers on 4 live tables (`room_seats`, `group_members`, `admins`, `energy_gifts`) and **replaces the live `game.board`** with the same body + a "no active ban" filter (same JSON for everyone not banned, proved against the original body).
+8. The chat content policy: the word list (`game.chat_lists`), blocking social-app names, "7+ digits = a phone number" (also blocks `1500000` written without commas), 120 chars, 5 / 10 s + 60 / h.
+9. Data retention: chat and reported messages are deleted after 7 days (also before the owner looked at a report); refused messages keep no text; the mod log is kept forever (append-only).
+10. Known gap to decide before the competitions release: `game.board2` (competitions draft) does not filter banned players yet — add the same `not exists (active ban)` filter there when competitions ship.
 
 Groups v2, competitions and worlds drafts are **not** part of this release. On the local stack they apply and their contract cases pass, but they have their own approvals (`ONLINE.md` §12, `20261125_worlds.sql`).
