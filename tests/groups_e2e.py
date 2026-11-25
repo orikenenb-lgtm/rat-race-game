@@ -79,7 +79,7 @@ async def run_map(b):
         un = [c['id'] for c in cards if not c['locked'] and not c['soon']]
         check(sc, 'linear unlock on a new-design save: w1–w5 open, every later built map locked', un == ['w1', 'w2', 'w3', 'w4', 'w5'], un)
         soon = [x for s in S for x in s['soon']]; pm = [m['id'] for m in wm if not m['playable']]
-        check(sc, 'planned maps are "בקרוב" pins, never buttons, with "תיפתח אחרי …"', [x['id'] for x in soon] == pm and all(x['tag'] != 'BUTTON' and not x['act'] and x['buttons'] == 0 and 'תיפתח אחרי' in x['line'] for x in soon) and len(pm) >= 7, soon)
+        check(sc, 'planned maps are "בקרוב" pins, never buttons, with "תיפתח אחרי …"', [x['id'] for x in soon] == pm and all(x['tag'] != 'BUTTON' and not x['act'] and x['buttons'] == 0 and 'תיפתח אחרי' in x['line'] for x in soon) and len(pm) >= 1, soon)
         w6 = next(c for c in cards if c['id'] == 'w6')
         check(sc, 'a locked map says how it opens: w6 "לפתוח: לצאת מעיר התיירות"', w6['locked'] and 'לצאת מעיר התיירות' in w6['line'], w6)
         mi = await pg.evaluate("() => (document.querySelector('.lb-mission b') || {}).textContent || ''")

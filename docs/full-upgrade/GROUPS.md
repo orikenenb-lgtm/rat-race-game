@@ -67,4 +67,5 @@
   and the CATALOG-25 tables / dependency graph rewritten as "map N of world K". Until then the two agree on w1–w5 only.
 - Engine-side wording still saying "עולם" for one level: `js/systems/mentor.js` ("טוב לעולם הראשון"). Also `js/main.js` (the no-lobby
   fallback picker: "בחר עולם", "בחירת עולם") is in no lane's list — left as is.
-- Planned maps w19–w25 (and w18 until it is committed) take their names / lines from `PLANNED`; when meta gains an entry, meta wins.
+- Planned maps (w20–w25 since the engine lane registered w18 / w19 in eb83fcb / f6698ee) take their names / lines from `PLANNED`; when meta gains an
+  entry, meta wins — no UI change is needed for a new map beyond its card art (`MOTIF` / `GEN_SKY` in `js/lobby.js`) and its lessons-meta.

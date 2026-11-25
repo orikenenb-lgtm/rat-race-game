@@ -176,6 +176,12 @@ export const LESSON_META = {
   // w17 (js/worlds/w17.js lessonDefs, since 8709bd0)
   real_option: { teaser: 'למה לשלם על שלב זול כשהסיכוי להגיע למדף קטן?', hint: 'בגבעת המעבדות: כשתרופה מאושרת, כשקונים מולקולה, או בשאלת אבא עשיר על שלב I.' },
   patent_cliff: { teaser: 'כמה שווה תרופה שהפטנט שלה נגמר בעוד שנתיים?', hint: 'בגבעת המעבדות: כשפטנט פג, או בשאלת אבא עשיר על תרופה קרובה לצוק.' },
+  // w18 (js/worlds/w18.js lessonDefs; the insure module's ctx.lesson calls, since eb83fcb)
+  correlated_tail: { teaser: 'למה אלף בתים בחוף הם לא אלף סיכונים נפרדים?', hint: 'בחוף הסערות: כשסערה פוגעת בחוף, או בשאלת אבא עשיר על ביטוח משנה.' },
+  combined_ratio: { teaser: 'איך יודעים אם חברת ביטוח באמת מרוויחה?', hint: 'בחוף הסערות: כשקונים תיק פוליסות, כשהתביעות עוברות את הפרמיות, או בשאלת אבא עשיר על הורדת מחירים.' },
+  // w19 (js/worlds/w19.js lessonDefs; the bell adapter's ctx.lesson calls, since f6698ee)
+  guidance_cred: { teaser: 'למה מניה נופלת גם כשהחברה הרוויחה הרבה?', hint: 'בפעמון הבורסה: כשרבעון מפספס את ההדרכה, או בשאלת אבא עשיר על הבטחת רווח.' },
+  buyback: { teaser: 'מתי כדאי לחברה לקנות את המניות של עצמה?', hint: 'בפעמון הבורסה: בקנייה עצמית, ברכישה משלימה, או בשאלת אבא עשיר על מניה בשיא.' },
 };
 
 /* wave 3a (docs/full-upgrade/research/J1-journey-learning.md §2.4, brief §16): lesson titles / texts that taught an absolute rule.
