@@ -169,6 +169,10 @@ export const LESSON_META = {
   stable_group: { teaser: 'כמה מפוזרים באמת כשמגיע מיתון?', hint: 'באימפריה: כשסערה פוגעת בשתי חטיבות או יותר יחד, או בשאלת אבא עשיר על פיזור.' },
   qty_hedge: { teaser: 'כמה מהיבול כדאי לנעול מראש?', hint: 'בארץ השדות: כשנועלים מחיר לקציר, או בשאלת אבא עשיר על צפי היבול.' },
   hedge_margin: { teaser: 'למה גידור שעובד מבקש עוד כסף?', hint: 'בארץ השדות: כשהמחיר עולה ויש חוזה גידור פתוח.' },
+  // w14 (js/worlds/w14.js lessonDefs; the credit module's ctx.lesson calls, since b86b077)
+  bank_run: { teaser: 'למה גם בנק בריא יכול להיתקע בלי מזומן?', hint: 'ברובע הבנקים: כשהאמון יורד והמפקידים מושכים כסף, או בשאלת אבא עשיר על פיקדונות.' },
+  adverse_selection: { teaser: 'מי נשאר כשהריבית שלך גבוהה מהשוק?', hint: 'ברובע הבנקים: כשמתמחרים הלוואות מעל השוק, או בשאלת אבא עשיר על לווים.' },
+  maturity_mismatch: { teaser: 'מה קורה למשכנתא קבועה כשהריבית עולה?', hint: 'ברובע הבנקים: כשהריבית עולה ויש הרבה משכנתאות בריבית קבועה, או בשאלת אבא עשיר.' },
 };
 
 /* wave 3a (docs/full-upgrade/research/J1-journey-learning.md §2.4, brief §16): lesson titles / texts that taught an absolute rule.
