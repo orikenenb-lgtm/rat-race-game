@@ -312,7 +312,7 @@ const has2 = has; void has2;
 /* ---------- I8: per-mechanic policy plug-ins (tools/policies/<mechanic>.mjs). A plug-in exports make(ctx) → {policyName: policy}; those
    names override / extend POLICIES for the worlds of that mechanic only (w1–w4 never load one, so their reports are unchanged). */
 const PLUGINS = {};
-for (const mech of ['season', 'plant', 'chain', 'projects', 'energy', 'portfolio', 'league', 'credit', 'multinational', 'platform', 'harvest']) {
+for (const mech of ['season', 'plant', 'chain', 'projects', 'energy', 'portfolio', 'league', 'credit', 'multinational', 'platform', 'harvest', 'holding']) {
   const mod = await import(`./policies/${mech}.mjs`);
   PLUGINS[mech] = mod.make({ E, POLICIES, ddRule, facade, claimedNet, runFocus, firstEnabled, ABL });
 }
@@ -805,7 +805,7 @@ if (import.meta.url === `file://${process.argv[1]}` && (args.includes('--world-g
 }
 /* ---------- worlds wave 0: the per-world balance gates of a module world (DESIGN §5.3) — `node tools/sim.mjs --world-gates N wX`
    Every policy below × character × N seeds (seedOf), free mode, cap 1.6× the limit; a winner plays 24 more months under the same policy
-   (continueAfterWin) for G-durable. Records: [pol, char, i, bucket, won, inTime, months, stars, turns, bankrupt, pwMet, forcedLoans, nwEnd (at the end, before any continuation), modForced (a module's forced liquidations, w10; FFP fines, w13; deposit runs, w14; frauds found, w11; emergency rounds, w15; forced margin liquidations, w16), modStat (w14: the last new-loan PD multiplier; w15: the final stake; w16: 1 if a drought-hit harvest had an over-hedge buy-back loss, 0 if not, null without a drought-hit harvest)]. */
+   (continueAfterWin) for G-durable. Records: [pol, char, i, bucket, won, inTime, months, stars, turns, bankrupt, pwMet, forcedLoans, nwEnd (at the end, before any continuation), modForced (a module's forced liquidations, w10; FFP fines, w13; deposit runs, w14; frauds found, w11; emergency rounds, w15; forced margin liquidations, w16; group defaults, w12), modStat (w14: the last new-loan PD multiplier; w15: the final stake; w16: 1 if a drought-hit harvest had an over-hedge buy-back loss, 0 if not, null without a drought-hit harvest)]. */
 export function worldGatePols() { return ['guideTapper', 'blindTapper', 'naive', 'smart', 'saver', 'founder', 'diversified', 'gambler', 'f:frugal', 'f:none', 'maxDebt']; }
 export function worldGatesRun(wid, n, extra = []) {
   const w = E.getWorld(wid); const recs = []; const t0 = Date.now();
@@ -816,7 +816,7 @@ export function worldGatesRun(wid, n, extra = []) {
     for (const pol of pols) {
       for (let i = 0; i < n; i++) {
         const { st, end } = play(wid, ch.id, seedOf(wid, i), pol, cap);
-        const won = !!(end && end.status === 'won'); let pw = null; const mEnd = E.metrics(st); const nwEnd = Math.round(mEnd.netWorth); const wiE = mEnd.worldIndicators || {}; const modForced = (wiE.portfolio || {}).forced || (wiE.league || {}).ffp || (wiE.credit || {}).runs || (wiE.multinational || {}).frauds || (wiE.platform || {}).crunches || (wiE.harvest || {}).forced || 0; const modStat = wiE.credit ? wiE.credit.pdNew : wiE.platform ? wiE.platform.stake : wiE.harvest ? (wiE.harvest.droughtHarv ? (wiE.harvest.overDrought > 0 ? 1 : 0) : null) : null;
+        const won = !!(end && end.status === 'won'); let pw = null; const mEnd = E.metrics(st); const nwEnd = Math.round(mEnd.netWorth); const wiE = mEnd.worldIndicators || {}; const modForced = (wiE.portfolio || {}).forced || (wiE.league || {}).ffp || (wiE.credit || {}).runs || (wiE.multinational || {}).frauds || (wiE.platform || {}).crunches || (wiE.harvest || {}).forced || (wiE.holding || {}).defaults || 0; const modStat = wiE.credit ? wiE.credit.pdNew : wiE.platform ? wiE.platform.stake : wiE.harvest ? (wiE.harvest.droughtHarv ? (wiE.harvest.overDrought > 0 ? 1 : 0) : null) : null;
         if (won && E.continueAfterWin(st).ok !== false) { const P = policyFor(wid, pol); const r = prng(i + 101); const m0 = st.month; let g = 0;
           while (!st.over && st.month < m0 + 24 && g++ < 3000) { P.between(st, { r }); if (st.over) break; if (st.pending) { let ev = E.currentEvent(st); let k = 0; while (ev && k++ < 12) { const c = k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); const res = E.choose(st, ev, c[0], c[1]); ev = res.event; } if (st.over) break; }
             E.rollDice(st); let ev = E.landing(st); let k = 0; while (ev && !st.over) { const c = ev.auto ? [ev.options[0].id] : k > 6 ? [(ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id] : P.decide(st, ev, { r, n: k }); let res = E.choose(st, ev, c[0], c[1]); if (!res.ok) res = E.choose(st, ev, (ev.options.find((o) => o.enabled && ['done', 'pass', 'ok', 'decline'].includes(o.id)) || ev.options.find((o) => o.enabled)).id); ev = res.event; k++; } }
