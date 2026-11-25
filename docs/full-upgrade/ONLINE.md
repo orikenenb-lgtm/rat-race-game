@@ -120,9 +120,10 @@ engine legality on a COPY (422, nothing changes) → commit (+1 `state_version`,
 | leave during play | forfeit (frozen, ranked after everyone else); the next tick closes the round |
 | host leaves | lobby: the host role moves; playing: nothing special (no host powers during play) |
 | two connections, same player | same seat; both may send; `state_version` + idempotency allow ONE apply per version; heartbeat `conn` → newest = `primary` (older tab read-only, UX only) |
-| stuck | no action for 2 h, or every active seat away for 30 min → finished (`abandoned`), ranked as-is; lobby idle 2 h → cancelled (`expired`) |
+| stuck | no action for 2 h, or every active seat away for 30 min → finished (`abandoned`), ranked as-is (next Edge tick/act); lobby idle 2 h → cancelled (`expired`) — in SQL too: `game.room_sweep()` runs at the start of `rr_room_create` / `rr_room_join` / `rr_my_rooms` (no cron). The 3-open-rooms cap counts lobbies + playing rooms active in the last 2 h |
 | cancel | lobby: host; playing: majority vote of active seats; nothing is ranked |
-| deploy during a room | the room keeps `engine_sha`; a function with another pin answers `409 version_changed` (cancel by vote, or abandoned after 2 h) — deploy at quiet times |
+| deploy during a room | the room keeps `engine_sha`; a function with another pin answers `409 version_changed {closes_in}` for 2 minutes (the deploy window; a server with the room's own pin clears `pin_mismatch_at`), then its next start/act/tick closes the room: cancelled, `end_reason = version_changed`, unranked (room_core `pinGate`, ONLINE_RELEASE.md S1) — still deploy at quiet times |
+| retention | `select game.room_purge(30);` (owner, SQL editor) deletes rooms that ended > 30 days ago with their seats/actions/events, and failed-join rows > 1 day; never scheduled, never granted to the API roles |
 
 ## 6. What a client may see — `room_core.redact()`
 
@@ -185,7 +186,12 @@ Every group RPC: `not_member` for a non-member / unknown id (no oracle).
 | `node tests/fairness.test.mjs [seeds=12]` | same seed × opposite policies: 15 streams + dice + tiles identical every turn; card differences only `business/life/doodad`; a live room: identical dice/tiles/streams per round |
 | `node tests/room_net.test.mjs` | 5 identities over HTTP against the fake (§30 list: room+join, permissions, start, turn, out of turn, double click, parallel, duplicate, stale, disconnect+return, host leaves, timeout, finish once, forged result, foreign user, revoked invite, closed competition) |
 | `python3 tests/groups_v2.test.py` | 32-cell permission matrix, handles, bans/rotation, throttle, long input, ownership, history, old keys, dump/load |
-| `node tests/backend_contract.mjs` | + 84 draft cases (groups v2, competitions, rooms RPC + Edge status codes); staging runs them with `RR_DRAFTS=1` |
+| `node tests/backend_contract.mjs` | + 85 draft cases (groups v2, competitions, rooms RPC + Edge status codes); staging runs them with `RR_DRAFTS=1`; `--live --local [--only=rooms]` = the local staging stack |
+| `RR_PGLITE=<dir> node tests/online_migration.test.mjs` | rooms.sql alone on the baseline: additive, atomic, rollback exact, grants, volatility, order independence + lifecycle S2/S5/S6 |
+| `node tests/online_smoke.mjs [--live --local]` | the release smoke (2 identities create → … → cancel vote) on the fake, the local stack, or (with approval) a hosted project |
+| `tools/staging/{install,setup,start,stop,run_live}.sh` | LOCAL staging: PostgreSQL 17 + PgBouncer (transaction mode) + PostgREST + Deno running `index.ts` + a Supabase-like gateway — no hosted project |
+| `node tests/online_local.test.mjs` | on the local stack: postgres.js json/jsonb/bigint binding, PostgREST error mapping + commit-on-400, concurrency through the pool, S1/S2/S5/S6 end to end |
+| `python3 tests/rooms_e2e.py <site> --local` | the browser suite (rooms part) against the local stack (`tests/online_localstack.py` relays the page's calls; `RR_STAGING_FAKETIME=1` moves the DB clock) |
 | `RR_PGLITE=<dir> node tests/sql_drafts.test.mjs` | the three drafts applied on the production baseline in PGlite; group/competition/room RPCs; the Edge write path (room_store) playing a room to the end; grants + RLS; `index.ts` static engine import hashes to the pin. SKIPs without PGlite (`npm i @electric-sql/pglite` anywhere) |
 
 ## 11. Deviations from the O1 design (and why)
@@ -198,16 +204,17 @@ Every group RPC: `not_member` for a non-member / unknown id (no oracle).
    jsonb round trip changed the outcome in 8 of 40 games (measured). See §13 for the same issue in production.
 4. **`mode: ranked | casual`.** The engine forces mentor `hint` in ranked modes, so a "help level" setting only exists in casual rooms (engine
    `free`, room-capped length).
-5. **No `paused` / `version_changed` room status.** A pin change answers 409 `version_changed`; the room is cancelled by vote or abandoned.
+5. **No `paused` / `version_changed` room status.** A pin change answers 409 `version_changed` for 2 minutes, then the room is cancelled with
+   `end_reason = version_changed` (S1); old states are never continued with another engine.
 6. **Opponent progress = last closed round** (not live): opponents hold the same card at the same time.
 7. **Leaving during play** is SQL-only (forfeit + `needs_tick`); the round close needs the engine, so the next Edge `tick` does it.
 8. **Competition board is a new `game.board2`** instead of replacing `game.board` (daily/weekly/legacy challenges keep their exact order
    and keys; v2 competitions rank without time). `rr_finish` keeps production's 6 h hard limit; `board2` ranks only finishes within
    `grace_minutes` (default 120).
 9. **Throttle rows survive a "raise"** via `set_config('response.status','400')` + a returned PostgREST-shaped error (a real raise would roll
-   the counter back). [verify live: PostgREST must commit such a response.]
-10. Not built (phase 2+): Realtime doorbell, live competitions as scheduled rooms (`kind = 'live'`, `competition_id` column exists), finished-room
-    retention, sealed async competitions as single-seat rooms.
+   the counter back). Verified on the local stack with PostgREST 12.2.3, 13.0.4 and 14.2: the 400 response is committed.
+10. Not built (phase 2+): Realtime doorbell, live competitions as scheduled rooms (`kind = 'live'`, `competition_id` column exists), a scheduled
+    retention job (only the callable `game.room_purge(days)`), sealed async competitions as single-seat rooms.
 
 ## 12. Production changes that need the owner's approval
 
@@ -218,15 +225,16 @@ Every group RPC: `not_member` for a non-member / unknown id (no oracle).
 | 3 | Rooms: 5 tables + `rr_room_*` + `rr_my_rooms` | `supabase/migrations/20261124_rooms.sql` | additive |
 | 4 | Deploy Edge Function `room` (`verify_jwt = false`, in the DB region), released together with the site + `verify-result` pin | `supabase/functions/room/` | new function |
 | 5 | verify-result follow-up for attempts > 1: `ROW` must use `coalesce(r.seed, c.seed)` | `supabase/functions/verify-result/index.ts` (not changed here) | alters a deployed function |
-| 6 | Staging project (or branch) to run `backend_contract.mjs --live` with `RR_DRAFTS=1` before production | — | new project |
-| 7 | Retention of finished rooms (e.g. 30 days) | — | data deletion policy |
+| 6 | ~~Staging project~~ replaced by the LOCAL staging stack (`tools/staging`, free); a hosted staging run stays optional | — | — |
+| 7 | Retention of finished rooms: when / how often to run `game.room_purge(30)` | — | data deletion policy |
 
 ## 13. Only verifiable live
 
-PostgREST behaviour (error mapping of the drafts, commit of `response.status` 400 responses, anon grants as seen through the API) · real
-concurrency of `FOR UPDATE` under load · Supabase's `extensions` schema/pgcrypto · Edge cold start (engine load measured ~1.9 s in local Deno
-on a loaded 2-core box — near the 2 s CPU budget; live verify-result loads faster) · region placement and per-intent latency · gateway body
-limits / CORS · phone clock skew · Realtime (not built).
+Now covered by the LOCAL staging stack (`tools/staging`, ONLINE_RELEASE.md §2–§3): PostgREST error mapping + commit-on-400, anon grants through
+the API, `FOR UPDATE` under concurrent calls through a transaction pooler, pgcrypto in `extensions`, postgres.js binding (it found a real
+bug: `$n::jsonb` double-encoded every JSON value — fixed with `$n::text::jsonb`), cold start under Deno (engine load 1.3–1.7 s CPU on a
+loaded 2-core box). Still only verifiable on hosted Supabase: the Edge Runtime's own CPU accounting and limits, the real `SUPABASE_DB_URL`
+(direct vs Supavisor), region placement and latency, the real gateway (body limits, `verify_jwt`), phone clock skew · Realtime (not built).
 
 **Finding for production (not changed here):** `game.results.checkpoint` is `jsonb`. A ranked game resumed from the server checkpoint gets
 its keys re-ordered, which can change the rest of the game (8/40 measured), so an honest player's final claim may fail verification. Fix

@@ -13,6 +13,9 @@ wait_http() { for _ in $(seq 1 150); do curl -s -o /dev/null "$1" && return 0; s
 #    (libfaketime, re-read every second) — tests/online_localstack.py advance() moves it like the fake's /__fake/advance. Every
 #    room clock is the DB's now() (SQL RPCs and the Edge Function alike), so the whole stack moves together. Needs a fresh start.
 CLOCK="$RR_STAGING_DIR/clock"; FT=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
+if [ "${RR_STAGING_FAKETIME:-}" = 1 ] && [ ! -f "$CLOCK/offset" ] && as_os_pg "$PG_BIN/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1; then
+  as_os_pg "$PG_BIN/pg_ctl" -D "$PGDATA" -m fast stop >/dev/null    # running without the movable clock (e.g. left by setup.sh): restart it
+fi
 if ! as_os_pg "$PG_BIN/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1; then
   if [ "${RR_STAGING_FAKETIME:-}" = 1 ]; then
     [ -f "$FT" ] || { echo "RR_STAGING_FAKETIME=1 needs libfaketime (apt-get install libfaketime)"; exit 2; }

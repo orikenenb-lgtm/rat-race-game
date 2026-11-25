@@ -2,26 +2,44 @@
 
 ## סיכום בעברית
 
-**שורה תחתונה: הקוד מוכן ל-staging. הוא עוד לא מוכן להדלקה בייצור.**
-כל הבדיקות האופליין עוברות: 434 בדיקות ב-10 סוויטות, 0 נכשלו (כולל 76 בדיקות בדפדפן עם 2–5 שחקנים נפרדים, ושחקן שמשחק על מסך התלת-ממד).
-אבל פונקציית השרת (Edge Function `room`) לא רצה אף פעם על Supabase אמיתי: לא Deno, לא postgres.js ולא PostgREST.
-לכן הצעד הבא הוא staging, ולא הדלקת הדגל.
+**שורה תחתונה: מוכן לשחרור לייצור, אחרי האישורים שלך. החוסם הגדול (B1) נבדק עכשיו על שרת אמיתי מקומי, ונמצא ותוקן בו באג שהיה שובר כל חדר.**
 
-**3 חוסמים:**
-1. אין staging. צריך להריץ פעם אחת את כל המסלול על פרויקט Supabase נפרד: מיגרציה, פריסת פונקציה, ושתי בדיקות שמוכנות כבר (`backend_contract --live`, `online_smoke --live`).
-2. לפרוס את הפונקציה **רק** עם `--no-verify-jwt`. אין `supabase/config.toml` בריפו. בלי הדגל הזה כל קריאה לחדר תיכשל ב-401.
-3. הפונקציה, האתר ו-verify-result חייבים לצאת מאותו קומיט, ו-`build-edge --check` צריך לעבור עליו. כרגע יש שינויי מנוע לא מקומטים (w18) בעבודה של סוכנים אחרים.
+**מה עשיתי:**
+- בניתי "staging" מקומי וחינמי בתוך המכונה, בלי שום פרויקט בענן: PostgreSQL 17 אמיתי, PgBouncer (כמו ה-pooler של Supabase), PostgREST (בדקתי 3 גרסאות), ו-Deno שמריץ את פונקציית השרת `room` עצמה, כמו ש-Supabase מריץ אותה. הכול ב-`tools/staging/`.
+- ההרצה האמיתית הראשונה של הפונקציה מצאה באג חמור: postgres.js קידד פעמיים כל ערך JSON. בייצור, **כל** לחיצה על "להתחיל משחק" הייתה נכשלת בשגיאת שרת (500). PGlite לא הראה את זה. תיקנתי, וזה נבדק עכשיו על השרת האמיתי.
+- תיקנתי את S1–S6 (ובנוסף S7 חלקית ו-N4):
+  - **S1:** חדר שנתקע אחרי עדכון מנוע נסגר עכשיו לבד אחרי 2 דקות, בלי דירוג, עם הודעה ברורה בעברית.
+  - **S2:** חדרי המתנה נטושים פגים ב-SQL, בלי cron. הם לא נספרים במגבלת 3 החדרים, ואי אפשר להצטרף אליהם.
+  - **S3:** קישור ההזמנה מוסיף `&ff=rooms` בתקופת הניסיון.
+  - **S4:** הודעות נכונות על "יותר מדי ניסיונות" ועל "המשחק התעדכן", כולל מה לעשות.
+  - **S5:** פחות כתיבות למסד: רק השחקן שזז נכתב, ובדיקת מצב (poll) לא כותבת כלום אם לא עברו 15 שניות.
+  - **S6:** פונקציית ניקוי `game.room_purge(30)` שמוחקת חדרים שהסתיימו לפני יותר מ-30 יום. מריצים אותה ידנית, היא לא מתוזמנת.
 
-**המיגרציה בטוחה:** היא רק מוסיפה (5 טבלאות + 10 פונקציות, 0 שינויים באובייקטים קיימים, 0 שינויים בנתונים), אטומית, וה-ROLLBACK שבתוכה נבדק. בדקתי את כל זה בפועל ב-PGlite. היא לא אידמפוטנטית: הרצה שנייה נכשלת ולא משנה כלום.
+**בדיקות (מספרים אמיתיים, 0 כישלונות בבדיקות החדרים):**
+- אופליין: 452 מתוך 452, ב-10 סוויטות.
+- על ה-staging המקומי האמיתי: 147 מתוך 147.
+  - פירוט: חוזה ה-API של החדרים 43, smoke של שחרור 27, בדיקת שרת חדשה 22, ו-55 בדיקות דפדפן אמיתיות מול השרת האמיתי.
+  - עברו גם עם PostgREST 12.2.3, 13.0.4 ו-14.2, וגם בחיבור ישיר למסד וגם דרך pooler.
 
-**דברים שכדאי לתקן (לא חוסמים):**
-- חדרים נטושים לא נסגרים לבד כי אין cron. הם נספרים במגבלת 3 החדרים הפתוחים.
-- אחרי כל עדכון מנוע, חדרים שהיו באמצע משחק "נתקעים" (409). צריך שאילתת ניקוי בכל שחרור, והיא מופיעה למטה.
-- קישור ההזמנה לא מעביר את `?ff=rooms`, כך שבתקופת ניסיון החבר לא יראה את החדר.
-- ההודעה על `rate_limited` בחדרים שגויה ("יותר מדי עדכונים היום").
-- במסך התלת-ממד אין טיימר לסבב.
+**מה רק Supabase אמיתי יכול להוכיח (סיכונים שנשארו):**
+1. **זמן עלייה קר:** טעינת המנוע לקחה כאן 1.3–1.7 שניות CPU, והמגבלה של Supabase היא 2 שניות. המרווח צר, וצריך לעקוב בלוגים.
+2. **הפריסה:** לפרוס **רק** עם `--no-verify-jwt` (B2).
+3. **אותו קומיט:** האתר, `room` ו-`verify-result` חייבים לצאת מאותו קומיט (B3).
+4. **מהירות:** האזור והמהירות ברשת אמיתית.
+5. **החיבור למסד:** סוג החיבור (`SUPABASE_DB_URL`). כאן נבדקו שני הסוגים ושניהם עבדו.
 
-**מה דורש את האישור שלך:** פרויקט staging, הרצת המיגרציה בייצור, פריסת הפונקציה, בדיקת smoke בייצור (יוצרת 2 שחקני טסט וחדר מבוטל אחד), הדלקת הדגל, ניקוי חדרים בכל שחרור, ומדיניות מחיקה של חדרים ישנים.
+**מה דורש את האישור שלך:**
+1. הרצת המיגרציה בייצור.
+2. פריסת הפונקציה `room` עם `--no-verify-jwt`, יחד עם האתר ו-`verify-result`.
+3. בדיקת smoke בייצור. היא יוצרת 2 שחקני טסט וחדר מבוטל אחד.
+4. הדלקת הדגל.
+5. מדיניות המחיקה: מתי להריץ את `room_purge`.
+
+פרויקט staging בענן כבר לא נדרש. הוא אופציונלי, ויכול לתת ודאות נוספת לגבי ה-CPU והאזור.
+
+**ממצאים בשבילם של סוכנים אחרים (לא תיקנתי, כי אלה לא הקבצים שלי):**
+- בקובץ `production_baseline.sql` חסרות הפונקציות `rr_sync_progress2`, `rr_weekly` ו-`rr_admin_*`, והלובי קורא להן.
+- הטקסט של `rate_limited` ב-`net.js` עדיין שגוי מחוץ למסכי החדר.
 
 ---
 
@@ -29,174 +47,191 @@
 
 | area | state |
 |---|---|
-| Room logic (`room_core.js`), redaction, fairness, idempotency, timeouts | **ready**: 22/22 heavy tests, server step === client engine byte-for-byte |
-| SQL draft `20261124_rooms.sql` | **safe to apply**: additive, atomic, rollback verified (new `tests/online_migration.test.mjs`) |
-| Client (`rooms.js`, `remote.js`, `net.js`, game.js hook) | **ready behind the flag**: 76/76 browser e2e incl. phone 390 px, dark mode, XSS nickname, 3D game screen |
-| Edge Function `index.ts` in a real Supabase runtime | **unverified**: never executed (no Deno here, no staging). Logic is exercised through `room_store.js` on PGlite, but not postgres.js parameter binding, CPU budget, connections or PostgREST |
-| Operations (cleanup, pin changes, monitoring) | **gaps**: lazy-only lifecycle, no sweeper, orphaned rooms after a pin change |
+| Room logic (`room_core.js`), redaction, fairness, idempotency, timeouts | **ready**: room_core 22/22; server step === client engine byte-for-byte |
+| SQL draft `20261124_rooms.sql` | **ready to apply**: additive, atomic, rollback exact (PGlite + real PostgreSQL 17); now with lifecycle without cron |
+| Edge Function `index.ts` + `room_store.js` in a real runtime | **verified locally** on Deno 2.9.8 + postgres.js 3.4.5 + PgBouncer / direct + PostgREST 12.2 / 13.0 / 14.2. **One production-breaking bug found and fixed** (§3.1) |
+| Client (`rooms.js`, `remote.js`, `net.js`, game.js hook) | **ready behind the flag**: 76/76 browser e2e on the fake, 55/55 (all room checks) against the real local stack |
+| Operations | S1 / S2 / S5 / S6 fixed. Remaining: watch the cold-start CPU (§3.3), deploy with `--no-verify-jwt`, one release commit |
 
-**Ready for staging now. Production flip only after staging steps 1–3 below pass.**
+**Ready for the production release (steps in §6), with the owner's approvals.** A hosted staging project is no longer a blocker.
 
-## 2. Real test results (this run, export of HEAD `db892c2`, private copies on ports 11600–11602, one suite at a time)
+## 2. Local staging (replaces B1's staging project): `tools/staging/`
 
-| suite | result | notes |
+It is free and runs inside this machine on 127.0.0.1. No hosted Supabase project is ever contacted.
+
+| piece | what | like Supabase |
 |---|---|---|
-| `node tests/room_core.test.mjs` | **22 / 22** | 4 m 46 s; 5,982 intents, 15.7 ms/intent; metrics parity 3,333/3,333; event parity 2,927 equal / 0 differ / 1 documented dd-level-1 skip; 18 seats replay === stored; 4 ranked seats pass `verifyGame`; 36,941 cards safe-default fuzz |
-| `node tests/room_net.test.mjs` | **56 / 56** | 5 identities over HTTP against the fake |
-| `node tests/remote_driver.test.mjs` | **29 / 29** | RemoteDriver: resend same id, stale adopt, finish once |
-| `node tests/fairness.test.mjs` | **3 / 3** | same dice/tiles/streams per round |
-| `node tests/flags.test.mjs` | **16 / 16** | `rooms` default OFF |
-| `RR_PGLITE=… node tests/sql_drafts.test.mjs` | **14 / 14** | all 3 drafts on the baseline; Edge write path via `room_store.js` (168 intents) |
-| `node tests/backend_contract.mjs --target=<own fake :11690>` | **184 / 184** | incl. the rooms RPC + Edge status-code cases |
-| `python3 tests/rooms_e2e.py http://localhost:11601/ --hook=http://localhost:11602/` | **76 / 76** | real lobby UI, 2–5 browser identities, roll on the 3D game screen, `assert_clean` (no request left the machine) |
-| **NEW** `RR_PGLITE=… node tests/online_migration.test.mjs` | **9 / 9** + 4 GAP probes | additive / atomic / rollback / grants / volatility / order independence |
-| **NEW** `node tests/online_smoke.mjs` (fake) | **25 / 25** (1 SKIP: health has no GET on the fake) | the release smoke script, run here on the fake only |
-| `node tools/build-edge.mjs --check` | ✓ | pin `f0f3bace…` = HEAD engine (core 885,667 chars = 98.4 % of `MAX_BUNDLE`) |
-| `python3 tests/guard_lint.py` | 1 violation | pre-existing in another file: `sql_drafts.test.mjs:7` says "npm i" in a comment. The new files are clean |
+| PostgreSQL 17.12 (PGDG apt) | initdb with superuser `supabase_admin`; scram over TCP | `postgres` is a non-superuser (createrole, createdb, replication, bypassrls) and owns `public` / `game` / `extensions`. anon / authenticated / service_role are NOLOGIN. `authenticator` (noinherit) is the PostgREST login. pgcrypto lives in `extensions`. Supabase's default privileges are on `public` |
+| schema | `production_baseline.sql` (FK-ordered by `baseline.mjs`), then rooms → groups v2 → competitions, each applied **as postgres**, each once (`game.staging_applied`) | the SQL editor / `psql "$DB_URL"` path of the runbook |
+| PgBouncer 1.26.1 | transaction pooling | Supavisor :6543 (needs `prepare:false`, which index.ts sets) |
+| PostgREST 13.0.4 (default), 12.2.3, 14.2 | `db-schemas=public`, `db-anon-role=anon` | the REST API |
+| Deno 2.9.8 + `edge_shim.ts` | runs `supabase/functions/room/index.ts` and `verify-result/index.ts` unchanged: captures their `Deno.serve`, injects `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_DB_URL`, and logs wall + CPU ms per request | the Edge Runtime |
+| `gateway.mjs` | `/rest/v1/*` → PostgREST, `/functions/v1/<fn>` → Deno, `apikey` required. `RR_STAGING_VERIFY_JWT=room` emulates a deploy without `--no-verify-jwt` | `<ref>.supabase.co` |
 
-Total: **434 passed, 0 failed**. Not run because they are not available here: `deno check`, any live/staging run. No production or network service was contacted. `online_smoke --live` refuses the production ref unless `RR_SMOKE_CONFIRM=production` is set.
+Run it:
 
-## 3. Migration review: `supabase/migrations/20261124_rooms.sql` vs `supabase/schema/production_baseline.sql`
+```
+bash tools/staging/install.sh                                       # once (apt + GitHub releases)
+RR_SRC=<export of commit C> bash tools/staging/setup.sh --reset     # DB + roles + baseline + drafts
+RR_STAGING_FAKETIME=1 bash tools/staging/start.sh                   # FAKETIME: tests can move the DB clock
+bash tools/staging/run_live.sh                                      # contract (rooms) + smoke + online_local
+. /tmp/rr-staging/target.env && python3 tests/rooms_e2e.py http://localhost:<site>/ --hook=… --local
+RR_POSTGREST=/opt/staging-bin/postgrest-v14.2 RR_EDGE_DB=direct …   # other PostgREST / a direct DB URL (stop.sh postgrest room verify-result first)
+bash tools/staging/stop.sh
+```
 
-Proved by `tests/online_migration.test.mjs` (PGlite = PostgreSQL in WASM, baseline + sample rows):
+The client is never edited for this. `tests/online_localstack.py` relays the page's calls to the production URL (rest/v1/rpc, functions/v1/room) to the local gateway and fulfils them; `fakebackend.install`'s guard aborts anything else (`assert_clean`). `net.js` needs no hook.
 
-- **Additive.** It applies **alone** on the baseline; groups v2, competitions and worlds are not prerequisites. Before vs after catalog: 0 changed, 0 removed; 196 objects added (5 tables). Every pre-existing table, column, constraint, index, function definition/volatility/ACL, RLS flag and policy is identical. Existing rows are unchanged (md5 per table).
-- **Names.** New objects are only `game.rooms`, `game.room_seats`, `game.room_actions`, `game.room_events`, `game.room_join_fails`, `game.ms`, 9 `game.room_*` helpers, 9 `public.rr_room_*` and `public.rr_my_rooms`. `game.ms` does not exist in the baseline, so there is no collision.
-- **Security.** All new tables have RLS on, no policies and no table grants. The 10 public RPCs are EXECUTE for anon/authenticated. The 10 `game.*` helpers are not. Every public RPC starts with `game.auth`.
-- **PostgREST.** Every RPC that writes is VOLATILE (`rr_room_state` and `rr_room_heartbeat` write `last_seen`). Only `rr_my_rooms` is STABLE, and it calls `game.auth`, which is STABLE and read-only in the baseline. That is safe under PostgREST's read-only transaction for STABLE functions.
-- **Idempotency.** Not idempotent: `create table` without `if not exists`. A second apply fails with `relation "rooms" already exists` and changes nothing, because it is one `begin … commit`. The runbook therefore checks `to_regclass('game.rooms') is null` first.
-- **Rollback.** The ROLLBACK block at the bottom (lines 456–465, commented) restores the baseline catalog exactly, with a live room present (FK drop order OK), and keeps existing data. Re-apply after rollback gives the identical catalog. Rollback deletes every room, so export first if any matter.
-- **Dependencies.** `extensions.gen_random_bytes` (pgcrypto in `extensions`, already used by the baseline's `rr_register2`), `gen_random_uuid()`, `game.players`, `game.groups`, `game.group_members`, `game.challenges` (FK only).
-- **Order.** Rooms first, then groups v2 → competitions still apply.
-- **Not covered offline:** Supabase default privileges on schema `game`, if any exist live. The migration only revokes from PUBLIC. RLS deny-all makes table grants harmless, and `game` is not an exposed schema (`backend_contract` checks this on staging).
+## 3. What the local staging proved (B1), and what only hosted Supabase can prove
 
-## 4. Gap list (ranked)
+### 3.1 Proved on the real stack
 
-### Blockers
+| B1 item | result |
+|---|---|
+| postgres.js parameter binding | **Bug found + fixed.** With `prepare:false`, postgres.js still describes the statement. For `$n::jsonb` / `$n::json` it then JSON-encodes the JSON text **again**. `start` failed the settings CHECK (500 `server_error`), and every json column would have held a string. Fixed in `room_store.js`: `$n::text::jsonb` / `$n::text::json` (byte-faithful on both drivers). Now proved: jsonb/json columns hold objects/arrays; the stored state text === `JSON.stringify` and `E.replay(actions)` reproduces it; `$2::smallint[]` arrays work; bigint arrives as a string and the `Number()` conversions are right; `to_timestamp(ms)` works |
+| JSON import attribute, pinned bundle | `import bundle … with { type: 'json' }` works in Deno 2.9.8; health answers the checkout's pin |
+| `SUPABASE_DB_URL` connection type + pool | all suites pass through **PgBouncer transaction mode** and **direct**. Pool `max:3`: 40 concurrent mixed calls → no 5xx. Two parallel rolls of one seat → one 200, one 409, the seat advanced exactly once (row lock + one transaction per call) |
+| PostgREST error mapping | `raise exception 'x'` → HTTP 400 `{code:'P0001', message:'x'}` on 12.2.3 / 13.0.4 / 14.2. `game.auth`'s `unauthorized` (errcode 28000) → **HTTP 403**. That is harmless: `net.js` reads only `.message`. The Edge Function maps it to 401 itself |
+| commit-on-400 (`rooms.sql` `game.room_fail`, `response.status`) | **committed** on all three PostgREST versions: 20 failed codes are kept, and the 21st → `rate_limited` |
+| STABLE / read-only transactions | `rr_my_rooms` now sweeps, so it is VOLATILE. It works under PostgREST, and the sweep is committed |
+| grants through the API | tables are not reachable through REST; schema `game` is not exposed; `game.*` (incl. `room_purge`) is not callable |
+| cold start | engine load (first call past `game.auth`) **1.30–1.71 s CPU** over 6 cold starts (Deno on a 2-core box, load average ≈ 6). Warm Edge calls: median 19 ms; p95 242 ms during bursts |
+| the whole client | `rooms_e2e.py --local`: 55/55. Real lobby UI, 2–5 browser identities, double click, duplicate delivery, lost answer + resend, two tabs, timeout autopilot (DB clock moved by libfaketime), disconnect / back, host leaves, finish once, the 3D game screen |
 
-| # | gap | where | fix |
-|---|---|---|---|
-| B1 | **The Edge Function has never run in a real Supabase runtime.** Unverified: postgres.js `tx.unsafe` binding of arrays/bigint/json (`room_store.js:57-86`, e.g. `$2::smallint[]`); `SUPABASE_DB_URL` connection type and pool (`index.ts:39`, `max:3` per isolate); cold-start CPU (engine ≈ 1.9 s CPU measured locally against Supabase's 2 s CPU limit; the core grew to 98.4 % of `MAX_BUNDLE`); JSON import attribute (`index.ts:21`); PostgREST error mapping and `response.status` commit (`rooms.sql:206`) | `supabase/functions/room/index.ts`, `room_store.js` | staging run: release steps 1–3 below. CR-22: no staging exists yet |
-| B2 | **`verify_jwt` must be false.** There is no `supabase/config.toml` in the repo. With the default `verify_jwt = true`, every call fails 401, because players send only the publishable `apikey` (`js/net.js:206`). | deploy command | always `supabase functions deploy room --no-verify-jwt` (or add `[functions.room] verify_jwt = false` to a `supabase/config.toml`) |
-| B3 | **Pin coupling.** `room` imports the verify-result pin and bundle (`index.ts:19-21`) and refuses rooms started under another pin (`index.ts:87`, 409 `version_changed`). It must ship from the same commit as the site and verify-result. Right now the shared tree has uncommitted engine work (`js/worlds/w18.js`, `all.js`) that will move the pin. | release process | release from one tagged commit where `node tools/build-edge.mjs --check` passes; deploy room, verify-result and the site in one window |
+### 3.2 S1–S6 end to end on the stack (`tests/online_local.test.mjs`)
 
-### Should fix (before or soon after the flip)
+- **S1:** a room whose `engine_sha` is not the function's pin → 409 `version_changed {closes_in}`, and `pin_mismatch_at` is stored even on that error answer. After the grace, the tick → 200 `applied:1`: cancelled, `version_changed`, unranked, seed revealed.
+- **S2:** a lobby idle 3 h is swept by another player's `rr_my_rooms`; its code → `room_not_found`.
+- **S5:** an act rewrites only the acting seat's row (xmin unchanged for the others); 6 fresh polls write nothing.
+- **S6:** `room_purge(30)` deletes a room that ended 45 days ago, with its seats and events.
 
-| # | gap | where | fix |
-|---|---|---|---|
-| S1 | **G-PIN-ORPHAN.** After any deploy that changes the engine pin, every `playing` room answers 409 `version_changed` to start/act/tick. No deploy ever abandons it, so it ends only by a cancel vote or by every player leaving. It also counts toward the 3-open-rooms cap. | `index.ts:87-89` | release step 9 (cleanup SQL); later: let `tick` of a foreign-pin room end it as `abandoned` without the engine |
-| S2 | **G-STALE-LOBBY / G-LAZY-EXPIRY / G-JOIN-EXPIRED.** Lifecycle is lazy-only: lobby expiry (2 h) and abandonment (2 h) run only inside an Edge `tick` that a client triggers. Idle lobbies stay `lobby`, stay joinable and count toward the cap. Reproduced by the probe in `online_migration.test.mjs`. | `rooms.sql:190-194`, `:223`, `:251` | count only `last_activity > now() - 2 h` lobbies in the cap (SQL change), and/or a pg_cron sweeper (owner approval); meanwhile run the step 9 SQL |
-| S3 | **Canary invite links.** The share link is `origin + pathname + ?room=CODE` (`lobby.js:91`, `rooms.js:237`). It drops `?ff=rooms`, and `?room=` is ignored while the flag is off (`lobby.js:299`, `:2514`). During a canary, a recipient lands on the plain home screen. | `js/lobby.js` | `?ff` applies per page load only, so canary links must carry `&ff=rooms` (add it by hand), or the link builder could append the active `ff`; moot after the flip |
-| S4 | **Wrong Hebrew for room `rate_limited`.** `net.js:31` says "יותר מדי עדכונים היום" for create (10/day), join (20 failed codes/hour) and reactions. `rooms.js:382` fixes it only for in-game acts. `version_changed` (`net.js:57`) does not say what to do. | `js/net.js`, `js/rooms.js` | e.g. "יותר מדי ניסיונות — נסה שוב בעוד כמה דקות"; for version_changed: "…אפשר לצאת מהחדר או להצביע על ביטול" |
-| S5 | **Write amplification.** Every Edge save rewrites `state` + `view` of **every** seat (`room_store.js:57`; `state` capped at 400 KB). Every poll of `rr_room_state` / heartbeat takes `FOR UPDATE` on the room and writes `last_seen` (`rooms.sql:400`): about 1 write/s per 4-player room. | `room_store.js`, `rooms.sql` | write only changed seats; skip the `last_seen` update when < 10 s old. Watch DB IO on the free tier |
-| S6 | **No retention.** Finished rooms keep full engine states (up to 4 × 400 KB) forever. | — | owner decision (e.g. delete finished > 30 days; cascade) |
-| S7 | **Region / latency.** One act ≈ 10 SQL round trips inside one transaction (load 3 + save 1 + seats + actions + events). The function runs at the edge nearest the caller, not next to the DB. No `x-region` header is sent, and CORS allow-headers do not list it (`index.ts:30`). | `index.ts`, `net.js:206` | measure on staging (`online_smoke` prints latencies); if > 1 s, pin the region and add `x-region` to CORS |
-| S8 | **Throttle is per isolate** (`index.ts:57`). Real protection is the DB limit of 120 intents/seat/min plus the SQL caps. | — | acceptable; watch logs |
+### 3.3 Only hosted Supabase can prove
 
-### Nice to have
+1. The Edge Runtime's own CPU accounting, its 2 s limit, and how often isolates start cold. 1.3–1.7 s here leaves a thin margin; the core is 98.4 % of `MAX_BUNDLE`.
+2. Which `SUPABASE_DB_URL` the project injects (direct / Supavisor; IPv6). Both modes pass here.
+3. The real gateway: `verify_jwt` (B2), body limits, CORS pass-through, the publishable-key → anon mapping.
+4. Region placement and per-intent latency (S7). Locally an act is ≈ 20 ms, with no network.
+5. Supabase-managed defaults in schema `game` (modelled here; N4 now revokes explicitly).
+6. The project's exact PostgREST version (12.2 / 13.0 / 14.2 all pass).
+7. Phones on real networks.
 
-| # | gap | where |
+## 4. Real test results (this run)
+
+Commit `a179c4f` (plus the `start.sh` FAKETIME-restart fix committed with this document). Offline: a `git archive HEAD` export with private copies on ports 11700–11702, one suite at a time. room_core ran on a byte-identical export (`diff -r` empty).
+
+| suite | offline (fake / PGlite) | live-local (real stack) |
 |---|---|---|
-| N1 | The client never sends `engine` in `act` (`remote.js:179`), so the 426 `version_mismatch` path cannot fire. A stale cached client renders server views with old read-only engine code. | `js/remote.js` |
-| N2 | 3D game screen in a room: no round timer, no opponents panel (the "👥 יריבים" chip is empty), in-card 💡 hidden (`ROOMS_GAME_HOOK.md` known gaps). The room screen has all of it. | `js/game.js` |
-| N3 | Polling stops while the tab is hidden (`remote.js:157`). On a phone, switching to WhatsApp to share the code marks you "מנותק" after 45 s. That is harmless in the lobby; during play the autopilot covers it. | `js/remote.js` |
-| N4 | Explicit `revoke all on game.room* from anon, authenticated` (defence in depth if schema `game` ever gets default grants). | `rooms.sql` |
-| N5 | No Realtime: polling only (3 s lobby/waiting, 8 s playing, heartbeat 15 s). Fine for 2–4 players. | — |
-| N6 | Room suites are not in `tests/run_all.sh`. | `tests/run_all.sh` |
-| N7 | The `rooms` flag also gates the groups v2 / competitions UI. Those UI paths activate only when the server returns `my_role` (v2 migration), so flipping `rooms` with only `rooms.sql` applied leaves group screens unchanged (`lobby.js:210`, `:1522`, `:1536`). | `js/lobby.js` |
+| `node tests/room_core.test.mjs` | **22 / 22** (5,982 intents, 25.4 ms/intent; parity 3,333/3,333 metrics, 2,927 events, 0 differ) | — |
+| `node tests/room_net.test.mjs` | **70 / 70** (+14: S1 pin change with grace / overlap, S2 sweep) | — |
+| `node tests/remote_driver.test.mjs` | **29 / 29** | — |
+| `node tests/fairness.test.mjs` | **3 / 3** | — |
+| `node tests/flags.test.mjs` | **16 / 16** | — |
+| `RR_PGLITE=… node tests/sql_drafts.test.mjs` | **14 / 14** | (the drafts apply as postgres on PG 17: setup.sh) |
+| `RR_PGLITE=… node tests/online_migration.test.mjs` | **12 / 12** (the 4 GAP probes are now S2 / S1 / S5 / S6 checks) | — |
+| `node tests/backend_contract.mjs` | **185 / 185** (fake) | `--live --local --only=rooms`: **43 passed**, 0 failed, 1 DIFF-ASSUMED (legacy `rr_register` exists in the baseline), 1 skip |
+| `node tests/online_smoke.mjs` | **25 / 25** (1 SKIP: no GET on the fake) | `--live --local`: **27 / 27** (health pin, CORS, create → … → cancel vote) |
+| `node tests/online_local.test.mjs` | SKIP without the stack | **22 / 22** |
+| `python3 tests/rooms_e2e.py … --hook=…` | **76 / 76** | `--local`: **55 / 55** (the 21 groups v2 / competitions checks are skipped: not rooms) |
+| **total** | **452 passed, 0 failed** (10 suites) | **147 passed, 0 failed** |
 
-**Checked and OK:**
-- Flag gating reaches every entry point: `renderRooms` (`lobby.js:206`), the `?room=` deep link (`:299`, `:2514`), the "חדר חי" entry (`:1245`), and the game screen only through `playRoom → setDriver`.
-- CORS answers OPTIONS 204 with allow `apikey, content-type`.
-- PostgREST error shape: raised codes arrive as `{message}` and are mapped by `net.js:91`.
-- 409 `stale` / duplicate `action_id` handling, both on the fake and in `online_smoke`.
-- Two tabs (primary connection), reconnect with the same `action_id`, host leaves, cancel vote, finish exactly once.
-- Mobile 390 px waiting, round and results screens (screenshots reviewed).
-- Hebrew RTL layout, XSS nickname escaped.
-- Rooms are limited to w1–w4 on both sides (`rooms.js:15`, `room_core.js:16`, `game.room_chars`).
-- Room results never touch `game.results` or the boards.
+- **PostgREST / DB matrix:** the 3 live-local HTTP suites (92 checks) pass identically with 12.2.3 + pooler, 13.0.4 + pooler, 14.2 + pooler, and 13.0.4 + direct.
+- **`node tools/build-edge.mjs --check`:** ✓ pin `f0f3bace…`; core 885,667 chars.
+- **`python3 tests/guard_lint.py`:** only the pre-existing `sql_drafts.test.mjs:7` note.
+- **Full contract (all sections, `RR_DRAFTS=1`):** 162 passed, 19 failed, 3 DIFF-ASSUMED. All 19 failures are in the pre-draft sections: the fake's model of older RPCs differs from `production_baseline.sql` (missing `rr_sync_progress2` / `rr_weekly`, `{ok:true}` vs `null` answers). Every groups v2 + competitions + rooms case passes on real PostgreSQL. This is for the backend owners (§5, F1).
 
-## 5. Release steps (in order)
+## 5. Gaps (status)
+
+| # | gap | status |
+|---|---|---|
+| B1 | Edge Function never ran in a real runtime | **done locally** (§3.1). The bug found is fixed. Hosted-only items: §3.3 |
+| B2 | `verify_jwt` must be false | **open (deploy flag):** `supabase functions deploy room --no-verify-jwt` |
+| B3 | pin coupling: one release commit | **open (process):** release from one tagged commit where `build-edge --check` passes. S1 now cleans up rooms the deploy interrupts |
+| S1 | stuck rooms after a pin change | **fixed** (`room_core.pinGate`, `rooms.pin_mismatch_at`). 409 `version_changed {closes_in}` for 2 minutes. A server with the room's own pin clears it: deploy overlap, or a rollback inside the window. Then the next start/act/tick cancels the room (`version_changed`, unranked). Hebrew: "המשחק התעדכן לגרסה חדשה… החדר ייסגר תוך כמה דקות בלי דירוג. אפשר לצאת עכשיו, להצביע על ביטול, או לפתוח חדר חדש." Games in progress at deploy time are therefore lost: deploy at quiet hours |
+| S2 | lobby expiry / abandon only in a client tick | **fixed** in SQL. `game.room_sweep()` (≤ 50 rows, `SKIP LOCKED`) runs at the start of `rr_room_create` / `rr_room_join` / `rr_my_rooms`. The cap counts lobbies + playing rooms active in the last 2 h. An idle *playing* room is still ranked as `abandoned` by the next Edge tick (that needs the engine) |
+| S3 | canary invite links lose `?ff=rooms` | **fixed** (`rooms.js` `roomLink`: adds `&ff=rooms` while `DEFAULTS.rooms` is false; nothing after the flip) |
+| S4 | Hebrew for `rate_limited` / `version_changed` | **fixed on the room screens** (`rooms.js` `roomMsg`: create 10/day, join 20 codes/hour, acts, reactions; version_changed with what to do, shown once). `net.js` `ERR.rate_limited` ("יותר מדי עדכונים היום") is still generic for other screens. Owner of `net.js`: e.g. "יותר מדי ניסיונות — נסה שוב בעוד כמה דקות" |
+| S5 | write amplification | **fixed:** `saveRoom` writes only changed seats (state/view only when replaced); `rr_room_state` takes no lock and writes nothing while `last_seen` < 15 s (heartbeat 15 s keeps "connected"). Proved by row versions on the stack |
+| S6 | no retention | **fixed (callable):** `game.room_purge(p_days default 30)`. Owner-run; not granted to the API roles; never touches lobby/playing rooms. When to run it is the owner's decision |
+| S7 | region / latency | **partly:** `x-region` is allowed by CORS now. Measure on the first hosted calls (`online_smoke` prints latencies); `net.js` does not send it |
+| S8 | per-isolate throttle | acceptable (unchanged) |
+| N1 | client never sends `engine` | open |
+| N2 | 3D screen: no round timer / opponents | open (`game.js`, not this lane) |
+| N3 | polling stops in a hidden tab | open (harmless) |
+| N4 | explicit revoke on room tables | **done** |
+| N5–N7 | Realtime, run_all, `rooms` gating v2 UI | open, as before |
+
+**New findings (for other lanes):**
+- **F1.** `production_baseline.sql` has no `rr_sync_progress2`, `rr_weekly` or `rr_admin_*`, but the lobby calls them (404 on the local stack), and its older RPCs answer differently from the fake. Either the snapshot is incomplete or production differs: re-snapshot before the next migration review.
+- **F2.** The baseline's `game.auth` raises `unauthorized` with errcode 28000, which PostgREST serves as HTTP **403**, not 400. Clients must keep reading `.message` (they do).
+- **F3.** The local stack starts `verify-result` too. On the baseline, the contract's honest-game case is rejected (`replay_mismatch … inspect:2`). This is most likely a test artifact: the baseline `rr_create_challenge2` returns no `starts_at`, so the contract builds the game in another rules era. It is for the verify owner to confirm.
+
+## 6. Release steps (in order)
 
 **0. Preconditions.**
-- Release commit `C` is merged and tagged, with a clean tree.
-- On `C`, `node tools/build-edge.mjs --check` passes.
-- On `C`, the offline suites of §2 pass.
-- Pick a quiet hour (S1).
+- Release commit `C` is tagged, with a clean tree.
+- `node tools/build-edge.mjs --check` passes on `C`.
+- The §4 offline suites pass on `C`.
+- Pick a quiet hour (S1 closes the rooms a pin change interrupts).
 
-**1. Staging (owner approval: a second Supabase project or a branch).**
-- Load the baseline schema, then apply `20261124_rooms.sql`.
-- Run `supabase functions deploy room --no-verify-jwt --project-ref <staging>` from `C`.
-- Run:
-  - `RR_LIVE=1 RR_DRAFTS=1 RR_SB_URL=https://<staging>.supabase.co RR_SB_ANON=<key> node tests/backend_contract.mjs --live`
-  - `RR_SMOKE_URL=https://<staging>.supabase.co RR_SMOKE_ANON=<key> node tests/online_smoke.mjs --live`
-- Check that the cold `Edge start` stays under 2 s CPU with no 503s.
-- Play one real 2-phone game to the end.
+**1. Local staging run from `C` (no approval needed, free, nothing hosted).**
+- `git archive C` to `/tmp/rel`, then from there: `tools/staging/setup.sh --reset` → `RR_STAGING_FAKETIME=1 tools/staging/start.sh` → `tools/staging/run_live.sh` (all `ok`), then `rooms_e2e.py … --local`.
+- Check `log/edge-room.log`: the cold engine load must stay ≤ ~1.7 s CPU.
+- *Optional, owner approval:* a hosted staging project, for CPU and region certainty (§3.3).
 
-**2. Production pre-check (SQL editor, read-only):**
+**2. Production pre-check (SQL editor, read-only).**
 ```sql
 select to_regclass('game.rooms') is null as fresh;                                  -- must be true
 select extnamespace::regnamespace from pg_extension where extname = 'pgcrypto';    -- must be extensions
 ```
 
-**3. Apply the migration (owner approval).**
-- Paste `supabase/migrations/20261124_rooms.sql` into the SQL editor, or run `psql "$DB_URL" -f supabase/migrations/20261124_rooms.sql`. It is one transaction.
-- Then run `notify pgrst, 'reload schema';` and check:
+**3. Apply the migration (owner approval).** Paste `supabase/migrations/20261124_rooms.sql`, or run `psql "$DB_URL" -f …`. It is one transaction. Then:
 ```sql
-select proname, has_function_privilege('anon', oid, 'execute') from pg_proc where proname like 'rr_room_%' or proname = 'rr_my_rooms';  -- 10 rows, all true
-select relname, relrowsecurity from pg_class where relnamespace = 'game'::regnamespace and relname like 'room%';                   -- all true
+notify pgrst, 'reload schema';
+select proname, has_function_privilege('anon', oid, 'execute') from pg_proc where proname like 'rr_room_%' or proname = 'rr_my_rooms';   -- 10 rows, all true
+select proname, has_function_privilege('anon', oid, 'execute') from pg_proc where proname in ('room_sweep', 'room_purge');               -- 2 rows, false
+select relname, relrowsecurity from pg_class where relnamespace = 'game'::regnamespace and relname like 'room%';                          -- all true
 ```
 
-**4. Deploy the function (owner approval), from commit `C`.**
+**4. Deploy the function from `C` (owner approval).**
 - `supabase functions deploy room --no-verify-jwt --project-ref <prod-ref>`.
-- The CLI bundles `room/*` plus `../verify-result/engine_pin.js`, `engine_loader.js` and `engine.bundle.json` (≈ 1 MB).
-- **Env: none to set.** It uses only `SUPABASE_DB_URL`, which Supabase injects. No other secret is read.
-- Check: `curl -s https://<prod-ref>.supabase.co/functions/v1/room -H "apikey: <publishable>"` returns `{ok:true, engine:<pin of C>, core:1}`.
+- Env: none to set (only the injected `SUPABASE_DB_URL`).
+- Check: `curl -s https://<prod-ref>.supabase.co/functions/v1/room -H "apikey: <publishable>"` → `{ok:true, engine:<pin of C>, core:1}`.
 
-**5. Site + verify-result.** Deploy the site from `C`. If the pin differs from the deployed verify-result, redeploy verify-result in the same window (`docs/VERIFY_INTEGRATION.md` §4).
+**5. Site + verify-result** from `C`, in the same window (`docs/VERIFY_INTEGRATION.md` §4).
 
-**6. Canary (flag still OFF).**
-- Run the production smoke with approval: `RR_SMOKE_URL=https://<prod-ref>.supabase.co RR_SMOKE_ANON=<publishable> RR_SMOKE_CONFIRM=production node tests/online_smoke.mjs --live`. It registers 2 `טסט-חדר-*` players and leaves 1 cancelled room. To reuse test players instead, set `RR_SMOKE_P1` / `RR_SMOKE_P2`.
-- The owner and friends play through `<site>/?ff=rooms`. Invite links need `&ff=rooms` added by hand (S3).
+**6. Canary (flag still OFF; owner approval for the smoke).**
+- `RR_SMOKE_URL=https://<prod-ref>.supabase.co RR_SMOKE_ANON=<publishable> RR_SMOKE_CONFIRM=production node tests/online_smoke.mjs --live`. It creates 2 `טסט-חדר-*` players and 1 cancelled room; `RR_SMOKE_P1/P2` reuse test players.
+- The owner and friends play through `<site>/?ff=rooms`. Invite links now carry `&ff=rooms` by themselves.
 
-**7. Flag flip (owner approval).**
-- In `js/flags.js:7`, set `rooms: true`, commit, and deploy the site.
-- This is a UI-only file, so the engine pin is unchanged and verify-result is not affected.
+**7. Flag flip (owner approval).** `js/flags.js` `rooms: true`, commit, deploy the site. UI only: the pin is unchanged. Invite links stop adding `&ff=rooms` automatically.
 
-**8. Watch** (first days):
-- Function logs: one JSON line per request with `status`/`error`; alert on 500 `server_error` and 503 `engine_unavailable`.
+**8. Watch (first days).**
+- Function logs: one JSON line per request; alert on 500 `server_error`, 503 `engine_unavailable`, or any CPU-limit / WORKER_LIMIT error (cold start, §3.3).
 - SQL:
 ```sql
 select status, end_reason, count(*) from game.rooms group by 1, 2;
-select count(*) from game.rooms where status in ('lobby','playing') and last_activity < now() - interval '2 hours';
+select count(*) from game.rooms where status = 'playing' and last_activity < now() - interval '2 hours';   -- idle, waiting for a tick (outside the cap)
 ```
 
-**9. Every later release that changes the pin, and daily until S2 is fixed (owner approval as a standing task):**
-```sql
--- rooms orphaned by a new pin (they can never continue) and lobbies nobody ticked
-update game.rooms set status = 'cancelled', end_reason = 'expired', finished_at = now(), deadline = null, version = version + 1
- where (status = 'playing' and engine_sha is distinct from '<NEW_PIN>')
-    or (status = 'lobby' and last_activity < now() - interval '2 hours');
-```
+**9. Every later pin-changing release.** No manual cleanup: S1 closes interrupted rooms within ~2 minutes of their next call. **Retention** (owner policy, e.g. monthly): `select game.room_purge(30);`.
 
 ### Rollback (least to most drastic)
 
 | level | action | effect |
 |---|---|---|
-| R1 UI | `js/flags.js` `rooms: false` → deploy site | entry points disappear; players with `rr2-flags {rooms:true}` in localStorage or `?ff=rooms` still see them |
-| R2 stop new rooms (instant, server) | `revoke execute on function public.rr_room_create(uuid,text,jsonb,uuid), public.rr_room_join(uuid,text,text) from anon, authenticated;` | running rooms finish normally; undo with `grant` |
-| R3 stop play | `supabase functions delete room` (or deploy a stub answering 503) | rooms freeze; RPCs still answer (leave/cancel work) |
-| R4 remove everything | export if needed, then run the ROLLBACK block of `rooms.sql` (lines 457–465 uncommented) | all room data dropped; catalog = baseline (proved by `online_migration.test.mjs`) |
+| R1 UI | `js/flags.js` `rooms: false` → deploy the site | entry points disappear (`rr2-flags` / `?ff=rooms` still show them) |
+| R2 stop new rooms (instant) | `revoke execute on function public.rr_room_create(uuid,text,jsonb,uuid), public.rr_room_join(uuid,text,text) from anon, authenticated;` | running rooms finish; undo with `grant` |
+| R3 stop play | `supabase functions delete room` (or deploy a stub answering 503) | rooms freeze; RPCs still answer (leave / cancel work) |
+| R3b roll the function back | redeploy the previous `room` (+ site + verify-result) | rooms started by the new pin get 409 for 2 min, then close (S1). Roll back inside 2 minutes to keep them |
+| R4 remove everything | export if needed, then run the ROLLBACK block at the bottom of `rooms.sql` (now also drops `room_sweep` / `room_purge`) | all room data dropped; catalog = baseline (proved by `online_migration.test.mjs`) |
 
-## 6. Needs the owner's explicit approval
+## 7. Needs the owner's explicit approval
 
-1. Creating a staging Supabase project or branch (step 1).
-2. Applying `20261124_rooms.sql` to production (step 3).
-3. Deploying the Edge Function `room` with `verify_jwt = false` (step 4), in lockstep with the site and verify-result (step 5).
-4. Running `online_smoke.mjs --live` against production (step 6): it creates 2 test players and 1 cancelled room.
-5. Flipping `rooms` to default ON (step 7).
-6. The cleanup SQL at each pin change, or a pg_cron sweeper (step 9 / S2).
-7. A retention policy for finished rooms (S6).
-8. Any later SQL fixes for S2 / S5, which change the draft before it is applied.
+1. Applying `20261124_rooms.sql` to production (step 3).
+2. Deploying `room` with `--no-verify-jwt`, in lockstep with the site and verify-result (steps 4–5).
+3. Running `online_smoke.mjs --live` against production (step 6).
+4. Flipping `rooms` to default ON (step 7).
+5. The retention policy: when to run `game.room_purge(N)` (step 9).
+6. Optional: a hosted staging project (step 1).
 
-Groups v2, competitions and worlds drafts are **not** part of this release. They have their own approvals: `ONLINE.md` §12 and `20261125_worlds.sql`.
+Groups v2, competitions and worlds drafts are **not** part of this release. On the local stack they apply and their contract cases pass, but they have their own approvals (`ONLINE.md` §12, `20261125_worlds.sql`).
