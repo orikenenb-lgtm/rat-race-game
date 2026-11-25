@@ -164,6 +164,8 @@ export const LESSON_META = {
   // w15 (js/worlds/w15.js lessonDefs; the platform module's ctx.lesson calls)
   ltv_cac: { teaser: 'כמה שווה משתמש, וכמה הוא עולה?', hint: 'במגדלי הענן: בשאלת אבא עשיר על פרסום מול משתמש.' },
   dilution: { teaser: 'למה גיוס בחורף עולה יותר מגיוס בבועה?', hint: 'במגדלי הענן: בכל סבב גיוס או הצעת השקעה.' },
+  qty_hedge: { teaser: 'כמה מהיבול כדאי לנעול מראש?', hint: 'בארץ השדות: כשנועלים מחיר לקציר, או בשאלת אבא עשיר על צפי היבול.' },
+  hedge_margin: { teaser: 'למה גידור שעובד מבקש עוד כסף?', hint: 'בארץ השדות: כשהמחיר עולה ויש חוזה גידור פתוח.' },
 };
 
 /* wave 3a (docs/full-upgrade/research/J1-journey-learning.md §2.4, brief §16): lesson titles / texts that taught an absolute rule.
