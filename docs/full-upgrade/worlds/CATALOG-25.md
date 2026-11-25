@@ -320,6 +320,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** opens w20 and w22. Library: "הזנב המתואם", "יחס משולב".
 - **Choices:** price vs volume, line mix and coast share, reinsurance depth, float liquidity.
 - **Recovery:** buy reinsurance (dear after cats), put a line into run-off, raise capital, issue a cat bond, sell a book.
+- **As built (wave A4, engine lane):** new module `js/worlds/mech/insure.js` (`uses: portfolio, season`, both re-implemented inside: the float's two liquidity classes + forced sale, storm months Aug–Oct), 238 lines; tile Z תיק פוליסות למכירה; an inherited under-priced book with short reserves; storms frequent and smaller than sketched (20 % a storm month, 0.3–1.5 × the storm base); gates N = 36: the required gates met, G-dom and G-durable open — see `w18-storms.md`.
 
 ### w19 · פעמון הבורסה (tier 9, diff 4)
 - **סיפור:** "החברה שלך עולה לבורסה. מעכשיו יש לה מחיר בכל חודש, ולכל מספר שתבטיח יש קהל שבודק אותך."
