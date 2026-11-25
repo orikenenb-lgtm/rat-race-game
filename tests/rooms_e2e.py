@@ -8,14 +8,20 @@
 #   SRC=<export> COPY_DIR=/tmp/w3b PORT_BASE=10100 bash tests/serve_copies.sh
 #   python3 tests/rooms_e2e.py http://localhost:10101/ [--hook=http://localhost:10103/]   (RR_SHOTS=<dir> for screenshots)
 # --hook: a copy of the real game whose game.js carries the wave-3b hook (/tmp/w3b/game_hook.patch) — plays a room on the game screen.
+# --local: the same browser suite against the LOCAL staging stack instead of the fake (real PostgreSQL + PostgREST + the Edge Function
+#   under Deno; tests/online_localstack.py relays the page's Supabase calls there). Start it with RR_STAGING_FAKETIME=1
+#   tools/staging/start.sh, then `. /tmp/rr-staging/target.env`. The groups v2 / competitions part is skipped (not rooms; it also
+#   needs verify-result and the fake's daily/weekly model).
 import asyncio, json, os, sys, random
 from playwright.async_api import async_playwright
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fakebackend as FB
+import online_localstack as LS
+LOCAL = '--local' in sys.argv
 BASE = FB.base_url('http://localhost:10101/')
 HOOK = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--hook=')), None)
 SHOT = os.environ.get('RR_SHOTS', '/tmp/w3b/shots') + '/'
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
-fb = FB.FakeBackend(verify='accept'); fb.set_daily('w1', 0)
+fb = LS.LocalStack.from_env() if LOCAL else FB.FakeBackend(verify='accept'); fb.set_daily('w1', 0)
 TAG = str(random.randint(100, 999))
 results = []
 SINKS = []
@@ -28,7 +34,7 @@ XSS = '<svg onload=__xss=1>'      # 20 chars: survives the room's 20-char nickna
 async def ident(b, nick, vp=DESK, flag=True, scheme='light', player=None):
     p = player or fb.seed_player(nick)
     ctx = await b.new_context(**FB.new_context_kwargs(), viewport=vp, color_scheme=scheme, locale='he-IL')
-    SINKS.append(await FB.install(ctx, fb))
+    SINKS.append(await (LS.install(ctx, fb) if LOCAL else FB.install(ctx, fb)))
     init = "localStorage.setItem('rr2-onboarded','1');localStorage.setItem('rr-player'," + json.dumps(json.dumps(p)) + ");"
     if flag: init += "localStorage.setItem('rr2-flags', JSON.stringify({rooms:true}));"
     await ctx.add_init_script(init)
@@ -71,7 +77,7 @@ BOT = """async (n) => { const m = await import('./js/rooms.js'); const d = m._de
 
 async def main():
     async with async_playwright() as pw:
-        FB.banner('offline', 'accept')
+        FB.banner('offline', 'accept') if not LOCAL else log(f'backend=LOCAL STAGING {fb.url} (real PostgreSQL + PostgREST + Deno room function; clock={fb.clock})')
         b = await pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=FB.chrome_args('offline', ARGS))
         # ------------------------------------------------ flag OFF: nothing of wave 3b is visible or called
         cO, O, _ = await ident(b, 'טסט־כבוי' + TAG, flag=False)
@@ -289,82 +295,84 @@ async def main():
         await B.click('[data-ract="cancel"]'); await B.wait_for_selector('.rm-room.is-cancelled')
         check('בוטל' in await B.inner_text('.rm-res'), 'the (new) host cancels the waiting room → "החדר בוטל", nobody ranked')
 
+        if LOCAL: fb.reset_clock(); log('SKIP groups v2 / competitions part (--local: rooms only)')
         # ------------------------------------------------ groups v2: roles, description, invite rotation (revoked code), removal, history
-        fb._offset = __import__('datetime').timedelta(0)   # the rooms part moved the fake clock hours ahead; competitions use the device clock for their end
-        await A.goto(BASE); await A.wait_for_selector('#lbGname')
-        await A.fill('#lbGname', 'טסט קבוצה ' + TAG); await A.click('form[data-form="newgroup"] button'); await A.wait_for_selector('.lb-group')
-        await A.wait_for_selector('#gpV2 .gp-v2')
-        check('בעלים' in await A.inner_text('#gpV2') and 'פרטית' in await A.inner_text('#gpV2'), 'group v2: my role (בעלים) + private by default')
-        GCODE = (await A.inner_text('.gp-code')).strip()
-        for pg in (B, C):
-            await pg.goto(BASE + '?join=' + GCODE); await pg.wait_for_selector('.lb-group'); await pg.wait_for_selector('#gpV2 .gp-v2')
-        check('חבר' in await B.inner_text('#gpV2 .gp-me-role') and await B.locator('#gpV2 [data-ract="g-remove"]').count() == 0 and await B.locator('#gpV2 [data-ract="g-rotate"]').count() == 0, 'a member sees no management buttons')
-        await A.click('[data-act="group"]'); await A.wait_for_selector('#gpV2 .gp-mng')
-        await A.click('#gpV2 .gp-edit summary'); await A.fill('form[data-rform="gupdate"] textarea', XSS + ' תיאור הקבוצה')
-        await A.click('form[data-rform="gupdate"] button'); await A.wait_for_selector('#gpV2 .gp-desc')
-        check(XSS in await A.inner_text('#gpV2 .gp-desc') and await A.evaluate('window.__xss') is None, 'description saved and shown as text (escaped)')
-        await A.click(f'#gpV2 .gp-mng li:has-text("טסט־בת") [data-ract="g-role"]'); await A.wait_for_selector('#gpV2 .gp-mng li:has-text("טסט־בת") .gp-role.r-admin')
-        check(True, 'owner makes B admin (role badge)')
-        await B.click('[data-act="group"]'); await B.wait_for_selector('#gpV2 .gp-me-role')
-        check('מנהל' in await B.inner_text('#gpV2 .gp-me-role') and await B.locator('#gpV2 [data-ract="g-rotate"]').count() == 1, 'B (admin) gets rotate / pause controls')
-        await shot(B, 'groups_v2_admin_390')
-        r = await C.evaluate("import('./js/net.js').then(async ({net}) => { const l = await net.myGroups(); const g = await net.group(l[0].id); const h = g.members.find((m) => m.role === 'owner').handle; return net.groupRemove(g.id, h).then(() => 'ok', (e) => e.code); })")
-        check(r == 'not_allowed', f'a plain member trying to remove the owner (direct call) → not_allowed ({r})')
-        await B.click('#gpV2 [data-ract="g-remove"]'); await B.wait_for_timeout(800)
-        await B.wait_for_selector('#gpV2 .gp-mng')
-        check(await B.locator('#gpV2 .gp-mng li:has-text("svg")').count() == 0, 'admin removes a member (C)')
-        await C.goto(BASE + '?join=' + GCODE); await C.wait_for_timeout(1500)
-        check('לא מצאנו קבוצה' in await toast_text(C) or 'לא מצאנו קבוצה' in await C.inner_text('#lbGErr'), 'a removed member cannot rejoin with the same code')
-        await B.click('#gpV2 [data-ract="g-rotate"]'); await B.wait_for_timeout(800); await B.wait_for_selector('.gp-code')
-        NEW = (await B.inner_text('.gp-code')).strip()
-        check(NEW != GCODE, f'admin rotates the invite code ({GCODE} → {NEW})')
-        await D.goto(BASE + '?join=' + GCODE); await D.wait_for_timeout(1500)
-        check('לא מצאנו קבוצה' in await toast_text(D) or 'לא מצאנו קבוצה' in await D.inner_text('#lbGErr'), 'revoked (rotated) invite link → "לא מצאנו קבוצה"')
-        await D.goto(BASE + '?join=' + NEW); await D.wait_for_selector('.lb-group')
-        check(True, 'the new invite code works')
-        await B.click('[data-act="group"]'); await B.wait_for_selector('#gpV2 [data-ract="g-pause"]'); await B.click('#gpV2 [data-ract="g-pause"]'); await B.wait_for_timeout(800)
-        check('מושהות' in await B.inner_text('#gpV2 .gp-inv2'), 'admin pauses invites')
-        await C.goto(BASE + '?join=' + NEW); await C.wait_for_timeout(1500)
-        check('לא מצאנו קבוצה' in await toast_text(C) or 'לא מצאנו קבוצה' in await C.inner_text('#lbGErr'), 'paused invites: the code answers like an unknown one')
-        await A.click('[data-act="group"]'); await A.wait_for_selector('#gpV2 [data-ract="g-history"]'); await A.click('#gpV2 [data-ract="g-history"]'); await A.wait_for_selector('.gp-hist')
-        h = await A.inner_text('.gp-hist')
-        check('החליף את קוד ההזמנה' in h and 'הסיר את' in h, 'history lists the rotation and the removal')
-        await shot(A, 'groups_v2_owner_desk')
-        # ------------------------------------------------ competitions: create (2 attempts), play, cancel, closed
-        await A.click('#gpComps .gp-newcomp summary'); await A.fill('form[data-rform="newcomp"] input[name="title"]', 'טסט תחרות ' + TAG)
-        await A.select_option('form[data-rform="newcomp"] select[name="attempts"]', '2'); await A.select_option('form[data-rform="newcomp"] select[name="hours"]', '2')
-        await A.click('form[data-rform="newcomp"] button'); await A.wait_for_selector('#gpComps .gp-comp')
-        await A.wait_for_selector('#gpComps .gp-rules')
-        t = await A.inner_text('#gpComps .gp-comp')
-        check('פתוחה' in t and 'ניסיונות' in t and '2' in t, 'competition created: status open, rules (2 attempts, metric, tiebreak, join policy)')
-        await D.click('[data-act="group"]'); await D.wait_for_selector('#gpComps .gp-comp [data-act="chal"]')
-        await D.click('#gpComps .gp-comp [data-act="chal"]'); await D.wait_for_function('(window.__cfgs || []).length > 0', timeout=10000)
-        await D.evaluate('window.__stubEnd("won", 14)'); await D.wait_for_selector('.lb-end', timeout=8000); await D.wait_for_timeout(1500)
-        await D.click('[data-act="group"]') if await D.locator('[data-act="group"]').count() else None
-        await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp')
-        await D.wait_for_selector('#gpComps [data-ract="c-again"]', timeout=8000)
-        check('ניסיון 2 מתוך 2' in await D.inner_text('#gpComps .gp-comp'), 'after a finished attempt: "ניסיון 2 מתוך 2"')
-        check(await D.locator('#gpComps .gp-b2 li.me').count() == 1, 'the competition board shows my ranked attempt')
-        await shot(D, 'competition_board_desk')
-        # cancel: a plain member (D) has no cancel; the admin (B) cancels a second competition
-        await A.click('#gpComps .gp-newcomp summary'); await A.fill('form[data-rform="newcomp"] input[name="title"]', 'טסט לביטול ' + TAG)
-        await A.click('form[data-rform="newcomp"] button'); await A.wait_for_timeout(1200)
-        await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp >> nth=1')
-        check(await D.locator('#gpComps [data-ract="c-cancel"]').count() == 0, 'a plain member sees no cancel button on others\' competitions')
-        await B.click('[data-act="group"]'); await B.wait_for_selector('#gpComps .gp-comp:has-text("טסט לביטול") [data-ract="c-cancel"]')
-        await B.click('#gpComps .gp-comp:has-text("טסט לביטול") [data-ract="c-cancel"]'); await B.wait_for_timeout(1200)
-        await B.wait_for_selector('#gpComps .gp-comp.st-cancelled')
-        check('בוטלה' in await B.inner_text('#gpComps .gp-comp.st-cancelled'), 'admin cancels a competition → status "בוטלה" (board kept)')
-        # closed: D started attempt 2 and never finished it; the window ends
-        await D.click('#gpComps [data-ract="c-again"]'); await D.wait_for_function('(window.__cfgs || []).length > 0', timeout=10000)
-        await asyncio.to_thread(fb.advance, 0, 3, 0)
-        await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp.st-closed')
-        t = await D.inner_text('#gpComps .gp-comp.st-closed')
-        check('נסגרה' in t and '[data-act="chal"]' and await D.locator('#gpComps .gp-comp.st-closed [data-act="chal"], #gpComps .gp-comp.st-closed [data-ract="c-again"]').count() == 0, 'closed competition: status "נסגרה", no play buttons')
-        r = await B.evaluate("import('./js/net.js').then(({net}) => net.myGroups()).then((l) => import('./js/net.js').then(({net}) => net.group(l[0].id))).then((g) => { const c = g.challenges.find((x) => x.status === 'closed'); return import('./js/net.js').then(({net}) => net.begin('challenge', c.id).then(() => 'ok', (e) => e.code)); })")
-        check(r == 'challenge_closed', f'a member who never started: begin on a closed competition → challenge_closed ({r})')
-        await shot(D, 'competition_closed_desk')
-        await D.set_viewport_size(PHONE); await D.wait_for_timeout(300); await shot(D, 'competition_board_390')
+        if not LOCAL:
+            if not LOCAL: fb._offset = __import__('datetime').timedelta(0)   # the rooms part moved the fake clock hours ahead; competitions use the device clock for their end
+            await A.goto(BASE); await A.wait_for_selector('#lbGname')
+            await A.fill('#lbGname', 'טסט קבוצה ' + TAG); await A.click('form[data-form="newgroup"] button'); await A.wait_for_selector('.lb-group')
+            await A.wait_for_selector('#gpV2 .gp-v2')
+            check('בעלים' in await A.inner_text('#gpV2') and 'פרטית' in await A.inner_text('#gpV2'), 'group v2: my role (בעלים) + private by default')
+            GCODE = (await A.inner_text('.gp-code')).strip()
+            for pg in (B, C):
+                await pg.goto(BASE + '?join=' + GCODE); await pg.wait_for_selector('.lb-group'); await pg.wait_for_selector('#gpV2 .gp-v2')
+            check('חבר' in await B.inner_text('#gpV2 .gp-me-role') and await B.locator('#gpV2 [data-ract="g-remove"]').count() == 0 and await B.locator('#gpV2 [data-ract="g-rotate"]').count() == 0, 'a member sees no management buttons')
+            await A.click('[data-act="group"]'); await A.wait_for_selector('#gpV2 .gp-mng')
+            await A.click('#gpV2 .gp-edit summary'); await A.fill('form[data-rform="gupdate"] textarea', XSS + ' תיאור הקבוצה')
+            await A.click('form[data-rform="gupdate"] button'); await A.wait_for_selector('#gpV2 .gp-desc')
+            check(XSS in await A.inner_text('#gpV2 .gp-desc') and await A.evaluate('window.__xss') is None, 'description saved and shown as text (escaped)')
+            await A.click(f'#gpV2 .gp-mng li:has-text("טסט־בת") [data-ract="g-role"]'); await A.wait_for_selector('#gpV2 .gp-mng li:has-text("טסט־בת") .gp-role.r-admin')
+            check(True, 'owner makes B admin (role badge)')
+            await B.click('[data-act="group"]'); await B.wait_for_selector('#gpV2 .gp-me-role')
+            check('מנהל' in await B.inner_text('#gpV2 .gp-me-role') and await B.locator('#gpV2 [data-ract="g-rotate"]').count() == 1, 'B (admin) gets rotate / pause controls')
+            await shot(B, 'groups_v2_admin_390')
+            r = await C.evaluate("import('./js/net.js').then(async ({net}) => { const l = await net.myGroups(); const g = await net.group(l[0].id); const h = g.members.find((m) => m.role === 'owner').handle; return net.groupRemove(g.id, h).then(() => 'ok', (e) => e.code); })")
+            check(r == 'not_allowed', f'a plain member trying to remove the owner (direct call) → not_allowed ({r})')
+            await B.click('#gpV2 [data-ract="g-remove"]'); await B.wait_for_timeout(800)
+            await B.wait_for_selector('#gpV2 .gp-mng')
+            check(await B.locator('#gpV2 .gp-mng li:has-text("svg")').count() == 0, 'admin removes a member (C)')
+            await C.goto(BASE + '?join=' + GCODE); await C.wait_for_timeout(1500)
+            check('לא מצאנו קבוצה' in await toast_text(C) or 'לא מצאנו קבוצה' in await C.inner_text('#lbGErr'), 'a removed member cannot rejoin with the same code')
+            await B.click('#gpV2 [data-ract="g-rotate"]'); await B.wait_for_timeout(800); await B.wait_for_selector('.gp-code')
+            NEW = (await B.inner_text('.gp-code')).strip()
+            check(NEW != GCODE, f'admin rotates the invite code ({GCODE} → {NEW})')
+            await D.goto(BASE + '?join=' + GCODE); await D.wait_for_timeout(1500)
+            check('לא מצאנו קבוצה' in await toast_text(D) or 'לא מצאנו קבוצה' in await D.inner_text('#lbGErr'), 'revoked (rotated) invite link → "לא מצאנו קבוצה"')
+            await D.goto(BASE + '?join=' + NEW); await D.wait_for_selector('.lb-group')
+            check(True, 'the new invite code works')
+            await B.click('[data-act="group"]'); await B.wait_for_selector('#gpV2 [data-ract="g-pause"]'); await B.click('#gpV2 [data-ract="g-pause"]'); await B.wait_for_timeout(800)
+            check('מושהות' in await B.inner_text('#gpV2 .gp-inv2'), 'admin pauses invites')
+            await C.goto(BASE + '?join=' + NEW); await C.wait_for_timeout(1500)
+            check('לא מצאנו קבוצה' in await toast_text(C) or 'לא מצאנו קבוצה' in await C.inner_text('#lbGErr'), 'paused invites: the code answers like an unknown one')
+            await A.click('[data-act="group"]'); await A.wait_for_selector('#gpV2 [data-ract="g-history"]'); await A.click('#gpV2 [data-ract="g-history"]'); await A.wait_for_selector('.gp-hist')
+            h = await A.inner_text('.gp-hist')
+            check('החליף את קוד ההזמנה' in h and 'הסיר את' in h, 'history lists the rotation and the removal')
+            await shot(A, 'groups_v2_owner_desk')
+            # ------------------------------------------------ competitions: create (2 attempts), play, cancel, closed
+            await A.click('#gpComps .gp-newcomp summary'); await A.fill('form[data-rform="newcomp"] input[name="title"]', 'טסט תחרות ' + TAG)
+            await A.select_option('form[data-rform="newcomp"] select[name="attempts"]', '2'); await A.select_option('form[data-rform="newcomp"] select[name="hours"]', '2')
+            await A.click('form[data-rform="newcomp"] button'); await A.wait_for_selector('#gpComps .gp-comp')
+            await A.wait_for_selector('#gpComps .gp-rules')
+            t = await A.inner_text('#gpComps .gp-comp')
+            check('פתוחה' in t and 'ניסיונות' in t and '2' in t, 'competition created: status open, rules (2 attempts, metric, tiebreak, join policy)')
+            await D.click('[data-act="group"]'); await D.wait_for_selector('#gpComps .gp-comp [data-act="chal"]')
+            await D.click('#gpComps .gp-comp [data-act="chal"]'); await D.wait_for_function('(window.__cfgs || []).length > 0', timeout=10000)
+            await D.evaluate('window.__stubEnd("won", 14)'); await D.wait_for_selector('.lb-end', timeout=8000); await D.wait_for_timeout(1500)
+            await D.click('[data-act="group"]') if await D.locator('[data-act="group"]').count() else None
+            await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp')
+            await D.wait_for_selector('#gpComps [data-ract="c-again"]', timeout=8000)
+            check('ניסיון 2 מתוך 2' in await D.inner_text('#gpComps .gp-comp'), 'after a finished attempt: "ניסיון 2 מתוך 2"')
+            check(await D.locator('#gpComps .gp-b2 li.me').count() == 1, 'the competition board shows my ranked attempt')
+            await shot(D, 'competition_board_desk')
+            # cancel: a plain member (D) has no cancel; the admin (B) cancels a second competition
+            await A.click('#gpComps .gp-newcomp summary'); await A.fill('form[data-rform="newcomp"] input[name="title"]', 'טסט לביטול ' + TAG)
+            await A.click('form[data-rform="newcomp"] button'); await A.wait_for_timeout(1200)
+            await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp >> nth=1')
+            check(await D.locator('#gpComps [data-ract="c-cancel"]').count() == 0, 'a plain member sees no cancel button on others\' competitions')
+            await B.click('[data-act="group"]'); await B.wait_for_selector('#gpComps .gp-comp:has-text("טסט לביטול") [data-ract="c-cancel"]')
+            await B.click('#gpComps .gp-comp:has-text("טסט לביטול") [data-ract="c-cancel"]'); await B.wait_for_timeout(1200)
+            await B.wait_for_selector('#gpComps .gp-comp.st-cancelled')
+            check('בוטלה' in await B.inner_text('#gpComps .gp-comp.st-cancelled'), 'admin cancels a competition → status "בוטלה" (board kept)')
+            # closed: D started attempt 2 and never finished it; the window ends
+            await D.click('#gpComps [data-ract="c-again"]'); await D.wait_for_function('(window.__cfgs || []).length > 0', timeout=10000)
+            await asyncio.to_thread(fb.advance, 0, 3, 0)
+            await D.goto(BASE); await D.wait_for_selector('.lb-gitem'); await D.click('.lb-gitem'); await D.wait_for_selector('#gpComps .gp-comp.st-closed')
+            t = await D.inner_text('#gpComps .gp-comp.st-closed')
+            check('נסגרה' in t and '[data-act="chal"]' and await D.locator('#gpComps .gp-comp.st-closed [data-act="chal"], #gpComps .gp-comp.st-closed [data-ract="c-again"]').count() == 0, 'closed competition: status "נסגרה", no play buttons')
+            r = await B.evaluate("import('./js/net.js').then(({net}) => net.myGroups()).then((l) => import('./js/net.js').then(({net}) => net.group(l[0].id))).then((g) => { const c = g.challenges.find((x) => x.status === 'closed'); return import('./js/net.js').then(({net}) => net.begin('challenge', c.id).then(() => 'ok', (e) => e.code)); })")
+            check(r == 'challenge_closed', f'a member who never started: begin on a closed competition → challenge_closed ({r})')
+            await shot(D, 'competition_closed_desk')
+            await D.set_viewport_size(PHONE); await D.wait_for_timeout(300); await shot(D, 'competition_board_390')
 
         # ------------------------------------------------ the 3D game screen (optional: a copy whose game.js carries the hook)
         if HOOK:

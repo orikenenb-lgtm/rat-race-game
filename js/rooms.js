@@ -10,6 +10,7 @@
 // * No free chat: reactions are ids from a fixed list (room_core.REACTIONS).
 import { RemoteDriver, REACTIONS } from './remote.js';
 import { fmtM, metrics } from './engine.js';
+import { DEFAULTS as FLAG_DEFAULTS } from './flags.js';
 /** Worlds a live room / competition can use = the server's room_core WORLDS (supabase/functions/room/room_core.js; tests/remote_driver
  *  checks they agree). Meta roomOk (w5) is not enough: the room server does not load lazy worlds yet. Unlocked ∩ this list. */
 export const ROOM_WORLDS = Object.freeze(['w1', 'w2', 'w3', 'w4']);
@@ -40,7 +41,8 @@ const H = {
   end: { first_win: 'נגמר כשמישהו יוצא מהמירוץ', all: 'משחקים עד שכולם מסיימים' },
   privacy: { code: 'כל מי שיש לו את הקוד', group: 'רק חברי קבוצה' },
   seat: { joined: 'עוד לא מוכן', ready: 'מוכן ✓', playing: 'משחק', away: 'לא מגיב — טייס זהיר', finished: 'סיים', forfeit: 'פרש', left: 'יצא' },
-  reason: { first_win: 'מישהו יצא מהמירוץ', all_done: 'כולם סיימו', max_rounds: 'הגענו לסבב האחרון', abandoned: 'החדר ננטש', host: 'המארח ביטל', vote: 'בוטל בהצבעה', empty: 'כולם יצאו', expired: 'החדר חיכה יותר מדי זמן' },
+  reason: { first_win: 'מישהו יצא מהמירוץ', all_done: 'כולם סיימו', max_rounds: 'הגענו לסבב האחרון', abandoned: 'החדר ננטש', host: 'המארח ביטל', vote: 'בוטל בהצבעה', empty: 'כולם יצאו', expired: 'החדר חיכה יותר מדי זמן',
+    version_changed: 'המשחק התעדכן לגרסה חדשה באמצע החדר, ואי אפשר להמשיך משחק ישן בגרסה חדשה. אפשר לפתוח חדר חדש' },
   ev: {
     created: '🏠 החדר נפתח', joined: '👋 {n} הצטרף', ready: '✅ {n} מוכן', unready: '⏸️ {n} עוד לא מוכן', left: '🚪 {n} יצא', host: '👑 {n} מארח עכשיו',
     kicked: '🚫 שחקן הוצא מהחדר', started: '🎲 המשחק התחיל', round: '🔔 סבב {r} נסגר', autopilot: '🤖 הטייס הזהיר שיחק עבור {n}', away: '📵 {n} לא מגיב',
@@ -76,8 +78,28 @@ function install() {
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && DRV) DRV.pollOnce().catch(() => {}); });
 }
+/** S4: room-specific Hebrew for server codes whose generic text (net.js ERR) is wrong or says nothing about what to do. */
+const ROOM_ERR = {
+  rate_limited: {
+    rcreate: 'פתחת הרבה חדרים היום (עד 10 ביום). אפשר להצטרף לחדר של חבר עם קוד, או לפתוח חדר חדש מחר.',
+    rjoin: 'יותר מדי קודים שגויים בשעה האחרונה. חכה כמה דקות, בדוק את הקוד ונסה שוב.',
+    act: 'לאט לאט — יותר מדי פעולות בדקה. חכה רגע ונסה שוב.',
+    react: 'רגע — תגובה אחת כל כמה שניות',
+    any: 'יותר מדי ניסיונות. חכה כמה דקות ונסה שוב.',
+  },
+  version_changed: 'המשחק התעדכן לגרסה חדשה באמצע החדר, ולכן אי אפשר להמשיך אותו. החדר ייסגר תוך כמה דקות בלי דירוג. אפשר לצאת עכשיו, להצביע על ביטול, או לפתוח חדר חדש.',
+  version_closed: 'החדר נסגר כי המשחק התעדכן לגרסה חדשה. אף אחד לא דורג. אפשר לפתוח חדר חדש.',
+};
+function roomMsg(e, where = 'any') {
+  const c = e && e.code;
+  if (c === 'rate_limited') return ROOM_ERR.rate_limited[where] || ROOM_ERR.rate_limited.any;
+  if (c === 'version_changed') return e.body && e.body.closed ? ROOM_ERR.version_closed : ROOM_ERR.version_changed;
+  return (e && e.message) || 'משהו השתבש';
+}
+/** S3: during the canary the `rooms` flag is off by default — an invite link must turn it on for the friend who opens it. */
+const roomLink = (code) => `${A.baseUrl()}?room=${code}${FLAG_DEFAULTS.rooms ? '' : '&ff=rooms'}`;
 function showErr(e, form) {
-  const msg = (e && e.message) || 'משהו השתבש';
+  const msg = roomMsg(e, form ? form.dataset.rform : 'any');
   const el = form ? form.querySelector('.err') : null;
   if (el) el.textContent = msg;
   A.toast(msg);
@@ -179,7 +201,8 @@ async function openRoom(id) {
   if (DRV && DRV.roomId !== id) stopRoom();
   if (!DRV) {
     DRV = new RemoteDriver({ net: A.net, roomId: id, conn: tabConn() });
-    DRV.on((kind) => { if (kind === 'fatal') { A.toast('אתה כבר לא בחדר הזה'); stopRoom(); A.go({ k: 'rooms' }); return; } if (kind === 'change' || kind === 'primary' || kind === 'busy') paint(); if (kind === 'round') A.sfx('card'); });
+    DRV.on((kind, data) => { if (kind === 'fatal') { A.toast('אתה כבר לא בחדר הזה'); stopRoom(); A.go({ k: 'rooms' }); return; } if (kind === 'change' || kind === 'primary' || kind === 'busy') paint(); if (kind === 'round') A.sfx('card');
+      if (kind === 'version' && DRV && !DRV.versionWarned) { DRV.versionWarned = true; A.toast(roomMsg({ code: 'version_changed', body: data })); } });
   }
   lastKey = '';
   A.html(`<div class="lb-shell rm-room"><div class="lb-bar"><button class="chip" data-ract="hub">› לחדרים</button></div><p class="lb-note">מתחברים לחדר…</p></div>`);
@@ -234,7 +257,7 @@ function seatsLobbyHtml(d) {
 }
 function waitingHtml(d) {
   const r = d.room; const s = r.settings; const me = d.mySeat; const ready = me && me.status === 'ready';
-  const link = `${A.baseUrl()}?room=${r.code}`;
+  const link = roomLink(r.code);
   const wa = A.waHref(`בוא לשחק איתי במירוץ העכברים בחדר חי 🎲 קוד: ${r.code} — ${link}`);
   const allReady = d.seats.length >= s.min_seats && d.seats.every((x) => x.status === 'ready');
   const why = d.seats.length < s.min_seats ? `צריך לפחות ${s.min_seats} שחקנים` : !allReady ? 'מחכים שכולם יסמנו "מוכן"' : '';
@@ -356,7 +379,7 @@ async function onAct(b) {
     });
     case 'cancel': return guard(async () => { if (!(await A.confirm('לבטל את החדר לכולם?', 'לבטל'))) return; await A.net.roomCancel(DRV.roomId); await DRV.refresh(true); paint(true); });
     case 'vote': return guard(async () => { if (!(await A.confirm('להצביע לביטול? אם רוב השחקנים יצביעו — החדר מתבטל ואף אחד לא מדורג.', 'להצביע'))) return; const r = await A.net.roomCancel(DRV.roomId); A.toast(r.status === 'cancelled' ? 'החדר בוטל' : `הצבעת לביטול (${r.votes}/${r.of})`); await DRV.refresh(true); paint(true); });
-    case 'react': try { await DRV.react(b.dataset.k); A.sfx('click'); await DRV.refresh(); paint(); } catch (e) { A.toast(e.code === 'rate_limited' ? 'רגע — תגובה אחת כל כמה שניות' : e.message); } return;
+    case 'react': try { await DRV.react(b.dataset.k); A.sfx('click'); await DRV.refresh(); paint(); } catch (e) { A.toast(roomMsg(e, 'react')); } return;
     case 'roll': return act(() => DRV.act('r'), 'roll');
     case 'opt': { const q = b.dataset.qty ? Math.max(1, Math.floor(+($('#rmQty') || {}).value || 1)) : null; return act(() => DRV.act('c', q != null ? [b.dataset.id, q] : [b.dataset.id]), 'card'); }
     case 'tool': return act(() => DRV.act(b.dataset.c, []), 'tool');
@@ -379,7 +402,7 @@ async function act(fn, what) {
     if (e.code === 'busy') return;
     if (e.code === 'stale') A.toast('המצב התעדכן — זה המצב האחרון');
     else if (e.code === 'not_your_roll') A.toast('כבר הטלת בסבב הזה — מחכים ליריבים');
-    else if (e.code === 'rate_limited') A.toast('לאט לאט — יותר מדי פעולות בדקה');
+    else if (e.code === 'rate_limited' || e.code === 'version_changed') A.toast(roomMsg(e, 'act'));
     else if (e.code === 'version_mismatch') A.toast('יש גרסה חדשה של המשחק — רענן את הדף');
     else if (e.code === 'illegal_action') A.toast((e.body && e.body.msg) || 'אי אפשר לעשות את זה עכשיו');
     else A.toast(e.message);

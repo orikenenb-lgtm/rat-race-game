@@ -133,7 +133,7 @@ export class RemoteDriver {
     if (!force && this.clock() - this._lastTick < POLL.tickGapMs) return null;
     this._lastTick = this.clock();
     try { const r = await this.net.roomFn('tick', this.roomId); this._clock(r && r.now); if (r && r.applied) await this.refresh().catch(() => {}); return r; }
-    catch (e) { this.lastError = e; return null; }
+    catch (e) { this.lastError = e; if (e.code === 'version_changed') { this.emit('version', e.body || {}); await this.refresh(true).catch(() => {}); } return null; }
   }
   /** One step of the background loop (also called directly by tests). */
   async pollOnce() {

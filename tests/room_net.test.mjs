@@ -172,6 +172,42 @@ await advance(3 * 3600);
 r = await B.rpc('rr_begin', { p_mode: 'challenge', p_challenge: COMP.id }); check('begin on a closed competition → challenge_closed', r.code === 'challenge_closed', r);
 r = await A.rpc('rr_competition', { p_challenge: COMP.id }); check('closed competition board: an unfinished attempt is shown as unfinished, not ranked', r.ok && r.body.status === 'closed' && r.body.board.some((x) => x.flag === 'unfinished' && x.rank === null), r.body?.board);
 
+/* ------------------------------------------------ lifecycle without a cron (ONLINE_RELEASE.md S1 / S2) — fresh identities */
+const pin = (sha) => fetch(TARGET + '/__fake/pin', { method: 'POST', body: JSON.stringify({ sha }) });
+{
+  const [P, Q] = await Promise.all(['טסט-מחזור-א', 'טסט-מחזור-ב'].map((n) => new Client(`${n}${tag}`.slice(0, 20)).register()));
+  // S2: three lobbies nobody touches for 3 h → swept by ANY player's create / join / my_rooms; never joinable; not in the cap
+  const L = []; for (let i = 0; i < 3; i++) L.push((await P.rpc('rr_room_create', { p_settings: { world: 'w1' }, p_group: null })).body);
+  r = await P.rpc('rr_room_create', { p_settings: {}, p_group: null }); check('S2 cap: 3 live lobbies → too_many_rooms', r.code === 'too_many_rooms', r);
+  await advance(3 * 3600);
+  r = await Q.rpc('rr_my_rooms'); check('S2: another player\'s rr_my_rooms runs the sweep', r.ok, r);
+  r = await P.state(L[0].room_id); check('S2: an idle lobby is cancelled (expired) without any tick', r.ok && r.body.room.status === 'cancelled' && r.body.room.end_reason === 'expired', r.body?.room);
+  r = await Q.rpc('rr_room_join', { p_code: L[1].code }); check('S2: an expired lobby cannot be joined (room_not_found)', r.code === 'room_not_found', r);
+  r = await P.rpc('rr_room_create', { p_settings: { world: 'w1', max_seats: 2, mode: 'casual', max_rounds: 10 }, p_group: null }); const PR = r.body;
+  check('S2: expired lobbies no longer count toward the cap', r.ok, r);
+  // S1: the engine pin changes under a playing room
+  await Q.rpc('rr_room_join', { p_code: PR.code });
+  for (const c of [P, Q]) await c.rpc('rr_room_ready', { p_room: PR.room_id, p_ready: true, p_char: null });
+  r = await P.fn('start', PR.room_id); check('S1 setup: room started under the current pin', r.status === 200, r);
+  let sv = (await P.state(PR.room_id)).body.me.state_version;
+  await pin('b'.repeat(64));
+  r = await P.act(PR.room_id, 'r', [], { state_version: sv });
+  check('S1: a server with another pin answers 409 version_changed (+ closes_in) and does NOT run the old state', r.status === 409 && r.body.error === 'version_changed' && r.body.closes_in > 0 && !r.body.closed, r.body);
+  await pin(null);
+  r = await P.act(PR.room_id, 'r', [], { state_version: sv }); check('S1: back on the room\'s own pin inside the grace (deploy overlap) → the room just goes on', r.status === 200, r.body);
+  sv = r.body.state_version;
+  await pin('b'.repeat(64));
+  r = await Q.fn('tick', PR.room_id); check('S1: a foreign-pin tick inside the grace → 409 version_changed, the room stays', r.status === 409 && r.body.error === 'version_changed', r.body);
+  await advance(121);
+  r = await Q.fn('tick', PR.room_id); check('S1: after the 2-minute grace the next tick closes it → 200 applied:1, status cancelled', r.status === 200 && r.body.applied === 1 && r.body.status === 'cancelled', r.body);
+  r = await P.state(PR.room_id);
+  check('S1: cancelled with end_reason version_changed, nobody ranked, the seed revealed', r.ok && r.body.room.status === 'cancelled' && r.body.room.end_reason === 'version_changed' && !r.body.room.results && Number.isFinite(r.body.room.seed), r.body?.room);
+  check('S1: the room log says why (cancelled · why=version)', r.body.events.some((e) => e.kind === 'cancelled' && e.data.why === 'version'), r.body.events.slice(-3));
+  r = await P.act(PR.room_id, 'r', [], { state_version: sv }); check('S1: acting afterwards → 409 room_not_playing', r.status === 409 && r.body.error === 'room_not_playing', r.body);
+  r = await P.rpc('rr_my_rooms'); check('S1: rr_my_rooms shows it as ended (cancelled), not open', r.ok && r.body.some((x) => x.id === PR.room_id && x.status === 'cancelled'), r.body);
+  await pin(null);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (child) child.kill();
 process.exit(failed ? 1 : 0);

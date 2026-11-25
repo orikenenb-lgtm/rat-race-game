@@ -21,6 +21,10 @@ export const LIMITS = Object.freeze({
   awayAfter: 3, forfeitAfter: 10, strictForfeitAfter: 3, actionsPerMin: 120, maxActions: 6000, autopilotSteps: 12,
   lobbyTtlMs: 2 * 3600e3, idleMs: 2 * 3600e3, allAwayMs: 30 * 60e3, offlineMs: 45e3, keepEvents: 50, reactGapMs: 3000,
   maxIntentBytes: 2048, maxOutBytes: 24000,
+  // S1: a playing room started under another engine pin is closed (cancelled, unranked) once the pin has differed for this long —
+  // the grace covers the deploy window, when old and new isolates may answer the same room. S5: a poll refreshes last_seen only
+  // when it is older than seenWriteMs (the 15 s heartbeat keeps it fresh; "connected" means ≤ offlineMs = 45 s).
+  pinGraceMs: 120e3, seenWriteMs: 15e3,
 });
 export const REACTIONS = Object.freeze(['clap', 'wow', 'lol', 'strong', 'bravo', 'again']); // 👏 😮 😂 💪 "כל הכבוד" "עוד סיבוב!"
 const ACTIVE = new Set(['playing', 'away']);
@@ -95,7 +99,7 @@ export function newRoom(E, ids, player, settings, now, opts = {}) {
     id: ids.id, code: ids.code, host_id: player.id, group_id: st.privacy === 'group' ? opts.group_id : null, status: 'lobby', settings: st,
     rules: null, engine_sha: ids.engine_sha || null, seed: ids.seed, date_key: null, round: 0, round_started: null, deadline: null,
     version: 1, signal_topic: ids.topic || null, created_at: now, started_at: null, finished_at: null, last_activity: now, end_reason: null,
-    cancel_votes: [], needs_tick: false, results: null, seats: [], events: [], next_event: 1,
+    cancel_votes: [], needs_tick: false, results: null, seats: [], events: [], next_event: 1, pin_mismatch_at: null,
   };
   addSeat(room, player, now);
   event(room, 'created', { by: 0 }, now);
@@ -396,7 +400,7 @@ export function tick(E, room, player, now) {
 function tickInner(E, room, now) {
   const out = [];
   if (room.status === 'lobby') {
-    if (now - room.last_activity > LIMITS.lobbyTtlMs) { room.status = 'cancelled'; room.end_reason = 'expired'; room.finished_at = now; event(room, 'cancelled', { why: 'expired' }, now); room.version++; }
+    expireLobby(room, now);
     return out;
   }
   if (room.status !== 'playing') return out;
@@ -577,7 +581,7 @@ const ok = (body) => ({ status: 200, body: { ok: true, ...body } });
 /** rr_room_state: the snapshot a member gets (reconnect = this + resend the unacknowledged intent with the SAME action_id). */
 export function snapshot(room, player, since, now) {
   const me = seatOf(room, player.id); if (!me) fail('not_in_room', 403);
-  me.last_seen = Math.max(me.last_seen, now); back(room, me, now);
+  if (me.status === 'away' || now - me.last_seen > LIMITS.seenWriteMs) { me.last_seen = Math.max(me.last_seen, now); back(room, me, now); }   // S5: = rr_room_state
   if (since != null && Number.isInteger(since) && since >= room.version) return ok({ unchanged: true, version: room.version, state_version: me.state_version, now });
   const over = ['finished', 'cancelled', 'abandoned'].includes(room.status);
   return ok({
@@ -607,12 +611,52 @@ export function listing(room, pid) {
  */
 export function dispatch(E, room, op, player, args, now, ctx = {}) {
   drainRows(room);
-  try { const r = route(E, room, op, player, args || {}, now, ctx); return { ...r, actions: drainRows(room) }; }
+  try {
+    const g = EDGE_OPS.has(op) ? pinGate(room, op, now, ctx) : null;
+    const r = g || route(E, room, op, player, args || {}, now, ctx); return { ...r, actions: drainRows(room) };
+  }
   catch (e) {
     if (e instanceof RoomError) return { status: e.status, body: { ok: false, error: e.code, ...(e.extra || {}) }, actions: drainRows(room) };
     drainRows(room); throw e;
   }
 }
+const EDGE_OPS = new Set(['start', 'act', 'tick']);
+/**
+ * S1 — the engine pin changed under a playing room (a deploy). Old engine states are never continued with another engine, and the
+ * room must not stay stuck (409 forever, counted in the open-rooms cap): the first time a server with another pin (ctx.engine_sha)
+ * sees it, it notes the time (pin_mismatch_at) and answers 409 version_changed; once the pin has differed for LIMITS.pinGraceMs
+ * (the deploy window — a server with the room's own pin clears the note), the room is closed: cancelled, end_reason
+ * 'version_changed', nobody ranked, the seed revealed like any cancelled room. tick → 200 (applied:1); start/act → 409
+ * version_changed {closed:true}. Needs no engine. Callers persist the room when room.__dirty is set (also on an error answer).
+ */
+function pinGate(room, op, now, ctx) {
+  const pin = ctx.engine_sha;
+  if (!pin || !room.engine_sha || room.engine_sha === pin) {
+    if (pin && room.pin_mismatch_at != null && room.engine_sha === pin) { room.pin_mismatch_at = null; DIRTY(room); }
+    return null;
+  }
+  if (room.status !== 'playing') return null;                       // lobby: no pin yet (start sets it) · ended rooms: nothing to run
+  if (room.pin_mismatch_at == null) { room.pin_mismatch_at = now; DIRTY(room); }
+  if (now - room.pin_mismatch_at < LIMITS.pinGraceMs) fail('version_changed', 409, { engine: room.engine_sha, closes_in: Math.ceil((LIMITS.pinGraceMs - (now - room.pin_mismatch_at)) / 1000) });
+  room.status = 'cancelled'; room.end_reason = 'version_changed'; room.finished_at = now; room.deadline = null; room.needs_tick = false; room.cancel_votes = [];
+  event(room, 'cancelled', { why: 'version' }, now); touch(room, now); DIRTY(room);
+  if (op === 'tick') return { status: 200, body: { ok: true, status: room.status, round: room.round, deadline: null, version: room.version, applied: 1, now } };
+  fail('version_changed', 409, { engine: room.engine_sha, closed: true });
+  return null;
+}
+const DIRTY = (room) => Object.defineProperty(room, '__dirty', { value: true, enumerable: false, configurable: true, writable: true });
+/**
+ * S2 — a lobby nobody touched for LIMITS.lobbyTtlMs is cancelled ('expired') — the same rule as tick(), applied without a tick:
+ * the SQL draft runs it (game.room_sweep) at the start of rr_room_create / rr_room_join / rr_my_rooms, the fake before the same ops.
+ * → true when it expired the room now.
+ */
+export function expireLobby(room, now) {
+  if (room.status !== 'lobby' || now - room.last_activity <= LIMITS.lobbyTtlMs) return false;
+  room.status = 'cancelled'; room.end_reason = 'expired'; room.finished_at = now; event(room, 'cancelled', { why: 'expired' }, now); room.version++;
+  return true;
+}
+/** S2 — counts toward the 3-open-rooms cap: lobby, or playing with activity in the last LIMITS.idleMs (= the SQL caps). */
+export function countsAsOpen(room, now) { return room.status === 'lobby' || (room.status === 'playing' && now - room.last_activity <= LIMITS.idleMs); }
 function route(E, room, op, player, args, now, ctx) {
   {
     switch (op) {

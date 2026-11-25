@@ -748,6 +748,9 @@ class FakeBackend:
             self.log.append((round(time.time(), 3), 'room', {'op': op, 'room': room, 'code': body.get('code')}, None))
             try: return self._room_ask(op, p, args)
             except (TimeoutError, queue.Empty): return 503, {'ok': False, 'error': 'engine_unavailable'}
+    def set_room_pin(self, sha=None):
+        """test-only: the engine pin of the fake's room server (None = the real pin) — simulates a deploy that changes it (S1)."""
+        return self._room_side().ask({'op': 'pin', 'player': {}, 'args': {'sha': sha}}, 60)['body']
     def rooms_dump(self):
         return self._rooms.ask({'op': 'dump', 'player': {}, 'args': {}}, 60)['body'] if self._rooms else self._room_state
 
@@ -1112,6 +1115,8 @@ def serve(port, fb):
                 try: body = json.loads(raw)
                 except ValueError: return self._send(400, {'ok': False, 'error': 'bad_json'})
                 return self._send(*fb.room_fn(body, len(raw.encode('utf-8'))))
+            if self.path.startswith('/__fake/pin'):         # test-only: change the room server's engine pin (S1)
+                b = json.loads(raw or '{}'); return self._send(200, fb.set_room_pin(b.get('sha')))
             if self.path.startswith('/__fake/advance'):     # test-only clock control (HTTP mode only)
                 b = json.loads(raw or '{}'); fb.advance(days=b.get('days', 0), hours=b.get('hours', 0), minutes=b.get('minutes', 0)); fb._offset += dt.timedelta(seconds=b.get('seconds', 0))
                 return self._send(200, {'now': fb.iso()})

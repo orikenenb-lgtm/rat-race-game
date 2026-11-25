@@ -6,6 +6,7 @@
 //   node tests/online_smoke.mjs                                   → its own fake backend (python3 tests/fakebackend.py --serve 11695)
 //   node tests/online_smoke.mjs --target=http://127.0.0.1:8779    → an already running fake
 //   RR_SMOKE_URL=https://<ref>.supabase.co RR_SMOKE_ANON=<publishable key> node tests/online_smoke.mjs --live      (staging)
+//   . /tmp/rr-staging/target.env && node tests/online_smoke.mjs --live --local                                     (local staging, tools/staging)
 //   … + RR_SMOKE_CONFIRM=production for the production project (OWNER APPROVAL: it registers 2 players named טסט-חדר-*, and
 //     leaves one cancelled room; set RR_SMOKE_P1 / RR_SMOKE_P2 = '{"id":…,"secret":…}' to reuse two existing test players instead).
 // The room is casual, 2 seats, 10 rounds, cancelled at the end: nothing is ranked, no board row, no game.results row.
@@ -16,11 +17,17 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url)); const ROOT = join(HERE, '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const LIVE = process.argv.includes('--live');
+const LOCAL = process.argv.includes('--local');      // the LOCAL staging stack (tools/staging): real PostgreSQL + PostgREST + Deno, nothing hosted
+const LIVE = process.argv.includes('--live') || LOCAL;
 const PROD_REF = /SB_PROD = 'https:\/\/([a-z0-9]+)\.supabase\.co'/.exec(readFileSync(join(HERE, 'fakebackend.py'), 'utf8'))[1];
 const { ENGINE_SHA256 } = await import(join(ROOT, 'supabase', 'functions', 'verify-result', 'engine_pin.js'));
 let TARGET = arg('target', null), KEY = 'fake-anon', child = null;
-if (LIVE) {
+if (LOCAL) {
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/?$/.test(process.env.RR_LOCAL_URL || '') || !process.env.RR_LOCAL_ANON) {
+    console.error('REFUSED --local: needs RR_LOCAL_URL=http://127.0.0.1:<port> and RR_LOCAL_ANON (. /tmp/rr-staging/target.env after tools/staging/start.sh)'); process.exit(2);
+  }
+  TARGET = process.env.RR_LOCAL_URL.replace(/\/$/, ''); KEY = process.env.RR_LOCAL_ANON;
+} else if (LIVE) {
   const m = /^https:\/\/([a-z0-9]{8,40})\.supabase\.co\/?$/.exec(process.env.RR_SMOKE_URL || '');
   if (!m || !process.env.RR_SMOKE_ANON) { console.error('REFUSED --live: needs RR_SMOKE_URL=https://<ref>.supabase.co and RR_SMOKE_ANON'); process.exit(2); }
   if (m[1] === PROD_REF && process.env.RR_SMOKE_CONFIRM !== 'production') { console.error('REFUSED: this is the PRODUCTION project — set RR_SMOKE_CONFIRM=production only with the owner\'s approval'); process.exit(2); }
@@ -52,7 +59,7 @@ const uuid = () => crypto.randomUUID();
 const tag = Math.floor(Math.random() * 9000 + 1000);
 const player = async (env, nick) => (process.env[env] ? JSON.parse(process.env[env]) : (await rpc('rr_register2', { p_nickname: nick, p_ref: null })).body);
 
-console.log(`online smoke · target=${FAKE ? 'fake ' : 'LIVE '}${TARGET}`);
+console.log(`online smoke · target=${FAKE ? 'fake ' : LOCAL ? 'LOCAL STAGING ' : 'LIVE '}${TARGET}`);
 try {
   // 0. health (GET loads nothing) — the deployed function must pin the engine this checkout pins
   const h = await timed('GET health', () => fetch(`${TARGET}/functions/v1/room`, { headers: { apikey: KEY } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })));
@@ -110,5 +117,5 @@ try {
   r = await rpc('rr_my_rooms', au(A)); check('rr_my_rooms lists it as cancelled', r.ok && r.body.some((x) => x.id === room && x.status === 'cancelled'), r);
 } catch (e) { fail++; console.log('FAIL  crashed: ' + (e && e.stack || e)); }
 console.log('\nlatency (ms): ' + times.map(([k, v]) => `${k} ${v}`).join(' · '));
-console.log(`${pass} passed, ${fail} failed · target=${FAKE ? 'fake' : 'live'}`);
+console.log(`${pass} passed, ${fail} failed · target=${FAKE ? 'fake' : LOCAL ? 'local staging' : 'live'}`);
 process.exit(fail ? 1 : 0);

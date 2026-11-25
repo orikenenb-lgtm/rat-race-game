@@ -7,6 +7,7 @@
 //   node tests/backend_contract.mjs                     → starts the fake in HTTP mode (python3 tests/fakebackend.py --serve 8779)
 //   node tests/backend_contract.mjs --target=http://127.0.0.1:8779     (an already running fake)
 //   RR_LIVE=1 RR_SB_URL=https://<staging>.supabase.co RR_SB_ANON=… node tests/backend_contract.mjs --live   (staging only)
+//   . /tmp/rr-staging/target.env && RR_DRAFTS=1 node tests/backend_contract.mjs --live --local    (the local staging stack, tools/staging)
 // Output: one line per case PASS / FAIL / DIFF-ASSUMED (staging differs on an assumed S-row of T7 §2.6) / SKIP (fake-only helper).
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -16,10 +17,16 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const HERE = dirname(fileURLToPath(import.meta.url)); const ROOT = join(HERE, '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const LIVE = process.argv.includes('--live');
+const LOCAL = process.argv.includes('--local');                    // the LOCAL staging stack (tools/staging: real PostgreSQL + PostgREST + Deno)
+const LIVE = process.argv.includes('--live') || LOCAL;
 const PROD_REF = /SB_PROD = 'https:\/\/([a-z0-9]+)\.supabase\.co'/.exec(readFileSync(join(HERE, 'fakebackend.py'), 'utf8'))[1];   // single source: the guard
 let TARGET = arg('target', null), KEY = 'fake-anon', child = null;
-if (LIVE) {
+if (LOCAL) {
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/?$/.test(process.env.RR_LOCAL_URL || '') || !process.env.RR_LOCAL_ANON) {
+    console.error('REFUSED --local: needs RR_LOCAL_URL=http://127.0.0.1:<port> and RR_LOCAL_ANON (. /tmp/rr-staging/target.env after tools/staging/start.sh)'); process.exit(2);
+  }
+  TARGET = process.env.RR_LOCAL_URL.replace(/\/$/, ''); KEY = process.env.RR_LOCAL_ANON;
+} else if (LIVE) {
   const m = /^https:\/\/([a-z0-9]{8,40})\.supabase\.co\/?$/.exec(process.env.RR_SB_URL || '');
   if (process.env.RR_LIVE !== '1' || !m || m[1] === PROD_REF || !process.env.RR_SB_ANON) {
     console.error('REFUSED --live: needs RR_LIVE=1, RR_SB_URL=<non-production staging URL>, RR_SB_ANON (CR-22: no staging exists yet).'); process.exit(2);
@@ -63,11 +70,16 @@ const E = await import(join(ROOT, 'js', 'engine.js'));
 const VC = await import(join(ROOT, 'supabase', 'functions', 'verify-result', 'verify_core.js'));
 const { playOut, prng } = await import(join(HERE, 'lib', 'random-player.mjs'));
 
-console.log(`backend contract · target=${FAKE ? 'fake ' + TARGET : 'staging ' + TARGET}`);
+console.log(`backend contract · target=${FAKE ? 'fake ' + TARGET : (LOCAL ? 'local staging ' : 'staging ') + TARGET}`);
+// --only=rooms: just the rooms draft (RPCs + the Edge Function) and the REST surface — e.g. against a staging whose baseline
+// differs from the fake's model of the older RPCs (tools/staging loads supabase/schema/production_baseline.sql as it is).
+const ROOMS_ONLY = arg('only', '') === 'rooms';
+let r, A, B, C;
+if (ROOMS_ONLY) { A = await reg(`טסט-A-${tag}`); skip('pre-draft RPC sections + groups v2 / competitions drafts', '--only=rooms'); } else {
 // ---------------------------------------------------------------- register / rename / profile / sync
-let r = await rpc('rr_register2', { p_nickname: `טסט-A-${tag}`, p_ref: null });
-const A = r.body; check('rr_register2 happy + shape {id,secret,nickname}', r.ok && keysEq(A, ['id', 'secret', 'nickname']) && shape(A, { id: 'string', secret: 'string', nickname: 'string' }), r);
-const B = await reg(`טסט-B-${tag}`); const C = await reg(`טסט-C-${tag}`);
+r = await rpc('rr_register2', { p_nickname: `טסט-A-${tag}`, p_ref: null });
+A = r.body; check('rr_register2 happy + shape {id,secret,nickname}', r.ok && keysEq(A, ['id', 'secret', 'nickname']) && shape(A, { id: 'string', secret: 'string', nickname: 'string' }), r);
+B = await reg(`טסט-B-${tag}`); C = await reg(`טסט-C-${tag}`);
 for (const [n, ok] of [['x', false], ['ab', true], ['x'.repeat(20), true], ['x'.repeat(21), false], ['   ', false]]) {
   r = await rpc('rr_register2', { p_nickname: n === 'ab' ? 'ab' : n, p_ref: null });
   check(`rr_register2 nickname length ${n.trim().length} → ${ok ? 'ok' : 'bad_nickname'}`, ok ? r.ok : r.code === 'bad_nickname', r);
@@ -149,7 +161,7 @@ check('rr_finish wrong secret → unauthorized', r.code === 'unauthorized', r);
 
 // honest + forged games (engine in Node; rules era from the server's date keys exactly as verify_core.rulesFor sees them)
 const era = (row) => (VC.rulesFor ? { rules: VC.rulesFor(row) } : {});
-const cfgC = { worldId: bA.world, charId: bA.char, seed: Number(bA.seed), mode: 'challenge', tutorial: false, bailout: false, ...era({ challenge_day: CH.starts_at.slice(0, 10) }) };
+const cfgC = { worldId: bA.world, charId: bA.char, seed: Number(bA.seed), mode: 'challenge', tutorial: false, bailout: false, ...era({ challenge_day: String(CH.starts_at || '').slice(0, 10) }) };
 const stA = playOut(E, cfgC, prng(tag)); const stB = playOut(E, cfgC, prng(tag + 1));
 const claim = (st) => ({ p_status: st.result.status, p_months: Math.max(1, Math.min(200, Math.round(st.result.months))), p_passive: Math.round(st.result.passive),
   p_expenses: Math.max(0, Math.round(st.result.expenses)), p_net_worth: Math.round(st.result.netWorth), p_stats: { progress: st.result.progress ?? null, stars: st.result.stars || 0 } });
@@ -217,6 +229,7 @@ if (FAKE && await advance({ days: 2 })) {
   r = await rpc('rr_log_event', { ...auth(X), p_kind: 'k', p_data: {} }); check('51st event of the day → rate_limited', r.code === 'rate_limited', r);
 }
 
+} // !ROOMS_ONLY
 // ---------------------------------------------------------------- DRAFTS (not applied in production): groups v2, competitions, rooms
 // supabase/migrations/20261124_{groups_v2,competitions,rooms}.sql + the Edge Function supabase/functions/room. On staging these run only
 // with RR_DRAFTS=1 (after the drafts were applied there); on the fake they always run.
@@ -227,6 +240,7 @@ async function room(body, raw) {
 }
 if (!DRAFTS) skip('groups v2 / competitions / rooms drafts', 'not applied on this target (RR_DRAFTS=1 after applying them)');
 else {
+  if (!ROOMS_ONLY) {
   // ---- groups v2
   const O = await reg(`טסט-gO-${tag}`), M = await reg(`טסט-gM-${tag}`), N = await reg(`טסט-gN-${tag}`), Z = await reg(`טסט-gZ-${tag}`);
   const g = (await rpc('rr_create_group', { ...auth(O), p_name: `טסט v2 ${tag}` })).body;
@@ -291,6 +305,7 @@ else {
   r = await rpc('rr_cancel_competition', { ...auth(O), p_challenge: SC.id }); check('cancel by the owner → cancelled (board kept)', r.ok && r.body.status === 'cancelled' && Array.isArray(r.body.board), r);
   r = await rpc('rr_cancel_competition', { ...auth(O), p_challenge: SC.id }); check('cancel twice → already_cancelled', r.code === 'already_cancelled', r);
   r = await rpc('rr_begin', { ...auth(O), p_mode: 'challenge', p_challenge: SC.id }); check('begin a cancelled competition → challenge_cancelled', r.code === 'challenge_cancelled', r);
+  } // !ROOMS_ONLY
 
   // ---- rooms: SQL RPCs
   const [P1, P2, P3, P4] = [await reg(`טסט-r1-${tag}`), await reg(`טסט-r2-${tag}`), await reg(`טסט-r3-${tag}`), await reg(`טסט-r4-${tag}`)];
@@ -303,6 +318,9 @@ else {
   r = await rpc('rr_room_join', { ...auth(P2), p_code: RM.code }); check('rr_room_join → {room_id, seat, rejoined}', r.ok && keysEq(r.body, ['room_id', 'seat', 'rejoined']) && r.body.seat === 1, r);
   await rpc('rr_room_join', { ...auth(P3), p_code: RM.code });
   r = await rpc('rr_room_join', { ...auth(P4), p_code: RM.code }); check('rr_room_join a full room → room_full', r.code === 'room_full', r);
+  { const T = await reg(`טסט-rj-${tag}`); for (let i = 0; i < 20; i++) await rpc('rr_room_join', { ...auth(T), p_code: 'ZZZZZ' + (2 + (i % 8)) });
+    r = await rpc('rr_room_join', { ...auth(T), p_code: RM.code });
+    check('rr_room_join: the 21st failed code in an hour → rate_limited (failed codes are kept although PostgREST answered 400)', r.code === 'rate_limited', r); }
   r = await rpc('rr_room_ready', { ...auth(P4), p_room: RM.room_id, p_ready: true, p_char: null }); check('rr_room_ready non-member → not_in_room', r.code === 'not_in_room', r);
   r = await rpc('rr_room_ready', { ...auth(P2), p_room: RM.room_id, p_ready: true, p_char: 'chef' }); check('rr_room_ready a character of another world → bad_char', r.code === 'bad_char', r);
   r = await rpc('rr_room_kick', { ...auth(P2), p_room: RM.room_id, p_seat: 2 }); check('rr_room_kick by a non-host → not_host', r.code === 'not_host', r);
@@ -345,12 +363,12 @@ else {
 }
 
 // ---------------------------------------------------------------- protocol + REST surface
-r = await rpc('rr_register', { p_nickname: 'טסט' }); check('legacy rr_register → 404', r.status === 404, r);
+r = await rpc('rr_register', { p_nickname: 'טסט' }); assumed('S-legacy', 'legacy rr_register → 404 (production_baseline.sql still lists public.rr_register)', r.status === 404, r);
 r = await rpc('rr_profile', { ...auth(A), p_extra: 1 }); check('unknown parameter → 404 (PostgREST signature mismatch)', r.status === 404, r);
 let x = await fetch(`${TARGET}/rest/v1/players?select=*`, { headers: { apikey: KEY } }); check('tables are not reachable through REST', !x.ok, { status: x.status });
 x = await fetch(`${TARGET}/rest/v1/players?select=*`, { headers: { apikey: KEY, 'Accept-Profile': 'game' } }); check('schema "game" is not exposed', !x.ok, { status: x.status });
 x = await fetch(`${TARGET}/rest/v1/rpc/auth`, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json', 'Content-Profile': 'game' }, body: '{}' }); check('game.* functions are not callable through REST', !x.ok, { status: x.status });
 
-console.log(`\n${out.pass} passed, ${out.fail} failed, ${out.diff} DIFF-ASSUMED, ${out.skip} skipped · target=${FAKE ? 'fake' : 'staging ' + new URL(TARGET).hostname.split('.')[0]}`);
+console.log(`\n${out.pass} passed, ${out.fail} failed, ${out.diff} DIFF-ASSUMED, ${out.skip} skipped · target=${FAKE ? 'fake' : LOCAL ? 'local staging ' + TARGET : 'staging ' + new URL(TARGET).hostname.split('.')[0]}`);
 if (child) child.kill();
 process.exit(out.fail ? 1 : 0);

@@ -9,7 +9,11 @@
 -- Model: RLS on, NO policies, NO grants on tables (deny-all like the 7 existing game tables); only public.rr_room_* are executable.
 -- The seed and the full engine state never leave the server through these RPCs: rr_room_state returns the caller's redacted view
 -- (written by the Edge Function), opponents' public progress, and the seed only after the room ended.
--- Retention of finished rooms (owner decision, not in this draft): e.g. delete rooms finished > 30 days ago (cascade).
+-- Lifecycle without a cron (ONLINE_RELEASE.md S1/S2/S5/S6): stale lobbies are expired by game.room_sweep() at the start of
+-- rr_room_create / rr_room_join / rr_my_rooms; the open-rooms cap counts lobbies + playing rooms active in the last 2 h; a playing room
+-- left behind by an engine-pin change is closed by the Edge Function (pin_mismatch_at, room_core pinGate); polls write last_seen at most
+-- every 15 s and take no lock otherwise; game.room_purge(days) deletes ended rooms (retention: owner-run, never scheduled here).
+-- Verified on real PostgreSQL 17 + PostgREST + Deno too: tools/staging (local stack), tests/online_local.test.mjs.
 -- ROLLBACK: at the bottom.
 
 begin;
@@ -40,7 +44,8 @@ create table game.rooms (
   created_at timestamptz not null default now(),
   started_at timestamptz,
   finished_at timestamptz,
-  last_activity timestamptz not null default now()
+  last_activity timestamptz not null default now(),
+  pin_mismatch_at timestamptz                                                    -- S1: first seen by a server with another engine pin
 );
 create unique index rooms_code_open on game.rooms (code) where status in ('lobby', 'playing');
 create index rooms_status_activity on game.rooms (status, last_activity);
@@ -199,6 +204,33 @@ begin
    where r.id = p_room and r.status = 'playing' and s.room_id = p_room and s.seat = p_seat and s.status = 'away';
   if found then perform game.room_event(p_room, 'back', json_build_object('seat', p_seat)::jsonb); perform game.room_touch(p_room); end if;
 end $$;
+/** S2 = room_core expireLobby(): lobbies idle > 2 h are cancelled ('expired') without an Edge tick. Called at the start of
+ *  rr_room_create / rr_room_join / rr_my_rooms (no cron). At most 50 rows per call and SKIP LOCKED: it never waits for, or deadlocks
+ *  with, a room another transaction holds (that room is swept by a later call). → number of lobbies expired. */
+create or replace function game.room_sweep() returns int language plpgsql volatile security definer set search_path = '' as $$
+declare n int;
+begin
+  with x as (select id from game.rooms where status = 'lobby' and last_activity < now() - interval '2 hours'
+             order by last_activity limit 50 for update skip locked),
+  u as (update game.rooms r set status = 'cancelled', end_reason = 'expired', finished_at = now(), version = r.version + 1, next_event = r.next_event + 1
+          from x where r.id = x.id returning r.id, r.next_event - 1 as seq, r.round),
+  e as (insert into game.room_events (room_id, seq, round, kind, data) select u.id, u.seq, u.round, 'cancelled', '{"why":"expired"}'::jsonb from u returning 1)
+  select count(*) into n from e;
+  return n;
+end $$;
+/** S6 — retention, run by the owner (SQL editor / psql as postgres), never scheduled here and never granted to the API roles:
+ *  deletes rooms that ENDED (finished / cancelled) more than p_days days ago — seats, actions and events go with them (cascade) —
+ *  and failed-join rows older than a day. Playing and lobby rooms are never touched. → {rooms, join_fails, older_than_days}. */
+create or replace function game.room_purge(p_days int default 30) returns json language plpgsql volatile set search_path = '' as $$
+declare n_rooms int; n_fails int;
+begin
+  if p_days is null or p_days < 1 or p_days > 3650 then raise exception 'bad_days'; end if;
+  with d as (delete from game.rooms where status in ('finished', 'cancelled') and coalesce(finished_at, last_activity) < now() - make_interval(days => p_days) returning 1)
+  select count(*) into n_rooms from d;
+  with d as (delete from game.room_join_fails where at < now() - interval '1 day' returning 1)
+  select count(*) into n_fails from d;
+  return json_build_object('rooms', n_rooms, 'join_fails', n_fails, 'older_than_days', p_days);
+end $$;
 /** a failed code is counted AND answered like the old raise (see game.fail_committed in the groups v2 draft; same caveat). */
 create or replace function game.room_fail(p_player uuid, p_code text) returns json language plpgsql security definer set search_path = '' as $$
 begin
@@ -213,6 +245,7 @@ language plpgsql security definer set search_path = '' as $$
 declare v_s jsonb; v_r game.rooms; v_seed bigint;
 begin
   perform game.auth(p_id, p_secret);
+  perform game.room_sweep();
   v_s := game.room_settings(coalesce(p_settings, '{}'::jsonb));
   if v_s->>'privacy' = 'group' then
     if p_group is null then raise exception 'bad_settings'; end if;
@@ -220,7 +253,8 @@ begin
   end if;
   if (select count(*) from game.rooms where host_id = p_id and created_at > now() - interval '1 day') >= 10 then raise exception 'rate_limited'; end if;
   if (select count(*) from game.room_seats s join game.rooms r on r.id = s.room_id
-      where s.player_id = p_id and r.status in ('lobby', 'playing') and s.status not in ('left', 'forfeit', 'finished')) >= 3 then raise exception 'too_many_rooms'; end if;
+      where s.player_id = p_id and s.status not in ('left', 'forfeit', 'finished')
+        and (r.status = 'lobby' or (r.status = 'playing' and r.last_activity > now() - interval '2 hours'))) >= 3 then raise exception 'too_many_rooms'; end if;
   v_seed := 1 + (('x' || encode(extensions.gen_random_bytes(4), 'hex'))::bit(32)::bigint % 2147483646);    -- crypto random, never random()
   insert into game.rooms (code, host_id, group_id, settings, seed, signal_topic)
     values (game.room_new_code(), p_id, case when v_s->>'privacy' = 'group' then p_group end, v_s, v_seed, encode(extensions.gen_random_bytes(16), 'hex'))
@@ -235,6 +269,7 @@ language plpgsql security definer set search_path = '' as $$
 declare v_code text := upper(btrim(left(coalesce(p_code, ''), 16))); v_r game.rooms; v_seat smallint; v_me game.room_seats;
 begin
   perform game.auth(p_id, p_secret);
+  perform game.room_sweep();
   if (select count(*) from game.room_join_fails where player_id = p_id and at > now() - interval '1 hour') >= 20 then raise exception 'rate_limited'; end if;
   select r.* into v_r from game.rooms r where r.code = v_code and v_code ~ '^[A-Z2-9]{6}$'
      and (r.status = 'lobby' or exists (select 1 from game.room_seats s where s.room_id = r.id and s.player_id = p_id))
@@ -248,7 +283,8 @@ begin
   if v_r.status <> 'lobby' or v_r.kicked ? p_id::text then return game.room_fail(p_id, 'room_not_found'); end if;
   if v_r.group_id is not null and not exists (select 1 from game.group_members where group_id = v_r.group_id and player_id = p_id) then raise exception 'not_member'; end if;
   if (select count(*) from game.room_seats s join game.rooms r on r.id = s.room_id
-      where s.player_id = p_id and r.status in ('lobby', 'playing') and s.status not in ('left', 'forfeit', 'finished')) >= 3 then raise exception 'too_many_rooms'; end if;
+      where s.player_id = p_id and s.status not in ('left', 'forfeit', 'finished')
+        and (r.status = 'lobby' or (r.status = 'playing' and r.last_activity > now() - interval '2 hours'))) >= 3 then raise exception 'too_many_rooms'; end if;
   if (select count(*) from game.room_seats where room_id = v_r.id) >= (v_r.settings->>'max_seats')::int then raise exception 'room_full'; end if;
   select min(n) into v_seat from generate_series(0, 3) n where not exists (select 1 from game.room_seats where room_id = v_r.id and seat = n);
   insert into game.room_seats (room_id, seat, player_id) values (v_r.id, v_seat, p_id);
@@ -391,17 +427,22 @@ begin
   return json_build_object('version', (select version from game.rooms where id = p_room));
 end $$;
 
-/** = room_core snapshot(): the caller's view only; opponents' public progress as of the last closed round; the seed only when over. */
+/** = room_core snapshot(): the caller's view only; opponents' public progress as of the last closed round; the seed only when over.
+ *  S5: a poll takes no lock and writes nothing unless the seat is away (it comes back) or its last_seen is older than 15 s. */
 create or replace function public.rr_room_state(p_id uuid, p_secret text, p_room uuid, p_since bigint default null) returns json
 language plpgsql security definer set search_path = '' as $$
 declare v_me game.room_seats; v_r game.rooms; v_host smallint;
 begin
   perform game.auth(p_id, p_secret);
-  v_me := game.room_lock(p_room, p_id);
-  update game.room_seats set last_seen = greatest(last_seen, now()) where room_id = p_room and seat = v_me.seat;
-  perform game.room_back(p_room, v_me.seat);
+  select * into v_me from game.room_seats where room_id = p_room and player_id = p_id;
+  if not found or v_me.status = 'away' or now() - v_me.last_seen > interval '15 seconds' then
+    v_me := game.room_lock(p_room, p_id);                                    -- raises room_not_found / not_in_room
+    update game.room_seats set last_seen = greatest(last_seen, now()) where room_id = p_room and seat = v_me.seat;
+    perform game.room_back(p_room, v_me.seat);
+  end if;
   select * into v_r from game.rooms where id = p_room;
-  select * into v_me from game.room_seats where room_id = p_room and seat = v_me.seat;
+  select * into v_me from game.room_seats where room_id = p_room and seat = v_me.seat and player_id = p_id;
+  if not found then raise exception 'not_in_room'; end if;                 -- left in another tab between the two reads
   if p_since is not null and p_since >= v_r.version then
     return json_build_object('unchanged', true, 'version', v_r.version, 'state_version', v_me.state_version, 'now', game.ms(now()));
   end if;
@@ -428,9 +469,10 @@ begin
 end $$;
 
 create or replace function public.rr_my_rooms(p_id uuid, p_secret text) returns json
-language plpgsql stable security definer set search_path = '' as $$
+language plpgsql volatile security definer set search_path = '' as $$             -- volatile: it sweeps stale lobbies (S2)
 begin
   perform game.auth(p_id, p_secret);
+  perform game.room_sweep();
   return (select coalesce(json_agg(json_build_object('id', r.id, 'code', r.code, 'status', r.status, 'world', r.settings->>'world',
       'seats', (select count(*) from game.room_seats x where x.room_id = r.id), 'max_seats', (r.settings->>'max_seats')::int,
       'round', r.round, 'host', r.host_id = p_id, 'seat', r.my_seat) order by r.last_activity desc), '[]'::json)
@@ -440,7 +482,8 @@ end $$;
 
 -- ------------------------------------------------------------------ grants: only rr_room_* / rr_my_rooms for the API roles
 revoke all on function game.ms(timestamptz), game.room_chars(text), game.room_settings(jsonb), game.room_new_code(), game.room_event(uuid, text, jsonb),
-  game.room_touch(uuid), game.room_lock(uuid, uuid), game.room_needs_tick(game.rooms), game.room_back(uuid, smallint), game.room_fail(uuid, text) from public;
+  game.room_touch(uuid), game.room_lock(uuid, uuid), game.room_needs_tick(game.rooms), game.room_back(uuid, smallint), game.room_fail(uuid, text),
+  game.room_sweep(), game.room_purge(int) from public;
 revoke all on function public.rr_room_create(uuid, text, jsonb, uuid), public.rr_room_join(uuid, text, text), public.rr_room_ready(uuid, text, uuid, boolean, text),
   public.rr_room_leave(uuid, text, uuid), public.rr_room_kick(uuid, text, uuid, smallint), public.rr_room_cancel(uuid, text, uuid),
   public.rr_room_heartbeat(uuid, text, uuid, text), public.rr_room_react(uuid, text, uuid, text), public.rr_room_state(uuid, text, uuid, bigint),
@@ -449,7 +492,9 @@ grant execute on function public.rr_room_create(uuid, text, jsonb, uuid), public
   public.rr_room_leave(uuid, text, uuid), public.rr_room_kick(uuid, text, uuid, smallint), public.rr_room_cancel(uuid, text, uuid),
   public.rr_room_heartbeat(uuid, text, uuid, text), public.rr_room_react(uuid, text, uuid, text), public.rr_room_state(uuid, text, uuid, bigint),
   public.rr_my_rooms(uuid, text) to anon, authenticated;
--- tables: no grants at all (the Edge Function connects with SUPABASE_DB_URL, the owner role; RLS stays deny-all for the API roles)
+-- tables: no grants at all (the Edge Function connects with SUPABASE_DB_URL, the owner role; RLS stays deny-all for the API roles);
+-- explicit revoke in case schema `game` ever gets default privileges for the API roles (N4)
+revoke all on table game.rooms, game.room_seats, game.room_actions, game.room_events, game.room_join_fails from anon, authenticated;
 
 commit;
 
@@ -458,7 +503,7 @@ commit;
 -- drop function if exists public.rr_my_rooms(uuid, text), public.rr_room_state(uuid, text, uuid, bigint), public.rr_room_react(uuid, text, uuid, text),
 --   public.rr_room_heartbeat(uuid, text, uuid, text), public.rr_room_cancel(uuid, text, uuid), public.rr_room_kick(uuid, text, uuid, smallint),
 --   public.rr_room_leave(uuid, text, uuid), public.rr_room_ready(uuid, text, uuid, boolean, text), public.rr_room_join(uuid, text, text),
---   public.rr_room_create(uuid, text, jsonb, uuid), game.room_fail(uuid, text), game.room_back(uuid, smallint), game.room_needs_tick(game.rooms),
+--   public.rr_room_create(uuid, text, jsonb, uuid), game.room_purge(int), game.room_sweep(), game.room_fail(uuid, text), game.room_back(uuid, smallint), game.room_needs_tick(game.rooms),
 --   game.room_lock(uuid, uuid), game.room_touch(uuid), game.room_event(uuid, text, jsonb), game.room_new_code(), game.room_settings(jsonb),
 --   game.room_chars(text), game.ms(timestamptz);
 -- drop table if exists game.room_join_fails, game.room_events, game.room_actions, game.room_seats, game.rooms;

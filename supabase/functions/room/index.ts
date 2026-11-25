@@ -4,6 +4,8 @@
 // POST {op:'start', id, secret, room}                                   host; every seat ready → one engine game per seat, round 1
 // POST {op:'act',   id, secret, room, action_id, state_version, code, args, engine?}   one intent of the caller's seat
 // POST {op:'tick',  id, secret, room}                                   any member; applies overdue timeouts (idempotent)
+//   A playing room whose engine pin is not this deploy's: 409 version_changed for 2 minutes, then closed (cancelled
+//   'version_changed', unranked) by the next start/act/tick — room_core pinGate, ONLINE_RELEASE.md S1.
 //   200 {ok:true, …} · 400 bad_json|bad_op|bad_action · 401 unauthorized · 403 not_in_room|not_host · 409 stale{state_version,view} |
 //   not_your_roll | room_not_playing | room_started | not_ready | not_enough_players | seat_finished | action_id_reused · 413 too_big ·
 //   409 version_changed (the pin changed under a running room) · 422 illegal_action{msg} · 426 version_mismatch{engine} ·
@@ -27,7 +29,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CORS = {
   'Access-Control-Allow-Origin': '*',          // no cookies / ambient credentials: auth is the secret in the body
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-region',   // x-region: pin the region later (S7)
   'Access-Control-Max-Age': '86400',
 };
 const json = (status: number, body: unknown) =>
@@ -81,12 +83,9 @@ async function handle(body: any) {
     if (!r) throw new HttpError('not_in_room', 403);
     const me = r.seats.find((s: any) => s.player_id === id);
     if (!me) throw new HttpError('not_in_room', 403);
-    // a deploy changed the pinned engine while this room was playing: never continue old states with another engine.
-    // The room can still be cancelled by vote (rr_room_cancel, SQL only) or ends as abandoned after 2 h (ranked as-is by an old-pin
-    // deploy, never by this one). Deploy at quiet times (docs/full-upgrade/ONLINE.md §release).
-    if (r.status === 'playing' && r.engine_sha && r.engine_sha !== ENGINE_SHA256 && op !== 'start') {
-      return { status: 409, body: { ok: false, error: 'version_changed', engine: r.engine_sha }, actions: [] };
-    }
+    // a deploy changed the pinned engine while this room was playing: old states are never continued with another engine.
+    // room_core.dispatch → pinGate (S1): 409 version_changed during a 2-minute grace (the deploy window), then the room is closed
+    // (cancelled 'version_changed', unranked) by the first start/act/tick — it never stays stuck or counts toward the cap.
     const ctx: Record<string, unknown> = { engine_sha: ENGINE_SHA256 };
     if (op === 'act' && typeof intent.action_id === 'string' && intent.action_id.length <= 64) {
       ctx.prior = await priorAction(q, room, me.seat, intent.action_id);
@@ -94,7 +93,7 @@ async function handle(body: any) {
     }
     const v0 = r.version; const before = { next_event: r.next_event };
     const res = C.dispatch(E, r, op, { id, nickname: me.nickname, pawn: me.pawn }, intent, Number(now), ctx);
-    if (r.version !== v0 || res.actions.length) await saveRoom(q, r, before, res.actions);
+    if (r.version !== v0 || res.actions.length || (r as any).__dirty) await saveRoom(q, r, before, res.actions);
     console.log(JSON.stringify({ room, op, code: intent.code ?? null, status: res.status, error: res.body?.error ?? null, rows: res.actions.length }));
     return res;
   });
