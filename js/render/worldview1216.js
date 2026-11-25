@@ -95,12 +95,12 @@ export const covText = (v, months) => `×${x2(v)}${months != null ? ` · ${mo(mo
 function hdGauge(H, g, X) {
   const v = +g.value || 0;
   if (g.id === 'coverage') { const bad = v < g.ref;
-    return `<div class="wp-g${bad ? ' low' : ''}" data-g="coverage"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(covText(v, X ? X.covMonths : null))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, (v / g.max) * 100)}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>היעד: ×1 = מזומן במטה ל־12 חודשים של החזרי חוב בערבות${bad ? ' · נמוך' : ''}${X && X.breach ? ' · ⚠️ מתחת ל־1.2: הפרת תנאי האג"ח' : ''}</small></div>`; }
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="coverage"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(covText(v, X ? X.covMonths : null))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, (v / g.max) * 100)}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>היעד: ×1 = מזומן במטה ל־12 חודשים של החזרי חוב בערבות${bad ? ' · נמוך' : ''}${X && X.breach ? ' · ⚠️ מתחת ל־1.2: הפרת תנאי האג"ח' : ''}</small></div>`; }
   if (g.id === 'rating') { const t = g.text || ''; const bad = v < 3;
     return `<div class="wp-g${bad ? ' low' : ''}" data-g="rating"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.esc(`${t} — ${RATING_WORDS[t] || ''}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.round((v / g.max) * 100)}%"></i></div><small>${X ? `ריבית על חוב בערבות ${pct1(X.rateG)}` : ''} · AA הכי טוב, CCC הכי גרוע</small></div>`; }
   if (g.id === 'noDefault') { const bad = v < g.ref;
-    return `<div class="wp-g${bad ? ' low' : ''}" data-g="noDefault"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(`${v} מתוך ${g.ref}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.round((v / g.max) * 100)}%"></i></div><small>${X && X.defaults ? `${X.defaults === 1 ? 'חדלות פירעון אחת' : `${X.defaults} חדלויות פירעון`} עד עכשיו — השעון התחיל מחדש` : 'אף חדלות פירעון עד עכשיו'}</small></div>`; }
-  return `<div class="wp-g" data-g="${H.esc(g.id)}"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(`${v} מתוך ${g.max}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.round((v / g.max) * 100)}%"></i></div><small>כל ערבות = עוד חוט שסערה יכולה למשוך</small></div>`;
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="noDefault"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(`${v} מתוך ${g.ref}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.round((v / g.max) * 100)}%"></i></div><small>${X && X.defaults ? `${X.defaults === 1 ? 'חדלות פירעון אחת' : `${X.defaults} חדלויות פירעון`} עד עכשיו — השעון התחיל מחדש` : 'אף חדלות פירעון עד עכשיו'}</small></div>`; }
+  return `<div class="wp-g" data-g="${H.esc(g.id)}"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(`${v} מתוך ${g.max}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.round((v / g.max) * 100)}%"></i></div><small>כל ערבות = עוד חוט שסערה יכולה למשוך</small></div>`;
 }
 function hdLine(H, X) {
   if (!X) return '';
@@ -142,12 +142,12 @@ export function hdPanelHtml(H, P, X, btn) {
 function hvGauge(H, g, X) {
   const v = +g.value || 0;
   if (g.id === 'income') { const bad = v < g.ref;
-    return `<div class="wp-g${bad ? ' low' : ''}" data-g="income"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(H.mSg(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, (v / g.max) * 100))}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>היעד: ${H.esc(H.mS(g.ref))} בחודש בממוצע שנתי · ההכנסה מגיעה בקציר${v < 0 ? ' · החודש רק הוצאות' : ''}</small></div>`; }
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="income"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(H.mSg(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, (v / g.max) * 100))}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>היעד: ${H.esc(H.mS(g.ref))} בחודש בממוצע שנתי · ההכנסה מגיעה בקציר${v < 0 ? ' · החודש רק הוצאות' : ''}</small></div>`; }
   if (g.id === 'margin') { const none = !X || !(+X.locked > 0); const bad = !none && v < g.ref;
-    return `<div class="wp-g${bad ? ' low' : ''}" data-g="margin"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${none ? 'אין גידור פתוח' : H.esc(`×${x2(v)}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${none ? 0 : Math.min(100, (v / g.max) * 100)}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>${none ? 'בלי חוזים עתידיים אין קריאות מרווח' : `המזומן מול 8% מהשווי הנעול (${H.esc(H.mS(X.locked))})${bad ? ' · ⚠️ קריאה תיסגר בכוח' : ''}`}</small></div>`; }
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="margin"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${none ? 'אין גידור פתוח' : H.num(`×${x2(v)}`)}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${none ? 0 : Math.min(100, (v / g.max) * 100)}%"></i><s style="inset-inline-start:${(g.ref / g.max) * 100}%"></s></div><small>${none ? 'בלי חוזים עתידיים אין קריאות מרווח' : `המזומן מול 8% מהשווי הנעול (${H.esc(H.mS(X.locked))})${bad ? ' · ⚠️ קריאה תיסגר בכוח' : ''}`}</small></div>`; }
   if (g.id === 'quota') { const bad = v < g.ref;
-    return `<div class="wp-g${bad ? ' low' : ''}" data-g="quota"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(pct(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, v * 100)}%"></i><s style="inset-inline-start:${g.ref * 100}%"></s></div><small>כמה מהמים נשארים לך בשנת בצורת${bad ? ' · נמוך' : ''}</small></div>`; }
-  return `<div class="wp-g" data-g="silo"><div class="wp-gl"><span>${H.esc(g.label)}</span><b class="num">${H.esc(tons(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, (v / (g.max || 30000)) * 100)}%"></i></div><small>1.5% מתקלקל כל חודש · נמכר לבד אחרי חצי שנה</small></div>`;
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="quota"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(pct(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, v * 100)}%"></i><s style="inset-inline-start:${g.ref * 100}%"></s></div><small>כמה מהמים נשארים לך בשנת בצורת${bad ? ' · נמוך' : ''}</small></div>`; }
+  return `<div class="wp-g" data-g="silo"><div class="wp-gl"><span>${H.esc(g.label)}</span><b>${H.num(tons(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, (v / (g.max || 30000)) * 100)}%"></i></div><small>1.5% מתקלקל כל חודש · נמכר לבד אחרי חצי שנה</small></div>`;
 }
 function hvLine(H, X) {
   if (!X) return '';
@@ -157,7 +157,7 @@ function hvLine(H, X) {
 function priceTable(H, T) {
   if (!T || !T.length) return '';
   return `<section class="wp-sec"><h3>המחירים</h3><div class="tblwrap"><table class="hvtbl"><caption class="sr">מחירי התוצרת לטון: המחיר ההוגן היום, המחיר המקומי שמקבלים במכירה (נמוך בחודש הקציר ובחודש שאחריו) והמחיר הממוצע לאורך זמן.</caption>
-    <thead><tr><th scope="col">גידול</th><th scope="col">הוגן היום</th><th scope="col">מקומי (במכירה)</th><th scope="col">ממוצע ארוך</th></tr></thead><tbody>${T.map((p) => `<tr data-crop="${H.esc(p.id)}"><th scope="row">${H.esc(CROP_EMOJI[p.id] || '')} ${H.esc(p.name)}</th><td class="num">₪${(+p.fair || 0).toLocaleString('en-US')}</td><td class="num">₪${(+p.spot || 0).toLocaleString('en-US')}${p.spot < p.fair ? ' <small>(שפל הקציר)</small>' : ''}</td><td class="num">₪${(+p.anchor || 0).toLocaleString('en-US')} <small>${p.fair > p.anchor * 1.03 ? '▲ מעל' : p.fair < p.anchor * 0.97 ? '▼ מתחת' : 'בערך'}</small></td></tr>`).join('')}</tbody></table></div>
+    <thead><tr><th scope="col">גידול</th><th scope="col">הוגן היום</th><th scope="col">מקומי (במכירה)</th><th scope="col">ממוצע ארוך</th></tr></thead><tbody>${T.map((p) => `<tr data-crop="${H.esc(p.id)}"><th scope="row">${H.esc(CROP_EMOJI[p.id] || '')} ${H.esc(p.name)}</th><td>${H.num(`₪${(+p.fair || 0).toLocaleString('en-US')}`)}</td><td>${H.num(`₪${(+p.spot || 0).toLocaleString('en-US')}`)}${p.spot < p.fair ? ' <small>(שפל הקציר)</small>' : ''}</td><td>${H.num(`₪${(+p.anchor || 0).toLocaleString('en-US')}`)} <small>${p.fair > p.anchor * 1.03 ? 'ההוגן ▲ מעל' : p.fair < p.anchor * 0.97 ? 'ההוגן ▼ מתחת' : 'ההוגן בערך כאן'}</small></td></tr>`).join('')}</tbody></table></div>
     <p class="note">חוזה עתידי נסגר במחיר ההוגן; את היבול עצמו מוכרים במחיר המקומי — שיורד בחודש הקציר. ממגורה עוזרת לחכות לו.</p></section>`;
 }
 const HV_ACT = { insure: 'ביטוח יבול', irrigate: 'השקיה', sellLand: 'למכור / להחזיר' };
@@ -212,13 +212,13 @@ export function hvChip(H, X, P) {
   return { al, html, extra: hedged ? `<span class="hedge" title="שדות מגודרים">🔒${H.num(String(hedged))}</span>` : '' };
 }
 export function hdBox(H, X, title) {
-  return `<div class="wbox"><div class="wl"><span>👑 ${H.num(`${X.divs}/${X.maxDivs}`)} חטיבות · ${H.esc(X.rating)}</span><b class="num">כיסוי ${H.esc(`×${x2(X.coverage)}`)}</b></div>
+  return `<div class="wbox"><div class="wl"><span>👑 ${H.num(`${X.divs}/${X.maxDivs}`)} חטיבות · ${H.esc(X.rating)}</span><b>כיסוי ${H.num(`×${x2(X.coverage)}`)}</b></div>
       <p class="note">כיסוי נזילות: מזומן במטה ל־${H.num(`${mo(X.covMonths)} חודשים`)} של החזרים · ${H.num(String(X.guaranteed))} בערבות המטה · החזרי חוב בערבות ${H.num(H.mS(X.service))} בחודש · שווי ברוטו ${H.num(H.mS(X.gross))} · חוב ${H.num(H.mS(X.debt))}${X.storm ? ` · 🌩️ ${H.esc(X.storm.name)}` : ''}${X.defaults ? ` · <b class="neg">${H.num(String(X.defaults))} חדלויות פירעון</b>` : ''}.</p>
       <div class="loans"><button data-act="world">👑 ${H.esc(title || 'לוח העולם')}</button></div></div>`;
 }
 export function hvBox(H, X, title) {
   const growing = (X.slots || []).filter((s) => s && s.phase === 'grow').length;
-  return `<div class="wbox"><div class="wl"><span>🌾 ${H.esc(title || 'המשק')} · ${H.esc(X.regimeLabel)}</span><b class="num">${H.esc(H.mSg(X.income))}</b></div>
+  return `<div class="wbox"><div class="wl"><span>🌾 ${H.esc(title || 'המשק')} · ${H.esc(X.regimeLabel)}</span><b>${H.num(H.mSg(X.income))}</b></div>
       <p class="note">${H.num(String(growing))} שדות בגידול · עלויות ${H.num(H.mS(X.cost))} בחודש${X.margin ? ` · ביטחונות ${H.num(H.mS(X.margin))}` : ''}${X.forced ? ` · <b class="neg">${H.num(String(X.forced))} סגירות בכוח</b>` : ''} · מכסת מים ${H.num(pct(X.quota))}.</p>
       <div class="loans"><button data-act="world">🌾 ${H.esc(title || 'לוח העולם')}</button></div></div>`;
 }
