@@ -398,6 +398,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** counts for w23, w24, w25. Library: "קללת המנצח", "תאריך יציאה".
 - **Choices:** bid level, leverage, which company to fix first, the exit route & timing, recap or not.
 - **Recovery:** an equity cure, a 12-month fund extension with LP consent (fee cut + months), a secondary sale at −15 %, a partial exit.
+- **As built (wave A5, engine lane):** rule adapter `js/worlds/adapters/lbo.js` (`uses: auction, credit, holding, market`; sealed-bid auctions vs 2–4 rivals that follow the sealed potential, LBO debt with a covenant and a leverage premium, the 18-month fix, exits by regime, the fund's end at month 72 with a −30 % forced sale — all re-implemented inside, so the four modules and their packs are untouched), 178 lines; tile W חברה למכירה (dd / low / mid / high / pass); **DPI is measured ÷ paid-in, not ÷ committed** (deviation); maxMonths 84; gates N = 36: the required gates met, G-dom and W21-curse open — see `w21-lbo.md`.
 
 ### w22 · העיר החדשה (tier 10, diff 4)
 - **סיפור:** "גבעות ריקות ותוכנית מתאר. כל רכבת, בית ספר ופארק שתבנה מייקרים את כל הקרקע שעוד נשארה אצלך, אבל הריבית רצה גם על עיר ריקה."

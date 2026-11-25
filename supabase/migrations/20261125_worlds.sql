@@ -49,7 +49,8 @@ insert into game.worlds (id, ord, ranked, nw_max, passive_max, expenses_max, min
   ('w17', 17, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A4: trials adapter (staged drug candidates, licensing, patent cliff), rules 7 (unranked until approved)
   ('w18', 18, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A4: insure (lines priced vs the market, reserves, storm season, reinsurance, solvency), rules 7 (unranked until approved)
   ('w19', 19, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A4: bell adapter (a listed company: guidance, buyback / dividend / offerings, IPO), rules 7 (unranked until approved)
-  ('w20', 20, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A5: funds adapter (other people's money: client flows, fees above the index, shorts, squeezes, the gate), rules 7 (unranked until approved)
+  ('w20', 20, false, 10000000000, 1000000000, 1000000000, 7, null),  -- CATALOG-25 A5: funds adapter (other people's money: client flows, fees above the index, shorts, squeezes, the gate), rules 7 (unranked until approved)
+  ('w21', 21, false, 10000000000, 1000000000, 1000000000, 7, null);  -- CATALOG-25 A5: lbo adapter (buyout fund: sealed-bid auctions, LBO debt + covenant, exits by regime, the fund's end; DPI on paid-in), rules 7 (unranked until approved)
 
 create table game.world_rotation (
   kind text not null check (kind in ('daily', 'weekly')),
