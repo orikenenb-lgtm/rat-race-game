@@ -345,6 +345,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** opens w20, w21 and w22. Library: "הדרכה ואמינות", "קנייה עצמית".
 - **Choices:** IPO timing/size, guidance level, buyback vs dividend vs issue, shares vs cash for acquisitions.
 - **Recovery:** reset guidance (a one-time hit), a secondary at a discount, sell a division, cut the dividend.
+- **As built (wave A4, engine lane):** rule adapter `js/worlds/adapters/bell.js` (`uses: market, plant, chain`; the issuer price and the two divisions re-implemented inside — `market.issuer` was not added to `market.js`, so the w10 / w15 / w16 packs stay pinned), 180 lines; tile W רכישה משלימה (cash or shares); maxMonths 66; gates N = 36: the required gates met, G-dom open — see `w19-bell.md`.
 
 ### w20 · רחוב הקרנות (tier 10, diff 5)
 - **סיפור:** "הכסף לא שלך. הלקוחות נשארים כשמרוויחים, ובורחים בדיוק כשהמחירים בתחתית, וכשאתה הכי צריך אותם."
