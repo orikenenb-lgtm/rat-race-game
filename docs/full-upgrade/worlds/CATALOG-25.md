@@ -426,6 +426,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** counts for w24 and w25. Library: "לכידת ערך קרקע", "סדר בנייה".
 - **Choices:** build vs sell order, amenity siting, bond vs plot-sale funding, services pace.
 - **Recovery:** sell a plot bundle to a developer at −20 %, a PPP, refinance bonds, phase the plan.
+- **As built (wave A5, engine lane):** rule adapter `js/worlds/adapters/capture.js` (`uses: projects, stages, public, rate`; 20 plots in 5 zones, amenities paid month by month that reprice their zone and the next ones (a sealed spill the planner sees), residents after a lag on sold plots, property tax, bonds with a DSCR spread, the services ratio and satisfaction — all re-implemented inside, so `projects.js` / `stages.js` and the w8 / w9 packs are untouched; `public.light()` is not a new export), 213 lines; tile W הצעה לעיר (PPP / campus / pass); maxMonths 84; gates N = 36: the required gates and W22-sequence / W22-services met, G-dom open — see `w22-capture.md`.
 
 ### w23 · בית המסחר העולמי (tier 11, diff 5)
 - **סיפור:** "אוניות, מחסנים ועקומת מחירים. מרוויחים על הפער בין היום למחר, עד שהעקומה מתהפכת, הבנק סוגר את הקו או שהלקוח לא משלם."

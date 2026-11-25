@@ -87,7 +87,7 @@ eq(W.find((x) => x.id === 'w6').lockText, 'לצאת מעיר התיירות', 'a
 eq(W.find((x) => x.id === 'w5').unlocked, true, 'w5 open after w1–w4');
 const G6 = P.mapGroups();
 eq(G6.map((g) => [g.done, g.total, g.open]), [[4, 4, true], [0, 5, true], [0, 4, false], [0, 4, false], [0, 4, G6[4].open], [0, 4, false]], 'mapGroups: done / total / open');
-ok(G6[5].soon && !G6[0].soon, 'a world with no built map is "בקרוב"');
+ok(G6.every((g) => !g.soon), 'every world has a built map now (הפסגה: w22) — none is "בקרוב"'); // was: G6[5].soon (no built map in הפסגה before w22)
 eq(P.nextGoal().text, 'לצאת מהמירוץ בעיר התיירות כדי לפתוח את המפה הבאה: אזור התעשייה', 'nextGoal inside a world');
 P._reset({ groupsV: 1, stars: { w1: 1, w2: 1, w3: 1 } });
 eq(P.nextGoal().text, 'לצאת מהמירוץ בעמק העתיד כדי לפתוח עולם חדש: עולם העסקים', 'nextGoal across worlds');
