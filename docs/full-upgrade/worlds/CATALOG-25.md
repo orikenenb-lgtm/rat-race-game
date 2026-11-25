@@ -213,6 +213,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Reward:** opens w18 and w19. ★★★ skin "כספת זהב". Library: "בריחת מפקידים", "ברירה שלילית".
 - **Choices:** price for volume or for quality; how much maturity mismatch; when to pay dividends vs hold capital.
 - **Recovery:** raise capital (dilution: issue to an investor at −15 %), sell a loan book (85–95 % of par), the central-bank window (expensive, once per 12 months), cut dividends, tighten underwriting.
+- **As built (wave A3, engine lane):** module `js/worlds/mech/credit.js`, 7 draws a payday (+ a shared credit cycle and its crunch), the stock side of adverse selection (good borrowers refinance away from a bank priced above the market), a bought book's discount as a credit mark; gates N = 36: every required gate met, G-dom open (diversified 100 % of cells) — see `w14-banks.md`.
 
 ### w15 · מגדלי הענן (tier 8, diff 4)
 - **סיפור:** "אפליקציה עם מיליון משתמשים ואפס רווח. כל סבב גיוס קונה עוד זמן, ומוכר עוד חתיכה ממך."

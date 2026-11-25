@@ -4,23 +4,26 @@
 // borrowers — price above the market and the good borrowers leave (new-loan PD ↑); price below and the book grows on a thin margin.
 // Long fixed-rate loans on short deposits squeeze the margin when the policy rate rises.
 //
-// Contract (DESIGN §4.2): pure, deterministic, no engine import; only + − × ÷ round / min / max / floor. Draws: 0 at init, exactly 6 'world'
-// draws every payday (one default draw per segment + one confidence draw), 3 per 'J' landing (the offer, its sealed quality, the rival).
+// Contract (DESIGN §4.2): pure, deterministic, no engine import; only + − × ÷ round / min / max / floor. Draws: 0 at init, exactly 7 'world'
+// draws every payday (one default draw per segment + one confidence draw + the credit cycle everyone shares), 3 per 'J' landing (the offer, its sealed quality, the rival).
 // The bank is one engine asset ('bank': value = your stake × the bank's equity); its balance sheet lives in st.world.cr.
 export const ID = 'credit';
 export const SEGS = Object.freeze(['mort', 'sme', 'dev', 'cons', 'corp']);
-export const DRAWS = Object.freeze({ init: 0, month: SEGS.length + 1, landing: Object.freeze({ J: 3 }) });
+export const DRAWS = Object.freeze({ init: 0, month: SEGS.length + 2, landing: Object.freeze({ J: 3 }) });
 /** Segments (annual PD, LGD, risk weight, maturity months, fixed-rate share of new loans, the market spread over the policy rate in pp). */
 export const SEG = Object.freeze({
-  mort: Object.freeze({ n: 'משכנתאות', pd: 0.01, lgd: 0.25, rw: 0.5, mat: 120, fix: 0.6, sp: 1.8 }),
-  sme: Object.freeze({ n: 'עסקים קטנים', pd: 0.04, lgd: 0.45, rw: 1.0, mat: 36, fix: 0.2, sp: 3.6 }),
-  dev: Object.freeze({ n: 'יזמי נדל"ן', pd: 0.05, lgd: 0.4, rw: 1.5, mat: 24, fix: 0, sp: 4.6 }),
-  cons: Object.freeze({ n: 'אשראי צרכני', pd: 0.07, lgd: 0.7, rw: 1.0, mat: 24, fix: 0.5, sp: 7.0 }),
-  corp: Object.freeze({ n: 'חברות גדולות', pd: 0.02, lgd: 0.4, rw: 1.0, mat: 48, fix: 0.3, sp: 2.2 }),
+  mort: Object.freeze({ n: 'משכנתאות', pd: 0.01, lgd: 0.25, rw: 0.5, mat: 120, fix: 0.6, sp: 2.7 }),
+  sme: Object.freeze({ n: 'עסקים קטנים', pd: 0.04, lgd: 0.45, rw: 1.0, mat: 36, fix: 0.2, sp: 4.5 }),
+  dev: Object.freeze({ n: 'יזמי נדל"ן', pd: 0.05, lgd: 0.4, rw: 1.5, mat: 24, fix: 0, sp: 5.5 }),
+  cons: Object.freeze({ n: 'אשראי צרכני', pd: 0.07, lgd: 0.7, rw: 1.0, mat: 24, fix: 0.5, sp: 7.9 }),
+  corp: Object.freeze({ n: 'חברות גדולות', pd: 0.02, lgd: 0.4, rw: 1.0, mat: 48, fix: 0.3, sp: 3.1 }),
 });
 export const PRICES = Object.freeze([-1, -0.5, 0, 0.5, 1, 1.5]);
 /** Adverse selection: volume × (1 − 0.45 × delta), new-loan PD × (1 + delta) above the market. */
-export const SEL = Object.freeze({ vol: 0.45, pd: 1.0, volMin: 0.25, volMax: 1.6 });
+export const SEL = Object.freeze({ vol: 0.45, pd: 1.0, volMin: 0.25, volMax: 1.6, prepay: 1.0, leaverPd: 0.5 });
+/** The credit cycle everyone shares (1 'sys' draw a payday): it tilts every segment's default draw the same way, and a draw above `at` starts a
+ *  credit crunch — every segment's PD × `pd` (developers × `dev`), confidence −`conf`, demand × `dem` for `months` paydays. Nobody can price it away. */
+export const CRUNCH = Object.freeze({ at: 0.98, months: 9, pd: 3.5, dev: 4.5, conf: 15, dem: 0.6, w: 0.4 });
 const CYC = Object.freeze({ exp: 0.8, slow: 1.1, rec: 1.8, recov: 1.0 });
 const DEM = Object.freeze({ exp: 1.15, slow: 1.0, rec: 0.7, recov: 0.95 });
 export const REG = Object.freeze({ min: 0.08, target: 0.1, resolve: 0.05, ban: 12 });
@@ -67,7 +70,7 @@ function revalue(st) { for (const a of st.assets) if (a.op && a.op.ck === 'bank'
 export const credit = {
   id: ID, draws: DRAWS,
   lessons: ['bank_run', 'adverse_selection', 'maturity_mismatch'],
-  mentorKeys: ['runWarn', 'runHit', 'regulator', 'raised', 'bookSold', 'offerAsk', 'offerBuy', 'offerPass'],
+  mentorKeys: ['runWarn', 'runHit', 'regulator', 'raised', 'bookSold', 'offerAsk', 'offerBuy', 'offerPass', 'crunch'],
   sealed: ['pending.wr', 'pending.offer.q'],
 
   init(st, w, ch) {
@@ -80,8 +83,11 @@ export const credit = {
   defaults(st) { const B = CR(st); if (!B) return; if (B.fixedOpex == null) B.fixedOpex = r1000(loans(st) * FUND.opex); if (!Array.isArray(B.shocks)) B.shocks = []; if (!Array.isArray(B.profit12)) B.profit12 = []; },
 
   monthly(st, out, ctx) {
-    const B = CR(st); const rs = []; for (let i = 0; i < DRAWS.month; i++) rs.push(ctx.draw(st)); // exactly 6 'world' draws every payday
-    const ph = phaseOf(st); const pays = st.stats.paydays;
+    const B = CR(st); const rs = []; for (let i = 0; i < DRAWS.month; i++) rs.push(ctx.draw(st)); // exactly 7 'world' draws every payday (5 segments, confidence, the shared cycle)
+    const ph = phaseOf(st); const pays = st.stats.paydays; const sys = rs[6];
+    if (sys > CRUNCH.at && !(B.crunch >= pays)) { B.crunch = pays + CRUNCH.months; B.crunches = (B.crunches || 0) + 1; B.shocks.push({ d: -CRUNCH.conf, until: st.month + 3 });
+      out.news.push({ kind: 'credit', text: ctx.mentorLine(st, 'crunch', {}) || 'משבר אשראי במשק: לווים מכל הסוגים מפסיקים לשלם, והביקוש לאשראי צונח. זה פוגע בכל הבנקים — גם בזהירים.' }); }
+    const cr8 = B.crunch >= pays; // a credit crunch is running
     // the policy rate drifts back to 4 %; retail deposit rates follow it slowly (sticky), wholesale at once
     B.rate = round2(clamp(B.rate + (RATE.start - B.rate) * RATE.revert, RATE.min, RATE.max)); B.rr = round2(B.rr + (Math.max(0, B.rate - FUND.retailSpread) - B.rr) * 0.3);
     // 1. the month's interest
@@ -91,14 +97,16 @@ export const credit = {
     const opex = (B.fixedOpex + loans(st) * FUND.opexVar) * B.opex; // branches and systems are mostly fixed; a bigger book adds a little
     // 2. defaults (one draw per segment; a draw above 0.985 is a big single borrower: 3 % of the segment at once)
     let loss = 0; const hit = {};
-    for (let i = 0; i < SEGS.length; i++) { const k = SEGS[i]; const s = B.seg[k]; const slump = k === 'dev' && B.slump >= st.month ? 2 : 1;
-      let l = s.book * SEG[k].pd / 12 * s.pdMix * (CYC[ph] || 1) * slump * (0.4 + 1.2 * rs[i]) * SEG[k].lgd; if (rs[i] > 0.985 && (k === 'corp' || k === 'dev')) l += s.book * 0.03 * SEG[k].lgd;
+    for (let i = 0; i < SEGS.length; i++) { const k = SEGS[i]; const s = B.seg[k]; const slump = (k === 'dev' && B.slump >= st.month ? 2 : 1) * (cr8 ? (k === 'dev' ? CRUNCH.dev : CRUNCH.pd) : 1);
+      let l = s.book * SEG[k].pd / 12 * s.pdMix * (CYC[ph] || 1) * slump * (0.4 + 1.2 * (rs[i] * (1 - CRUNCH.w) + sys * CRUNCH.w)) * SEG[k].lgd; if (rs[i] > 0.985 && (k === 'corp' || k === 'dev')) l += s.book * 0.03 * SEG[k].lgd;
       l = Math.round(l); s.book = Math.max(0, s.book - Math.round(l / SEG[k].lgd)); s.fixBook = Math.min(s.fixBook, s.book); if (s.leg) s.leg = Math.min(s.leg, s.book); loss += l; hit[k] = l; }
     // 3. runoff + new lending at the player's price (adverse selection), expected loss provisioned at origination
     let el = 0; B.newVolSum = 0; let pdW = 0;
-    for (const k of SEGS) { const s = B.seg[k]; const legRun = Math.round((s.leg || 0) * LEGACY.run / SEG[k].mat); const run = Math.round((s.book - (s.leg || 0)) / SEG[k].mat) + legRun; if (s.leg) s.leg = Math.max(0, s.leg - legRun); const fr = s.book ? s.fixBook / s.book : 0; s.book -= run; s.fixBook = Math.max(0, s.fixBook - Math.round(run * fr));
+    for (const k of SEGS) { const s = B.seg[k]; const legRun = Math.round((s.leg || 0) * LEGACY.run / SEG[k].mat); const pre = Math.round(Math.max(0, s.book - s.fixBook) * Math.max(0, s.delta) * SEL.prepay / SEG[k].mat); // priced above the market, the good floating-rate borrowers refinance away
+      if (pre > 0 && s.book > pre) s.pdMix = round3((s.pdMix * s.book - SEL.leaverPd * s.pdMix * pre) / (s.book - pre));
+      const run = Math.round((s.book - (s.leg || 0)) / SEG[k].mat) + legRun + pre; if (s.leg) s.leg = Math.max(0, s.leg - legRun); const fr = s.book ? s.fixBook / s.book : 0; s.book -= run; s.fixBook = Math.max(0, s.fixBook - Math.round(run * fr));
       const banned = s.stop || (B.ban >= pays && SEG[k].rw >= 0.85);
-      const vol = banned ? 0 : r1000(B.base[k] * B.demand * (DEM[ph] || 1) * volOf(s.delta)); const pn = round3(pdNewOf(s.delta) * (VINT[ph] || 1));
+      const vol = banned ? 0 : r1000(B.base[k] * B.demand * (DEM[ph] || 1) * (cr8 ? CRUNCH.dem : 1) * volOf(s.delta)); const pn = round3(pdNewOf(s.delta) * (VINT[ph] || 1));
       if (vol > 0) { s.pdMix = round3((s.pdMix * s.book + pn * vol) / Math.max(1, s.book + vol)); s.yAdj = round3((s.yAdj * s.book + s.delta * vol) / Math.max(1, s.book + vol));
         const fv = Math.round(vol * SEG[k].fix); const y = round2(B.rate + SEG[k].sp + s.delta); s.fixY = s.fixBook + fv ? round2((s.fixY * s.fixBook + y * fv) / (s.fixBook + fv)) : y; s.fixBook += fv; s.book += vol;
         el += vol * SEG[k].pd * pn * SEG[k].lgd; B.newVolSum += vol; pdW += vol * pn; }
@@ -193,7 +201,7 @@ credit.tiles.J = {
     if (o.id === 'check') { B.eq -= 500000; p.checked = true; revalue(st); ctx.logDecision(st, 'הצעה לבנק', 'ועדת אשראי'); return false; }
     const f = o.id === 'half' ? 0.5 : 1; const size = r1000(B.eq * of.size * f);
     if (of.kind === 'deposits') { B.ret += size; B.hot = round2(Math.min(3, B.hot + 0.3)); }
-    else { const s = B.seg[of.seg]; const price = r1000(size * of.price); s.pdMix = round3((s.pdMix * s.book + of.q * size) / Math.max(1, s.book + size)); s.book += size; s.fixBook += Math.round(size * SEG[of.seg].fix); B.eq += size - price; B.prov += Math.round(size * SEG[of.seg].pd * SEG[of.seg].lgd); B.eq -= Math.round(size * SEG[of.seg].pd * SEG[of.seg].lgd); }
+    else { const s = B.seg[of.seg]; const price = r1000(size * of.price); s.pdMix = round3((s.pdMix * s.book + of.q * size) / Math.max(1, s.book + size)); s.book += size; s.fixBook += Math.round(size * SEG[of.seg].fix); const disc = size - price; const elB = Math.round(size * SEG[of.seg].pd * SEG[of.seg].lgd); B.prov += Math.max(disc, elB); B.eq += Math.min(0, disc - elB); } // the purchase discount is a credit mark (it covers the expected loss first), not a day-one gain
     rebalance(st); revalue(st); ctx.lesson(st, out, of.kind === 'deposits' ? 'bank_run' : 'adverse_selection');
     out.mentor = ctx.mentorLine(st, 'offerBuy', {}) || null; ctx.logDecision(st, 'הצעה לבנק', o.id === 'half' ? 'חצי' : 'קנה', size); return true;
   },
@@ -230,7 +238,7 @@ function indicatorsOf(st, ctx) {
   const rows = SEGS.map((k) => { const s = B.seg[k]; return { seg: k, name: SEG[k].n, book: s.book, fixShare: s.book ? round2(s.fixBook / s.book) : 0, yieldPct: yieldOf(st, k), fixYield: s.fixY, delta: s.delta, stop: !!s.stop, pd: pdBand(st, k), lgd: SEG[k].lgd, rw: SEG[k].rw, newVol: s.newVol, newPdMult: s.pdNew, lastLoss: B.last ? B.last.hit[k] || 0 : 0 }; });
   return {
     credit: { equity: ownerEquity(st), bankEquity: B.eq, stake: B.stake, target: target.target || 0, capRatio: cr, capMin: REG.min, capTarget: REG.target, rwa: Math.round(rwa(st)), loans: loans(st), retail: B.ret, wholesale: B.wh, liquid: B.liqA, cbWindow: B.cbw, liq: B.liq, rate: B.rate, retailRate: B.rr, wholesaleRate: whRate(st),
-      conf: B.conf, runAt: CONF.run, runs: B.runs, regs: B.regs, banUntil: B.ban, last: B.last, profit12: B.profit12.reduce((a, b) => a + b, 0), provisions: B.prov, raised: B.raised, sold: B.sold, pdNew: B.newPdSum, newVol: B.newVolSum, slump: B.slump >= st.month },
+      conf: B.conf, runAt: CONF.run, runs: B.runs, regs: B.regs, banUntil: B.ban, last: B.last, profit12: B.profit12.reduce((a, b) => a + b, 0), provisions: B.prov, raised: B.raised, sold: B.sold, pdNew: B.newPdSum, newVol: B.newVolSum, slump: B.slump >= st.month, crunch: (B.crunch || 0) >= st.stats.paydays, crunchUntil: B.crunch || 0, crunches: B.crunches || 0 },
     panel: { id: 'credit', title: 'הבנק', gauges: [{ id: 'capRatio', label: 'יחס הון', value: cr, ref: REG.target, min: 0, max: 0.2 }, { id: 'conf', label: 'אמון המפקידים', value: B.conf, ref: CONF.run, min: 0, max: 100 },
       { id: 'equity', label: 'ההון שלך מול היעד', value: ownerEquity(st), ref: target.target || 0, unit: '₪' }, { id: 'rate', label: 'ריבית בנק ישראל (%)', value: B.rate, ref: RATE.start }], rows, actions: actionList(st, ctx) },
   };
