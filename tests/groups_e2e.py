@@ -135,6 +135,7 @@ async def run_cross(b):
         await pg.evaluate("() => document.querySelector('.end-unlock').scrollIntoView({ block: 'center' })"); await shot(pg, f'cross_end_{vp}_news')
         await pg.click('.end-acts [data-act=end-next]')
         await pg.wait_for_selector('.lb-world .wv-hero h1', timeout=60000); await pg.wait_for_function("() => document.querySelector('.wv-hero h1').textContent === 'עיר התיירות'", timeout=60000)
+        await pg.wait_for_selector('.wv-char', timeout=60000)   # the lazy rules load first (the loading view has the same h1)
         k = await pg.evaluate("() => ({ k: (document.querySelector('.wv-kicker') || {}).textContent || '', chars: document.querySelectorAll('.wv-char').length })")
         check(sc, 'the w5 view: "מפה 1 · עולם העסקים" above its name, open with its characters', k['k'] == 'מפה 1 · עולם העסקים' and k['chars'] >= 3, k)
         await shot(pg, f'cross_world_{vp}')

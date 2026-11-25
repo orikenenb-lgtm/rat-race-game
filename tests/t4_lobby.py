@@ -293,7 +293,11 @@ async def t_naming(b):
         if go: await pg.evaluate("document.querySelector('[data-act=home]') && document.querySelector('[data-act=home]').click()"); await pg.wait_for_timeout(200); await pg.evaluate(go); await pg.wait_for_selector(sel)
         texts.append(await pg.evaluate("document.body.innerText + ' ' + [...document.querySelectorAll('[aria-label],[title]')].map(e=>(e.getAttribute('aria-label')||'')+' '+(e.title||'')).join(' ')"))
     allt = ' '.join(texts)
-    check('אנרגי' not in allt, 'AC-N1 no "אנרגיה" in the lobby screens (text, aria-label, title)')
+    # a map's own name / lines are content, not the ⚡ wording (w9 "מדבר האנרגיה" has been on the map since it was registered — this check
+    # failed on fb8db75 before the worlds / maps split for that reason alone): drop every meta / planned name, tagline and learn line first
+    names = await pg.evaluate("Promise.all([import('./js/worlds/meta.js'), import('./js/worlds-groups.js')]).then(([M, G]) => [...M.WORLD_META.flatMap((m) => [m.name, m.tagline, m.learn, m.newHere, m.goalLabel]), ...Object.values(G.PLANNED).flatMap((p) => [p.name, p.tagline]), ...G.WORLD_GROUPS.map((g) => g.learn)].filter(Boolean))")
+    for nm in sorted(names, key=len, reverse=True): allt = allt.replace(nm, ' ')
+    check('אנרגי' not in allt, 'AC-N1 no "אנרגיה" in the lobby screens (text, aria-label, title) — map names and lines aside')
     check('אל תשבור' not in allt, '§11 no threatening streak copy')
     await ctx.close()
 
