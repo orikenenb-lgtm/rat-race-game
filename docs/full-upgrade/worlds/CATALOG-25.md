@@ -292,6 +292,7 @@ below are globally unique (validator rule 2). All amounts are TUNE.
 - **Choices:** continue/abandon/license per readout, pipeline breadth vs depth, sell the royalty or keep it.
 - **Recovery:** license out, sell royalties, partner co-funding, cut early programmes, sell the plant.
 - **Similarity fix:** `G-dom` must show that `neverAbandon` and `licenseAll` both lose (§6.3).
+- **As built (wave A4, engine lane):** rule adapter `js/worlds/adapters/trials.js` (`uses: stages, market, dd`; the `stages` build record used as is, the biotech regime and dd re-implemented), 8 slots, printed odds +5 pp over the example above, a band on the sealed quality that narrows with dd and every passed readout, license / partner / stop / go with a real-option guide; gates N = 36: the required gates met, G-dom and W17-cliff open — see `w17-labs.md`.
 
 ### w18 · חוף הסערות (tier 9, diff 4)
 - **סיפור:** "הלקוחות משלמים היום. הסערה מגיעה מתי שהיא רוצה. מי שגבה מעט מדי בקיץ יגלה את זה בחורף."

@@ -26,6 +26,7 @@ import { clubNames, playerName, DIVS } from '../js/worlds/adapters/league.js';
 import { DEALS_W13 } from '../js/content/deals-w13.js';
 import { TEMPLATES as MN_TEMPLATES } from '../js/worlds/mech/multinational.js';
 import { TEMPLATES as HD_TEMPLATES } from '../js/worlds/mech/holding.js';
+import { TEMPLATES as TR_TEMPLATES } from '../js/worlds/adapters/trials.js';
 import { existsSync } from 'node:fs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -194,6 +195,13 @@ export function checkHolding(deny = readDeny()) {
   if (new Set(HD_TEMPLATES.map((t) => t.n)).size !== HD_TEMPLATES.length) errors.push('H-fict: duplicate division names');
   return errors;
 }
+/** T-fict (w17): the molecules' names are fictional — no entry of tools/data/real-names.txt is a name or a whole word of one; unique. */
+export function checkTrials(deny = readDeny()) {
+  const errors = []; const bad = (s) => deny.has(s) || s.split(/[\s־-]+/).some((x) => deny.has(x)) || [...deny].some((d) => d.includes(' ') && s.includes(d));
+  for (const t of TR_TEMPLATES) if (bad(t.n)) errors.push(`T-fict: molecule ${t.n} matches a real name`);
+  if (new Set(TR_TEMPLATES.map((t) => t.n)).size !== TR_TEMPLATES.length) errors.push('T-fict: duplicate molecule names');
+  return errors;
+}
 /** V-adapter (CATALOG §2.1): a rule adapter (js/worlds/adapters/*.js) is ≤ 350 lines and declares `uses: [moduleIds]`. */
 export function checkAdapters(dir = join(ROOT, 'js', 'worlds', 'adapters')) {
   const errors = []; if (!existsSync(dir)) return errors;
@@ -245,7 +253,7 @@ export function fuzzModules(worlds = E.loadedWorlds(), turns = 70) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   let style = null; try { style = (await import('../js/render/vocab.js')).WORLD_STYLE; } catch (e) { style = null; }
   const r = validate({ worldStyle: style }); const lint = lintModules(); const fz = fuzzModules();
-  const errors = [...r.errors, ...lint, ...fz.errors, ...checkCompanies(), ...checkAdapters(), ...checkLeague(), ...checkMultinational(), ...checkHolding()];
+  const errors = [...r.errors, ...lint, ...fz.errors, ...checkCompanies(), ...checkAdapters(), ...checkLeague(), ...checkMultinational(), ...checkHolding(), ...checkTrials()];
   if (process.argv.includes('--json')) console.log(JSON.stringify({ errors, warnings: r.warnings, notes: fz.notes }, null, 1));
   else {
     for (const x of r.warnings) console.log('⚠ ' + x);
