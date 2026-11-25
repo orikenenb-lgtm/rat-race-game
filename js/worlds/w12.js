@@ -37,7 +37,7 @@ export default {
   start: {},
   doodadWealth: 0.0008,
   tipDoodad: 8000000,
-  bounds: { nwMax: 50000000000, passiveMax: 1000000000 },
+  bounds: { nwMax: 20000000000, passiveMax: 1000000000 },
   econ: { loanUnit: 5000000, autoUnit: 5000000, ddMinFee: 1000000, sideReportFee: 400, tipDoodad: 8000000, doodadWealth: 0.0008, band: { deal: [50000000, 600000000], monthly: [-10000000, 30000000] } },
   lessonDefs: [
     { id: 'contagion', cat: 'world', title: 'הדבקה דרך ערבויות', text: 'ערבות של המטה מוזילה את החוב של חטיבה — עד היום שבו היא נופלת. אז החוב שלה עובר למטה, הדירוג יורד, וכל חוב אחר בערבות מתייקר. חטיבה חלשה אחת יכולה למשוך את כולן.' },

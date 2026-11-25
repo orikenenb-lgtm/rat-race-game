@@ -3,8 +3,11 @@
 // hotels = w5's season curve, industry = w6's condition × utilisation, retail = w7's growth knob, real estate = w8's project pipeline and
 // rates, energy = w9's PPA share, finance = w10's factor mix, global = w11's FX basket. The decision is the STRUCTURE between them: a
 // division is guaranteed by HQ (cheap debt, but its default moves its debt to HQ, cuts the group rating and raises every guaranteed rate)
-// or ring-fenced (+1.5 pp, and the lenders can only take the division). Storms are multi-factor shocks (growth, rates, energy, FX) with fixed
-// betas per kind; a division whose month is negative asks HQ for support; HQ declines (or cannot pay) twice in a row → default.
+// or ring-fenced (+1.5 pp, 30 % of its surplus swept to its lenders, and they can only take the division). Storms are multi-factor shocks
+// (growth, rates, energy, FX) with fixed betas per kind. A division's negative month asks HQ for support (it pays the gap, or the gap is added
+// to the division's debt); two negative paydays in a row break its covenant: a guaranteed division's lenders call 60 % of its debt from HQ —
+// unpaid (no cash, or support declined) it is a GROUP DEFAULT: the debt + 25 % moves to HQ, the rating drops a notch, every other guaranteed
+// division in deficit breaches at once (cross-default). A ring-fenced one's lenders ask a 30 % cure; unpaid, they take the division.
 //
 // Contract (DESIGN §4.2): pure, deterministic, no engine import, only + − × ÷ and Math.round / min / max / floor / abs. Fixed 'world' draws:
 // init 16 (per division slot: quality, beta jitter — whoever plays), payday 10 (8 division noises, one per slot, empty slots too · 2 storm:
@@ -95,7 +98,7 @@ function defaultOf(st, d, out, ctx) { const M = HS(st); const a = divAsset(st, d
     out.news.push({ kind: 'hd', text: ctx.mentorLine(st, 'lost', { name: d.n }) || `${d.n} קרסה. היא הייתה מגודרת: הבנקים לקחו את החטיבה ואת החוב שלה — ולא נגעו בשאר הקבוצה.` }); return; }
   const pen = r100k(D * HD.penalty); M.hqDebt += D + pen; M.penalties += pen; if (a) a.debt = 0; M.rating = Math.min(RATINGS.length - 1, M.rating + 1); M.defaults++; M.lastDef = st.stats.paydays; d.miss = 0; d.health = Math.min(d.health, 30); d.sup = true;
   if (st.life) st.life.happiness = clamp(st.life.happiness - 6, 0, 100); ctx.lesson(st, out, 'contagion');
-  for (const x of M.divs) if (x !== d && x.struct === 'g' && x.last && x.last.net < 0 && x.miss > 0) x.miss = 2; // cross-default: every guaranteed division already in deficit breaches now
+  for (const x of M.divs.slice()) if (x !== d && x.struct === 'g' && x.miss > 0) breachOf(st, x, out, ctx); // cross-default: every guaranteed division already in deficit breaches now
   out.news.push({ kind: 'hd', text: ctx.mentorLine(st, 'default', { name: d.n, amount: ctx.fmtM(D), rating: RATINGS[M.rating] }) || `${d.n} לא עמדה בחוב, והמטה ערב לה: ${ctx.fmtM(D)} עברו למטה, ועוד ${ctx.fmtM(pen)} קנסות פירעון מוקדם. הדירוג ירד ל־${RATINGS[M.rating]} — וכל חוב בערבות מתייקר.` }); }
 
 /** A storm starts (a payday draw, a market card or a crisis card). out = null from a card (its text says it). */
@@ -141,7 +144,7 @@ export const holding = {
     const M = HS(st); const rs = []; for (let i = 0; i < DRAWS.month; i++) rs.push(ctx.draw(st)); // exactly 10 'world' draws every payday
     if (M.storm) { M.storm.left--; if (M.storm.left <= 0) M.storm = null; }
     const s0 = rs[SLOTS], s1 = rs[SLOTS + 1];
-    if (!M.storm && s0 < HD.stormP) startStorm(st, Math.floor(frac(s0 * 977) * STORMS.length), 0.7 + 0.9 * s1 + (s1 > 0.8 ? 0.7 : 0), out, ctx);
+    if (!M.storm && s0 < HD.stormP) startStorm(st, Math.floor(frac(s0 * 977) * STORMS.length), 0.7 + 0.9 * s1 + (s1 > 0.75 ? 0.8 : 0), out, ctx);
     const sh = shockOf(st); let lossNo = 0;
     for (const d of M.divs.slice()) {
       const K = KO(d.kind); const a = divAsset(st, d); const r = rs[d.slot];
@@ -182,6 +185,7 @@ export const holding = {
     create(st, p) { const c = p.card; const M = HS(st);
       if (c.mk === 'recession') startStorm(st, 0, 1.2, null);
       if (c.mk === 'energy') startStorm(st, 2, 1.1, null);
+      if (c.mk === 'boom') startStorm(st, 4, 1, null);
       if (c.mk === 'review') { const was = M.rating; review(st, null); p.was = was; p.now = M.rating; }
       if (c.mk === 'antitrust' && M.divs.length >= 6) { const d = M.divs.slice().sort((x, y) => grossOf(st, y) - grossOf(st, x) || x.slot - y.slot)[0]; const v = r100k(grossOf(st, d) * HD.forced); const D = debtOf(st, d);
         p.hit = d.n; p.amount = v - D; dropDiv(st, d, { despawn: [] }); st.cash += v - D; M.sold++; }

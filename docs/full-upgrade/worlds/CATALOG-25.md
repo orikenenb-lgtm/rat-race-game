@@ -154,6 +154,7 @@ tier 12    w25 ← 1 of (w12, w21, w22) + 1 of (w23, w24)
 - **Unchanged:** w1–w10 rules. **Changed** (planned worlds only): w11 adds w13 to its second clause. w10's mechanic becomes `['market','portfolio']`, minRules 7.
 - Locked-world cards render from these rules through `unlockText()` (no code change).
 - **As built w11 (wave A3, engine lane):** `js/worlds/mech/multinational.js`, goal `nw` ₪800M hold 2; gates N = 36 all met except G-dom — see `w11-multinational.md`.
+- **As built w12 (wave A4, engine lane):** `js/worlds/mech/holding.js` (the seven light division models inside it), goal `all`(nw ₪2B, noDefault 24, liquidity 12 months = coverage 1.0) hold 3, maxMonths 72; gates N = 36 all met except G-dom (founder 100 % of cells, guaranteeAll Δ 2 pp) — see `w12-empire.md`.
 
 ---
 
