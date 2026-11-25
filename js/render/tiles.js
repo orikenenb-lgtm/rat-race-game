@@ -38,6 +38,10 @@ export const TILE_TEXT = Object.freeze({
   // w13 אצטדיון הכוכבים — tile H (auction.js tiles.H, wired by w13.js world.auction). Number-free until prepareWorldText() built it from
   // the module's constants (MODULE_TEXT below).
   transfer: { short: 'שוק העברות', desc: 'שחקן במכירה מול מועדונים אחרים: ההערכה ציבורית, כל מועדון מעריך בעצמו. מציעים, מעלים או מוותרים — מי שמעריך הכי ביוקר זוכה.' },
+  // w11 התאגיד הבינלאומי — tile Z (multinational.js tiles.Z); w15 מגדלי הענן — tile H (platform.js tiles.H). Number-free until
+  // prepareWorldText() built them from the modules' constants (MODULE_TEXT below).
+  acquisition: { short: 'הצעת רכישה', desc: 'חברה־בת בחו"ל למכירה, עם המנהל שכבר יושב שם: הרווח שלה הוא טווח, והמנהל — לא ידוע. אפשר לבדוק קודם, לקנות או לוותר.' },
+  investors: { short: 'משקיעים', desc: 'פגישה עם משקיעים: הצעת השקעה תמורת חלק מהחברה, או ענקית שרוצה לקנות את כולה. אפשר לקבל או לסרב.' },
   privateDeal: { short: 'עסקה פרטית', desc: 'השקעה פרטית: נעולה לשנים, בלי מחיר יומי, ואי אפשר ללוות כנגדה. אפשר לבדוק את המנהל, להשקיע הכל או חצי, או לוותר.' },
 });
 
@@ -60,6 +64,9 @@ const BY_NAME = Object.freeze({
   'תקלה ברשת': { short: 'תקלה ברשת', desc: 'תקלה ברשת: שנאי שנשרף ומשבית תחנה, תביעה של שכנים או חודש בלי משכורת. תחנות שמכסות את החוב שלהן בנוח עוברות את זה בלי הלוואה.' },
   // w13: the crisis tile (w13.crises: the FFP audit, a sponsor scandal, a fan protest, the stand roof, a lawsuit, a month without salary)
   'משבר במועדון': { short: 'משבר', desc: 'משבר במועדון: ביקורת על השכר, שערוריית נותן חסות, מחאת אוהדים או חודש בלי משכורת. שכר שלא אוכל את ההכנסות ומזומן בצד עוזרים לעבור אותו.' },
+  // w11 / w15: the crisis tiles (w11.crises: a regulator, a general strike, a class action, a cyber break-in · w15.crises: an outage, a churn wave, a patent suit)
+  'משבר בקבוצה': { short: 'משבר', desc: 'משבר בקבוצה: רגולטור שבודק את המנהלים, שביתה כללית במדינה אחת, תביעה או חודש בלי משכורת. מנהלים שנבדקו ומזומן בצד עוזרים לעבור אותו.' },
+  'משבר בחברה': { short: 'משבר', desc: 'משבר בחברה: השרתים נופלים, גל נטישה, תביעת פטנט או חודש בלי משכורת. כמה חודשי מזומן ביד עוזרים לעבור אותו בלי לגייס בכל מחיר.' },
   'שפל בתיירות': { short: 'שפל', desc: 'שפל בתיירות: חודשים שבהם התיירים לא מגיעים, וכל הנכסים על החוף נפגעים יחד. כרית לחורף ונכסים לכמה עונות עוזרים לעבור אותו.' },
 });
 /* ---------- worlds wave 1: module tiles get their text from the module's own constants (no copied numbers that drift) */
@@ -67,6 +74,10 @@ const pctW = (x) => `${Math.round(x * 100)}%`;
 const partW = (x) => (x === 0.5 ? 'חצי מהכסף' : x === 0.25 ? 'רבע מהכסף' : `${pctW(x)} מהכסף`);
 /** mechanic id → (its module namespace) → { tile type: {short, desc} } */
 const MODULE_TEXT = {
+  // w11 (multinational.js MN.down, MN.auditFee, SLOTS): the acquisition card — the down payment, the due-diligence fee, the cap on subsidiaries
+  multinational: (M) => (M && M.MN && M.SLOTS ? { acquisition: { short: 'הצעת רכישה', desc: `חברה־בת בחו"ל למכירה, עם המנהל שלה: הרווח הוא טווח והמנהל לא ידוע. ${pctW(M.MN.down)} מקדמה, השאר הלוואה על החברה. בדיקה (${Math.round(M.MN.auditFee / 1000)} אלף ₪) מצמצמת את הטווח. עד ${M.SLOTS} חברות. אפשר לוותר.` } } : {}),
+  // w15 (platform.js PF.raise): a term sheet (a share of the company for cash) or a giant's buyout
+  platform: (M) => (M && M.PF && M.PF.raise ? { investors: { short: 'משקיעים', desc: `פגישה עם משקיעים: כסף תמורת חלק מהחברה במחיר קרוב לשווי לפי השוק היום (לא לפי הסבב הקודם), או ענקית שקונה את כולה במזומן. אפשר לקבל או לסרב.` } } : {}),
   // w13 (auction.js ROUNDS, STEP): the transfer market's rounds and bid steps
   auction: (M) => (M && M.ROUNDS && M.STEP ? { transfer: { short: 'שוק העברות', desc: `שחקן במכירה מול 1–3 מועדונים: ההערכה ציבורית, ההערכות שלהם סודיות. עד ${M.ROUNDS} סבבים — להשוות, להעלות ב־${pctW(M.STEP.raise - 1)} או לקפוץ ב־${pctW(M.STEP.jump - 1)}. לוותר תמיד אפשר.` } } : {}),
   // w9 / w10 (energy.js SLOT, PPA; portfolio.js PE, STAKE, FIRE)
@@ -99,7 +110,7 @@ const TILE_ICON = [
   [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
   [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
   [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'],
+  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'], [/^plane$/, '✈️'], [/^doc$/, '📝'], [/^crane$/, '🏗️'], [/^bolt$/, '⚡'], [/^lock$/, '🔒'], [/^ball$/, '⚽'], [/^globe$/, '🌍'],
 ];
 export function tileEmoji(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
 
@@ -113,6 +124,7 @@ export const DEAL_WORDS = Object.freeze({
   cnc: 'קווי CNC', plastic: 'מכונות הזרקה', food: 'מפעלי מזון', recycle: 'מפעלי מיחזור', metal: 'מסגריות', pack: 'קווי אריזה',   // w6
   // w7 / w8 module deal cards carry op.ck (chain.js branch / dc / ecom, projects.js proj / plot) — dealKind names them 'ck:<ck>'
   'ck:branch': 'סניפים ורשת מתחרה', 'ck:dc': 'מרכז הפצה', 'ck:ecom': 'אתר מכירות', 'ck:proj': 'פרויקט תקוע באמצע', 'ck:plot': 'מגרשים', building: 'בניין מושכר',
+  office: 'בנייני משרדים', lab: 'חדרי שרתים',   // w11 / w15 legacy deal kinds
   'ck:sponsor': 'חסויות', 'ck:facility': 'מתקנים של המועדון', 'ck:club': 'המועדון',   // w13
   'ck:slot': 'חיבור לרשת', 'ck:plant': 'תחנה שכבר עובדת', 'ck:line': 'חלק בקו הולכה', 'ck:h2': 'פיילוט מימן', 'ck:fund': 'קרנות אג"ח, ריט ואשראי',   // w9 / w10
   resort: 'ריזורטים', spa: 'ספא', conference: 'כנסים', waterpark: 'פארקי מים', apts: 'דירות נופש', housing: 'מגורי עובדים', restaurant: 'מסעדות', dive: 'צלילה',   // w5
@@ -140,13 +152,18 @@ export const MARKET_WORDS = Object.freeze({
   // w10 (portfolio.js market: c.mk)
   // w13 (league.js market: c.mk)
   'mk:tv': { t: 'חוזה טלוויזיה' }, 'mk:fees': { t: 'שוק ההעברות רותח' }, 'mk:coach': { t: 'מאמן הנוער נחטף' }, 'mk:cup': { t: 'ריצה בגביע' }, 'mk:derby': { t: 'דרבי מקומי' }, 'mk:star': { t: 'הכוכב רוצה העלאה' },
+  // w11 (multinational.js market: c.mk; 'tariff' / 'boom' mean something else here: MARKET_WORDS_W.w11)
+  'mk:port': { t: 'נמל נסגר' }, 'mk:fxcrisis': { t: 'משבר מטבע' }, 'mk:election': { t: 'בחירות במדינה אחת' }, 'mk:shipping': { t: 'מחירי ההובלה מזנקים' }, 'mk:poach': { t: 'מנהל כוכב נחטף' },
+  // w15 (platform.js market: c.mk)
+  'mk:appstore': { t: 'חנות האפליקציות מעלה מחיר' }, 'mk:breach': { t: 'פריצת מידע' }, 'mk:rivalRound': { t: 'המתחרה גייס סבב ענק' }, 'mk:pop': { t: 'הבועה מתפוצצת' }, 'mk:copy': { t: 'ענקית מעתיקה פיצ׳ר' }, 'mk:engineer': { t: 'מהנדסת מפתח עוזבת' },
   'mk:shock': { t: 'הבורסה זזה בחדות' }, 'mk:spread': { t: 'מרווחי האשראי מתפוצצים' }, 'mk:prop': { t: 'מחירי הנדל"ן זזים' }, 'mk:flash': { t: 'קריסה בזק' }, 'mk:gate': { t: 'קרן נועלת פדיונות' },
 });
 /** Per-world market words where a kind means something else in that world (w10's 'freeze' is a liquidity freeze, not a permit freeze). */
-export const MARKET_WORDS_W = Object.freeze({ w10: Object.freeze({ 'mk:freeze': Object.freeze({ t: 'הקפאת נזילות' }) }) });
+export const MARKET_WORDS_W = Object.freeze({ w10: Object.freeze({ 'mk:freeze': Object.freeze({ t: 'הקפאת נזילות' }) }),
+  w11: Object.freeze({ 'mk:tariff': Object.freeze({ t: 'מכסים חדשים' }), 'mk:boom': Object.freeze({ t: 'פריחה במדינה אחת' }) }), w15: Object.freeze({ 'mk:viral': Object.freeze({ t: 'חודש ויראלי' }) }) });
 const marketWord = (k, world) => ((world && MARKET_WORDS_W[world.id]) || {})[k] || MARKET_WORDS[k];
 /** Per-world words where a kind means something else in that world (w7's 'warehouse' card is a leased commercial building). */
-export const DEAL_WORDS_W = Object.freeze({ w7: Object.freeze({ warehouse: 'מבנה מסחרי מושכר' }) });
+export const DEAL_WORDS_W = Object.freeze({ w7: Object.freeze({ warehouse: 'מבנה מסחרי מושכר' }), w11: Object.freeze({ warehouse: 'מחסנים ומרכזי הפצה' }) });
 const dealWord = (k, world) => ((world && DEAL_WORDS_W[world.id]) || {})[k] || DEAL_WORDS[k];
 const KNOWN_TK = new Set(['GOLD', 'USD', 'MADAD', 'INDX', 'AGAH', 'IDX']);
 /** deal card → DEAL_WORDS key */

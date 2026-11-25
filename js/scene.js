@@ -4,9 +4,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
+import { COUNTRY_BAND, COUNTRY_IDS, MOTION, labelColor, worldStyle, normLevel, kitParts, fixtureLevels, fixtureCity, fixtureCount, activityOf, ACTIVITY_ICON, ARCHETYPE_ICON, WORLD_STYLE } from './render/vocab.js';
 import { hasStandin, buildStandin, paintWindows, paintPlant, stepBelt, paintBranch, paintStock, paintBuild, stepShop, stepCrane, buildCrane } from './render/standins3d.js';
 import { paintEnergy, stepEnergy, paintHold, stepTicker } from './render/standins910.js';
+import { paintSub, paintApp, cloudCount } from './render/standins1115.js';   // w11: a subsidiary's country band, manager token + trust ring, supply marks · w15: the app's runway fuse + user cloud
 import { paintClub, paintBillboard } from './render/standins13.js';   // w13: the stadium (stands ∝ seats, crowd ∝ fill, crane while building), billboards   // w9 / w10: energy sites (pulses ∝ output), holdings blocks (ticker band)   // w5–w8: procedural models (occupancy windows, production lines, storefronts, building sites)
 import { resolveTier, TIER_CONFIG, tierDpr, makeGovernor, qualityPref, setEnv } from './render/quality.js';
 import { bus } from './bus.js';
@@ -640,6 +641,10 @@ function drawIcon(g, icon, x, y, c) {
       P(); g.moveTo(x + 8, y - 50); g.lineTo(x - 26, y + 6); g.lineTo(x - 2, y + 6); g.lineTo(x - 12, y + 50); g.lineTo(x + 28, y - 8); g.lineTo(x + 4, y - 8); g.closePath(); g.fill(); break;
     case 'lock': // w10 tile Y: a padlock
       g.lineWidth = 10; P(); g.arc(x, y - 14, 22, Math.PI, 0); g.stroke(); g.fillRect(x - 34, y - 14, 68, 52); g.save(); g.globalCompositeOperation = 'destination-out'; P(); g.arc(x, y + 6, 8, 0, 7); g.fill(); g.fillRect(x - 3, y + 6, 6, 18); g.restore(); break;
+    case 'globe': // w11 tile Z: a globe (the rim, the equator, two meridians)
+      g.lineWidth = 7; P(); g.arc(x, y, 44, 0, 7); g.stroke(); P(); g.moveTo(x - 44, y); g.lineTo(x + 44, y); g.stroke();
+      P(); g.ellipse(x, y, 18, 44, 0, 0, 7); g.stroke(); P(); g.moveTo(x - 38, y - 22); g.quadraticCurveTo(x, y - 12, x + 38, y - 22); g.stroke(); P(); g.moveTo(x - 38, y + 22); g.quadraticCurveTo(x, y + 12, x + 38, y + 22); g.stroke();
+      break;
     case 'ball': // w13 tile H: a football (a circle, the centre pentagon and its seams)
       g.lineWidth = 6; P(); g.arc(x, y, 44, 0, 7); g.stroke();
       P(); for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; g.lineTo(x + Math.cos(a) * 17, y + Math.sin(a) * 17); } g.closePath(); g.fill();
@@ -674,10 +679,10 @@ function tileTexture(tile, frame) {
   return canvasTex(cv);
 }
 
-const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך' };
+const CAPTION = { w1: 'התיק שלך', w2: 'העיר שלך', w3: 'הנמל שלך', w4: 'העמק שלך', w5: 'המפרץ שלך', w6: 'המפעל שלך', w7: 'הרשת שלך', w8: 'הפרויקטים שלך', w9: 'התחנות שלך', w10: 'המשרד שלך', w13: 'המועדון שלך', w11: 'הקבוצה שלך', w15: 'האפליקציה שלך' };
 /** wave 1 (B1 G8): the empty-city text and the per-world look of an empty lot (render-side, no rules) */
 export const EMPTY_CAPTION = 'כאן יקומו הנכסים שלך';
-const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'] };
+const LOT = { trees: ['#d9e7b4', '#9bbf6a'], skyline: ['#454c5e', '#ffd166'], sea: ['#ead6a6', '#a8805a'], stars: ['#eef4ff', '#22d3ee'], history: ['#e6d6b0', '#8a6a40'], palms: ['#fde3c8', '#ff7a59'], stacks: ['#dcdcd8', '#f97316'], storefronts: ['#f7e1dc', '#e63946'], cranes: ['#e4e0ef', '#eab308'], solar: ['#f3dc9b', '#06b6d4'], towers: ['#334155', '#d4af37'], floodlights: ['#15803d', '#f8fafc'], globe: ['#115e59', '#f59e0b'], servers: ['#a5b4fc', '#7c3aed'] };
 let emptyShown = true, emptyGroup = null;
 function drawCenter(n) {
   if (!centerMat || !theme) return;
@@ -798,11 +803,13 @@ const LIGHTS = {
   cranes: { hemi: 1.15, sun: 2.6, exp: 1.04, env: 0.42, sunPos: [10, 24, 12], fill: ['#93c5fd', 3] },     // w8: a clear day on the building site
   solar: { hemi: 1.2, sun: 2.8, exp: 1.05, env: 0.4, sunPos: [4, 28, 8], fill: ['#fbbf24', 3] },            // w9: desert noon, the sun high
   towers: { hemi: 0.85, sun: 1.6, exp: 1.02, env: 0.42, sunPos: [-12, 16, 10], fill: ['#3b82f6', 8] },    // w10: blue hour between glass towers
-  floodlights: { hemi: 0.8, sun: 2.1, exp: 1.04, env: 0.36, sunPos: [6, 26, 10], fill: ['#e0f2fe', 6] },  // w13: a night match — the "sun" is the floodlights, high and white
+  floodlights: { hemi: 0.8, sun: 2.1, exp: 1.04, env: 0.36, sunPos: [6, 26, 10], fill: ['#e0f2fe', 6] },
+  globe: { hemi: 0.78, sun: 1.9, exp: 1.03, env: 0.36, sunPos: [-8, 22, 12], fill: ['#5eead4', 6] },        // w11: a world map at night, a teal glow from the globe
+  servers: { hemi: 0.95, sun: 2.1, exp: 1.04, env: 0.4, sunPos: [8, 24, 10], fill: ['#a78bfa', 7] },       // w15: violet dusk over the server rows  // w13: a night match — the "sun" is the floodlights, high and white
 };
 
 function clearWorld() {
-  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null;
+  updaters.clear(); steamHook = null; linkHook = null; tickerDecor = null; energyFlow = { v: 0, n: 0 }; floodState = null; globeDecor = null; cloudDecor = null;
   worldGroup.traverse((o) => {
     if (o.isMesh || o.isPoints || o.isSprite) {
       if (o.userData.ownGeo && o.geometry) o.geometry.dispose();
@@ -906,7 +913,7 @@ export function buildWorld(w) {
   buildEmptyLots(T);
   // decor
   const before = worldGroup.children.length;
-  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights }[T.decor] || decorTrees)(T);
+  ({ trees: decorTrees, skyline: decorSkyline, sea: decorSea, stars: decorStars, history: decorHistory, palms: decorPalms, stacks: decorStacks, storefronts: decorStorefronts, cranes: decorCranes, solar: decorSolar, towers: decorTowers, floodlights: decorFloodlights, globe: decorGlobe, servers: decorServers }[T.decor] || decorTrees)(T);
   if (K !== 1) spreadDecor(worldGroup.children.slice(before), K);
   for (const o of worldGroup.children.slice(before)) o.userData.decor = true;
   applyCasters();
@@ -1427,6 +1434,85 @@ function decorFloodlights(T) {
   floodState = { masts: masts.length, lit: true };
 }
 let floodState = null;
+/** w11 התאגיד הבינלאומי: a world map at night — a dark-teal island with a graticule, a wire globe rising behind the board, five country
+ *  districts in the back (a few blocks each, banded in the country's FICTIONAL colour, a lit beacon where you run a subsidiary yourself) and
+ *  the supply arcs: one per subsidiary, from its supplier's district to its own; a disrupted arc is red and its downstream district dims.
+ *  Nothing moves (no updater): the arcs are rebuilt from the city's levels (syncArcs), the same with and without reduced motion. */
+function decorGlobe(T) {
+  island(31, std('#0f3d3a', { roughness: 1 }), '#020617');
+  const grat = own(new THREE.Mesh(new THREE.RingGeometry(12.4, 14.4, 72, 1), std('#134e4a', { roughness: 0.8, metalness: 0.1 }))); grat.rotation.x = -Math.PI / 2; grat.position.y = -0.7; grat.receiveShadow = true; worldGroup.add(grat);
+  const lineMat = new THREE.LineBasicMaterial({ color: '#2dd4bf', transparent: true, opacity: 0.35 }); disposables.push(lineMat);
+  for (const r of [16, 20, 24]) { const pts = []; for (let i = 0; i <= 96; i++) { const a = (i / 96) * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(a) * r, -0.69, Math.cos(a) * r)); } const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat); l.userData.ownGeo = true; l.userData.noSpread = true; worldGroup.add(l); }
+  // the wire globe behind the board
+  const gl = own(new THREE.Mesh(new THREE.SphereGeometry(8, 24, 16), new THREE.MeshBasicMaterial({ color: '#5eead4', wireframe: true, transparent: true, opacity: 0.22 }))); gl.position.set(0, 5, -30); gl.name = 'decor:globe'; worldGroup.add(gl);
+  const core = own(new THREE.Mesh(new THREE.SphereGeometry(7.8, 32, 20), std('#0b2f2c', { roughness: 0.9, emissive: '#042f2e', emissiveIntensity: 0.4 }))); core.position.copy(gl.position); worldGroup.add(core);
+  // five districts in the back half (the camera side +z stays clear)
+  const districts = {}; const blockGeo = new THREE.BoxGeometry(1, 1, 1);
+  COUNTRY_IDS.forEach((c, i) => {
+    const a = Math.PI * (0.62 + i * 0.19); const r = 19.5; const g = new THREE.Group(); g.position.set(Math.sin(a) * r, -0.72, Math.cos(a) * r); g.rotation.y = Math.atan2(-g.position.x, -g.position.z); g.name = 'decor:district:' + c;
+    const [c1, c2] = COUNTRY_BAND[c]; const bandMat = new THREE.MeshStandardMaterial({ color: c1, emissive: c1, emissiveIntensity: 0.25, roughness: 0.6 }); disposables.push(bandMat);
+    const base = own(new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.4, 0.3, 24), std('#0b2f2c', { roughness: 1 }))); base.position.y = 0.15; g.add(base);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(3.3, 0.12, 6, 40), bandMat); ring.rotation.x = Math.PI / 2; ring.position.y = 0.32; ring.userData.ownGeo = true; g.add(ring);
+    for (let k = 0; k < 4; k++) { const h = 1.6 + ((i * 7 + k * 3) % 5) * 0.7; const m = new THREE.Mesh(blockGeo, std(k % 2 ? '#1e293b' : '#334155', { roughness: 0.5, metalness: 0.2 })); m.userData.ownMat = true; m.scale.set(1.1, h, 1.1); m.position.set(-1.6 + k * 1.05, 0.3 + h / 2, (k % 2) * 0.8 - 0.4); m.castShadow = true; g.add(m);
+      const b = new THREE.Mesh(blockGeo, k % 2 ? bandMat : new THREE.MeshBasicMaterial({ color: c2 })); if (!(k % 2)) b.userData.ownMat = true; b.scale.set(1.14, 0.22, 1.14); b.position.set(m.position.x, 0.3 + h * 0.8, m.position.z); g.add(b); }
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 10), new THREE.MeshBasicMaterial({ color: '#334155' })); beacon.userData.ownGeo = true; beacon.userData.ownMat = true; beacon.position.set(0, 5.6, 0); g.add(beacon);
+    worldGroup.add(g); districts[c] = { g, bandMat, beacon };
+  });
+  const arcs = new THREE.Group(); arcs.name = 'decor:arcs'; arcs.userData.noSpread = true; worldGroup.add(arcs);
+  globeDecor = { districts, arcs, n: 0, red: 0, self: [], dim: [] };
+  syncArcs();
+}
+let globeDecor = null;
+const ARC_OK = new THREE.Color('#5eead4'), ARC_BAD = new THREE.Color('#dc2626');
+/** w11: rebuild the supply arcs from the city's 'sub' levels (supplier district → own district), red when disrupted; light a district's
+ *  beacon where a sub is self-run; dim a district whose subs wait on a disrupted supplier. */
+function syncArcs() {
+  const D = globeDecor; if (!D) return;
+  for (const o of [...D.arcs.children]) { D.arcs.remove(o); o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }
+  const subs = [...city.values()].map((it) => it.level).filter((L) => L && L.kind === 'sub');
+  const self = new Set(subs.filter((L) => L.self).map((L) => L.country)); const dim = new Set(subs.filter((L) => L.disrupted).map((L) => L.country));
+  let red = 0; const seen = new Map();
+  for (const L of subs) { if (!L.sup || L.sup === L.country || !D.districts[L.sup] || !D.districts[L.country]) continue;
+    const k = L.sup + '>' + L.country; const n = (seen.get(k) || 0) + 1; seen.set(k, n);
+    const A = D.districts[L.sup].g.position, B = D.districts[L.country].g.position; const mid = new THREE.Vector3((A.x + B.x) / 2, 7 + 1.6 * n, (A.z + B.z) / 2);
+    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(A.x, 4.8, A.z), mid, new THREE.Vector3(B.x, 4.8, B.z));
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, L.disrupted ? 0.16 : 0.11, 6, false), new THREE.MeshBasicMaterial({ color: L.disrupted ? ARC_BAD : ARC_OK, transparent: true, opacity: L.disrupted ? 0.95 : 0.7 }));
+    tube.name = 'decor:arc' + (L.disrupted ? ':red' : ''); D.arcs.add(tube); if (L.disrupted) red++; }
+  for (const [c, d] of Object.entries(D.districts)) { d.beacon.material.color.set(self.has(c) ? '#f59e0b' : '#334155'); d.bandMat.emissiveIntensity = dim.has(c) ? 0.02 : self.has(c) ? 0.6 : 0.25; d.bandMat.color.set(dim.has(c) ? '#334155' : COUNTRY_BAND[c][0]); }
+  D.n = D.arcs.children.length; D.red = red; D.self = [...self]; D.dim = [...dim];
+  invalidate();
+}
+/** w15 מגדלי הענן: violet dusk over server rows — an indigo island, racks in the back with LED dots (violet / cyan / green), and a cloud of
+ *  user dots over the board whose count follows the app's users (syncCloud). The cloud drifts slowly through an updater — so it is still
+ *  under reduced motion and on the low tier (the render loop runs no updaters then). */
+function decorServers(T) {
+  island(31, std('#312e81', { roughness: 0.9 }), '#1e1b4b');
+  const ring = own(new THREE.Mesh(new THREE.RingGeometry(12.2, 14.4, 72), std('#3730a3', { roughness: 0.5, metalness: 0.3 }))); ring.rotation.x = -Math.PI / 2; ring.position.y = -0.7; ring.receiveShadow = true; worldGroup.add(ring);
+  const d = new THREE.Object3D();
+  const racks = scatter(dn(26), 17, 28, { backOnly: true, seed: 151 });
+  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), std('#111827', { roughness: 0.4, metalness: 0.5 }), racks.length);
+  const leds = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff' }), racks.length * 4);
+  const tones = ['#a78bfa', '#22d3ee', '#4ade80', '#c4b5fd'];
+  racks.forEach((p, i) => { const h = 3 + p.k * 5, w = 1.4 + p.k * 0.8, rot = Math.atan2(-p.x, -p.z);
+    d.position.set(p.x, -0.72 + h / 2, p.z); d.rotation.set(0, rot, 0); d.scale.set(w, h, 1.2); d.updateMatrix(); body.setMatrixAt(i, d.matrix);
+    const fx = Math.sin(rot), fz = Math.cos(rot);
+    for (let k = 0; k < 4; k++) { d.position.set(p.x + fx * 0.62, -0.72 + h * (0.2 + k * 0.2), p.z + fz * 0.62); d.rotation.set(0, rot, 0); d.scale.set(w * 0.7, 0.12, 1); d.updateMatrix(); leds.setMatrixAt(i * 4 + k, d.matrix); leds.setColorAt(i * 4 + k, new THREE.Color(tones[(i + k) % tones.length])); } });
+  body.castShadow = true; body.receiveShadow = true; [body, leds].forEach((m) => { own(m); worldGroup.add(m); });
+  // the user cloud: a pool of dots in a flat dome over the board (seeded), drawRange = the shown count
+  const N = 720; const pos = new Float32Array(N * 3); let s = 4242; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < N; i++) { const a = rnd() * Math.PI * 2, r = 3 + Math.sqrt(rnd()) * 13, h = 7 + rnd() * 3.5 - r * 0.12; pos[i * 3] = Math.sin(a) * r; pos[i * 3 + 1] = h; pos[i * 3 + 2] = Math.cos(a) * r; }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: '#c4b5fd', size: 0.22, sizeAttenuation: true, transparent: true, opacity: 0.85, depthWrite: false })); pts.userData.ownGeo = true; pts.userData.ownMat = true; pts.userData.noSpread = true; pts.name = 'decor:users'; worldGroup.add(pts);
+  cloudDecor = { pts, N, shown: 0, rot: 0 };
+  syncCloud();
+  updaters.add((t, dt) => { if (!cloudDecor) return; cloudDecor.rot = (cloudDecor.rot + (dt || 0) * 0.02) % (Math.PI * 2); cloudDecor.pts.rotation.y = cloudDecor.rot; });
+}
+let cloudDecor = null;
+/** w15: the board's user cloud ∝ the app's users (3 × the tower's own dots), cyan past the network threshold, none once sold */
+function syncCloud() {
+  const C = cloudDecor; if (!C) return; const L = [...city.values()].map((it) => it.level).find((x) => x && x.kind === 'app');
+  const n = !L || L.sold ? 0 : Math.min(C.N, cloudCount(L.users) * 3); C.pts.geometry.setDrawRange(0, n); C.pts.visible = n > 0; C.shown = n; C.pts.material.color.set(L && L.net ? '#67e8f9' : '#c4b5fd'); invalidate();
+}
 function decorTrees(T) {
   island(33, std('#9cc46a', { roughness: 1 }), '#8a5a3a');
   const plaza = own(new THREE.Mesh(new THREE.RingGeometry(11.4, 14.2, 64), std('#ead8b0', { roughness: 1 })));
@@ -1783,14 +1869,14 @@ export function spawn(key, model, opts = {}) {
 /** Shrink a model away. */
 export function despawn(key) {
   const it = city.get(key); if (!it) return;
-  city.delete(key); syncKit();
+  city.delete(key); syncKit(); syncArcs(); syncCloud();
   const o = it.obj, s0 = o.scale.x;
   tween(reduced ? MOTION.t1 : D(MOTION.despawn), (p) => { o.scale.setScalar(Math.max(0.001, s0 * (1 - p))); if (!reduced) o.rotation.y += 0.08; }).then(() => dropObj(o));
 }
 /** Startup exit: success = rocket lifts off; fail = it topples into dust. */
 export function launch(key, success) {
   const it = city.get(key); if (!it) return;
-  city.delete(key); syncKit();
+  city.delete(key); syncKit(); syncArcs(); syncCloud();
   const o = it.obj, y0 = o.position.y, s0 = o.scale.x;
   if (reduced) { tween(MOTION.t2, (p) => o.scale.setScalar(Math.max(0.001, s0 * (1 - p)))).then(() => dropObj(o)); return; }
   dust(key, success ? '#f8fafc' : '#94a3b8', 16);
@@ -1804,7 +1890,7 @@ export function launch(key, success) {
 export function syncCity(list, { silent = true } = {}) {
   list = [...(list || []), ...fixtureItems()];
   const want = new Set(list.map((m) => m.key));
-  for (const k of [...city.keys()]) if (!want.has(k)) { dropObj(city.get(k).obj); city.delete(k); }
+  for (const k of [...city.keys()]) if (!want.has(k)) { dropObj(city.get(k).obj); city.delete(k); } syncArcs(); syncCloud();
   ensureGrid(list.length, false);
   for (const m of list) if (!city.has(m.key)) spawn(m.key, m.model, { silent, level: m.level });
   for (const m of list) if ('level' in m) setLevel(m.key, m.level, { animate: false });
@@ -1833,7 +1919,9 @@ function applyLevelParts(it) {
   if (it.level && it.level.kind === 'energy') { paintEnergy(it.obj, it.level); return; }  // w9: rows / turbines / boxes, crane, barrier, loose cable vs wire, pulses
   if (it.level && it.level.kind === 'hold') { paintHold(it.obj, it.level); syncTicker(); return; }   // w10: floors ∝ value, ticker red on a call, frost, vault
   if (it.level && it.level.kind === 'club') { paintClub(it.obj, it.level); return; }      // w13: stands ∝ seats, crowd ∝ fill, crane + scaffold while building, tier stars
-  if (it.level && it.level.kind === 'sponsor') { paintBillboard(it.obj, it.level); return; }   // w13: a lit billboard, dark once the contract ended
+  if (it.level && it.level.kind === 'sponsor') { paintBillboard(it.obj, it.level); return; }
+  if (it.level && it.level.kind === 'sub') { paintSub(it.obj, it.level); syncArcs(); return; }   // w11: the country band, the manager + trust ring, supply marks; the decor's arcs
+  if (it.level && it.level.kind === 'app') { paintApp(it.obj, it.level); syncCloud(); return; }  // w15: the runway fuse, the tower's user dots; the board's cloud   // w13: a lit billboard, dark once the contract ended
   const P = kitParts(it.level);
   if (P.annex && !it.annex) {
     const a = inst(it.model); a.position.set(-0.78, 0, -0.78); a.scale.set(0.55, 0.42, 0.55); a.userData.annex = true; it.obj.add(a); it.annex = a;
@@ -1891,7 +1979,7 @@ export function highlight(key) { try { hlKey = key && city.has(key) ? key : null
 export function levelOf(key) {
   const it = city.get(key); if (!it || !it.level) return null; const ud = it.obj.userData;
   const model = ud.plantState ? { ...ud.plantState, beltPhase: ud.belt ? ud.belt.phase : null } : ud.shopState ? { ...ud.shopState } : ud.buildState ? { ...ud.buildState, jib: ud.jib ? ud.jib.rotation.y : null } : ud.stockState ? { ...ud.stockState }
-    : ud.energyState ? { ...ud.energyState } : ud.clubState ? { ...ud.clubState } : ud.boardState ? { ...ud.boardState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
+    : ud.energyState ? { ...ud.energyState } : ud.clubState ? { ...ud.clubState } : ud.subState ? { ...ud.subState } : ud.appState ? { ...ud.appState } : ud.boardState ? { ...ud.boardState } : ud.holdState ? { ...ud.holdState, ribbonCall: !!(tickerDecor && tickerDecor.call) } : null;
   return { ...it.level, parts: kitParts(it.level), annex: !!it.annex, ...(model ? { model } : {}), ...(it.level.kind === 'mgr' ? { links: linkState.get(key) || [] } : {}) };
 }
 export function shield(keys) {
@@ -1958,7 +2046,7 @@ function showLabel(text, color, pos, { rise = 1.5, dur = 1900, w = 8, h = 1 } = 
 }
 export function floatLabel(text, color = 'green', at = 'pawn', opts = {}) { return showLabel(text, color, anchorTop(at), opts); }
 function particles(at, n, o) { const base = anchor(at); const s0 = (at && at !== 'pawn' && city.has(at)) ? slotScale(gridN) / 0.86 : 1; return particlesAt(base, n, { ...o, s0 }); }
-const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0' };
+const DUST = { trees: '#e8dcc4', skyline: '#9aa3c0', sea: '#f3e6c8', stars: '#c7d2fe', palms: '#fde3c8', stacks: '#d6d3d1', storefronts: '#f3d4cc', cranes: '#d6cfb8', solar: '#e9c46a', towers: '#93c5fd', floodlights: '#bbf7d0', globe: '#99f6e4', servers: '#ddd6fe' };
 const nPart = (n) => Math.max(1, Math.round(n * cfg.particles));
 export function dust(at, color, n = 12) { if (reduced || cfg.particles < 0.5) return Promise.resolve(); return particles(at, nPart(n), { tex: soft(), color: color || DUST[theme && theme.decor] || '#e8dcc4', size: 0.75, spread: 1.6, up: 0.6, dur: MOTION.dust, y: 0.15 }); }
 export function sparkle(at = 'pawn', n = 26) {
@@ -2317,7 +2405,9 @@ export function perfStats() {
   return { calls: r.render.calls, triangles: r.render.triangles, geos: r.memory.geometries, textures: r.memory.textures, texMB: +(texBytes() / 1048576).toFixed(1),
     dpr: renderer.getPixelRatio(), tier, lowPower, shadows: renderer.shadowMap.enabled, antialias: !!renderer.getContextAttributes()?.antialias, framesRendered, lastTurnMs: Math.round(turnMs),
     fps: { median: q(0.5) ? +(1000 / q(0.5)).toFixed(1) : null, p95: q(0.95) ? +q(0.95).toFixed(1) : null, samples: s.length }, programs: (r.programs || []).length, city: city.size,
-    decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null, floodlights: floodState && theme && theme.decor === 'floodlights' ? { ...floodState } : null },   // w9 pulses / w10 ribbon (tests)
+    decor: { energyFlow: { ...energyFlow }, ticker: tickerDecor ? { call: tickerDecor.call, ph: tickerDecor.ph } : null, floodlights: floodState && theme && theme.decor === 'floodlights' ? { ...floodState } : null,
+      globe: globeDecor && theme && theme.decor === 'globe' ? { districts: Object.keys(globeDecor.districts).length, arcs: globeDecor.n, red: globeDecor.red, self: [...globeDecor.self], dim: [...globeDecor.dim] } : null,
+      servers: cloudDecor && theme && theme.decor === 'servers' ? { dots: cloudDecor.shown, max: cloudDecor.N, rot: Math.round(cloudDecor.rot * 1000) / 1000 } : null },   // w9 pulses / w10 ribbon (tests)
     paused, hidden: pageHidden, reduced, damping: !!(controls && controls.enableDamping), shaking: performance.now() < shakeUntil, fx: fxGroup.children.length,
     kit: kit ? { ...Object.fromEntries(Object.entries(kit.meshes).map(([k, m]) => [k, m.visible ? m.count : 0])), sprites: kit.group.children.filter((o) => o.isSprite).length, rimColor: '#' + kit.meshes.rim.material.color.getHexString() } : null,
     shader: { checked: flatChecked, ok: flatOk }, glb: [...ready.keys()] };

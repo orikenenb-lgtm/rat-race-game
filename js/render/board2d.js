@@ -246,7 +246,7 @@ function addCard(key, model, label, kind = null, level = null) {
   const c = el('button', 'b2d-card', cityEl); c.type = 'button';
   c.dataset.key = key; c.dataset.kind = 'plain'; c.title = label || '';
   if (/^L:/.test(key) && key !== 'L:pension' && key !== 'L:index') c.dataset.life = '1';   // a life event, not an owned asset (B1 G9)
-  hidden(el('span', 'b2d-ce', c, cityIcon(model)));
+  hidden(el('span', 'b2d-ce', c, cityIcon(model, curWorld && curWorld.id)));   // w11 / w15: a world may read a shared model key its own way
   if (label) { const l = hidden(el('span', 'b2d-cl', c, String(label).slice(0, 18))); l.dir = 'rtl'; }
   c.addEventListener('click', (e) => { const r = c.getBoundingClientRect(); emitPick(key, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
   const it = { el: c, model, label: label || '', kind, level: null };
@@ -291,6 +291,14 @@ function paintLevel(it, L) {
     } else if (L.kind === 'sponsor') {   // w13: a billboard — dark once the contract ended
       hidden(el('span', 'b2d-corner-b', c, L.expired ? '⬛' : '📣'));
       c.dataset.light = L.expired ? 'off' : 'on'; c.dataset.run = L.expired ? 'expired' : 'live';
+    } else if (L.kind === 'sub') {   // w11: the country's fictional colour band (CSS from data-country), ★ self-run, 🔍 audited / ❔ not, ⚠️ a disrupted supplier
+      hidden(el('span', 'b2d-corner-b', c, L.disrupted ? '⚠️' : L.self ? '★' : L.managed ? (L.audited ? '🔍' : '❔') : '∅'));
+      c.dataset.light = L.disrupted ? 'stalled' : L.self ? 'on' : L.managed ? 'mgr' : 'off'; c.dataset.run = L.country; c.dataset.country = L.country;
+      c.style.setProperty('--b2d-pct', `${Math.round((L.self ? 1 : L.trust || 0) * 100)}%`);
+    } else if (L.kind === 'app') {   // w15: 📱 the app, the runway as a fuse bar (36 months = full), 🔥 under 6 months, ✔ sold
+      hidden(el('span', 'b2d-corner-b', c, L.sold ? '✔' : L.runway < 6 && !L.profitable ? '🔥' : L.net ? '🌐' : '📱'));
+      c.dataset.light = L.sold ? 'off' : L.runway < 6 && !L.profitable ? 'stalled' : 'on'; c.dataset.run = L.profitable ? 'profit' : String(L.runway);
+      c.style.setProperty('--b2d-pct', `${L.sold ? 0 : L.profitable ? 100 : Math.round(Math.min(36, L.runway) / 36 * 100)}%`);
     } else if (L.kind === 'hold') {   // w10: the liquidity class (glass / stone / vault), ⚠️ a margin call, ❄️ frozen, 🔒 locked
       hidden(el('span', 'b2d-corner-b', c, L.call ? '⚠️' : L.frozen ? '❄️' : L.cls === 'locked' ? '🔒' : L.cls === 'monthly' ? '🧱' : '🏦'));
       c.dataset.light = L.call ? 'call' : L.frozen ? 'off' : 'on'; c.dataset.run = L.cls;

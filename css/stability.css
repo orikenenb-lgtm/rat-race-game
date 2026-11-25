@@ -175,3 +175,17 @@ body:has(#evm:not([hidden])) .recover,body:has(#gm:not([hidden])) .recover{botto
 .b2d-card[data-kind="club"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;width:80%;
   background:linear-gradient(to left,#15803d 0 var(--b2d-pct,0%),rgba(21,128,61,.18) var(--b2d-pct,0%) 100%)}
 .b2d-card[data-kind="sponsor"][data-light="off"]{border-style:dotted;opacity:.85}
+/* w11 (globe motif: a graticule on the dark teal; a subsidiary card: its country's FICTIONAL band along the top, the trust as the bar,
+   a dashed red border when its supplier's port is disrupted, a gold border while you run it yourself) */
+.b2d-m-globe .b2d-center{background-image:radial-gradient(circle at 50% 50%,transparent 0 44px,rgba(94,234,212,.35) 44px 46px,transparent 46px),linear-gradient(rgba(94,234,212,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(94,234,212,.12) 1px,transparent 1px);background-size:auto,24px 24px,24px 24px}
+.b2d-card[data-kind="sub"]{border-color:#0f766e}.b2d-card[data-kind="sub"][data-light="on"]{border-color:#f59e0b;border-width:3px}.b2d-card[data-kind="sub"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}
+.b2d-card[data-kind="sub"]::before{content:"";position:absolute;inset-inline:8%;top:5px;height:5px;border-radius:2px;pointer-events:none;background:linear-gradient(to bottom,#6366f1 0 60%,#e0e7ff 60%)}
+.b2d-card[data-country="us"]::before{background:linear-gradient(to bottom,#f97316 0 60%,#ffedd5 60%)}.b2d-card[data-country="in"]::before{background:linear-gradient(to bottom,#10b981 0 60%,#d1fae5 60%)}
+.b2d-card[data-country="br"]::before{background:linear-gradient(to bottom,#eab308 0 60%,#1e3a8a 60%)}.b2d-card[data-country="vn"]::before{background:linear-gradient(to bottom,#e11d48 0 60%,#ffe4e6 60%)}
+.b2d-card[data-kind="sub"]::after,.b2d-card[data-kind="app"]::after{content:"";position:absolute;inset-inline-start:10%;bottom:8px;height:4px;border-radius:2px;pointer-events:none;width:80%;
+  background:linear-gradient(to left,#0f766e 0 var(--b2d-pct,0%),rgba(15,118,110,.18) var(--b2d-pct,0%) 100%)}
+/* w15 (cloud motif: soft dots on the lavender board; the app card: the runway as a fuse bar, red under 6 months) */
+.b2d-m-cloud .b2d-center{background-image:radial-gradient(rgba(124,58,237,.22) 2px,transparent 2.5px),radial-gradient(rgba(34,211,238,.18) 1.5px,transparent 2px);background-size:22px 22px,15px 15px;background-position:0 0,7px 9px}
+.b2d-card[data-kind="app"]{border-color:#7c3aed}.b2d-card[data-kind="app"]::after{background:linear-gradient(to left,#7c3aed 0 var(--b2d-pct,0%),rgba(124,58,237,.18) var(--b2d-pct,0%) 100%)}
+.b2d-card[data-kind="app"][data-light="stalled"]{border-color:#dc2626;border-style:dashed}.b2d-card[data-kind="app"][data-light="stalled"]::after{background:linear-gradient(to left,#dc2626 0 var(--b2d-pct,0%),rgba(220,38,38,.18) var(--b2d-pct,0%) 100%)}
+.b2d-card[data-kind="app"][data-light="off"]{border-style:dotted;opacity:.85}

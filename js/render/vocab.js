@@ -56,6 +56,16 @@ export const WORLD_STYLE = Object.freeze({
   // #166534 (ΔE76 ≥ 49 from every world), edge #14532d, the club red #dc2626 (ink #7f1d1d / dark #fca5a5; the UI fill is the lighter #f05252 so
   // --ink on it stays ≥ 4.5), decor 'floodlights' (four masts with lamp heads, still — nothing moves, also under reduced motion), ⚽🏟️.
   w13: { name: 'אצטדיון הכוכבים', mood: 'night match under floodlights', sky: ['#0b1020', '#1e3a8a'], board: '#166534', edge: '#14532d', center: '#15803d', decor: 'floodlights', accent: '#dc2626', accent2: '#f8fafc', accentInk: ['#7f1d1d', '#fca5a5'], rim: '#dc2626', rimGlow: true, motif: 'pitch', caption: 'המועדון שלך' },
+  // w11 התאגיד הבינלאומי (docs/full-upgrade/worlds/w11-multinational.md "Visual language"): a world map at night, sky #020617 → #1e1b4b, the
+  // dark-teal board #134e4a (ΔE76 ≥ 22 from every world), edge #115e59, amber #f59e0b (the doc's ink #b45309 is 3.98:1 on --paper3 — ink
+  // #92400e / dark #fbbf24), decor 'globe' (a wire globe behind the board, five country districts in their own fictional colours, supply arcs
+  // that turn red when a port is disrupted — still: nothing moves, also under reduced motion), 🌍.
+  w11: { name: 'התאגיד הבינלאומי', mood: 'world map at night', sky: ['#020617', '#1e1b4b'], board: '#134e4a', edge: '#115e59', center: '#0f766e', decor: 'globe', accent: '#f59e0b', accent2: '#5eead4', accentInk: ['#92400e', '#fbbf24'], rim: '#f59e0b', rimGlow: true, motif: 'globe', caption: 'הקבוצה שלך' },
+  // w15 מגדלי הענן (w15-cloud.md, CATALOG-25 §1.4): violet dusk over server towers, sky #1e1b4b → #4c1d95, a cool lavender board #c7d2fe (the
+  // catalog's #e2e8f0 is ΔE76 4.4 from w4's #e8f1ff — #c7d2fe is ≥ 13 from every world), edge #a5b4fc, violet #7c3aed (ink #4c1d95 / dark
+  // #c4b5fd; the UI fill is #a78bfa so --ink on it stays ≥ 4.5 — #7c3aed stays the 3D accent and tile H with white ink 5.7:1), decor 'servers'
+  // (rows of racks with LED dots + a cloud of user particles over the board ∝ the users — still under reduced motion / the low tier), ☁️📱.
+  w15: { name: 'מגדלי הענן', mood: 'violet dusk over server towers', sky: ['#1e1b4b', '#4c1d95'], board: '#c7d2fe', edge: '#a5b4fc', center: '#e0e7ff', decor: 'servers', accent: '#7c3aed', accent2: '#22d3ee', accentInk: ['#4c1d95', '#c4b5fd'], rim: '#7c3aed', rimGlow: true, motif: 'cloud', caption: 'האפליקציה שלך' },
   // T5 verify A-36 / D7: the history board is aged newsprint #daceb8 (was #efe4c8): ΔE76 12.7 to w1 and w3 (was 8.9 / 11.0), 23.3 to w4
   h: { name: 'מכונת הזמן', mood: 'sepia newspaper', sky: ['#efe2c4', '#c9b089'], board: '#daceb8', edge: '#5b4127', center: '#e6d6b0', decor: 'history', accent: '#c8a24a', accentInk: ['#7a5520', '#c8a24a'], rim: '#c8a24a', rimGlow: false, motif: 'news', caption: 'התיק שלך' },
 });
@@ -78,6 +88,8 @@ export const CHAR_STYLE = Object.freeze({
   gridEng: '#0891b2', infraFund: '#1e3a8a', kibbutz: '#65a30d',         // w9
   allocator: '#a16207', blockHeir: '#7c2d12', floorTrader: '#be123c',   // w10
   coachOwner: '#15803d', localTycoon: '#b91c1c', academyDirector: '#65a30d',   // w13
+  ceo: '#b45309', oldExporter: '#0f766e', pe: '#4338ca',                    // w11
+  soloFounder: '#7c3aed', bigTechExec: '#1d4ed8', bootstrapper: '#15803d',   // w15
 });
 export const CHAR_FALLBACK = '#a8763e';
 
@@ -109,7 +121,9 @@ export const CITY_EMOJI = Object.freeze({ apartment: '🏢', business: '🏪', s
   stone_block: '🧱', vault: '🔒', glass_tower: '🏦',
   // w13 model keys (procedural stand-ins in 3D, js/render/standins13.js; no .glb files)
   stadium: '🏟️', billboard: '📣', club_shop: '🧣' });
-export function cityEmoji(model) { const name = String(model || '').split('/').pop(); return CITY_EMOJI[name] || '🏠'; }
+/** w11 / w15: the same model keys (regional_office, glass_tower, warehouse) read differently in these worlds — a subsidiary, the app's tower. */
+export const CITY_EMOJI_W = Object.freeze({ w11: Object.freeze({ regional_office: '🏢', glass_tower: '🏙️', warehouse: '📦' }), w15: Object.freeze({ glass_tower: '📱', regional_office: '🖥️' }) });
+export function cityEmoji(model, worldId = null) { const name = String(model || '').split('/').pop(); return ((worldId && CITY_EMOJI_W[worldId]) || {})[name] || CITY_EMOJI[name] || '🏠'; }
 
 
 /** Kind labels for city entries that are not world `kinds` (holdings, angels, the foundation, life items). */
@@ -142,6 +156,16 @@ export const DIV_HE = Object.freeze(['הדרג השלישי', 'הדרג השני
 export const AGE_BAND = Object.freeze([[21, 'young', 'צעיר'], [24, 'rising', 'עולה'], [28, 'prime', 'בשיא'], [30, 'late', 'אחרי השיא'], [99, 'vet', 'ותיק']]);
 /** a player's age → its band {id, he} (the token's age ring; the same bands as the market value's age factor) */
 export function ageBand(age) { const a = Number(age) || 0; const b = AGE_BAND.find((x) => a <= x[0]) || AGE_BAND[AGE_BAND.length - 1]; return { id: b[1], he: b[2] }; }
+/** w11 (multinational.js COUNTRIES): the five fictional markets — their words and a FICTIONAL two-colour band (never a real flag: one colour
+ *  + a stripe, chosen only to tell the districts apart; the country is always also named in words). */
+export const COUNTRY_IDS = Object.freeze(['eu', 'us', 'in', 'br', 'vn']);
+export const COUNTRY_HE = Object.freeze({ eu: 'אירופה', us: 'ארה״ב', in: 'הודו', br: 'ברזיל', vn: 'וייטנאם' });
+export const COUNTRY_BAND = Object.freeze({ eu: Object.freeze(['#6366f1', '#e0e7ff']), us: Object.freeze(['#f97316', '#ffedd5']), in: Object.freeze(['#10b981', '#d1fae5']),
+  br: Object.freeze(['#eab308', '#1e3a8a']), vn: Object.freeze(['#e11d48', '#ffe4e6']) });
+export const SUB_KIND_HE = Object.freeze({ factory: 'מפעל', retail: 'רשת חנויות', software: 'תוכנה', distribution: 'הפצה', services: 'שירותים' });
+/** w15 (market.js REGIMES ids → words) */
+export const REGIME_HE = Object.freeze({ growth: 'צמיחה', bubble: 'בועה', recession: 'מיתון', recovery: 'התאוששות', highVol: 'תנודתיות גבוהה', sectorCrisis: 'משבר בענף' });
+const cid = (x) => (COUNTRY_IDS.includes(x) ? x : null);
 /** Normalise a level object (T5 §5.1) → a safe copy, or null when it carries nothing to draw. */
 export function normLevel(level) {
   if (!level || typeof level !== 'object') return null;
@@ -216,7 +240,17 @@ export function normLevel(level) {
     return { kind: 'club', n: stage, of: 2, seats: Math.max(0, int(level.seats, 20000)), stage, expanded: clampN(level.expanded, 0, 2, 0), fill: frac(level.fill), div: clampN(level.div, 0, 2, 1),
       rank: clampN(level.rank, 1, 8, 4), floodlights: level.floodlights !== false, training: !!level.training, academy: !!level.academy, activity: null, trouble: false };
   }
-  if (level.kind === 'sponsor') return { kind: 'sponsor', n: level.expired ? 0 : 1, of: 1, expired: !!level.expired, activity: null, trouble: false };   // w13: a billboard; an ended contract goes dark
+  if (level.kind === 'sponsor') return { kind: 'sponsor', n: level.expired ? 0 : 1, of: 1, expired: !!level.expired, activity: null, trouble: false };
+  if (level.kind === 'sub') {   // w11 (multinational.js cityModels): a subsidiary — its country, kind, who runs it, the shown trust, audited, a disrupted supplier, dual source, hedged
+    const t = level.trust == null || !Number.isFinite(Number(level.trust)) ? null : frac(level.trust);
+    return { kind: 'sub', n: level.self ? 3 : level.managed ? (t != null && t >= 0.6 ? 2 : 1) : 0, of: 3, country: cid(level.country) || 'eu', sup: cid(level.sup ?? level.supplier), kind2: SUB_KIND_HE[level.kind2] ? level.kind2 : 'factory',
+      self: !!level.self, managed: !level.self && !!level.managed, trust: level.self ? null : t, audited: !!level.audited, disrupted: !!level.disrupted, dual: !!level.dual, hedged: !!level.hedged, activity: null, trouble: !!level.disrupted };
+  }
+  if (level.kind === 'app') {   // w15 (platform.js cityModels): the app — users, runway (99 = cash flow ≥ 0), past the network threshold, the regime, sold, your stake
+    const rw = Number.isFinite(Number(level.runway)) ? Math.max(0, Math.round(Number(level.runway) * 10) / 10) : 0;
+    return { kind: 'app', n: level.sold ? 0 : rw >= 99 ? 3 : rw >= 12 ? 2 : rw >= 6 ? 1 : 0, of: 3, users: Math.max(0, int(level.users)), runway: rw, profitable: rw >= 99, net: !!level.net, regime: REGIME_HE[level.regime] ? level.regime : 'growth',
+      sold: !!level.sold, stake: frac(level.stake), activity: null, trouble: !level.sold && rw < 6 };
+  }   // w13: a billboard; an ended contract goes dark
   return null;
 }
 /** T5-L0/L1/L2 */
@@ -253,6 +287,8 @@ export function levelText(level) {
   }
   if (L.kind === 'club') return `${DIV_HE[L.div]} · מקום ${L.rank} · ${L.seats.toLocaleString('en-US')} מקומות · תפוסה ${Math.round(L.fill * 100)}%${L.stage ? ` · מרחיבים את היציע: שלב ${L.stage} מתוך 2` : ''}${L.training ? ' · מתחם אימונים' : ''}${L.academy ? ' · אקדמיה' : ''}`;   // w13
   if (L.kind === 'sponsor') return L.expired ? 'החוזה נגמר · השלט כבוי' : 'חוזה חסות פעיל';
+  if (L.kind === 'sub') return `${SUB_KIND_HE[L.kind2]} ב${COUNTRY_HE[L.country]} · ${L.self ? 'בניהול שלך' : L.managed ? `מנהל מקומי · אמון ${Math.round(L.trust * 100)}%${L.audited ? ' (נבדק)' : ' (לא נבדק)'}` : 'בלי מנהל'}${L.sup ? ` · ספק מ${COUNTRY_HE[L.sup]}` : ''}${L.disrupted ? ' · ⚠️ שיבוש אצל הספק' : ''}${L.dual ? ' · ספק שני' : ''}${L.hedged ? ' · מטבע מגודר' : ''}`;   // w11
+  if (L.kind === 'app') return L.sold ? 'החברה נמכרה' : `${L.users.toLocaleString('en-US')} משתמשים · ${L.profitable ? 'רווחית — המזומן לא נגמר' : `מזומן ל־${L.runway} חודשים`} · החלק שלך ${Math.round(L.stake * 100)}%${L.net ? ' · אפקט רשת' : ''} · שוק: ${REGIME_HE[L.regime]}`;   // w15
   if (L.kind === 'hold') return `${LIQ_HE[L.cls]}${L.call ? ' · קריאת מרווח' : ''}${L.frozen ? ' · קפוא החודש' : ''}${L.lockUntil != null ? ` · נעול עד חודש ${L.lockUntil}` : ''}`;
   return L.n === 0 ? 'בהתחלה · עוד לא יציב' : `שלב ${L.n} מתוך 3 · ${L.label}`;
 }
@@ -276,6 +312,8 @@ export function levelHint(level) {
     : 'הפאנלים מצטרפים שורה אחרי שורה. עד החיבור לרשת אין הכנסה.';
   if (L.kind === 'club') return L.stage ? 'העגורן = מרחיבים את היציע: 15% פחות מקומות בזמן הבנייה, ו־40% יותר בסוף.' : 'הקהל ביציע = התפוסה. מקום גבוה בטבלה ממלא את היציע — ומעלה את ההכנסה.';   // w13
   if (L.kind === 'sponsor') return L.expired ? 'שלט כבוי = החוזה נגמר (או בוטל בשערורייה). אין עוד כסף ממנו.' : 'שלט דולק = החסות משלמת כל חודש עד סוף החוזה.';
+  if (L.kind === 'sub') return L.self ? 'הבניין מואר = בניהול שלך: הכי יעיל, ועולה קשב.' : L.managed ? 'הטבעת סביב המנהל = האמון בו, רק לפי מה שנבדק. ביקורת מצמצמת את הטווח.' : 'בלי מנהל: החברה עובדת חלש עד מינוי מנהל או ניהול עצמי.';   // w11
+  if (L.kind === 'app') return L.sold ? 'החברה נמכרה: המחיר קבוע — בלי סיכון, ובלי עלייה.' : 'הפתיל = חודשי המזומן. ענן המשתמשים מעל המגדל גדל עם המשתמשים. פחות מ־6 חודשים — הפתיל אדום.';   // w15
   if (L.kind === 'hold') return L.cls === 'daily' ? 'זכוכית = נזיל: מניות וקרן מדד שאפשר למכור תוך יומיים. רצועת המניות מהבהבת באדום בקריאת מרווח.'
     : L.cls === 'monthly' ? 'אבן = נזילות חודשית: קרן שאפשר לפדות רק ביום המשכורת הבא (או מיד, בהנחה).' : 'כספת = נעול: השקעה פרטית שאי אפשר למכור מהר, ואי אפשר ללוות כנגדה.';
   return HINTS[L.n];
@@ -293,6 +331,8 @@ export function pipsText(level) {
   if (L.kind === 'hold') return L.cls === 'daily' ? '▮'.repeat(L.n) : L.cls === 'monthly' ? '▭'.repeat(L.n) : '🔒';   // w10
   if (L.kind === 'club') return L.stage ? '🏗️' : '▮'.repeat(Math.max(1, Math.round(L.fill * 5))) + '▯'.repeat(5 - Math.max(1, Math.round(L.fill * 5)));   // w13: the stands' fill in fifths
   if (L.kind === 'sponsor') return L.expired ? '○' : '●';
+  if (L.kind === 'sub') return L.self ? '★' : L.managed ? '●'.repeat(Math.max(1, Math.round((L.trust || 0) * 3))) + '○'.repeat(3 - Math.max(1, Math.round((L.trust || 0) * 3))) : '○○○';   // w11: trust in thirds
+  if (L.kind === 'app') return L.sold ? '✔' : L.profitable ? '▮▮▮' : '▮'.repeat(L.n) + '▯'.repeat(3 - L.n);   // w15: the runway (6 / 12 / profitable)
   return '●'.repeat(L.n) + '○'.repeat(L.of - L.n);
 }
 /** The one activity key to show for a level (trouble beats activity), or null. */
@@ -324,6 +364,8 @@ export function kitParts(level) {
   if (L.kind === 'hold') { p.cls = L.cls; p.floors = L.n; p.call = L.call; p.frozen = L.frozen; p.lock = L.lockUntil != null; return p; }   // w10 (paintHold)
   if (L.kind === 'club') { p.stage = L.stage; p.expanded = L.expanded; p.fill = L.fill; p.div = L.div; p.rank = L.rank; p.floodlights = L.floodlights; p.training = L.training; p.academy = L.academy; p.crane = L.stage > 0; return p; }   // w13 (standins13.js paintClub)
   if (L.kind === 'sponsor') { p.lit = !L.expired; return p; }   // w13 (paintBillboard)
+  if (L.kind === 'sub') { p.country = L.country; p.self = L.self; p.managed = L.managed; p.trust = L.trust; p.audited = L.audited; p.disrupted = L.disrupted; p.dual = L.dual; p.hedged = L.hedged; return p; }   // w11 (standins1115.js paintSub)
+  if (L.kind === 'app') { p.users = L.users; p.runway = L.runway; p.profitable = L.profitable; p.net = L.net; p.sold = L.sold; p.stake = L.stake; return p; }   // w15 (paintApp)
   if (L.kind === 'build') { p.floors = L.floors; p.pct = L.pct; p.crane = L.crane; p.tarp = L.stalled; p.permit = L.permit; p.presold = L.presold; p.rental = L.rental; p.fence = L.plot; return p; }   // w8 (paintBuild)
   const busy = !!(L.activity && L.activity.busy);
   if (L.n === 0) { p.scaffold = true; p.cone = true; p.scale = 0.8; }
