@@ -161,7 +161,12 @@ check('rr_finish wrong secret → unauthorized', r.code === 'unauthorized', r);
 
 // honest + forged games (engine in Node; rules era from the server's date keys exactly as verify_core.rulesFor sees them)
 const era = (row) => (VC.rulesFor ? { rules: VC.rulesFor(row) } : {});
-const cfgC = { worldId: bA.world, charId: bA.char, seed: Number(bA.seed), mode: 'challenge', tutorial: false, bailout: false, ...era({ challenge_day: String(CH.starts_at || '').slice(0, 10) }) };
+// the challenge's day as the client derives it (js/lobby.js rankedDateKey): rr_begin date_key if sent, else the Israel date of the group
+// listing's starts_at (= created_at), else today in Israel — the live rr_create_challenge2 / rr_begin return no starts_at (VERIFY_CHECK.md)
+const ilDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+const chAt = bA.date_key || ((await rpc('rr_group', { ...auth(A), p_group: G.id })).body?.challenges || []).find((c) => c.id === CH.id)?.starts_at || CH.starts_at;
+const cfgC = { worldId: bA.world, charId: bA.char, seed: Number(bA.seed), mode: 'challenge', tutorial: false, bailout: false,
+  ...era({ challenge_day: bA.date_key ? String(bA.date_key) : ilDate(chAt ? new Date(chAt) : new Date()) }) };
 const stA = playOut(E, cfgC, prng(tag)); const stB = playOut(E, cfgC, prng(tag + 1));
 const claim = (st) => ({ p_status: st.result.status, p_months: Math.max(1, Math.min(200, Math.round(st.result.months))), p_passive: Math.round(st.result.passive),
   p_expenses: Math.max(0, Math.round(st.result.expenses)), p_net_worth: Math.round(st.result.netWorth), p_stats: { progress: st.result.progress ?? null, stars: st.result.stars || 0 } });
