@@ -297,5 +297,41 @@ ok(debts > 0, `new-debt chips seen in play (${debts})`);
     const row = moneyHubModel(m).rows.find((r) => r.id === 'world'); ok(row && row.icon === '☁️' && row.title === 'האפליקציה והגיוסים' && row.acts[0].act === 'world', `w15/${ch}/m${months}: 💼 row`, row);
   }
 }
+/* 12. w12 (goal all: nw ₪2B + noDefault 24 'default' + liquidity 12 months = coverage 1.0, hold 3) and w16 (all: passive12 ₪5M of farm income +
+   noDefault 12 'margin', hold 2): the streak parts read months ("ברצף"), the coverage in months and ×, never ₪ or "fixed costs"; the rules;
+   the gaps; the rungs; the 💼 rows */
+{
+  const { moneyHubModel, milestoneLadder, partTag, meterLabel } = await import('../js/hudgoal.js');
+  const play = (wid, ch, months) => { const st = E.createGame({ worldId: wid, charId: ch, seed: 7, mode: 'free' });
+    for (let k = 0; k < 300 && st.month < months && !st.over; k++) {
+      if (st.phase === 'roll') E.rollDice(st);
+      let ev = E.landing(st) || E.currentEvent(st); let g = 0;
+      while (ev && !st.over && g++ < 30) { const os = ev.options.filter((o) => o.enabled !== false); const o = os.find((x) => x.id === 'pass' || x.id === 'decline') || os.find((x) => x.primary) || os[0]; if (!o) break; const r = E.choose(st, ev, o.id, { qty: 1 }); ev = (r && r.event) || E.currentEvent(st); }
+    } return st; };
+  await E.ensureWorld('w12'); await E.ensureWorld('w16');
+  for (const ch of ['chair', 'activist', 'thirdGen']) for (const months of [1, 13]) {
+    const st = play('w12', ch, months); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w12'), st.charId, m.rules) });
+    const nw = M.parts.find((p) => p.key === 'netWorth'), nd = M.parts.find((p) => p.key === 'noDefault:default'), lq = M.parts.find((p) => p.key === 'liquidity'); const raw = m.goalParts.find((p) => p.key === 'liquidity');
+    ok(m.goalType === 'all' && M.parts.length === 3 && nw && nw.targetText === E.fmtM(2e9) && nd && nd.streak && lq && lq.coverage && !lq.runway, `w12/${ch}/m${months}: three parts (₪2B, the streak, the coverage)`, M.parts);
+    ok(nd.valueText === `${Math.round(nd.value)} חודשים` && nd.targetText === '24 חודשים' && !/₪|עלויות קבועות/.test(nd.valueText + nd.targetText + lq.valueText + lq.targetText), `w12/${ch}/m${months}: months, never ₪ / "fixed costs" (${nd.valueText} · ${lq.valueText})`);
+    ok(raw.value >= 99 ? lq.valueText === 'אין חוב בערבות — כיסוי מלא' : lq.valueText.includes(`${Math.round(raw.value * 10) / 10} חודשים`) && lq.valueText.includes('כיסוי ×') && lq.targetText === '12 חודשים (כיסוי ×1.00)', `w12/${ch}/m${months}: coverage "${lq.valueText}"`);
+    ok(M.rule.startsWith('שלושה יעדים יחד') && M.rule.includes('בלי חדלות פירעון') && M.rule.includes('כיסוי נזילות של ×1') && !/עלויות קבועות/.test(M.rule + M.gaps.join(' ')), `w12/${ch}/m${months}: the rule`, M.rule);
+    ok((nd.met || M.gaps.some((g) => g.includes('בלי חדלות פירעון בקבוצה — עוד'))) && (lq.met || M.gaps.some((g) => g.startsWith('כיסוי הנזילות ×'))), `w12/${ch}/m${months}: the gaps`, M.gaps);
+    const L = milestoneLadder(m); ok(L.some((x) => x.id === 'noDefault:default' && x.title === '24 חודשים בלי חדלות פירעון בקבוצה' && x.icon === '🛡️') && L.some((x) => x.id === 'liquidity' && x.title.startsWith('כיסוי נזילות ×1')), `w12/${ch}/m${months}: the rungs`, L.map((x) => x.title));
+    ok(partTag(m.goalParts[1]) === 'רצף' && partTag(m.goalParts[2]) === 'קופה' && meterLabel(m) === 'יעד הקבוצה', `w12/${ch}: HUD tags / meter label`);
+    const X = m.worldIndicators.holding; const row = moneyHubModel(m).rows.find((r) => r.id === 'world');
+    ok(row && row.icon === '👑' && row.title === 'מפת הקבוצה והערבויות' && row.value.includes(`דירוג ${X.rating}`) && row.value.includes(`${X.divs} חטיבות`) && row.acts[0].act === 'world', `w12/${ch}/m${months}: 💼 row`, row);
+  }
+  for (const ch of ['agronomist', 'moshavFarmer', 'agriFund']) for (const months of [1, 9]) {
+    const st = play('w16', ch, months); const m = E.metrics(st); const M = goalPanelModel(m, { thresholds: E.starThresholds(E.getWorld('w16'), st.charId, m.rules) });
+    const p12 = M.parts.find((p) => p.key === 'passive12'), nd = M.parts.find((p) => p.key === 'noDefault:margin');
+    ok(m.goalType === 'all' && M.parts.length === 2 && p12 && p12.label === 'ממוצע 12 חודשים: הכנסת המשק' && p12.targetText === E.fmtM(5e6) && nd && nd.streak && nd.targetText === '12 חודשים', `w16/${ch}/m${months}: the farm income + the margin streak`, M.parts);
+    ok(M.rule.includes('הכנסת המשק') && M.rule.includes('בלי שהברוקר סגר גידור בכוח') && !/עלויות קבועות/.test(M.rule + M.gaps.join(' ')), `w16/${ch}/m${months}: the rule`, M.rule);
+    ok(nd.met || M.gaps.some((g) => g.includes('בלי שהברוקר סגר גידור בכוח — עוד')), `w16/${ch}/m${months}: the streak gap`, M.gaps);
+    const L = milestoneLadder(m); ok(L.filter((x) => /^passive12/.test(x.id)).every((x) => x.title.endsWith('בחודש מהמשק')) && L.some((x) => x.id === 'noDefault:margin' && x.title === '12 חודשים בלי סגירה בכוח של גידור'), `w16/${ch}/m${months}: the rungs`, L.map((x) => x.title));
+    ok(partTag(m.goalParts[0]) === 'הכנסה' && partTag(m.goalParts[1]) === 'רצף' && meterLabel(m) === 'הכנסה ורצף', `w16/${ch}: HUD tags / meter label`);
+    const row = moneyHubModel(m).rows.find((r) => r.id === 'world'); ok(row && row.icon === '🌾' && row.title === 'השדות והגידור' && row.value.startsWith(m.worldIndicators.harvest.regimeLabel), `w16/${ch}/m${months}: 💼 row`, row);
+  }
+}
 console.log(`hud_goal: ${n - fails}/${n} passed (${checks} mid-game checks, ${wins} won games, ${agree} star predictions = engine, ${debts} debt chips)`);
 process.exit(fails ? 1 : 0);

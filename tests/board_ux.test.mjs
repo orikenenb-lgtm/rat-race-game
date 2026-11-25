@@ -35,6 +35,8 @@ const PORT = await import('../js/worlds/mech/portfolio.js');
 const W13 = await E.ensureWorld('w13');   // w13: the lazy world (tile H, the sponsor / facility deck, league news)
 const AUC = await import('../js/worlds/mech/auction.js');
 const W11 = await E.ensureWorld('w11'), W15 = await E.ensureWorld('w15');   // w11 / w15: the lazy worlds (tiles Z / H, their decks)
+const W12 = await E.ensureWorld('w12'), W16 = await E.ensureWorld('w16');   // w12 / w16: the lazy worlds (tiles Z / H, their decks)
+const HDM = await import('../js/worlds/mech/holding.js'), HVM = await import('../js/worlds/adapters/harvest.js');
 const MNM = await import('../js/worlds/mech/multinational.js');
 
 /* T-opt */
@@ -53,7 +55,7 @@ ok(typeof b2d.onTilePick(() => {}) === 'function' && b2d.cityKeys().length === 0
 const W = (id) => E.getWorld(id);
 /* T-tiles */
 const types = new Set();
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w15', 'w16', 'h']) {
   let tiles; try { tiles = E.boardInfo(wid); } catch (e) { tiles = null; }
   ok(tiles && tiles.length === 40, `${wid}: 40 tiles`);
   for (const t of tiles || []) {
@@ -77,7 +79,7 @@ ok(T.landedText({ type: 'payday', name: 'יום משכורת' }) === 'נחתת �
 
 /* T-deck (MAJOR-2): words ↔ the world's own cards */
 const dealK = (c) => T.dealKind(c), mktK = (c) => T.marketKind(c);
-for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w13', 'w15', 'h']) {
+for (const wid of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w15', 'w16', 'h']) {
   const w = W(wid);
   for (const [type, deck, kindOf, WORDS] of [['deal', w.deals || [], dealK, { ...T.DEAL_WORDS, ...((T.DEAL_WORDS_W || {})[wid] || {}) }], ['market', w.market || [], mktK, { ...T.MARKET_WORDS, ...((T.MARKET_WORDS_W || {})[wid] || {}) }]]) {
     const tile = Object.values(w.tiles).find((t) => t.type === type); if (!tile) continue;
@@ -215,6 +217,26 @@ const uiKeys = new Set([...game.matchAll(/\bS\.ui\.(\w+)\s*(?:\?\?=|=(?!=))/g)].
   ok(['חנות האפליקציות', 'חודש ויראלי', 'פריצת מידע', 'הבועה', 'מהנדסת מפתח'].every((x) => tt(W15, 'market').includes(x)), 'w15 market tile: ' + tt(W15, 'market'));
   ok(/רגולטור/.test(tt(W11, 'crisis')) && /השרתים נופלים/.test(tt(W15, 'crisis')), 'w11 / w15 crisis tiles: their own wording');
   for (const W of [W11, W15]) ok(W.board.length === 40 && Object.values(W.tiles).every((t) => T.tileText(t, W).short.length <= T.SHORT_MAX), `${W.id}: 40 tiles, every short name ≤ 10`);
+}
+/* T-w12 / w16: tile Z (division, 👑 crown, #166534 / #fff) and tile H (produce, 📊 bars, #0284c7 / #fff): number-free until prepareWorldText
+   builds them from holding.js (HD.down, SLOTS) / adapters/harvest.js (HV.water); the deal / market / crisis tiles name what their decks do */
+{
+  const tZ = W12.tiles.Z, tH = W16.tiles.H;
+  ok(tZ && tZ.type === 'division' && tZ.icon === 'crown' && tZ.color === '#166534' && tZ.ink === '#ffffff' && [...W12.board].filter((c) => c === 'Z').length === 6, 'w12 tile Z: division (crown, deep green / white), 6 on the board');
+  ok(tH && tH.type === 'produce' && tH.icon === 'bars' && tH.color === '#0284c7' && [...W16.board].filter((c) => c === 'H').length === 6, 'w16 tile H: produce (bars, irrigation blue), 6 on the board');
+  ok(!/\d/.test(T.TILE_TEXT.division.desc) && !/\d/.test(T.TILE_TEXT.produce.desc), 'Z / H before prepareWorldText: number-free');
+  ok((await T.prepareWorldText(W12)).includes('division') && (await T.prepareWorldText(W16)).includes('produce'), 'prepareWorldText builds Z / H (the adapter is imported from adapters/)');
+  const z = T.tileText(tZ, W12), h = T.tileText(tH, W16);
+  ok(z.emoji === '👑' && z.short === 'חטיבה' && h.emoji === '📊' && h.short.length <= T.SHORT_MAX, `Z 👑 "${z.short}", H 📊 "${h.short}"`);
+  ok(z.desc.includes(`${Math.round(HDM.HD.down * 100)}%`) && z.desc.includes(`עד ${HDM.SLOTS} חטיבות`) && /בערבות המטה/.test(z.desc) && /מגודרת/.test(z.desc) && z.desc.includes('לוותר') && z.desc.length <= 180, 'w12 Z text = holding.js constants: ' + z.desc);
+  ok(h.desc.includes(`${Math.round(HVM.HV.water * 100)}%`) && /חוזה ייצוא/.test(h.desc) && /לסרב/.test(h.desc) && h.desc.length <= 200, 'w16 H text = harvest.js constants: ' + h.desc);
+  ok(HDM.holding.tiles.Z.safe === 'pass' && HVM.harvest.tiles.H.safe === 'decline', 'Z safe = pass, H safe = decline');
+  const tt = (W, type) => T.tileText(Object.values(W.tiles).find((t) => t.type === type), W).desc;
+  ok(/בנייני משרדים/.test(tt(W12, 'deal')) && /מרכזים לוגיסטיים/.test(tt(W12, 'deal')) && /סולאריים/.test(tt(W16, 'deal')) && /צימרים/.test(tt(W16, 'deal')), 'w12 / w16 deal tiles: ' + tt(W12, 'deal') + ' / ' + tt(W16, 'deal'));
+  ok(['מיתון רב־מדינתי', 'משבר אנרגיה', 'סוכנות הדירוג', 'בדיקת הגבלים', 'השווקים עולים'].every((x) => tt(W12, 'market').includes(x)) && !/עוד שדות סולאריים/.test(tt(W12, 'market')), 'w12 market tile = its own news (boom / energy in w12 words): ' + tt(W12, 'market'));
+  ok(['בצורת', 'איסור ייצוא', 'יבול שיא', 'הדולר מתחזק', 'מענק השקיה', 'מזיק'].every((x) => tt(W16, 'market').includes(x)), 'w16 market tile: ' + tt(W16, 'market'));
+  ok(/מאבק ירושה/.test(tt(W12, 'crisis')) && !/רגולטור שבודק את המנהלים/.test(tt(W12, 'crisis')) && /רגולטור/.test(tt(W11, 'crisis')) && /ברד/.test(tt(W16, 'crisis')), 'w12 / w16 crisis tiles: their own wording (w12 shares the name with w11)');
+  for (const W of [W12, W16]) ok(W.board.length === 40 && Object.values(W.tiles).every((t) => T.tileText(t, W).short.length <= T.SHORT_MAX), `${W.id}: 40 tiles, every short name ≤ 10`);
 }
 const KNOWN = ['seq', 'fundWarn', 'weddingAge', 'burnSeen', 'lifeSeen', 'inflReality', 'tl', 'hist', 'pensionHist', 'trackMonth', 'coach', 'firstPayday', 'endSent'];   // endSent (P0b, 6d05559): the win reached the lobby — it must survive a reload, so it IS save data
 for (const k of uiKeys) ok(KNOWN.includes(k), 'game.js writes S.ui.' + k + ' (display data must go to rr2-settings, not the save)');

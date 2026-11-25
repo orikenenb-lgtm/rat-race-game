@@ -376,5 +376,52 @@ ok(V.fixtureCount('?fx=levels') === 24 && V.fixtureCount('?a=1&fx=levels:12') ==
   const html2 = WV.pfPanelHtml(H, { ...P, actions: [{ id: 'spend', param: 'search:1', label: 'a', enabled: true }, { id: 'spend', param: 'search:3', label: 'b', enabled: false }] }, X, () => '');
   ok(!html2.includes('הפרסום מוקפא'), 'w15: no freeze line when only the team cap blocks a level');
 }
+/* w12 / w16 — identity (board ΔE ≥ 10 from every world), character colours, model emoji + stand-ins (no .glb: w12's tower / hotel / warehouse
+   and w16's business reuse existing stand-ins in their folder, w16's warehouse is the farm), the 'div' / 'farm' level kinds, the cityModels
+   fields game.js reads, still decor (the HQ tower + cables, the silos) */
+{
+  const lab = (hex) => { const n = parseInt(hex.slice(1), 16); const f = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4); const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((x) => f(x / 255));
+    const h = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116); const X = h((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = h(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = h((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const s1216 = readFileSync(resolve(ROOT, 'js/render/standins1216.js'), 'utf8'); const s3d = readFileSync(resolve(ROOT, 'js/render/standins3d.js'), 'utf8');
+  const sAll = s3d + readFileSync(resolve(ROOT, 'js/render/standins910.js'), 'utf8') + readFileSync(resolve(ROOT, 'js/render/standins1115.js'), 'utf8') + s1216;
+  const SPEC = { w12: { sky: ['#f5f5f4', '#a8a29e'], board: '#cce2d4', edge: '#78350f', accent: '#166534', ink: ['#14532d', '#86efac'], decor: 'tower', motif: 'crown', chars: 'chair,activist,thirdGen' },
+    w16: { sky: ['#fde68a', '#fdba74'], board: '#c9c46b', edge: '#713f12', accent: '#0284c7', ink: ['#075985', '#7dd3fc'], decor: 'silos', motif: 'fields', chars: 'agronomist,moshavFarmer,agriFund' } };
+  const OWN = { w12: ['tower', 'hotel', 'warehouse'], w16: ['warehouse', 'business'] };
+  for (const [wid, X] of Object.entries(SPEC)) {
+    const w = await E.ensureWorld(wid); const st = V.WORLD_STYLE[wid];
+    ok(st && st.sky.join() === X.sky.join() && st.board === X.board && st.edge === X.edge && st.accent === X.accent && st.accentInk.join() === X.ink.join() && st.decor === X.decor && st.motif === X.motif && st.caption, `WORLD_STYLE.${wid} = the identity sheet`);
+    for (const id of Object.keys(V.WORLD_STYLE)) if (id !== wid) ok(dE(st.board, V.WORLD_STYLE[id].board) >= 10, `${wid} board ΔE ≥ 10 from ${id} (${dE(st.board, V.WORLD_STYLE[id].board).toFixed(1)})`);
+    const cs = w.characters.map((c) => c.id);
+    ok(cs.join() === X.chars && cs.every((c) => V.CHAR_STYLE[c]) && new Set(cs.map((c) => V.CHAR_STYLE[c])).size === 3, `CHAR_STYLE: ${X.chars}, distinct`);
+    for (const m of new Set(Object.values(w.models).filter(Boolean))) {
+      ok(V.cityEmoji(m, wid) !== '🏠', `2D emoji ${wid}/${m} (${V.cityEmoji(m, wid)})`);
+      ok(OWN[wid].includes(m) ? new RegExp(`${wid}: Object\\.freeze\\(\\{[^\\n]*\\b${m}: `).test(s3d + s1216) : new RegExp(`\\b${m}[:(,]`).test(sAll) || new RegExp(`${m}: [a-zA-Z]+`).test(sAll), `stand-in for ${wid}/${m} (no .glb is ever requested)`);
+    }
+  }
+  ok(/w16: Object\.freeze\(\{ warehouse: farm16 \}\)/.test(s1216) && /\.\.\.W1216_DIR/.test(s3d) && !/w3: Object\.freeze\(\{ warehouse/.test(s3d), 'w16 builds its farm (DIR_BUILD); w3 keeps warehouse.glb, w2 tower.glb / hotel.glb');
+  ok(!/\.glb['"`]/.test(s1216) && !/import\(|fetch\(|Loader/.test(s1216) && !/requestAnimationFrame|updaters/.test(s1216), 'standins1216 requests no file and nothing steps');
+  { const g = E.createGame({ worldId: 'w12', charId: 'chair', seed: 7, mode: 'free' }); const cm = E.cityModels(g).filter((m) => m.struct != null);
+    ok(cm.length === 6 && cm.every((c) => V.DIV_KIND_HE[c.kind2] && /^w\d+$/.test(c.home) && ['g', 'r'].includes(c.struct) && c.cable === (c.struct === 'g') && c.fence === (c.struct === 'r') && Number.isFinite(c.health) && typeof c.distress === 'boolean' && typeof c.stormHit === 'boolean'), 'w12 cityModels: 6 divisions with kind2 / home / struct / cable / fence / health / distress / stormHit', cm);
+    ok(cm.filter((c) => c.cable).length === 3 && cm.find((c) => c.kind2 === 'ind').health <= 40, 'w12 chair: 3 guaranteed, the weak foundry'); }
+  { const g = E.createGame({ worldId: 'w16', charId: 'moshavFarmer', seed: 7, mode: 'free' }); const f = E.cityModels(g).find((m) => Array.isArray(m.fields));
+    ok(f && f.model === 'warehouse' && f.fields.length === 6 && f.fields.filter(Boolean).length === 3 && f.fields.filter(Boolean).every((x) => V.CROP_HE[x.crop] && V.PHASE_HE[x.ph] && Number.isFinite(x.hedged)) && Number.isFinite(f.silo) && V.FIELD_REGIME_HE[f.regime], 'w16 cityModels: the farm (6 slots, 3 fields, silo, regime)', f); }
+  const Dv = V.normLevel({ kind: 'div', kind2: 'ind', home: 'w6', struct: 'g', health: 39.4, distress: true, support: false, stormHit: true });
+  ok(Dv.kind === 'div' && Dv.n === 1 && Dv.cable && !Dv.fence && Dv.trouble && JSON.stringify(V.normLevel(Dv)) === JSON.stringify(Dv), 'div level: normalised, idempotent');
+  ok(V.levelText(Dv) === 'תעשייה · בערבות המטה (כבל) · בריאות 39 · ⚠️ בגירעון · בלי תמיכת המטה · 🌩️ בסערה' && V.pipsText(Dv) === '●○○', `div text "${V.levelText(Dv)}" / pips "${V.pipsText(Dv)}"`);
+  const kd = V.kitParts(Dv); ok(kd.cable && !kd.fenced && kd.distress && kd.stormHit && kd.support === false && !kd.sign && !kd.scaffold, 'div level: model parts only');
+  ok(V.levelText(V.normLevel({ kind: 'div', kind2: 'tour', struct: 'r', health: 85 })).includes('מגודרת (גדר)') && V.pipsText(V.normLevel({ kind: 'div', struct: 'r', health: 85 })) === '●●●', 'ring-fenced = a fence, health ≥ 80 = ●●●');
+  const Fm = V.normLevel({ kind: 'farm', fields: [{ crop: 'cotton', ph: 'idle', hedged: 0, irr: 0 }, { crop: 'wheat', ph: 'grow', hedged: 0.504, irr: 1 }, { crop: 'avo', ph: 'young', hedged: 0, irr: 0 }], silo: 6720.4, regime: 'drought' });
+  ok(Fm.kind === 'farm' && Fm.fields.length === 6 && Fm.n === 1 && Fm.of === 3 && Fm.fields[1].hedged === 0.5 && Fm.silo === 6720 && JSON.stringify(V.normLevel(Fm)) === JSON.stringify(Fm), 'farm level: normalised, idempotent');
+  ok(V.levelText(Fm) === '3 שדות · 1 בגידול · 1 מגודרים · בצורת · 6,720 טון בממגורה' && V.pipsText(Fm) === '▯▮▴', `farm text "${V.levelText(Fm)}" / pips "${V.pipsText(Fm)}"`);
+  ok(V.kitParts(Fm).fields[1].irr && V.kitParts(Fm).silo === 6720 && V.kitParts(Fm).regime === 'drought', 'farm level: model parts (fields, silo, regime)');
+  ok(V.cityEmoji('warehouse', 'w16') === '🌾' && V.cityEmoji('warehouse', 'w3') === '📦' && V.cityEmoji('hotel', 'w12') === '👑', 'the 2D emoji of a shared model key per world');
+  const scn = readFileSync(resolve(ROOT, 'js/scene.js'), 'utf8');
+  const tw = scn.slice(scn.indexOf('function decorTower('), scn.indexOf('let hqDecor')), sl = scn.slice(scn.indexOf('function decorSilos('), scn.indexOf('let siloDecor'));
+  ok(/tower: decorTower/.test(scn) && /silos: decorSilos/.test(scn) && tw && sl && !/updaters\.add/.test(tw + sl), 'the HQ tower / silos decor add no updater (still, also under reduced motion)');
+  ok(/function syncCables/.test(scn) && /kind === 'div'\) \{ paintDiv\(it\.obj, it\.level\); syncCables\(\)/.test(scn) && /kind === 'farm'\) \{ paintFarm/.test(scn), 'scene: div → paintDiv + the cables; farm → paintFarm');
+  ok(/case 'crown':/.test(scn) && /w12: 'האימפריה שלך'/.test(scn) && /w16: 'המשק שלך'/.test(scn), "scene: tile icon 'crown', the captions");
+}
 console.log(`${n - fails} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
