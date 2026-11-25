@@ -182,6 +182,8 @@ export const LESSON_META = {
   // w19 (js/worlds/w19.js lessonDefs; the bell adapter's ctx.lesson calls, since f6698ee)
   guidance_cred: { teaser: 'מה קורה למניה כשמבטיחים 100 ומרוויחים 95?', hint: 'בפעמון הבורסה: כשרבעון מפספס את ההדרכה, או בשאלת אבא עשיר על הבטחת רווח.' },
   buyback: { teaser: 'מתי כדאי לחברה לקנות את המניות של עצמה?', hint: 'בפעמון הבורסה: בקנייה עצמית, ברכישה משלימה, או בשאלת אבא עשיר על מניה בשיא.' },
+  other_money: { teaser: 'הלקוחות נכנסים אחרי שנה טובה — ויוצאים בדיוק בתחתית.', hint: 'ברחוב הקרנות: כשלקוחות מושכים כסף, או בשאלת אבא עשיר על משיכות.' },
+  short_squeeze: { teaser: 'מניה יכולה לרדת רק עד אפס — אבל לעלות בלי תקרה.', hint: 'ברחוב הקרנות: בסחיטת שורט, או בשאלת אבא עשיר על מכירה בחסר.' },
 };
 
 /* wave 3a (docs/full-upgrade/research/J1-journey-learning.md §2.4, brief §16): lesson titles / texts that taught an absolute rule.
