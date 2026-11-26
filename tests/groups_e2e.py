@@ -73,9 +73,10 @@ async def run_map(b):
         check(sc, 'the maps of each world in the exact order', [s['ids'] for s in S] == [['w1', 'w2', 'w3', 'w4'], ['w5', 'w6', 'w7', 'w8', 'w9'], ['w10', 'w15', 'w13', 'w16'],
               ['w11', 'w17', 'w14', 'w12'], ['w18', 'w19', 'w20', 'w21'], ['w22', 'w23', 'w24', 'w25']], [s['ids'] for s in S])
         check(sc, 'the cards follow P.worldMap() (one order of the game)', [c['id'] for c in cards] == [m['id'] for m in wm], [c['id'] for c in cards])
-        check(sc, 'counts: world 1 4/4 done, world 2 0/5 — the 1 of 2 is open (w5 after w4), world 3 locked "נפתח אחרי מדבר האנרגיה", world 6 "בקרוב"',
+        g6built = any(m['playable'] for m in wm if m['g'] == 'g6')   # since 552e780 (w22 registered) world 6 has a built map: locked after w21, no longer "בקרוב"
+        check(sc, 'counts: world 1 4/4 done, world 2 0/5 — the 1 of 2 is open (w5 after w4), world 3 locked "נפתח אחרי מדבר האנרגיה", world 6 "בקרוב" (or, once it has a built map, locked after the map before it)',
               '4/4' in S[0]['count'] and 'is-done' in S[0]['cls'] and '0/5' in S[1]['count'] and 'is-open' in S[1]['cls'] and 'is-locked' in S[2]['cls'] and 'מדבר האנרגיה' in S[2]['st']
-              and 'is-soon' in S[5]['cls'] and 'בקרוב' in S[5]['st'], [(s['g'], s['cls'], s['count'], s['st']) for s in S])
+              and (('is-locked' in S[5]['cls'] and 'נפתח אחרי' in S[5]['st']) if g6built else ('is-soon' in S[5]['cls'] and 'בקרוב' in S[5]['st'])), [(s['g'], s['cls'], s['count'], s['st']) for s in S])
         un = [c['id'] for c in cards if not c['locked'] and not c['soon']]
         check(sc, 'linear unlock on a new-design save: w1–w5 open, every later built map locked', un == ['w1', 'w2', 'w3', 'w4', 'w5'], un)
         soon = [x for s in S for x in s['soon']]; pm = [m['id'] for m in wm if not m['playable']]
