@@ -124,7 +124,7 @@ create trigger energy_gifts_mod_log after insert on game.energy_gifts for each r
 /** The word lists (folded by game.chat_fold at run time). chat_rules.js LISTS must equal this JSON (tests/chat_rules.test.mjs). */
 create or replace function game.chat_lists() returns jsonb language sql immutable set search_path = '' as $$ select
 -- CHAT_LISTS_BEGIN
-'{"exact":["ass","dick","cock","fag","sex","sexy","kys","stfu","wtf","idiot","stupid","moron","loser","dumb","porn","nude","nudes","זין","זיין","חרא","תמות","טיפש","טיפשה","סתום","סתומה","מניאק","מניאקית","כוסית","זונות"],"part":["fuck","fuk","fck","shit","bitch","cunt","asshole","bastard","slut","whore","nigger","nigga","faggot","retard","dickhead","motherf","pussy","wank","porno","שרמוט","זונה","כוסאמ","כוסעמ","כוסאחת","מזדיינ","לזיינ","זיינת","מטומטמ","דביל","מפגר","אידיוט","תתאבד","בנזונה","חתיכתחרא"],"phrase":["kill yourself","kill urself","go die","shut up","לך תמות","תלך תמות","סתום את הפה","סתום תפה","בן זונה","כוס אמא","כוס אמק","כוס אמך","יא חרא","יא זבל","יא מפגר"],"platform":["instagram","insta","snapchat","snap","tiktok","tik tok","telegram","whatsapp","whats app","discord","facebook","אינסטגרם","אינסטה","סנאפצט","סנאפ","סנפצט","טיקטוק","טלגרם","וואטסאפ","ווטסאפ","וואצאפ","ווצאפ","ווטצאפ","דיסקורד","פייסבוק"]}'::jsonb
+'{"exact":["dick","cock","fag","sex","sexy","kys","stfu","wtf","idiot","stupid","moron","loser","dumb","porn","nude","nudes","זין","זיין","חרא","תמות","טיפש","טיפשה","סתום","סתומה","מניאק","מניאקית","כוסית","זונות"],"part":["fuck","fuk","fck","shit","bitch","cunt","asshole","bastard","slut","whore","nigger","nigga","faggot","retard","dickhead","motherf","pussy","wank","porno","שרמוט","זונה","כוסאמ","כוסעמ","כוסאחת","מזדיינ","לזיינ","זיינת","מטומטמ","דביל","מפגר","אידיוט","תתאבד","בנזונה","חתיכתחרא"],"phrase":["kill yourself","kill urself","go die","shut up","לך תמות","תלך תמות","סתום את הפה","סתום תפה","בן זונה","כוס אמא","כוס אמק","כוס אמך","יא חרא","יא זבל","יא מפגר"],"platform":["instagram","insta","snapchat","snap","tiktok","tik tok","telegram","whatsapp","whats app","discord","facebook","אינסטגרם","אינסטה","סנאפצט","סנאפ","סנפצט","טיקטוק","טלגרם","וואטסאפ","ווטסאפ","וואצאפ","ווצאפ","ווטצאפ","דיסקורד","פייסבוק"]}'::jsonb
 -- CHAT_LISTS_END
 $$;
 
@@ -135,11 +135,13 @@ create or replace function game.chat_norm(p text) returns text language sql immu
       '[­֑-ׇ​-‏‪-‮⁠-⁩﻿]', '', 'g'), '[\u0001-\u001F\u007F]', ' ', 'g'),
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', 'abcdefghijklmnopqrstuvwxyz01234567890123456789') $$;
 
-/** Word view of a normalized text: leet digits → letters, Hebrew final letters → regular, letters only (one space between words),
+/** Word view of a normalized text: leet digits → letters (only inside a word that has a letter: 45, 455, 4.5 stay numbers), Hebrew final letters → regular, letters only (one space between words),
  *  repeated letters collapsed ("fuuuck" → "fuck", "זיין" → "זין"). */
 create or replace function game.chat_fold(p text) returns text language sql immutable set search_path = '' as $$
-  select btrim(regexp_replace(regexp_replace(translate(p, '0134578@$!|ךםןףץ', 'oieastbasiiכמנפצ'), '[^a-zא-ת]+', ' ', 'g'),
-    '([a-zא-ת])\1+', '\1', 'g')) $$;
+  select btrim(regexp_replace(regexp_replace(
+    (select string_agg(case when tok ~ '[a-zא-ת]' then translate(tok, '0134578@$!|ךםןףץ', 'oieastbasiiכמנפצ') else tok end, ' ' order by i)
+       from unnest(regexp_split_to_array(p, '\s+')) with ordinality as u(tok, i)),
+    '[^a-zא-ת]+', ' ', 'g'), '([a-zא-ת])\1+', '\1', 'g')) $$;
 
 /** → null (ok) or the refusal code: chat_empty · chat_too_long · chat_email · chat_link · chat_phone · chat_handle · chat_bad_word. */
 create or replace function game.chat_check(p_text text) returns text language plpgsql immutable set search_path = '' as $$
@@ -160,7 +162,7 @@ begin
   if t ~ '@\s*[^\s]' then return 'chat_handle'; end if;
   w := game.chat_fold(t);
   if exists (select 1 from jsonb_array_elements_text(L->'platform') p where position(' ' || game.chat_fold(game.chat_norm(p)) || ' ' in ' ' || w || ' ') > 0
-             or (char_length(game.chat_fold(game.chat_norm(p))) >= 5 and position(game.chat_fold(game.chat_norm(p)) in replace(w, ' ', '')) > 0))
+             or (char_length(game.chat_fold(game.chat_norm(p))) >= 6 and position(game.chat_fold(game.chat_norm(p)) in replace(w, ' ', '')) > 0))
     then return 'chat_handle'; end if;
   if exists (select 1 from jsonb_array_elements_text(L->'phrase') p where position(' ' || game.chat_fold(game.chat_norm(p)) || ' ' in ' ' || w || ' ') > 0)
     then return 'chat_bad_word'; end if;
@@ -305,7 +307,7 @@ begin
   perform game.auth(p_id, p_secret);
   if game.is_banned(p_id) then raise exception 'banned'; end if;
   v_r := game.chat_member(p_room, p_id);
-  if not (v_r.status in ('lobby', 'playing') or (v_r.status in ('finished', 'cancelled') and v_r.finished_at > now() - interval '30 minutes')) then raise exception 'chat_closed'; end if;
+  if not (v_r.status in ('lobby', 'playing') or (v_r.status in ('finished', 'cancelled') and v_r.end_reason is distinct from 'admin' and v_r.finished_at > now() - interval '30 minutes')) then raise exception 'chat_closed'; end if;
   if (select count(*) from game.room_chat where player_id = p_id and created_at > now() - interval '10 seconds')
      + (select count(*) from game.chat_blocked where player_id = p_id and at > now() - interval '10 seconds') >= 5
   or (select count(*) from game.room_chat where player_id = p_id and created_at > now() - interval '1 hour')
@@ -353,7 +355,7 @@ end $$;
 /** ban (or change a ban): reason 2–200 chars, p_days 1–3650 or null = permanent. Removes the player from every open room. */
 create or replace function public.rr_admin_ban(p_id uuid, p_secret text, p_target uuid, p_reason text, p_days int default null) returns json
 language plpgsql security definer set search_path = '' as $$
-declare v_reason text := btrim(coalesce(p_reason, '')); v_until timestamptz; v_rooms int := 0; v_room uuid;
+declare v_reason text := btrim(coalesce(p_reason, '')); v_until timestamptz; v_rooms int := 0; v_room uuid; v_groups int := 0; v_grp uuid;
 begin
   perform game.need_admin(p_id, p_secret);
   if p_target = p_id then raise exception 'cannot_ban_self'; end if;
@@ -367,8 +369,12 @@ begin
   for v_room in select s.room_id from game.room_seats s join game.rooms r on r.id = s.room_id where s.player_id = p_target and r.status in ('lobby', 'playing') loop
     if game.admin_seat_out(v_room, p_target, 'ban') <> 'none' then v_rooms := v_rooms + 1; end if;
   end loop;
-  perform game.mod(p_id, 'ban', p_target, null, null, null, jsonb_build_object('reason', v_reason, 'days', p_days, 'rooms', v_rooms));
-  return json_build_object('banned', true, 'until', game.ms(v_until), 'rooms', v_rooms);
+  -- out of every group too: a banned member could otherwise still post challenge titles / a new nickname / events to his groups
+  for v_grp in select m.group_id from game.group_members m where m.player_id = p_target order by m.group_id loop
+    perform game.admin_group_out(p_id, v_grp, p_target, 'ban'); v_groups := v_groups + 1;
+  end loop;
+  perform game.mod(p_id, 'ban', p_target, null, null, null, jsonb_build_object('reason', v_reason, 'days', p_days, 'rooms', v_rooms, 'groups', v_groups));
+  return json_build_object('banned', true, 'until', game.ms(v_until), 'rooms', v_rooms, 'groups', v_groups);
 end $$;
 
 create or replace function public.rr_admin_unban(p_id uuid, p_secret text, p_target uuid) returns json
@@ -473,17 +479,17 @@ end $$;
 
 /** removes a member from a group (the owner too: the oldest member becomes owner, the last one deletes the group). With the groups v2
  *  draft applied, its own path runs (game.group_drop, a ban until the code rotates, the group log). → {removed, group_deleted} */
-create or replace function public.rr_admin_remove_from_group(p_id uuid, p_secret text, p_group uuid, p_target uuid) returns json
+/** takes p_target out of p_group the way the live rr_leave_group / groups v2 does (owner moves to the oldest member; the last one → the
+ *  group is deleted; groups v2 also keeps him out until the code rotates) → true when the group is gone. Caller checks admin + membership. */
+create or replace function game.admin_group_out(p_admin uuid, p_group uuid, p_target uuid, p_why text) returns boolean
 language plpgsql security definer set search_path = '' as $$
-declare v_g game.groups; v_next uuid; v_gone boolean;
+declare v_g game.groups; v_next uuid;
 begin
-  perform game.need_admin(p_id, p_secret);
   select * into v_g from game.groups where id = p_group for update;
-  if not found then raise exception 'group_not_found'; end if;
-  if not exists (select 1 from game.group_members where group_id = p_group and player_id = p_target) then raise exception 'member_not_found'; end if;
+  if not found then return false; end if;
   if to_regprocedure('game.group_drop(uuid,uuid)') is not null then                        -- groups v2
     execute 'insert into game.group_bans (group_id, player_id, code) values ($1, $2, $3) on conflict (group_id, player_id) do update set code = excluded.code, created_at = now()' using p_group, p_target, v_g.code;
-    execute 'insert into game.group_log (group_id, kind, actor, target, data) values ($1, ''removed'', $2, $3, ''{"by":"admin"}''::jsonb)' using p_group, p_id, p_target;
+    execute 'insert into game.group_log (group_id, kind, actor, target, data) values ($1, ''removed'', $2, $3, jsonb_build_object(''by'', $4))' using p_group, p_admin, p_target, p_why;
     execute 'select game.group_drop($1, $2)' using p_group, p_target;
   else                                                                                       -- = the live rr_leave_group
     delete from game.group_members where group_id = p_group and player_id = p_target;
@@ -492,7 +498,18 @@ begin
       if v_next is null then delete from game.groups where id = p_group; else update game.groups set owner_id = v_next where id = p_group; end if;
     end if;
   end if;
-  v_gone := not exists (select 1 from game.groups where id = p_group);
+  return not exists (select 1 from game.groups where id = p_group);
+end $$;
+
+create or replace function public.rr_admin_remove_from_group(p_id uuid, p_secret text, p_group uuid, p_target uuid) returns json
+language plpgsql security definer set search_path = '' as $$
+declare v_g game.groups; v_gone boolean;
+begin
+  perform game.need_admin(p_id, p_secret);
+  select * into v_g from game.groups where id = p_group for update;
+  if not found then raise exception 'group_not_found'; end if;
+  if not exists (select 1 from game.group_members where group_id = p_group and player_id = p_target) then raise exception 'member_not_found'; end if;
+  v_gone := game.admin_group_out(p_id, p_group, p_target, 'admin');
   perform game.mod(p_id, 'remove_group', p_target, null, p_group, null, jsonb_build_object('name', v_g.name, 'group_deleted', v_gone));
   return json_build_object('removed', true, 'group_deleted', v_gone);
 end $$;
@@ -544,7 +561,8 @@ end $$;
 -- ------------------------------------------------------------------ grants: only the public RPCs for the API roles
 revoke all on function game.is_banned(uuid), game.need_admin(uuid, text), game.mod(uuid, text, uuid, uuid, uuid, bigint, jsonb), game.mod_log_guard(),
   game.ban_guard(), game.mod_log_claim(), game.mod_log_give(), game.chat_lists(), game.chat_norm(text), game.chat_fold(text), game.chat_check(text),
-  game.chat_sweep(), game.chat_member(uuid, uuid), game.chat_refuse(uuid, uuid, text), game.admin_seat_out(uuid, uuid, text) from public;
+  game.chat_sweep(), game.chat_member(uuid, uuid), game.chat_refuse(uuid, uuid, text), game.admin_seat_out(uuid, uuid, text),
+  game.admin_group_out(uuid, uuid, uuid, text) from public;
 revoke all on function public.rr_ban_status(uuid, text), public.rr_room_chat_send(uuid, text, uuid, text), public.rr_room_chat_list(uuid, text, uuid, bigint),
   public.rr_room_chat_report(uuid, text, bigint), public.rr_admin_ban(uuid, text, uuid, text, int), public.rr_admin_unban(uuid, text, uuid),
   public.rr_admin_bans(uuid, text), public.rr_admin_player(uuid, text, uuid), public.rr_admin_rooms(uuid, text), public.rr_admin_room_chat(uuid, text, uuid),
@@ -571,7 +589,7 @@ commit;
 --   public.rr_admin_room_chat(uuid, text, uuid), public.rr_admin_rooms(uuid, text), public.rr_admin_player(uuid, text, uuid), public.rr_admin_bans(uuid, text),
 --   public.rr_admin_unban(uuid, text, uuid), public.rr_admin_ban(uuid, text, uuid, text, int), public.rr_room_chat_report(uuid, text, bigint),
 --   public.rr_room_chat_list(uuid, text, uuid, bigint), public.rr_room_chat_send(uuid, text, uuid, text), public.rr_ban_status(uuid, text),
---   game.admin_seat_out(uuid, uuid, text), game.chat_refuse(uuid, uuid, text), game.chat_member(uuid, uuid), game.chat_sweep(), game.chat_check(text),
+--   game.admin_group_out(uuid, uuid, uuid, text), game.admin_seat_out(uuid, uuid, text), game.chat_refuse(uuid, uuid, text), game.chat_member(uuid, uuid), game.chat_sweep(), game.chat_check(text),
 --   game.chat_fold(text), game.chat_norm(text), game.chat_lists(), game.mod_log_give(), game.mod_log_claim(), game.ban_guard(), game.mod(uuid, text, uuid, uuid, uuid, bigint, jsonb),
 --   game.need_admin(uuid, text);
 -- drop table if exists game.chat_blocked, game.chat_reports, game.room_chat, game.mod_log, game.bans;

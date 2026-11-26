@@ -64,7 +64,7 @@ function chatOp(q, now) {
     case 'chat_send': {
       if (q.banned) return err(400, 'banned');
       const [room, e] = chatMember(a.room, p.id); if (e) return e;
-      if (!(room.status === 'lobby' || room.status === 'playing' || (['finished', 'cancelled'].includes(room.status) && now - (room.finished_at || 0) < CR.CHAT.afterEndMs))) return err(409, 'chat_closed');
+      if (!(room.status === 'lobby' || room.status === 'playing' || (['finished', 'cancelled'].includes(room.status) && room.end_reason !== 'admin' && now - (room.finished_at || 0) < CR.CHAT.afterEndMs))) return err(409, 'chat_closed');
       const n = (ms) => chat.filter((m) => m.player_id === p.id && now - m.at < ms).length + blocked.filter((b) => b.player_id === p.id && now - b.at < ms).length;
       if (n(CR.CHAT.burstMs) >= CR.CHAT.burst || n(CR.CHAT.hourMs) >= CR.CHAT.hourly) return err(429, 'rate_limited');
       chatSweep(now);

@@ -13,7 +13,7 @@ export const QUICK = Object.freeze(['בהצלחה!', 'מהלך יפה 👏', 'ר
 export const REFUSALS = Object.freeze(['chat_empty', 'chat_too_long', 'chat_email', 'chat_link', 'chat_phone', 'chat_handle', 'chat_bad_word']);
 
 export const LISTS = Object.freeze({
-  exact: ['ass', 'dick', 'cock', 'fag', 'sex', 'sexy', 'kys', 'stfu', 'wtf', 'idiot', 'stupid', 'moron', 'loser', 'dumb', 'porn', 'nude', 'nudes',
+  exact: ['dick', 'cock', 'fag', 'sex', 'sexy', 'kys', 'stfu', 'wtf', 'idiot', 'stupid', 'moron', 'loser', 'dumb', 'porn', 'nude', 'nudes',
     'זין', 'זיין', 'חרא', 'תמות', 'טיפש', 'טיפשה', 'סתום', 'סתומה', 'מניאק', 'מניאקית', 'כוסית', 'זונות'],
   part: ['fuck', 'fuk', 'fck', 'shit', 'bitch', 'cunt', 'asshole', 'bastard', 'slut', 'whore', 'nigger', 'nigga', 'faggot', 'retard', 'dickhead', 'motherf',
     'pussy', 'wank', 'porno', 'שרמוט', 'זונה', 'כוסאמ', 'כוסעמ', 'כוסאחת', 'מזדיינ', 'לזיינ', 'זיינת', 'מטומטמ', 'דביל', 'מפגר', 'אידיוט', 'תתאבד',
@@ -24,6 +24,7 @@ export const LISTS = Object.freeze({
     'סנאפצט', 'סנאפ', 'סנפצט', 'טיקטוק', 'טלגרם', 'וואטסאפ', 'ווטסאפ', 'וואצאפ', 'ווצאפ', 'ווטצאפ', 'דיסקורד', 'פייסבוק'],
 });
 
+const S = '[ \\t\\n\\r\\f\\v\\u1680\\u2000-\\u200a\\u2028\\u2029\\u205f\\u3000\\u0085]';
 const tr = (s, from, to) => { const a = [...from], b = [...to]; const m = new Map(a.map((c, i) => [c, b[i]])); return [...s].map((c) => (m.has(c) ? m.get(c) : c)).join(''); };
 const UP = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹';
 const LO = 'abcdefghijklmnopqrstuvwxyz01234567890123456789';
@@ -33,13 +34,14 @@ export function norm(p) {
 }
 /** = game.chat_fold */
 export function fold(p) {
-  return tr(p, '0134578@$!|ךםןףץ', 'oieastbasiiכמנפצ').replace(/[^a-zא-ת]+/g, ' ').replace(/([a-zא-ת])\1+/g, '$1').trim();
+  // leet only inside a word that has a letter (45, 455, 4.5 stay numbers); words split on the whitespace PostgreSQL's \s also sees
+  const w = String(p).split(new RegExp(`${S}+`)).map((tok) => (/[a-zא-ת]/.test(tok) ? tr(tok, '0134578@$!|ךםןףץ', 'oieastbasiiכמנפצ') : tok)).join(' ');
+  return w.replace(/[^a-zא-ת]+/g, ' ').replace(/([a-zא-ת])\1+/g, '$1').trim();
 }
 const F = (x) => fold(norm(x));
 let folded = null;
 const lists = () => (folded ||= { exact: LISTS.exact.map(F), part: LISTS.part.map(F), phrase: LISTS.phrase.map(F), platform: LISTS.platform.map(F) });
 // PostgreSQL ARE `\s` = [[:space:]]; JS `\s` is wider (U+FEFF, U+2028 …). Use the ASCII + NFKC-surviving whitespace both agree on.
-const S = '[ \\t\\n\\r\\f\\v\\u1680\\u2000-\\u200a\\u2028\\u2029\\u205f\\u3000\\u0085]';
 const RE = {
   email: /[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+/,
   scheme: /(https?:|www\.|:\/\/)/,
@@ -61,7 +63,7 @@ export function check(text) {
   { const d = t.replace(RE.sep, ''); if (/\+[0-9]{8,}/.test(d) || /(^|[^0-9])(0|972)[0-9]{8,}/.test(d)) return 'chat_phone'; }
   if (RE.handle.test(t)) return 'chat_handle';
   const w = fold(t); const L = lists(); const sp = ` ${w} `; const squash = w.replace(/ /g, '');
-  if (L.platform.some((p) => sp.includes(` ${p} `) || ([...p].length >= 5 && squash.includes(p)))) return 'chat_handle';
+  if (L.platform.some((p) => sp.includes(` ${p} `) || ([...p].length >= 6 && squash.includes(p)))) return 'chat_handle';
   if (L.phrase.some((p) => sp.includes(` ${p} `))) return 'chat_bad_word';
   const toks = w === '' ? [] : w.split(' ');
   let run = '';

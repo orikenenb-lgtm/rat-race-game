@@ -881,8 +881,11 @@ class FakeBackend:
         if days is not None and (not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 3650): self._err('bad_days')
         self.ban(t, reason, days, by=p['id'])
         n = self._side_ok('ban_sweep', p, {'target': t})['rooms']
-        self._mod(p['id'], 'ban', t, data={'reason': reason, 'days': days, 'rooms': n})
-        return {'banned': True, 'until': self._ms(self.bans[t]['until']), 'rooms': n}
+        ng = 0
+        for g in sorted([g for g in self.G.values() if t in g['members']], key=lambda g: g['id']):   # = SQL: out of every group too
+            g.setdefault('bans', {})[t] = g['code']; self._glog(g, 'removed', p['id'], t, {'by': 'ban'}); self._drop_member(g, t); ng += 1
+        self._mod(p['id'], 'ban', t, data={'reason': reason, 'days': days, 'rooms': n, 'groups': ng})
+        return {'banned': True, 'until': self._ms(self.bans[t]['until']), 'rooms': n, 'groups': ng}
     def _rr_admin_unban(self, b):
         p = self._admin(b); t = b.get('p_target')
         if t not in self.bans: self._err('not_banned')

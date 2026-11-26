@@ -110,7 +110,7 @@ const diff = (a, b) => {
   for (const k of b.keys()) if (!a.has(k)) added.push(k);
   return { changed, added, removed };
 };
-const NEW_OBJ = /^(rel|col|con|idx|fn|pol|trg) (game\.(bans|mod_log|room_chat|chat_reports|chat_blocked)(_\w+)?([:.]|$)|game\.(is_banned|need_admin|mod|mod_log_guard|ban_guard|mod_log_claim|mod_log_give|chat_\w+|admin_seat_out)\(|public\.(rr_ban_status|rr_room_chat_\w+|rr_admin_(ban|unban|bans|player|rooms|room_chat|kick_room|close_room|remove_from_group|delete_chat|reports|mod_log))\(|game\.(room_seats|group_members|admins|energy_gifts):(room_seats_ban_guard|group_members_ban_guard|admins_mod_log|energy_gifts_mod_log)$)/;
+const NEW_OBJ = /^(rel|col|con|idx|fn|pol|trg) (game\.(bans|mod_log|room_chat|chat_reports|chat_blocked)(_\w+)?([:.]|$)|game\.(is_banned|need_admin|mod|mod_log_guard|ban_guard|mod_log_claim|mod_log_give|chat_\w+|admin_seat_out|admin_group_out)\(|public\.(rr_ban_status|rr_room_chat_\w+|rr_admin_(ban|unban|bans|player|rooms|room_chat|kick_room|close_room|remove_from_group|delete_chat|reports|mod_log))\(|game\.(room_seats|group_members|admins|energy_gifts):(room_seats_ban_guard|group_members_ban_guard|admins_mod_log|energy_gifts_mod_log)$)/;
 const REPLACED = ['fn game.board(p_challenge uuid, p_weekly text, p_me uuid, p_daily text)', 'fn game.room_purge(p_days integer)'];
 
 const db = await stack();
@@ -138,9 +138,9 @@ const PUB = ['rr_ban_status', 'rr_room_chat_send', 'rr_room_chat_list', 'rr_room
 await test(`EXECUTE: the ${PUB.length} public RPCs for anon/authenticated; every new game.* helper for nobody but the owner; writers VOLATILE`, async () => {
   const fns = await rows(db, `select n.nspname as s, p.proname as f, p.provolatile::text as v, has_function_privilege('anon', p.oid, 'execute') as anon,
       has_function_privilege('authenticated', p.oid, 'execute') as auth, pg_get_functiondef(p.oid) as d from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where (n.nspname = 'public' and p.proname = any($1)) or (n.nspname = 'game' and p.proname in ('is_banned','need_admin','mod','mod_log_guard','ban_guard','mod_log_claim','mod_log_give','chat_lists','chat_norm','chat_fold','chat_check','chat_sweep','chat_member','chat_refuse','admin_seat_out'))`, [PUB]);
+      where (n.nspname = 'public' and p.proname = any($1)) or (n.nspname = 'game' and p.proname in ('is_banned','need_admin','mod','mod_log_guard','ban_guard','mod_log_claim','mod_log_give','chat_lists','chat_norm','chat_fold','chat_check','chat_sweep','chat_member','chat_refuse','admin_seat_out','admin_group_out'))`, [PUB]);
   const pub = fns.filter((x) => x.s === 'public'); assert.equal(pub.length, PUB.length); assert.ok(pub.every((x) => x.anon && x.auth));
-  const help = fns.filter((x) => x.s === 'game'); assert.equal(help.length, 15); assert.ok(help.every((x) => !x.anon && !x.auth), 'a helper is executable by the API roles');
+  const help = fns.filter((x) => x.s === 'game'); assert.equal(help.length, 16); assert.ok(help.every((x) => !x.anon && !x.auth), 'a helper is executable by the API roles');
   const writes = (d) => /\b(insert into|update game\.|delete from)\b/i.test(d) || /game\.(mod|admin_seat_out|chat_refuse|chat_sweep|room_event|room_touch)\(/.test(d);
   for (const f of pub) if (writes(f.d)) assert.equal(f.v, 'v', `${f.f} writes but is not VOLATILE`);
   assert.deepEqual(pub.filter((f) => !writes(f.d)).map((f) => f.f).sort(), ['rr_admin_bans', 'rr_admin_mod_log', 'rr_admin_player', 'rr_admin_reports', 'rr_admin_room_chat', 'rr_admin_rooms', 'rr_ban_status', 'rr_room_chat_list'].sort());
@@ -421,7 +421,7 @@ await test('remove from group (baseline): a member; the owner → the oldest mem
   assert.equal((await call('rr_admin_remove_from_group', { ...au(ADM), p_group: g.id, p_target: B.id })).code, 'group_not_found');
 });
 await test('remove from group (groups v2 applied before the draft): its own path — ban until the code rotates, the group log, owner role moves', async () => {
-  const { d, call, ADM, A, B, C } = await world(['supabase/migrations/20261124_groups_v2.sql', 'supabase/migrations/20261124_competitions.sql']);
+  const { d, call, ADM, A, B, C, D } = await world(['supabase/migrations/20261124_groups_v2.sql', 'supabase/migrations/20261124_competitions.sql']);
   const g = (await rows(d, `select id, code from game.groups limit 1`))[0];
   await call('rr_join_group', { ...au(B), p_code: g.code }); await call('rr_join_group', { ...au(C), p_code: g.code });
   assert.ok((await call('rr_admin_remove_from_group', { ...au(ADM), p_group: g.id, p_target: C.id })).ok);
@@ -430,12 +430,15 @@ await test('remove from group (groups v2 applied before the draft): its own path
   const roles = await rows(d, `select player_id, role from game.group_members where group_id = $1`, [g.id]);
   assert.deepEqual(roles.map((x) => [x.player_id, x.role]), [[B.id, 'owner']]);
   assert.ok((await rows(d, `select count(*)::int as n from game.group_log where kind = 'removed'`))[0].n >= 2);
-  await call('rr_admin_ban', { ...au(ADM), p_target: B.id, p_reason: 'טסט', p_days: 1 });
-  const code2 = (await call('rr_group_rotate_code', { ...au(B), p_group: g.id })).body;
-  assert.ok(code2, 'a banned owner can still manage his existing group (no new members though)');
+  await call('rr_join_group', { ...au(D), p_code: g.code });
+  const ban = await call('rr_admin_ban', { ...au(ADM), p_target: B.id, p_reason: 'טסט', p_days: 1 });
+  assert.equal(ban.body.groups, 1, 'a ban takes the player out of every group he is in');
+  assert.deepEqual((await rows(d, `select player_id, role from game.group_members where group_id = $1`, [g.id])).map((x) => [x.player_id, x.role]), [[D.id, 'owner']], 'the banned owner is out; the oldest member owns');
+  assert.ok((await call('rr_group_rotate_code', { ...au(B), p_group: g.id })).code, 'a banned ex-owner cannot manage the group');
   const newCode = (await rows(d, `select code from game.groups where id = $1`, [g.id]))[0].code;
-  assert.equal((await call('rr_join_group', { ...au(B), p_code: newCode })).ok, true, 'already a member: no insert, no ban error');
+  assert.ok(['banned', 'group_not_found'].includes((await call('rr_join_group', { ...au(B), p_code: newCode })).code), 'and cannot come back (v2 group ban by code, and the ban)');
   assert.equal((await call('rr_create_group', { ...au(B), p_name: 'עוד קבוצה' })).code, 'banned');
+  assert.ok((await rows(d, `select count(*)::int as n from game.group_log where kind = 'removed' and data->>'by' = 'ban'`))[0].n >= 1, 'the group log says why');
 });
 
 /* ------------------------------------------------------------------ rollback */

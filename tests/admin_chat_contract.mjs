@@ -147,12 +147,12 @@ check('after unban: chat again', (await A.send(R0.room_id, 'חזרתי 🙂')).o
 /* ------------------------------------------------ chat: members only, the whole case table, rate limits */
 r = await E.send(R0.room_id, 'אני זר'); check('chat: a stranger → not_in_room', r.code === 'not_in_room', r);
 r = await E.rpc('rr_room_chat_list', { p_room: R0.room_id, p_since: null }); check('chat list: a stranger → not_in_room', r.code === 'not_in_room', r);
-const RC = await mkRoom(C, D);
+const RC = await mkRoom(C, D, E);
 const wrong = []; let sent = 0, refused = 0;
-for (let i = 0; i < CASES.length; i++) {                  // C and D take turns: 4 rows per player per 10 s window, < 60 per hour each
+for (let i = 0; i < CASES.length; i++) {                  // C, E and D take turns: ≤ 3 rows per player per 10 s window, < 60 per hour each (D writes more below)
   if (i && i % 8 === 0) await pass10s();
   const [text, want] = CASES[i];
-  const x = await (i % 2 ? D : C).send(RC.room_id, text);
+  const x = await [C, E, D][i % 3].send(RC.room_id, text);
   const got = x.ok ? null : x.code; if (x.ok) sent++; else refused++;
   if (got !== want) wrong.push([text.slice(0, 30), want, got, x.status]);
 }
@@ -221,7 +221,7 @@ r = await ADM.rpc('rr_admin_close_room', { p_room: RG.room_id }); check('admin c
 const cl = (await P1.state(RG.room_id)).body.room; check('…end_reason admin, nobody ranked', cl.status === 'cancelled' && cl.end_reason === 'admin' && !cl.results, cl);
 r = await P1.act(RG.room_id, 'r', [], (await P1.state(RG.room_id)).body.me.state_version); check('…no more intents (409 room_not_playing)', r.status === 409 && r.body.error === 'room_not_playing', r);
 r = await ADM.rpc('rr_admin_close_room', { p_room: RG.room_id }); check('closing it again → room_not_open', r.code === 'room_not_open', r);
-r = await P2.send(RG.room_id, 'משחק טוב 🤝'); check('chat stays open for 30 min after the end ("משחק טוב")', r.ok, r);
+r = await P2.send(RG.room_id, 'משחק טוב 🤝'); check('…an admin close also closes the chat (no 30-minute "משחק טוב" window)', r.code === 'chat_closed', r);
 
 /* ------------------------------------------------ groups + mod log */
 await D.rpc('rr_join_group', { p_code: G0.code });

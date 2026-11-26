@@ -255,17 +255,22 @@ select proname, has_function_privilege('anon', oid, 'execute') from pg_proc wher
 select relname, relrowsecurity from pg_class where relnamespace = 'game'::regnamespace and relname like 'room%';                          -- all true
 ```
 
-**3b. Moderation + chat (a SEPARATE release, owner approval; after rooms are live and stable).**
-- Pre-check:
+**3b. Moderation + chat (owner approval). Applied right after step 3, in the same window, BEFORE the site of step 5 (that site has the chat).**
+- Pre-check (abort if any answer differs):
 ```sql
 select to_regclass('game.rooms') is not null as rooms_live, to_regclass('game.bans') is null as fresh;   -- both true
 select count(*) from game.admins;                                                                       -- 1 (the owner)
+select md5(pg_get_functiondef('game.board(uuid,text,uuid,text)'::regprocedure));                        -- 196121a405cc7edf900e7ffd1ad72ca7
 ```
+  The md5 is the live `game.board` read on 2026-11-26 (byte-compared with the migration's body: identical + the ban filter; the live text is
+  kept in the owner's backup). A different md5 means production changed since: stop, the migration and its ROLLBACK would overwrite it.
 - Apply: paste `supabase/migrations/20261126_admin_mod_chat.sql` (one transaction). Then run:
 ```sql
 notify pgrst, 'reload schema';
 select proname, has_function_privilege('anon', oid, 'execute') from pg_proc where proname like 'rr_admin_%' or proname like 'rr_room_chat_%' or proname = 'rr_ban_status';   -- 20 rows (4 live rr_admin_* + 16 new), all true
 select tgname from pg_trigger where tgname in ('room_seats_ban_guard','group_members_ban_guard','admins_mod_log','energy_gifts_mod_log','mod_log_no_change','mod_log_no_truncate');   -- 6 rows
+select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'game' and has_function_privilege('anon', p.oid, 'execute')
+  and p.proname in ('is_banned','need_admin','mod','chat_check','chat_refuse','chat_member','admin_seat_out','admin_group_out');   -- 0
 ```
 - The client (`js/net.js`, `js/rooms.js`, `js/roomchat.js`, `js/admin.js`) ships with the site. Without the migration, the chat cannot send ("משהו השתבש בשרת"), its list stays empty, and the new admin tabs show the error (the old ⚡ tools keep working). So apply the migration **before** deploying a site that has the chat, in the same window.
 - Smoke (owner): open a room with a second device, chat, send a phone number (it must be refused), report a message, then in the profile panel hide it, kick, and unban a test player.

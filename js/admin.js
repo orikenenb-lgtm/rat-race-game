@@ -66,7 +66,7 @@ export async function openPlayer(id, prefill = '') {
       <input id="pfBanR" name="reason" maxlength="200" required minlength="2" value="${esc(prefill)}" placeholder="למשל: שיתף מספר טלפון בצ'אט">
       <label for="pfBanD">לכמה זמן</label><select id="pfBanD" name="days">${DURATIONS.map(([d, t]) => `<option value="${d}" ${d === 7 ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <button class="primary" ${two('השעיה')}>⛔ להשעות</button><p class="err" aria-live="polite"></p>
-      <p class="lb-note">מושעה לא יכול לפתוח או להיכנס לחדרים, לכתוב בצ'אט, להצטרף לקבוצות או להופיע בטבלאות. הוא יוצא מכל חדר פתוח. אפשר לבטל בכל רגע.</p></form>`}
+      <p class="lb-note">מושעה לא יכול לפתוח או להיכנס לחדרים, לכתוב בצ'אט, להצטרף לקבוצות או להופיע בטבלאות. הוא יוצא מכל חדר פתוח ומכל קבוצה. אפשר לבטל בכל רגע (לקבוצות חוזרים עם קוד).</p></form>`}
     <h4>קבוצות</h4>${p.groups.length ? `<ul class="pf-mod-rows">${p.groups.map((g) => `<li><span><b>${esc(g.name)}</b><small>${+g.members} חברים${g.owner ? ' · הבעלים' : ''}</small></span>
         <button type="button" class="chip lb-leave" data-aact="ungroup" data-g="${esc(g.id)}" data-id="${esc(p.id)}" ${two(`להסיר מ־${g.name}`)}>להסיר מהקבוצה</button></li>`).join('')}</ul>` : '<p class="lb-empty">לא בשום קבוצה.</p>'}
     <h4>חדרים פתוחים</h4>${p.rooms.length ? `<ul class="pf-mod-rows">${p.rooms.map((r) => `<li><span><b dir="ltr">${esc(r.code)}</b><small>${esc(ST[r.status] || r.status)} · ${esc(ST[r.seat_status] || r.seat_status)}</small></span>

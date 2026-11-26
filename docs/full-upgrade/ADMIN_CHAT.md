@@ -23,6 +23,7 @@
     - לא יכול להצטרף לקבוצות או לפתוח קבוצה.
     - לא מופיע בטבלאות (יומי, שבועי, אתגרים).
     - יוצא מכל חדר פתוח.
+    - יוצא מכל קבוצה שהוא חבר בה. אם הוא הבעלים, הבעלות עוברת לחבר הוותיק ביותר. אחרי ביטול ההשעיה הוא חוזר לקבוצה רק עם קוד.
   - הוא רואה הודעה ברורה: "החשבון שלך מושעה… אפשר להמשיך לשחק לבד".
   - אפשר לבטל השעיה בכל רגע, בכרטיס של השחקן או בלשונית "⛔ השעיות".
   - אי אפשר להשעות את עצמך.
@@ -124,10 +125,10 @@ Every RPC takes `p_id, p_secret` first. Errors are raised codes (PostgREST 400 `
 | RPC | who | returns · errors |
 |---|---|---|
 | `rr_ban_status()` | anyone | `{banned, until ms\|null, permanent}` |
-| `rr_room_chat_send(p_room, p_text)` | room members | `{id, at}` · `banned` · `room_not_found` · `not_in_room` (also admin-kicked) · `chat_closed` (> 30 min after the end) · `rate_limited` (5 / 10 s, 60 / h, refusals count) · refusals `chat_empty` `chat_too_long` `chat_email` `chat_link` `chat_phone` `chat_handle` `chat_bad_word` |
+| `rr_room_chat_send(p_room, p_text)` | room members | `{id, at}` · `banned` · `room_not_found` · `not_in_room` (also admin-kicked) · `chat_closed` (> 30 min after the end; at once after an admin close) · `rate_limited` (5 / 10 s, 60 / h, refusals count) · refusals `chat_empty` `chat_too_long` `chat_email` `chat_link` `chat_phone` `chat_handle` `chat_bad_word` |
 | `rr_room_chat_list(p_room, p_since)` | room members | `{msgs[≤ 40, id > since]{id, seat, nickname, text, at, me}, hidden[ids among the last 100], last}` |
 | `rr_room_chat_report(p_msg)` | room members, not own | `{reported}` (idempotent) · `msg_not_found` `cannot_report_self` `rate_limited` (20 / h) |
-| `rr_admin_ban(p_target, p_reason, p_days)` | admin | `{banned, until, rooms}` (sweeps open rooms) · `not_admin` `cannot_ban_self` `player_not_found` `bad_reason` `bad_days` |
+| `rr_admin_ban(p_target, p_reason, p_days)` | admin | `{banned, until, rooms, groups}` (sweeps open rooms and takes him out of every group, via `game.admin_group_out`) · `not_admin` `cannot_ban_self` `player_not_found` `bad_reason` `bad_days` |
 | `rr_admin_unban(p_target)` | admin | `{banned:false}` · `not_banned` |
 | `rr_admin_bans()` | admin | active bans `[{player_id, nickname, reason, until, at, by}]` |
 | `rr_admin_player(p_target)` | admin | `{id, nickname, stars, joined, admin, ban, groups[], rooms[], blocked_24h, reported_24h}` |

@@ -7,7 +7,8 @@ export const CASES = [
   ['קניתי דירה ב-1,500,000 ₪', null], ['יש לי 300 ש"ח פסיבי', null], ['חודש 24 סבב 3', null], ['good luck everyone', null],
   ['כוס מים', null], ['הזין את הנתונים', null], ['אחראי על הכסף', null], ['מזונות', null], ['class pass', null], ['Sussex', null],
   ['שלום לכולם', null], ['GG', null], ['ok.', null], ['נקודה טובה', null], ['😂😂😂', null], ['2+2=4', null], ['i am 13', null],
-  ['snapshot', null], ['hello, world', null], ['מה קורה?', null], ['שלוש נקודות... ', null], ['5 6 7', null], ['1500000', null], ['יש לי 1 500 000 בבנק', null], ['1.500.000 ₪', null], ['הגעתי ל 3000000000!', null], ['25000000 שווי', null], ['תודה! ממש כיף', null],
+  ['snapshot', null], ['hello, world', null], ['מה קורה?', null], ['שלוש נקודות... ', null], ['5 6 7', null], ['1500000', null], ['יש לי 1 500 000 בבנק', null], ['1.500.000 ₪', null], ['הגעתי ל 3000000000!', null], ['25000000 שווי', null], ['45', null], ['יש לי 45 חודשים', null], ['חודש 45', null], ['₪45', null], ['4.5', null], ['הכנסה 45,000', null],
+  ['נשאר לי 1,455', null], ['as good as gold', null], ['instant', null], ['install the game', null], ['a55hole', 'chat_bad_word'], ['5h1t', 'chat_bad_word'], ['תודה! ממש כיף', null],
   // empty / long
   ['', 'chat_empty'], ['   ', 'chat_empty'], ['​​', 'chat_empty'], ['א'.repeat(121), 'chat_too_long'], ['א'.repeat(120), null],
   // links / domains
