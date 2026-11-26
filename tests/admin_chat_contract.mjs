@@ -226,8 +226,15 @@ r = await P2.send(RG.room_id, 'משחק טוב 🤝'); check('chat stays open fo
 /* ------------------------------------------------ groups + mod log */
 await D.rpc('rr_join_group', { p_code: G0.code });
 r = await ADM.rpc('rr_admin_remove_from_group', { p_group: G0.id, p_target: D.id }); check('admin removes a member from a group', r.ok && r.body.removed === true && r.body.group_deleted === false, r);
-r = await D.rpc('rr_join_group', { p_code: G0.code }); check('…who cannot rejoin with the same code (groups v2: until the code rotates)', r.code === 'group_not_found', r);
-r = await ADM.rpc('rr_admin_remove_from_group', { p_group: G0.id, p_target: D.id }); check('removing him again → member_not_found', r.code === 'member_not_found', r);
+// groups v2 (a separate, later release) is detected by its rr_group_rotate_code: with it a removed member cannot rejoin with the same
+// code; on the live baseline he can (only a ban stops him), and removing him again works.
+const v2 = (await ADM.rpc('rr_group_rotate_code', { p_group: '00000000-0000-0000-0000-000000000000' })).status !== 404;
+r = await D.rpc('rr_join_group', { p_code: G0.code });
+if (v2) check('…who cannot rejoin with the same code (groups v2: until the code rotates)', r.code === 'group_not_found', r);
+else check('…baseline (no groups v2): the same code still lets him back in — a ban is what keeps him out', r.ok, r);
+r = await ADM.rpc('rr_admin_remove_from_group', { p_group: G0.id, p_target: D.id });
+if (v2) check('removing him again → member_not_found', r.code === 'member_not_found', r);
+else check('baseline: removing him again → removed', r.ok && r.body.removed === true, r);
 const log = (await ADM.rpc('rr_admin_mod_log', { p_before: null })).body;
 const acts = (log?.log || []).map((x) => x.action);
 check('mod log: every admin action, newest first', ['remove_group', 'close_room', 'kick_room', 'hide_chat', 'unban', 'ban', 'claim'].every((a) => acts.includes(a)) && acts[0] === 'remove_group', acts);
