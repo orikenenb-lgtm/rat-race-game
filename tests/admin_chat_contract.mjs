@@ -181,7 +181,7 @@ r = await C.rpc('rr_room_chat_report', { p_msg: bad }); check('a second report o
 const rep = (await ADM.rpc('rr_admin_reports')).body;
 const row = rep?.reports?.find((x) => x.msg_id === bad);
 check('admin reports: the message, its sender, room code, 1 report', row && row.text === 'אתה משחק גרוע' && row.sender === B.name && row.room_code === R0.code && row.reports === 1, rep);
-check('admin reports: refusal summary (who tried links / phones …, never the text)', rep?.blocked?.some((x) => x.player_id === C.id && x.n >= 1 && x.reasons.includes('chat_phone')) && !JSON.stringify(rep.blocked).includes('054'), rep?.blocked);
+check('admin reports: refusal summary (who tried links / phones …, never the text)', rep?.blocked?.some((x) => x.player_id === C.id && x.n >= 1 && x.reasons.includes('chat_phone')) && !JSON.stringify(rep.blocked.map(({ player_id, ...x }) => x)).includes('054'), rep?.blocked);
 r = await ADM.rpc('rr_admin_delete_chat', { p_msg: bad }); check('admin hides the message → {hidden: true}', r.ok && r.body.hidden === true, r);
 const after = (await C.rpc('rr_room_chat_list', { p_room: R0.room_id, p_since: null })).body;
 check('players: the hidden message is gone, its id is in `hidden`', !after.msgs.some((m) => m.id === bad) && after.hidden.includes(bad), after);
