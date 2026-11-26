@@ -44,7 +44,7 @@ const RE = {
   email: /[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+/,
   scheme: /(https?:|www\.|:\/\/)/,
   domain: new RegExp(`[a-z0-9-]${S}*(\\.|\\(dot\\)|\\[dot\\]|${S}dot${S})${S}*(com|net|org|il|co|io|me|gg|ly|app|xyz|info|biz|tv|ru|us|uk|de|fr|link|site|online|club|top|to|cc|be|ws|live|gl|ai|so|sh)([^a-z0-9]|$)`),
-  sep: new RegExp(`(${S}|[().\\-_/+*#])`, 'g'),
+  sep: new RegExp(`(${S}|[().\\-_/*#])`, 'g'),
   handle: new RegExp(`@${S}*[^ \\t\\n\\r\\f\\v]`),
 };
 /** = game.chat_check → null (ok) or the refusal code. */
@@ -56,7 +56,9 @@ export function check(text) {
   if (btrim(t) === '') return 'chat_empty';
   if (RE.email.test(t)) return 'chat_email';
   if (RE.scheme.test(t) || RE.domain.test(t)) return 'chat_link';
-  if (/[0-9]{7,}/.test(t.replace(RE.sep, ''))) return 'chat_phone';
+  // a phone number, not an amount: Israeli 0… (9+ digits, also 00… abroad), 972… (11+), or + and 8+ digits; separators between the digits
+  // do not help. Plain amounts (1500000, 1 500 000, 3000000000) pass.
+  { const d = t.replace(RE.sep, ''); if (/\+[0-9]{8,}/.test(d) || /(^|[^0-9])(0|972)[0-9]{8,}/.test(d)) return 'chat_phone'; }
   if (RE.handle.test(t)) return 'chat_handle';
   const w = fold(t); const L = lists(); const sp = ` ${w} `; const squash = w.replace(/ /g, '');
   if (L.platform.some((p) => sp.includes(` ${p} `) || ([...p].length >= 5 && squash.includes(p)))) return 'chat_handle';

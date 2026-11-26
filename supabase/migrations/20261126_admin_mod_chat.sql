@@ -15,7 +15,7 @@
 --     player from every open room (lobby: the seat is freed; playing: forfeit, like leaving — the game goes on with the others).
 --   * In-room chat: game.room_chat (≤ 120 chars, members of the same room only, hidden by the admin), game.chat_reports ("דווח"),
 --     game.chat_blocked (refused messages: who / when / why — never the text). Server filter game.chat_check: links / domains, phone
---     numbers (7+ digits), e-mails, @handles + social-app names, a Hebrew + English word list; rate limit 5 / 10 s and 60 / hour per
+--     numbers (0… 9+ digits, 972… 11+, + and 8+; amounts pass), e-mails, @handles + social-app names, a Hebrew + English word list; rate limit 5 / 10 s and 60 / hour per
 --     player (sent + refused). History: 7 days (game.chat_sweep on every send + game.room_purge). Chat never touches the engine.
 -- REPLACED existing functions (same signature, same result for everyone who is not banned):
 --   * game.board(uuid, text, uuid, text) — LIVE: the baseline body + one filter "the player has no active ban".
@@ -154,8 +154,9 @@ begin
   if t ~ '[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+' then return 'chat_email'; end if;
   if t ~ '(https?:|www\.|://)' or t ~ '[a-z0-9-]\s*(\.|\(dot\)|\[dot\]|\sdot\s)\s*(com|net|org|il|co|io|me|gg|ly|app|xyz|info|biz|tv|ru|us|uk|de|fr|link|site|online|club|top|to|cc|be|ws|live|gl|ai|so|sh)([^a-z0-9]|$)'
     then return 'chat_link'; end if;
-  d := regexp_replace(t, '[\s().\-_/+*#]', '', 'g');
-  if d ~ '[0-9]{7,}' then return 'chat_phone'; end if;
+  -- a phone number, not an amount: 0… (9+ digits), 972… (11+), or + and 8+ digits; plain amounts (1500000, 3000000000) pass
+  d := regexp_replace(t, '[\s().\-_/*#]', '', 'g');
+  if d ~ '\+[0-9]{8,}' or d ~ '(^|[^0-9])(0|972)[0-9]{8,}' then return 'chat_phone'; end if;
   if t ~ '@\s*[^\s]' then return 'chat_handle'; end if;
   w := game.chat_fold(t);
   if exists (select 1 from jsonb_array_elements_text(L->'platform') p where position(' ' || game.chat_fold(game.chat_norm(p)) || ' ' in ' ' || w || ' ') > 0

@@ -7,7 +7,7 @@ export const CASES = [
   ['קניתי דירה ב-1,500,000 ₪', null], ['יש לי 300 ש"ח פסיבי', null], ['חודש 24 סבב 3', null], ['good luck everyone', null],
   ['כוס מים', null], ['הזין את הנתונים', null], ['אחראי על הכסף', null], ['מזונות', null], ['class pass', null], ['Sussex', null],
   ['שלום לכולם', null], ['GG', null], ['ok.', null], ['נקודה טובה', null], ['😂😂😂', null], ['2+2=4', null], ['i am 13', null],
-  ['snapshot', null], ['hello, world', null], ['מה קורה?', null], ['שלוש נקודות... ', null], ['5 6 7', null], ['תודה! ממש כיף', null],
+  ['snapshot', null], ['hello, world', null], ['מה קורה?', null], ['שלוש נקודות... ', null], ['5 6 7', null], ['1500000', null], ['יש לי 1 500 000 בבנק', null], ['1.500.000 ₪', null], ['הגעתי ל 3000000000!', null], ['25000000 שווי', null], ['תודה! ממש כיף', null],
   // empty / long
   ['', 'chat_empty'], ['   ', 'chat_empty'], ['​​', 'chat_empty'], ['א'.repeat(121), 'chat_too_long'], ['א'.repeat(120), null],
   // links / domains
@@ -16,6 +16,7 @@ export const CASES = [
   ['bit.ly/x', 'chat_link'], ['example dot com', 'chat_link'],
   // phone numbers
   ['054-1234567', 'chat_phone'], ['0541234567', 'chat_phone'], ['+972 54 123 4567', 'chat_phone'], ['05 4 1 2 3 4 5 6 7', 'chat_phone'],
+  ['03-1234567', 'chat_phone'], ['031234567', 'chat_phone'], ['972541234567', 'chat_phone'], ['00972541234567', 'chat_phone'], ['+1 555 123 4567', 'chat_phone'],
   ['(054) 123.45.67', 'chat_phone'], ['תתקשר ל ٠٥٤١٢٣٤٥٦٧', 'chat_phone'], ['תתקשר אליי 0541234567 בערב', 'chat_phone'], ['０５４１２３４５６７', 'chat_phone'],
   // e-mail, handles, social apps
   ['kid@mail.com', 'chat_email'], ['KID.A+B@Mail.Co.IL', 'chat_email'], ['@dani_12', 'chat_handle'], ['תוסיף אותי @ dani', 'chat_handle'],

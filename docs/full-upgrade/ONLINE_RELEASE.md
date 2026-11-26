@@ -315,7 +315,7 @@ select count(*) from game.rooms where status = 'playing' and last_activity < now
 5. The retention policy: when to run `game.room_purge(N)` (step 9).
 6. Optional: a hosted staging project (step 1).
 7. Applying `20261126_admin_mod_chat.sql` to production (step 3b). It adds triggers on 4 live tables (`room_seats`, `group_members`, `admins`, `energy_gifts`) and **replaces the live `game.board`** with the same body + a "no active ban" filter (same JSON for everyone not banned, proved against the original body).
-8. The chat content policy: the word list (`game.chat_lists`), blocking social-app names, "7+ digits = a phone number" (also blocks `1500000` written without commas), 120 chars, 5 / 10 s + 60 / h.
+8. The chat content policy: the word list (`game.chat_lists`), blocking social-app names, phone numbers = 0… with 9+ digits, 972… with 11+, or + and 8+ digits (plain amounts like `1500000` or `3000000000` pass), 120 chars, 5 / 10 s + 60 / h.
 9. Data retention: chat and reported messages are deleted after 7 days (also before the owner looked at a report); refused messages keep no text; the mod log is kept forever (append-only).
 10. Known gap to decide before the competitions release: `game.board2` (competitions draft) does not filter banned players yet — add the same `not exists (active ban)` filter there when competitions ship.
 
