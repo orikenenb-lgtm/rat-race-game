@@ -4,24 +4,20 @@
 // cost); every exported function catches its own errors. Styles live in css/stability.css (#board2d / .b2d-*).
 import { boardInfo } from '../engine.js';
 import { reducedMotion } from '../motion.js'; // T5: the in-app motion setting wins over the OS (CR-R1)
-import { MOTION, labelColor, worldStyle, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
+import { MOTION, labelColor, worldStyle, WORLD_STYLE, cityEmoji, normLevel, pipsText, cardName, activityOf, ACTIVITY_EMOJI, ARCHETYPE_EMOJI, kindLabelOf, fixtureCity, fixtureCount } from './vocab.js';
 import { bus } from '../bus.js';
+import { tileText, tileEmoji } from './tiles.js';
 
 export const kind = '2d';
 
 const TOKEN = { classic: '♟', car: '🚕', tophat: '🎩', rocket: '🚀', crown: '👑', diamond: '💎' };
-const TILE_ICON = [
-  [/^coin$/, '💰'], [/^trend$/, '📈'], [/^bag$/, '👜'], [/^bars$/, '📊'], [/^question$/, '❓'], [/^bank$/, '🏦'], [/^hammer$/, '🔨'],
-  [/^dollar$/, '💵'], [/^ship$/, '🚢'], [/^rocket$/, '🚀'], [/^heart$/, '❤️'], [/^(life|family)$/, '🏠'], [/^(edu|school|cap|study)$/, '🎓'],
-  [/^(tax|receipt)$/, '🧾'], [/^piggy$/, '🐷'], [/^(index|fund|pension|chart)$/, '📊'], [/^(shop|store|business)$/, '🏪'],
-  [/^(news|newspaper)$/, '📰'], [/^x$/, '✖️'],
-];
 const HISTORY_COLORS = { board: '#daceb8', boardEdge: '#5b4127', center: '#e6d6b0' };
 
 let root = null, boardEl = null, gridEl = null, cityEl = null, capEl = null, pawnEl = null, fxEl = null;
 let n = 40, side = 10, pos = 0, speed = 1, paused = false, camMode = 'follow', rect = null, gridN = 4;
 const city = new Map(); // key -> {el, model, label, kind, level}
-const pickCbs = new Set();
+const pickCbs = new Set(), tileCbs = new Set();
+const marks = { current: null, dest: null }; let focusTile = 0, emptyEl = null;
 let curWorld = null, motionOverride = null, quality = 'high', turnMs = 0, hlKey = null;
 const timers = new Set();
 const anims = new Set();
@@ -52,7 +48,7 @@ function gridXY(i) {
 }
 function tileCenter(i) { const c = cellPx(); const [gx, gz] = gridXY(i); return { x: (gx + 0.5) * c, y: (gz + 0.5) * c }; }
 const pawnXf = (p, lift = 0, sx = 1, sy = 1) => `translate(${p.x}px, ${p.y - lift}px) translate(-50%, -62%) scale(${sx}, ${sy})`;
-function tileIcon(icon) { const s = String(icon || ''); for (const [re, e] of TILE_ICON) if (re.test(s)) return e; return '⭐'; }
+const tileIcon = tileEmoji;
 const cityIcon = cityEmoji;
 
 /* ============================================================ setup */
@@ -74,9 +70,9 @@ export function dispose() {
   try {
     for (const t of timers) clearTimeout(t); timers.clear();
     for (const a of anims) { try { a.cancel(); } catch (e) { /* ignore */ } } anims.clear();
-    city.clear(); pickCbs.clear();
+    city.clear(); pickCbs.clear(); tileCbs.clear(); marks.current = marks.dest = null;
     if (root) { root.innerHTML = ''; root.hidden = true; }
-    root = boardEl = gridEl = cityEl = capEl = pawnEl = fxEl = null;
+    root = boardEl = gridEl = cityEl = capEl = pawnEl = fxEl = emptyEl = null;
   } catch (e) { warn(e); }
 }
 export function onContextLost() {}
@@ -117,7 +113,9 @@ export function buildWorld(w) {
     let tiles = [];
     try { tiles = [...boardInfo(w.id)]; } catch (e) { tiles = (w && w.board ? [...w.board] : []).map((ch, i) => ({ index: i, name: '', color: '#ddd', ink: '#222', icon: '' })); }
     n = tiles.length || 40; side = Math.max(1, Math.round(n / 4));
-    const T = hist ? HISTORY_COLORS : ((w && w.theme) || {});
+    // worlds wave 2: later worlds (w5 …) take their board look from WORLD_STYLE like the 3D scene (the engine theme is legacy data there)
+    const late = !hist && w && !/^w[1-4]$/.test(w.id) && WORLD_STYLE[w.id];
+    const T = hist ? HISTORY_COLORS : late ? { board: late.board, boardEdge: late.edge, center: late.center } : ((w && w.theme) || {});
     boardEl.style.setProperty('--b2d-board', T.board || '#f6efe2');
     boardEl.style.setProperty('--b2d-edge', T.boardEdge || '#6b4430');
     boardEl.style.setProperty('--b2d-center', T.center || '#efe3cb');
@@ -128,20 +126,34 @@ export function buildWorld(w) {
     boardEl.style.setProperty('--b2d-accent', ws.accent); boardEl.style.setProperty('--b2d-rim', ws.rim);
     gridEl.innerHTML = '';
     gridEl.style.gridTemplateColumns = gridEl.style.gridTemplateRows = `repeat(${side + 1}, 1fr)`;
+    // wave 1 (B1 G5 / A2 G-05): every tile is a button (one tab stop, arrows move along the ring) with a short name that fits
+    // (no "…") — tap / Enter opens the tile sheet with the full name and what happens there
+    gridEl.setAttribute('role', 'group'); gridEl.setAttribute('aria-label', 'משבצות הלוח — חצים כדי לעבור בין המשבצות, Enter לפרטים');
+    marks.current = marks.dest = null; focusTile = 0;
     for (const t of tiles) {
-      const i = t.index ?? t.i ?? 0; const [gx, gz] = gridXY(i);
-      const d = el('div', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl);
+      const i = t.index ?? t.i ?? 0; const [gx, gz] = gridXY(i); const tx = tileText(t);
+      const d = el('button', 'b2d-tile' + (t.type === 'payday' ? ' b2d-corner' : ''), gridEl); d.type = 'button';
       d.style.gridColumn = String(gx + 1); d.style.gridRow = String(gz + 1);
       d.style.background = t.color || '#ddd'; d.style.color = t.ink || '#222';
-      d.dataset.i = String(i); d.title = t.name || ''; hidden(d);
+      d.dataset.i = String(i); d.dataset.type = t.type || ''; d.tabIndex = i === 0 ? 0 : -1;
+      d.dataset.label = `${tx.name}, משבצת ${i + 1} מתוך ${tiles.length}`; d.setAttribute('aria-label', d.dataset.label);
       hidden(el('span', 'b2d-ti', d, tileIcon(t.icon)));
-      const nm = el('span', 'b2d-tn', d, t.name || ''); nm.dir = 'rtl';
+      const nm = hidden(el('span', 'b2d-tn', d, tx.short)); nm.dir = 'rtl';
+      nm.style.setProperty('--len', String(Math.max(3, ...tx.short.split(/\s+/).map((x) => x.length))));
+      d.addEventListener('click', (e) => { focusTile = i; rove(); const r = d.getBoundingClientRect(); emitTile(i, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
+      d.addEventListener('keydown', onTileKey);
     }
     const center = el('div', 'b2d-center', gridEl);
     center.style.gridColumn = `2 / span ${Math.max(1, side - 1)}`; center.style.gridRow = `2 / span ${Math.max(1, side - 1)}`;
     capEl = hidden(el('div', 'b2d-cap', center, worldStyle(w).caption)); capEl.dir = 'rtl';
+    // wave 1 (B1 G8): an intended empty state — lots "למכירה", the first one glowing; never looks owned (no rim, no card)
+    emptyEl = el('div', 'b2d-empty', center); emptyEl.dir = 'rtl';
+    const lots = hidden(el('div', 'b2d-lots', emptyEl)); lots.dir = 'ltr';   // the first lot is where the first card appears (the city grid is LTR)
+    for (let k = 0; k < 4; k++) { const l = el('span', 'b2d-lot' + (k === 0 ? ' b2d-lot-next' : ''), lots, k === 0 ? '+' : ''); if (k === 1 || k === 3) el('i', 'b2d-sale', l, 'למכירה'); }
+    el('p', 'b2d-empty-cap', emptyEl, 'כאן יקומו הנכסים שלך');
     cityEl = el('div', 'b2d-city', center); cityEl.setAttribute('role', 'group'); cityEl.setAttribute('aria-label', 'העיר שלך');
     city.clear(); gridN = 4; cityEl.style.setProperty('--n', String(gridN));
+    updateEmpty();
     layout();
   } catch (e) { warn(e); }
 }
@@ -180,6 +192,50 @@ export function resetCamera() {}
 export function setCameraMode(m) { camMode = m === 'overview' ? 'overview' : 'follow'; }
 export function getCameraMode() { return camMode; }
 
+/* ============================================================ wave 1: tiles (buttons, markers, keyboard) */
+function tileEl(i) { return gridEl ? gridEl.querySelector(`.b2d-tile[data-i="${i}"]`) : null; }
+function rove() { if (!gridEl) return; for (const t of gridEl.querySelectorAll('.b2d-tile')) t.tabIndex = Number(t.dataset.i) === focusTile ? 0 : -1; }
+function onTileKey(e) {
+  const i = Number(e.currentTarget.dataset.i); let j = null;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') j = (i + 1) % n;          // along the direction of play
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') j = (i - 1 + n) % n;
+  else if (e.key === 'Home') j = marks.current ?? 0;
+  else if (e.key === 'End') j = marks.dest ?? marks.current ?? 0;
+  if (j == null) return;
+  e.preventDefault(); focusTile = j; rove(); const t = tileEl(j); if (t) t.focus();
+}
+function emitTile(i, x, y) {
+  for (const f of [...tileCbs]) { try { f(i, { x, y }); } catch (e) { warn(e); } }
+  try { bus.emit('tile:pick', { index: i, x, y, source: '2d' }); } catch (e) { warn(e); }
+}
+/** onTilePick(cb) → unsubscribe; cb(tileIndex, {x, y}) on a click / Enter on a tile (SCENE_OPTIONAL). */
+export function onTilePick(cb) { if (typeof cb !== 'function') return () => {}; tileCbs.add(cb); return () => tileCbs.delete(cb); }
+/** markTile('current' | 'dest', i | null): .b2d-cur (outline + the roving tab stop) / .b2d-dest (pulsing gold outline). */
+export function markTile(kind, i) {
+  try {
+    if (!(kind in marks) || !gridEl) return;
+    const cls = kind === 'current' ? 'b2d-cur' : 'b2d-dest';
+    for (const t of gridEl.querySelectorAll('.' + cls)) t.classList.remove(cls);
+    marks[kind] = i == null || i < 0 ? null : Number(i);
+    const t = marks[kind] != null ? tileEl(marks[kind]) : null; if (t) t.classList.add(cls);
+    // wave 3a (review MINOR-2): the marks are spoken too — aria-current + "אתה כאן" / "לכאן זזים" in the tile's name
+    for (const x of gridEl.querySelectorAll('.b2d-tile')) {
+      const cur = x.classList.contains('b2d-cur'), dst = x.classList.contains('b2d-dest');
+      if (cur) x.setAttribute('aria-current', 'location'); else x.removeAttribute('aria-current');
+      const base = x.dataset.label || x.getAttribute('aria-label') || '';
+      x.setAttribute('aria-label', base + (cur ? ' · אתה כאן' : dst ? ' · לכאן זזים' : ''));
+    }
+    if (kind === 'current' && marks.current != null && !(gridEl.contains(document.activeElement))) { focusTile = marks.current; rove(); }
+  } catch (e) { warn(e); }
+}
+export function cityKeys() { return [...city.keys()]; }
+export function homeView() {}
+const LIFE_MARK = (k) => /^L:/.test(String(k)) && k !== 'L:pension' && k !== 'L:index';   // = scene.js isLifeMarker
+function updateEmpty() {
+  if (!emptyEl) return; const e = ![...city.keys()].some((k) => !LIFE_MARK(k));   // wave 3a (NIT-1): life markers alone keep the empty state
+  emptyEl.hidden = !e; if (capEl) capEl.hidden = e; if (cityEl) cityEl.classList.toggle('b2d-none', e);
+}
+
 /* ============================================================ city: cards in the centre grid */
 function ensureGrid(count) {
   let g = 4; while (g * g < count && g < 8) g++;
@@ -189,11 +245,12 @@ function ensureGrid(count) {
 function addCard(key, model, label, kind = null, level = null) {
   const c = el('button', 'b2d-card', cityEl); c.type = 'button';
   c.dataset.key = key; c.dataset.kind = 'plain'; c.title = label || '';
-  hidden(el('span', 'b2d-ce', c, cityIcon(model)));
+  if (/^L:/.test(key) && key !== 'L:pension' && key !== 'L:index') c.dataset.life = '1';   // a life event, not an owned asset (B1 G9)
+  hidden(el('span', 'b2d-ce', c, cityIcon(model, curWorld && curWorld.id)));   // w11 / w15: a world may read a shared model key its own way
   if (label) { const l = hidden(el('span', 'b2d-cl', c, String(label).slice(0, 18))); l.dir = 'rtl'; }
   c.addEventListener('click', (e) => { const r = c.getBoundingClientRect(); emitPick(key, e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2); });
   const it = { el: c, model, label: label || '', kind, level: null };
-  city.set(key, it);
+  city.set(key, it); updateEmpty();
   paintLevel(it, normLevel(level));
   return c;
 }
@@ -201,6 +258,7 @@ function emitPick(key, x, y) {
   for (const f of [...pickCbs]) { try { f(key, { x, y }); } catch (e) { warn(e); } }
   try { bus.emit('city:pick', { key, x, y, source: '2d' }); } catch (e) { warn(e); }
 }
+const PLANT_DOT = { green: '🟢', amber: '🟠', red: '🔴' };
 /** card look per level (T5 §5.3): data-level / data-kind, pips, corner badges, accessible name T5-C2 */
 function paintLevel(it, L) {
   const c = it.el; it.level = L;
@@ -210,6 +268,69 @@ function paintLevel(it, L) {
   for (const x of c.querySelectorAll('.b2d-pips,.b2d-corner-b,.b2d-annex,.b2d-act')) x.remove();
   if (L) {
     hidden(el('span', 'b2d-pips', c, pipsText(L)));
+    if (L.kind === 'occ' && (L.closed || L.wing)) hidden(el('span', 'b2d-corner-b', c, L.closed ? '⛔' : '◧'));   // w5: closed asset / closed wing
+    if (L.kind === 'plant') {   // w6: the condition light as a corner dot (the pips and the accessible name carry it too); ordered ⏳, mothballed 💤
+      hidden(el('span', 'b2d-corner-b', c, L.pending ? '⏳' : L.mothball ? '💤' : L.down ? '🔴' : PLANT_DOT[L.light] || '🟢'));
+      c.dataset.light = L.pending || L.mothball ? 'off' : L.down ? 'red' : L.light; c.dataset.run = L.running ? '1' : '0';
+    } else if (L.kind === 'branch') {   // w7: a storefront — 🚧 fit-out, a franchise tag, a flickering sign over the span (CSS, none with reduced motion)
+      hidden(el('span', 'b2d-corner-b', c, L.fitout ? '🚧' : !L.own ? '🤝' : L.n === 4 ? '★' : '💡'));
+      c.dataset.light = L.fitout ? 'off' : L.flicker ? 'flicker' : 'on'; c.dataset.run = L.own ? 'own' : 'fran';
+    } else if (L.kind === 'build') {   // w8: a site — the % complete as a fill bar, ⛔ stalled, 🏗️ working, 📋 permit, 🔑 rental, 🚧 plot
+      hidden(el('span', 'b2d-corner-b', c, L.plot ? '🚧' : L.rental ? '🔑' : L.permit ? '📋' : L.stalled ? '⛔' : '🏗️'));
+      c.dataset.light = L.stalled ? 'stalled' : L.permit || L.plot ? 'off' : 'on'; c.dataset.run = String(Math.round(L.pct * 100));
+      c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
+    } else if (L.kind === 'energy') {   // w9: 🔌 a slot / no connection, 🏜️ a plot, 📋 permits, ⛔ stalled, 🏗️ building, ☀️ / 🌬️ / 🔋 operating, 🧪 the pilot; a % bar
+      const op = L.n === 4; const TI = { solar: '☀️', wind: '🌬️', storage: '🔋', hybrid: '🔆', line: '🗼', h2: '🧪' };
+      hidden(el('span', 'b2d-corner-b', c, L.slot ? '🔌' : L.plot ? '🏜️' : L.tech === 'h2' ? (L.failed ? '✖' : '🧪') : op ? (L.down ? '⛔' : TI[L.tech] || '☀️') : L.unconnected ? '🔌' : L.n === 0 ? '📋' : L.stalled ? '⛔' : '🏗️'));
+      c.dataset.light = op ? (L.down ? 'stalled' : 'on') : L.stalled || L.unconnected ? 'stalled' : L.n === 0 || L.slot || L.plot ? 'off' : 'build'; c.dataset.run = String(Math.round((op ? L.output : L.pct) * 100));
+      c.style.setProperty('--b2d-pct', `${Math.round(L.pct * 100)}%`);
+    } else if (L.kind === 'club') {   // w13: 🏟️ the stadium (🏗️ while the stand grows), the stands' fill as the bar, the tier as data
+      hidden(el('span', 'b2d-corner-b', c, L.stage ? '🏗️' : '⚽'));
+      c.dataset.light = L.stage ? 'build' : 'on'; c.dataset.run = String(Math.round(L.fill * 100)); c.dataset.div = String(L.div);
+      c.style.setProperty('--b2d-pct', `${Math.round(L.fill * 100)}%`);
+    } else if (L.kind === 'sponsor') {   // w13: a billboard — dark once the contract ended
+      hidden(el('span', 'b2d-corner-b', c, L.expired ? '⬛' : '📣'));
+      c.dataset.light = L.expired ? 'off' : 'on'; c.dataset.run = L.expired ? 'expired' : 'live';
+    } else if (L.kind === 'sub') {   // w11: the country's fictional colour band (CSS from data-country), ★ self-run, 🔍 audited / ❔ not, ⚠️ a disrupted supplier
+      hidden(el('span', 'b2d-corner-b', c, L.disrupted ? '⚠️' : L.self ? '★' : L.managed ? (L.audited ? '🔍' : '❔') : '∅'));
+      c.dataset.light = L.disrupted ? 'stalled' : L.self ? 'on' : L.managed ? 'mgr' : 'off'; c.dataset.run = L.country; c.dataset.country = L.country;
+      c.style.setProperty('--b2d-pct', `${Math.round((L.self ? 1 : L.trust || 0) * 100)}%`);
+    } else if (L.kind === 'app') {   // w15: 📱 the app, the runway as a fuse bar (36 months = full), 🔥 under 6 months, ✔ sold
+      hidden(el('span', 'b2d-corner-b', c, L.sold ? '✔' : L.runway < 6 && !L.profitable ? '🔥' : L.net ? '🌐' : '📱'));
+      c.dataset.light = L.sold ? 'off' : L.runway < 6 && !L.profitable ? 'stalled' : 'on'; c.dataset.run = L.profitable ? 'profit' : String(L.runway);
+      c.style.setProperty('--b2d-pct', `${L.sold ? 0 : L.profitable ? 100 : Math.round(Math.min(36, L.runway) / 36 * 100)}%`);
+    } else if (L.kind === 'div') {   // w12: 🔗 guaranteed (a cable to HQ) / 🚧 ring-fenced (a fence border), ⚠️ a deficit, 🌩️ in the storm; the health as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.distress ? '⚠️' : L.stormHit ? '🌩️' : L.fence ? '🚧' : '🔗'));
+      c.dataset.light = L.distress ? 'stalled' : L.stormHit ? 'storm' : 'on'; c.dataset.run = L.struct === 'r' ? 'fence' : 'cable'; c.dataset.struct = L.struct;
+      c.style.setProperty('--b2d-pct', `${L.health}%`);
+    } else if (L.kind === 'bank') {   // w14: 🏦 the bank, the capital ratio as the bar (20 % = full), 🚶 a queue, ⚠️ under 8 %
+      hidden(el('span', 'b2d-corner-b', c, L.cap < 0.08 ? '⚠️' : L.queue ? '🚶' : '🏦'));
+      c.dataset.light = L.cap < 0.08 || L.run ? 'stalled' : L.queue ? 'storm' : 'on'; c.dataset.run = String(Math.round(L.cap * 1000) / 10); c.dataset.conf = String(L.conf);
+      c.style.setProperty('--b2d-pct', `${Math.round(Math.min(1, L.cap / 0.2) * 100)}%`);
+    } else if (L.kind === 'lab') {   // w17: 🧪 the lab, 💊 a drug on the market, ✖ a failed readout; the share of slots in use as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.cracked ? '✖' : L.drugs ? '💊' : '🧪'));
+      c.dataset.light = L.cracked ? 'stalled' : L.drugs ? 'on' : L.trials ? 'build' : 'off'; c.dataset.run = `${L.drugs}/${L.trials}`;
+      c.style.setProperty('--b2d-pct', `${Math.round(((L.trials + L.drugs) / 8) * 100)}%`);
+    } else if (L.kind === 'ins') {   // w18: ☂️ the insurer, 🌀 the storm season, ⚠️ solvency under 100 %; solvency as the bar (200 % = full)
+      hidden(el('span', 'b2d-corner-b', c, L.solvency < 1 ? '⚠️' : L.season ? '🌀' : '☂️'));
+      c.dataset.light = L.solvency < 1 ? 'stalled' : L.season ? 'storm' : 'on'; c.dataset.run = String(Math.round(L.solvency * 100)); c.dataset.xol = String(L.xol);
+      c.style.setProperty('--b2d-pct', `${Math.round(Math.min(1, L.solvency / 2) * 100)}%`);
+    } else if (L.kind === 'listco') {   // w19: 🔔 listed (▲ / ▼ vs the peers), 🏢 private, 🚩 an activist; the price vs the peers as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.activist ? '🚩' : L.listed ? (L.price >= L.peer ? '🔔' : '🔻') : '🏢'));
+      c.dataset.light = L.activist ? 'stalled' : L.listed ? 'on' : 'off'; c.dataset.run = L.listed ? 'listed' : 'private';
+      c.style.setProperty('--b2d-pct', `${L.listed && L.peer ? Math.round(Math.min(1.5, L.price / L.peer) / 1.5 * 100) : 0}%`);
+    } else if (L.kind === 'fund') {   // w20: 📈 the fund, 🚧 the gate, 🏃 redemptions waiting; money managed vs its peak as the bar
+      hidden(el('span', 'b2d-corner-b', c, L.gate ? '🚧' : L.pending ? '🏃' : '📈'));
+      c.dataset.light = L.gate ? 'stalled' : L.pending ? 'storm' : 'on'; c.dataset.run = `${L.longs}L${L.shorts}S`;
+      c.style.setProperty('--b2d-pct', `${Math.round(L.dd * 100)}%`);
+    } else if (L.kind === 'farm') {   // w16: 🌾 the farm; the share of fields growing as the bar; 🏜️ in a drought
+      hidden(el('span', 'b2d-corner-b', c, L.regime === 'drought' ? '🏜️' : L.hedged ? '🔒' : '🌾'));
+      c.dataset.light = L.regime === 'drought' ? 'stalled' : L.n ? 'on' : 'off'; c.dataset.run = L.regime;
+      c.style.setProperty('--b2d-pct', `${L.of ? Math.round((L.n / L.of) * 100) : 0}%`);
+    } else if (L.kind === 'hold') {   // w10: the liquidity class (glass / stone / vault), ⚠️ a margin call, ❄️ frozen, 🔒 locked
+      hidden(el('span', 'b2d-corner-b', c, L.call ? '⚠️' : L.frozen ? '❄️' : L.cls === 'locked' ? '🔒' : L.cls === 'monthly' ? '🧱' : '🏦'));
+      c.dataset.light = L.call ? 'call' : L.frozen ? 'off' : 'on'; c.dataset.run = L.cls;
+    } else { delete c.dataset.light; delete c.dataset.run; }
     if (L.kind === 'biz') {
       const corner = L.n === 0 ? '🚧' : L.n === 3 ? '★' : (ARCHETYPE_EMOJI[L.type] || '🏪');
       hidden(el('span', 'b2d-corner-b', c, corner));
@@ -232,13 +353,13 @@ export function spawn(key, model, opts = {}) {
 }
 export function despawn(key) {
   try {
-    const it = city.get(key); if (!it) return; city.delete(key);
+    const it = city.get(key); if (!it) return; city.delete(key); updateEmpty();
     animate(it.el, [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.01)', opacity: 0 }], { duration: reduced() ? MOTION.t1 : D(MOTION.despawn), fill: 'forwards' }).then(() => it.el.remove());
   } catch (e) { warn(e); }
 }
 export function launch(key, success) {
   try {
-    const it = city.get(key); if (!it) return; city.delete(key);
+    const it = city.get(key); if (!it) return; city.delete(key); updateEmpty();
     const frames = success ? [{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-400%)', opacity: 0 }] : [{ transform: 'rotate(0)', opacity: 1 }, { transform: 'rotate(70deg) translateY(20%)', opacity: 0 }];
     animate(it.el, frames, { duration: D(success ? 1300 : 800), easing: success ? 'ease-in' : 'ease-out', fill: 'forwards' }).then(() => it.el.remove());
   } catch (e) { warn(e); }
@@ -249,6 +370,7 @@ export function syncCity(list, { silent = true } = {}) { // eslint-disable-line 
     const fx = fixtureCount(globalThis.location ? location.search : '');
     const want = new Map([...(list || []), ...(fx && curWorld ? fixtureCity(curWorld, fx) : [])].map((m) => [m.key, m]));
     for (const k of [...city.keys()]) if (!want.has(k)) { city.get(k).el.remove(); city.delete(k); }
+    updateEmpty();
     ensureGrid(want.size);
     for (const m of want.values()) {
       if (!city.has(m.key)) addCard(m.key, m.model, m.label, m.kind || null, m.level || null);

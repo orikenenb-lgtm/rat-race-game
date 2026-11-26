@@ -1,0 +1,339 @@
+// 3D upgrade wave 2 (team ד, A2 G-04 / G-07, brief §14–15): the "יעד העולם" panel model and the new-debt chip numbers.
+// PURE (no DOM, no state writes): everything comes from the engine's own outputs — E.metrics(S) (goalParts, goalHold,
+// emergency, life, totals, liabilities, expenseLines) and E.starThresholds(world, charId, rules). The only arithmetic here is
+// the difference of two engine values (target − value of the engine's own goal part; liabilities after − before). No new
+// rules, no fields added to metrics(), nothing saved. Tested against the engine in tests/hud_goal.test.mjs.
+import { fmtM } from './engine.js';
+
+const nf = (n) => Math.round(+n || 0);
+const paydays = (n) => (n === 1 ? 'משכורת אחת' : n === 2 ? 'שתי משכורות' : `${n} משכורות`);
+const pts = (n) => (n === 1 ? 'נקודת השפעה אחת' : `${n} נקודות השפעה`);
+const PART_LABEL = { capRatio: 'יחס הון', solvency: 'כושר פירעון', combined12: 'יחס משולב (12 חודשים)', netDebtEbitda: 'חוב נטו מול הרווח התפעולי', productsEarning: 'תרופות שמרוויחות', aum: 'כסף בניהול', stakeMkt: 'החלק שלך בבורסה', equity: 'ההון שלך בבנק', passive: 'הכנסה פסיבית מול הוצאות', netWorth: 'שווי נקי', impact: 'נקודות השפעה', benchmark: 'שווי מול "קנה והחזק"', passive12: 'ממוצע 12 חודשים: הכנסה מהנכסים', opIncome: 'הכנסה תפעולית אחרי החזר חוב', wageRatio12: 'שכר מול הכנסות (12 חודשים)', stakeValue: 'שווי החלק שלך בחברה' };
+/** w13: a ratio part with cmp 'le' (wageRatio12: wages ÷ revenue, lower is better) — shown in %, never in ₪ */
+const isLe = (p) => p && p.cmp === 'le';
+export const pctT = (x) => `${Math.round((+x || 0) * 100)}%`;
+
+/** w7 liquidity (unit 'months'): months of the chain's fixed costs; 99 = the engine's "no fixed costs yet". */
+export const NO_FIXED = 99;
+export const monthsText = (v, runway = false) => (+v >= NO_FIXED ? (runway === 'cov' ? 'אין חוב בערבות — כיסוי מלא' : runway ? 'רווחית — המזומן לא נגמר' : 'אין עלויות קבועות') : `${Math.round((+v || 0) * 10) / 10} חודשים`);
+/** w12: the liquidity part is the group's coverage (HQ cash ÷ a month of guaranteed debt service; 12 months = coverage 1.0; 99 = no
+ *  guaranteed debt) — shown in months and as the coverage ×, never in ₪ */
+export const isCoverage = (m) => !!(m && m.worldIndicators && m.worldIndicators.holding);
+/** w12 / w16 / w14: a noDefault part ('noDefault:<key>') counts paydays since the last event — months, never "fixed costs" */
+export const isStreak = (p) => !!(p && typeof p.key === 'string' && p.key.startsWith('noDefault:'));
+/** w16: the passive12 part is the FARM's income (harvests, hedge P&L and silo sales − bank-loan interest) */
+export const isFarm = (m) => !!(m && m.worldIndicators && m.worldIndicators.harvest);
+export const covX = (months) => `×${(Math.round(((+months || 0) / 12) * 100) / 100).toFixed(2)}`;
+/** the short tag of a goal part under its HUD bar, and its one-line value (the HUD sub-line) */
+const TAG_W = { capRatio: 'הון', equity: 'הון', solvency: 'פירעון', combined12: 'משולב', netDebtEbitda: 'חוב', stakeMkt: 'בורסה', productsEarning: 'תרופות', aum: 'בניהול' };
+export function partTag(p) { return TAG_W[p.key] ? TAG_W[p.key] : p.key === 'impact' ? 'השפעה' : isStreak(p) ? 'רצף' : p.unit === 'months' ? 'קופה' : p.cmp === 'le' ? 'שכר' : p.key === 'passive12' || p.key === 'opIncome' ? 'הכנסה' : 'שווי'; }
+export function meterLabel(m) {
+  const P = m.goalParts || [];
+  if (isCoverage(m)) return 'יעד הקבוצה'; if (isFarm(m)) return 'הכנסה ורצף';
+  const wk = worldOf(m); if (wk) return { credit: 'יעד הבנק', trials: 'שווי ותרופות', insure: 'יעד חברת הביטוח', bell: 'בורסה וחוב', funds: 'שווי וכסף בניהול' }[wk];
+  return m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : m.goalType === 'passive12' ? 'ממוצע שנתי' : P.some((p) => p.unit === 'months' && !isStreak(p)) ? 'שווי וקופה' : P.some((p) => p.cmp === 'le') ? 'שווי ושכר' : 'יעד המפה';
+}
+/** w14 / w17 / w18 / w19 / w20: their modValue parts — a ratio, a multiple or a count is never shown in ₪ */
+export const pct1 = (x) => `${Math.round((+x || 0) * 1000) / 10}%`;
+export const xT = (x) => (+x >= 99 ? 'אין רווח תפעולי' : `×${(Math.round((+x || 0) * 100) / 100).toFixed(2)}`);
+const RATIO_GE = new Set(['capRatio', 'solvency']);   // at least the target, shown in %
+/** the HUD sub-line (short) and the sheet line (long) of one of those parts; null for any other part (the callers keep their own words) */
+export function partText1420(p) {
+  const v = +p.value || 0, t = +p.target || 0;
+  switch (p.key) {
+    case 'capRatio': return { short: `יחס הון ${pct1(v)} (לפחות ${pct1(t)})`, long: `${pct1(v)} · היעד: לפחות ${pct1(t)}` };
+    case 'solvency': return { short: `פירעון ${pctT(v)} (לפחות ${pctT(t)})`, long: `${pctT(v)} · היעד: לפחות ${pctT(t)}` };
+    case 'combined12': return { short: `משולב ${pctT(v)} (עד ${pctT(t)})`, long: `${pctT(v)} · היעד: עד ${pctT(t)}` };
+    case 'netDebtEbitda': return { short: `חוב ${xT(v)} (עד ×${nf(t)})`, long: `${xT(v)} · היעד: עד ×${nf(t)}` };
+    case 'productsEarning': return { short: `💊 ${nf(v)} מתוך ${nf(t)}`, long: `${drugsT(v)} מתוך ${drugsT(t)}` };
+    default: return null;
+  }
+}
+const drugsT = (n) => (nf(n) === 1 ? 'תרופה אחת' : `${nf(n)} תרופות`);
+const worldOf = (m) => { const W = (m && m.worldIndicators) || {}; return W.credit ? 'credit' : W.trials ? 'trials' : W.insure ? 'insure' : W.bell ? 'bell' : W.funds ? 'funds' : null; };
+/** w15: the liquidity part is the app's runway (cash ÷ the monthly burn; 99 = cash flow ≥ 0), not months of fixed costs */
+export const isRunway = (m) => !!(m && m.worldIndicators && m.worldIndicators.platform);
+/** One goal part with its gap (target − value of the engine's own part, never below 0). */
+function part(p, rw = false, farm = false) {
+  const value = +p.value || 0, target = +p.target || 0;
+  const le = isLe(p);   // w13: at most the target (wages ÷ revenue): the gap is how far above it
+  const gap = le ? Math.max(0, value - target) : Math.max(0, target - value);
+  const isPts = p.key === 'impact'; const isMo = p.unit === 'months'; const streak = isStreak(p);
+  const cov = rw === 'cov' && p.key === 'liquidity';
+  if (RATIO_GE.has(p.key) || p.key === 'netDebtEbitda' || p.key === 'productsEarning') {   // w14 capRatio / w18 solvency (%), w19 net debt ÷ EBITDA (×, at most), w17 drugs that earn (a count)
+    const x = p.key === 'netDebtEbitda'; const n = p.key === 'productsEarning'; const pc = p.key === 'capRatio' ? pct1 : pctT;
+    return { key: p.key, label: PART_LABEL[p.key] || p.label, value, target, gap, progress: Math.max(0, Math.min(1, +p.progress || 0)), met: le ? value <= target : value >= target,
+      valueText: x ? xT(value) : n ? drugsT(value) : pc(value), targetText: x ? `עד ×${nf(target)}` : n ? drugsT(target) : `לפחות ${pc(target)}`,
+      ...(le ? { cmp: 'le' } : {}), unit: x ? 'x' : n ? 'n' : 'ratio', note: p.note || null, months: null, window: null };
+  }
+  return {
+    key: p.key, label: farm && p.key === 'passive12' ? 'ממוצע 12 חודשים: הכנסת המשק' : PART_LABEL[p.key] || p.label, value, target, gap, progress: Math.max(0, Math.min(1, +p.progress || 0)),
+    met: le ? value <= target : p.key === 'passive' ? value > 0 && value >= target : value >= target,
+    valueText: le ? pctT(value) : isPts ? String(nf(value)) : streak ? `${nf(value)} חודשים` : cov ? (value >= NO_FIXED ? monthsText(value, 'cov') : `${monthsText(value)} (כיסוי ${covX(value)})`) : isMo ? monthsText(value, rw) : fmtM(value),
+    targetText: le ? `עד ${pctT(target)}` : isPts ? String(nf(target)) : cov ? `${nf(target)} חודשים (כיסוי ${covX(target)})` : isMo ? `${nf(target)} חודשים` : fmtM(target),
+    ...(streak ? { streak: true } : {}), ...(cov ? { coverage: true } : {}),
+    ...(le ? { cmp: 'le', unit: 'ratio' } : {}),
+    note: p.note || null, months: p.months ?? null, window: p.window ?? null,
+    ...(isMo ? { unit: 'months', runway: rw === true, liquid: p.liquid ?? null, fixedMonth: p.fixedMonth ?? null, liquidText: p.liquid != null ? fmtM(p.liquid) : null, fixedText: p.fixedMonth != null ? fmtM(p.fixedMonth) : null } : {}),
+  };
+}
+/** The main "what is missing" line for a part (null when it is met). */
+function gapText(p, goalType) {
+  if (p.met) return null;
+  switch (p.key) {
+    case 'passive': return p.value <= 0 && p.target <= 0 ? null : `חסרה ${fmtM(p.gap)} הכנסה פסיבית לכיסוי ההוצאות`;
+    case 'netWorth': return `חסרים ${fmtM(p.gap)} לשווי נקי של ${fmtM(p.target)}`;
+    case 'impact': return p.gap === 1 ? 'חסרה נקודת השפעה אחת' : `חסרות ${nf(p.gap)} נקודות השפעה`;
+    case 'benchmark': return `השווי שלך נמוך ב־${fmtM(p.gap)} משל "קנה והחזק"`;
+    case 'passive12': return `חסרים ${fmtM(p.gap)} בחודש בממוצע השנתי (היעד: ${fmtM(p.target)} בחודש)`;
+    case 'opIncome': return `חסרים ${fmtM(p.gap)} בחודש של הכנסה תפעולית אחרי החזר החוב (היעד: ${fmtM(p.target)} בחודש)`;   // w9
+    case 'wageRatio12': return `השכר הוא ${pctT(p.value)} מההכנסות ב־12 החודשים האחרונים — צריך לרדת ל־${pctT(p.target)} לכל היותר (עוד ${Math.round(p.gap * 100)} נקודות אחוז)`;   // w13
+    case 'stakeValue': return `החלק שלך בחברה שווה ${fmtM(p.value)} — חסרים ${fmtM(p.gap)} ל־${fmtM(p.target)}`;   // w15
+    case 'liquidity': if (p.coverage) return `כיסוי הנזילות ${covX(p.value)}: במטה יש מזומן ל־${monthsText(p.value)} של החזרי חוב בערבות. צריך ${nf(p.target)} חודשים (כיסוי ×1).`;   // w12
+      if (p.runway) return `בקופה יש ${p.liquidText || ''} — מזומן ל־${monthsText(p.value, true)} בקצב השריפה של היום. צריך ${nf(p.target)} חודשים, או חודש רווחי.`;   // w15
+      return `בקופה יש ${p.liquidText || ''} — ${monthsText(p.value)} של עלויות קבועות (${p.fixedText || ''} בחודש). צריך ${nf(p.target)} חודשים.`;   // w7
+    case 'equity': return `ההון שלך בבנק ${fmtM(p.value)} — חסרים ${fmtM(p.gap)} ל־${fmtM(p.target)}`;   // w14
+    case 'capRatio': return `יחס ההון ${pct1(p.value)} — צריך לפחות ${pct1(p.target)} (עוד ${Math.round(p.gap * 1000) / 10} נקודות אחוז)`;   // w14
+    case 'noDefault:regulator': return `${nf(p.value)} מתוך ${nf(p.target)} חודשים בלי התערבות המפקח — עוד ${nf(p.gap)} חודשים`;   // w14
+    case 'productsEarning': return `${drugsT(p.value)} מרוויחות כסף — צריך ${drugsT(p.target)} (עוד ${nf(p.gap)})`;   // w17
+    case 'solvency': return `כושר הפירעון ${pctT(p.value)} — צריך לפחות ${pctT(p.target)}`;   // w18
+    case 'combined12': return `היחס המשולב ב־12 החודשים האחרונים ${pctT(p.value)}: תביעות והוצאות מול הפרמיות — צריך לרדת ל־${pctT(p.target)} לכל היותר`;   // w18
+    case 'stakeMkt': return p.value > 0 ? `החלק שלך שווה בבורסה ${fmtM(p.value)} — חסרים ${fmtM(p.gap)} ל־${fmtM(p.target)}` : `עוד אין מחיר בבורסה: בלי הנפקה החלק שלך לא נספר. היעד: ${fmtM(p.target)}`;   // w19
+    case 'netDebtEbitda': return `החוב נטו הוא ${xT(p.value)} הרווח התפעולי השנתי — צריך לרדת ל־×${nf(p.target)} לכל היותר`;   // w19
+    case 'aum': return `בניהול ${fmtM(p.value)} — חסרים ${fmtM(p.gap)} ל־${fmtM(p.target)}`;   // w20
+    case 'noDefault:default': return `${nf(p.value)} מתוך ${nf(p.target)} חודשים בלי חדלות פירעון בקבוצה — עוד ${nf(p.gap)} חודשים`;   // w12
+    case 'noDefault:margin': return `${nf(p.value)} מתוך ${nf(p.target)} חודשים בלי שהברוקר סגר גידור בכוח — עוד ${nf(p.gap)} חודשים`;   // w16
+    default: if (p.streak) return `${nf(p.value)} מתוך ${nf(p.target)} חודשים — עוד ${nf(p.gap)} חודשים`;
+      return goalType ? `חסרים ${fmtM(p.gap)}` : null;
+  }
+}
+function ruleText(goalType, parts) {
+  const nw = parts.find((p) => p.key === 'netWorth'), im = parts.find((p) => p.key === 'impact');
+  switch (goalType) {
+    case 'passive': return 'יוצאים מהמירוץ כשההכנסה הפסיבית (כסף שנכסים מכניסים בלי לעבוד) מכסה את כל ההוצאות החודשיות.';
+    case 'nw':   // w10 (goal type 'nw', the same rule)
+    case 'netWorth': return `יוצאים מהמירוץ בשווי נקי (כל מה שיש לך פחות החובות) של ${nw ? nw.targetText : ''}.`;
+    case 'netWorthImpact': return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} וגם ${im ? pts(nf(im.target)) : ''}. שני הפסים חייבים להתמלא.`;
+    case 'benchmark': return 'בסוף התקופה השווי שלך צריך להיות גבוה משל משקיע שקנה את המדד והחזיק.';
+    case 'passive12': { const p = parts.find((x) => x.key === 'passive12'); return `יוצאים מהמירוץ כשהממוצע של 12 ימי המשכורת האחרונים — הכנסה מהנכסים, קיץ וחורף יחד — מגיע ל־${p ? p.targetText : ''} בחודש. חודש קיץ אחד לא מספיק.`; }
+    case 'passiveTarget': { const p = parts.find((x) => x.key === 'opIncome') || parts[0];   // w9: the plants' run-rate month after debt service
+      return `יוצאים מהמירוץ כשההכנסה התפעולית של התחנות — בחודש רגיל, אחרי החזר החוב של כל תחנה והריבית על הלוואות הבנק — מגיעה ל־${p ? p.targetText : ''} בחודש. חודש שמשי או קפיצת מחיר אחת לא נספרים.`; }
+    case 'all': {   // w7: net worth AND liquidity (months of the chain's fixed costs) — both bars must fill
+      const lq = parts.find((x) => x.key === 'liquidity');
+      const wr = parts.find((x) => x.key === 'wageRatio12');   // w13: net worth (the squad at book) AND wages ≤ 70 % of the 12-month revenue
+      const sv = parts.find((x) => x.key === 'stakeValue');   // w15: your stake's value AND 12 months of cash (or a profitable month)
+      const nd = parts.find((x) => x.streak); const p12 = parts.find((x) => x.key === 'passive12');
+      const capR = parts.find((x) => x.key === 'capRatio'), pe = parts.find((x) => x.key === 'productsEarning'), solv = parts.find((x) => x.key === 'solvency'), cr12 = parts.find((x) => x.key === 'combined12'), smk = parts.find((x) => x.key === 'stakeMkt'), nde = parts.find((x) => x.key === 'netDebtEbitda'), au = parts.find((x) => x.key === 'aum'), eqB = parts.find((x) => x.key === 'equity');
+      if (capR) return `שלושה יעדים יחד: ההון שלך בבנק ${eqB ? eqB.targetText : ''}, יחס הון ${capR.targetText} (המפקח נכנס מתחת ל־8%), ו־${nd ? nd.target : 12} חודשים ברצף בלי התערבות המפקח. שלושת הפסים חייבים להתמלא.`;   // w14
+      if (pe) return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} — מולקולה בצינור נספרת לפי מה ששולם עליה, תרופה לפי הרווח שלה — וגם ${pe.targetText} שמרוויחות כסף. שני הפסים חייבים להתמלא.`;   // w17
+      if (solv && cr12) return `שלושה יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''}, כושר פירעון ${solv.targetText}, ויחס משולב ${cr12.targetText} ב־12 החודשים האחרונים — התביעות וההוצאות לא יותר מהפרמיות. שלושת הפסים חייבים להתמלא.`;   // w18
+      if (smk && nde) return `שני יעדים יחד: החלק שלך בחברה שווה ${smk.targetText} במחיר הבורסה — בלי הנפקה אין מחיר — וגם חוב נטו ${nde.targetText} מהרווח התפעולי השנתי. שני הפסים חייבים להתמלא.`;   // w19
+      if (au) return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} וגם ${au.targetText} כסף בניהול — של הלקוחות ושלך, בקרן ובקרן המדד. שני הפסים חייבים להתמלא.`;   // w20
+      if (lq && lq.coverage) return `שלושה יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''}, ${nd ? nd.target : 24} חודשים ברצף בלי חדלות פירעון בקבוצה, וכיסוי נזילות של ×1 — מזומן במטה ל־12 חודשים של החזרי חוב בערבות. שלושת הפסים חייבים להתמלא.`;   // w12
+      if (p12 && nd) return `שני יעדים יחד: ממוצע של 12 ימי המשכורת האחרונים של הכנסת המשק — ${p12.targetText} בחודש (קציר, גידורים ומכירות מהממגורה, פחות ריבית על הלוואות) — וגם ${nd.target} חודשים ברצף בלי שהברוקר סגר גידור בכוח. שני הפסים חייבים להתמלא.`;   // w16
+      if (sv) return `שני יעדים יחד: החלק שלך בחברה שווה ${sv.targetText} — לפי השוק היום, לא לפי הסבב האחרון — וגם מזומן ל־${lq ? lq.targetText : '12 חודשים'} (או חברה רווחית). אחרי מכירה — הכסף שקיבלת. שני הפסים חייבים להתמלא.`;
+      if (wr) return `שני יעדים יחד: שווי נקי של ${nw ? nw.targetText : ''} — השחקנים לפי הספרים, לא לפי השוק — וגם שכר של ${wr.targetText} מההכנסות ב־12 החודשים האחרונים. שני הפסים חייבים להתמלא.`;
+      const bits = [nw ? `שווי נקי של ${nw.targetText}` : null, lq ? `קופה (מזומן, חיסכון והשקעות נזילות) של ${lq.targetText} של עלויות קבועות` : null, ...parts.filter((x) => x !== nw && x !== lq).map((x) => `${x.label} ${x.targetText}`)].filter(Boolean);
+      return `${bits.length > 1 ? 'שני יעדים יחד' : 'היעד'}: ${bits.join(' וגם ')}. ${bits.length > 1 ? 'שני הפסים חייבים להתמלא — רשת רווחית בלי קופה לא יוצאת מהמירוץ.' : ''}`.trim();
+    }
+    default: return '';
+  }
+}
+
+/**
+ * The panel model.
+ * @param m   E.metrics(S)
+ * @param o   { thresholds: E.starThresholds(world, charId, m.rules), learn?: bool, startNW?: number (history only),
+ *              impactPending?: number (m.worldIndicators.impactPending) }
+ */
+export function goalPanelModel(m, o = {}) {
+  const th = o.thresholds || {};
+  const goalType = m.goalType;
+  const rw = isRunway(m) || (isCoverage(m) ? 'cov' : false); const parts = (m.goalParts || []).map((p) => part(p, rw, isFarm(m)));
+  const gaps = parts.map((p) => gapText(p, goalType)).filter(Boolean);
+  const bench = goalType === 'benchmark';
+  const allMet = parts.length > 0 && parts.every((p) => p.met);
+  const H = m.goalHold || { streak: 0, need: 2, met: false };
+  const hold = bench ? null : {
+    need: H.need, streak: Math.min(H.streak || 0, H.need), met: !!H.met, ok: (H.streak || 0) >= H.need,
+    text: `היעד צריך להחזיק ${paydays(H.need)} ברצף`,
+    status: H.met || H.streak > 0 ? `מחזיק ${Math.min(H.streak || 0, H.need)}/${H.need}` : 'עוד לא התחיל',
+  };
+  const month = m.month || 0;
+  const happyNow = m.life ? (m.life.happinessBase ?? m.life.happiness) : null;   // buildEnd reads st.life.happiness (the base, without the passing glow)
+  const fundNow = m.emergency ? m.emergency.months : null;
+  const gates = [];
+  if (fundNow != null && th.fundMonths != null) gates.push({ key: 'fund', text: `קרן חירום: לפחות ${th.fundMonths} חודשי הוצאות`, now: `${fundNow}/${th.fundMonths}`, ok: fundNow >= th.fundMonths });
+  if (happyNow != null && th.happy != null) gates.push({ key: 'happy', text: `אושר ${th.happy} לפחות`, now: `${Math.round(happyNow)}/${th.happy}`, ok: Math.round(happyNow) >= th.happy, note: m.life && m.life.happiness !== m.life.happinessBase ? 'בלי השמחה הזמנית' : null });
+  // worlds: a module's own ★★★ rule when the engine exposes it (w6 worldIndicators.plant.starGate: no safety-inspection stop in 12 months)
+  for (const x of Object.values(m.worldIndicators || {})) {
+    const sg = x && typeof x === 'object' ? x.starGate : null;
+    if (sg && sg.label) gates.push({ key: sg.id || 'world', text: String(sg.label).replace(/^★+\s*/, ''), now: sg.ok ? 'כרגע ✓' : 'נעצר', ok: !!sg.ok });
+  }
+  // w10: ★★★ also needs no forced liquidation (portfolio.js starGates 'noForced'; the count is worldIndicators.portfolio.forced)
+  const PFi = (m.worldIndicators || {}).portfolio;
+  if (PFi && PFi.forced != null && !gates.some((g) => g.key === 'noForced')) gates.push({ key: 'noForced', text: 'בלי אף מכירה כפויה', now: +PFi.forced ? `${nf(+PFi.forced)} מכירות כפויות` : 'כרגע ✓', ok: !+PFi.forced });
+  // w20: ★★★ also needs no redemption gate (funds.js starGates 'noGate'; the count is worldIndicators.funds.gates)
+  const FDi = (m.worldIndicators || {}).funds;
+  if (FDi && FDi.gates != null && !gates.some((g) => g.key === 'noGate')) gates.push({ key: 'noGate', text: 'בלי לנעול פדיונות אף פעם', now: +FDi.gates ? `${nf(+FDi.gates)} נעילות` : 'כרגע ✓', ok: !+FDi.gates });
+  let stars = null, starsNote = null;
+  if (o.learn) starsNote = 'במשחק לימוד לא אוספים כוכבים — כאן רק לומדים.';
+  else if (bench) {
+    const realNW = m.life ? m.life.realNetWorth : null;
+    stars = [
+      { n: 1, text: 'שווי ריאלי (אחרי אינפלציה) גבוה מבהתחלה', now: realNW != null ? fmtM(realNW) : null, ok: o.startNW != null && realNW != null ? realNW > o.startNW : null },
+      { n: 2, text: 'לנצח את "קנה והחזק" בסוף התקופה', now: null, ok: allMet },
+      { n: 3, text: 'לנצח, וגם אושר 60 לפחות', now: null, ok: null, gates: gates.filter((g) => g.key === 'happy') },
+    ];
+  } else {
+    const max = m.maxMonths ?? th.maxMonths;
+    const row = (n, lim) => ({ n, limit: lim, text: `לצאת מהמירוץ עד חודש ${lim}`, now: month <= lim ? `עכשיו חודש ${month}` : `עבר — עכשיו חודש ${month}`, ok: month <= lim });
+    stars = [row(1, max), row(2, th.t2 ?? max), { ...row(3, th.t3 ?? max), gates }];
+    if (m.mode === 'free') starsNote = 'במשחק חופשי הזמן לא נגמר — אבל הכוכבים נמדדים לפי החודש שבו יוצאים.';
+  }
+  const ladder = bench ? [] : milestoneLadder(m);   // wave 3a: the near-goal ladder (metrics values only)
+  return {
+    goalType, rule: ruleText(goalType, parts), parts, gaps, met: allMet, hold, stars, starsNote, month, ladder, next: bench ? null : nextMilestone(m),
+    pending: goalType === 'netWorthImpact' && o.impactPending ? `עוד ${pts(nf(o.impactPending))} בדרך (מתבשלות)` : (parts.find((p) => p.note) || {}).note || null,
+    totals: { assets: m.totalAssets, liabilities: m.totalLiabilities, netWorth: m.netWorth,
+      assetsText: fmtM(m.totalAssets || 0), liabilitiesText: fmtM(m.totalLiabilities || 0), netWorthText: fmtM(m.netWorth || 0) },
+    /** one line for the toggle's accessible name and the phone HUD (the first gap, or "the goal is met") */
+    summary: gaps[0] || (bench ? 'השווי שלך מעל "קנה והחזק"' : hold && hold.ok ? 'היעד הושג' : `היעד הושג — ${hold ? hold.status : ''}`),
+  };
+}
+
+/** Debt-bearing monthly lines of the engine's statement (bank-loan and card interest): their sum. */
+const DEBT_LINES = new Set(['loan', 'credit']);
+export function debtMonthly(m) { return (m.expenseLines || []).reduce((s, l) => s + (DEBT_LINES.has(l.id) ? +l.amount || 0 : 0), 0); }
+/** The snapshot game.js keeps between renders (engine values only). */
+export const debtSnap = (m) => ({ total: +m.totalLiabilities || 0, monthly: debtMonthly(m) });
+/**
+ * New debt between two snapshots: {amount, monthly, text} when total liabilities rose, else null.
+ * monthly = the rise of the engine's own loan / card interest lines (0 for a mortgage: its cost is inside the asset's cash flow).
+ */
+export function newDebt(before, after) {
+  if (!before || !after) return null;
+  const amount = Math.round(after.total - before.total);
+  if (!(amount > 0)) return null;
+  const monthly = Math.max(0, Math.round(after.monthly - before.monthly));
+  return { amount, monthly, text: `חוב חדש ${fmtM(amount)}${monthly ? ` · ${fmtM(monthly)} בחודש` : ''}` };
+}
+
+/* ---------- wave 3a (J1 P0-2, brief §8 "יעד קרוב"): the near-goal milestone ladder for every world and mode.
+ * Built ONLY from E.metrics(S) values (emergency.months / target, assets[].cf, goalParts value / target, goalHold) — comparisons, no new
+ * rule, nothing saved. The rungs, in order: 🛟 one month in the fund → a first asset that brings money every month → 🛟 the fund target
+ * (★★★) → each goal part at ¼, ½ and ¾ of its target → the goal itself → the goal holding its paydays. The next unmet rung is shown in
+ * the HUD (#hNext) once the tutorial goal chain (metrics().nextGoal) is done; null when everything is met (or for the benchmark race). */
+const QUARTER = [[0.25, 'רבע'], [0.5, 'חצי'], [0.75, 'שלושה רבעים']];
+const mo1 = (x) => Math.round((+x || 0) * 10) / 10;
+export function milestoneLadder(m) {
+  const out = [];
+  const E = m.emergency || null; const fundT = E && E.target ? E.target : 3;
+  if (E) out.push({ id: 'fund1', icon: '🛟', title: 'חודש הוצאות בקרן החירום', value: mo1(E.months), target: 1, unit: 'mo', met: (+E.months || 0) >= 1 });
+  const cfAssets = (m.assets || []).filter((a) => (+a.cf || 0) > 0).length;
+  out.push({ id: 'asset1', icon: '🏠', title: 'נכס ראשון שמכניס כסף כל חודש', value: Math.min(1, cfAssets), target: 1, unit: 'n', met: cfAssets >= 1 });
+  if (E && fundT > 1) out.push({ id: 'fund' + fundT, icon: '🛟', title: `${fundT} חודשי הוצאות בקרן (ל־★★★)`, value: mo1(E.months), target: fundT, unit: 'mo', met: (+E.months || 0) >= fundT });
+  const parts = (m.goalParts || []).filter((p) => p.key !== 'benchmark');
+  for (const p of parts) {
+    const v = +p.value || 0, t = +p.target || 0; if (!(t > 0)) continue;
+    if (RATIO_GE.has(p.key) || p.key === 'combined12' || p.key === 'netDebtEbitda') {   // w14 / w18 / w19: one rung, in % or ×
+      const T = { capRatio: [`יחס הון של ${pct1(t)} לפחות`, '🏦', 'pge'], solvency: [`כושר פירעון של ${pctT(t)} לפחות`, '🛟', 'pge'], combined12: [`יחס משולב של ${pctT(t)} לכל היותר`, '☂️', '%'], netDebtEbitda: [`חוב נטו של ×${nf(t)} לכל היותר מהרווח התפעולי`, '⚖️', 'xle'] }[p.key];
+      out.push({ id: `${p.key}`, icon: T[1], title: T[0], value: v, target: t, unit: T[2], met: isLe(p) ? v <= t : v >= t });
+      continue;
+    }
+    if (p.key === 'productsEarning') { for (let k = 1; k <= t; k++) out.push({ id: `${p.key}${k}`, icon: '💊', title: k === 1 ? 'תרופה ראשונה שמרוויחה' : `${drugsT(k)} שמרוויחות`, value: Math.min(v, k), target: k, unit: 'n', met: v >= k }); continue; }   // w17
+    if (p.key === 'stakeMkt') { const BL = (m.worldIndicators || {}).bell; if (BL) out.push({ id: 'ipo', icon: '🔔', title: 'הנפקה בבורסה: הפעמון מצלצל', value: BL.listed ? 1 : 0, target: 1, unit: 'n', met: !!BL.listed }); }   // w19
+    if (isLe(p)) {   // w13 wages ÷ revenue: one rung (at most the target), in %, no quarters (value 1 = "no 12-month data yet")
+      out.push({ id: `${p.key}`, icon: '⚖️', title: `שכר של ${pctT(t)} מההכנסות לכל היותר`, value: v, target: t, unit: '%', met: v <= t });
+      continue;
+    }
+    if (p.unit === 'months') {   // w7 liquidity: one rung (months of fixed costs), no quarters · w12 coverage · w12 / w16 a no-event streak
+      const title = isStreak(p) ? (p.key === 'noDefault:margin' ? `${nf(t)} חודשים בלי סגירה בכוח של גידור` : p.key === 'noDefault:default' ? `${nf(t)} חודשים בלי חדלות פירעון בקבוצה` : p.key === 'noDefault:regulator' ? `${nf(t)} חודשים בלי התערבות המפקח` : `${nf(t)} חודשים ברצף`)
+        : isCoverage(m) ? `כיסוי נזילות ×1 (מזומן במטה ל־${nf(t)} חודשים של החזרים)` : isRunway(m) ? `מזומן ל־${nf(t)} חודשים (או חברה רווחית)` : `קופה של ${nf(t)} חודשי עלויות קבועות`;
+      out.push({ id: `${p.key}`, icon: isStreak(p) ? '🛡️' : '🛟', title, value: Math.min(v, Math.max(t, 0)), target: t, unit: 'mo', met: v >= t });
+      continue;
+    }
+    for (const [f, word] of QUARTER) {
+      const goal = t * f;
+      const title = p.key === 'passive' ? `הכנסה פסיבית שמכסה ${word} מההוצאות` : p.key === 'opIncome' ? `הכנסה תפעולית של ${fmtM(goal)} בחודש אחרי החזר החוב` : p.key === 'impact' ? `${Math.ceil(goal)} נקודות השפעה` : p.key === 'passive12' ? `ממוצע שנתי של ${fmtM(goal)} בחודש ${isFarm(m) ? 'מהמשק' : 'מהנכסים'}` : p.key === 'stakeValue' ? `החלק שלך בחברה שווה ${fmtM(goal)}` : p.key === 'stakeMkt' ? `החלק שלך שווה בבורסה ${fmtM(goal)}` : p.key === 'aum' ? `${fmtM(goal)} בניהול` : p.key === 'equity' ? `הון של ${fmtM(goal)} בבנק` : `שווי נקי של ${fmtM(goal)}`;
+      out.push({ id: `${p.key}${Math.round(f * 100)}`, icon: p.key === 'impact' ? '💗' : p.key === 'passive' || p.key === 'passive12' ? '💸' : '📈', title, value: v, target: p.key === 'impact' ? Math.ceil(goal) : Math.round(goal), unit: p.key === 'impact' ? 'n' : '₪', met: v >= goal && (p.key !== 'passive' || v > 0) });
+    }
+  }
+  if (parts.length) {
+    const okP = (p) => (isLe(p) ? (+p.value || 0) <= (+p.target || 0) : (+p.value || 0) >= (+p.target || 0) && (p.key !== 'passive' || (+p.value || 0) > 0));
+    const all = parts.every(okP);
+    out.push({ id: 'goal', icon: '🏁', title: m.goalType === 'passive' ? 'הכנסה פסיבית שמכסה את כל ההוצאות' : 'היעד של המפה', value: parts.length === 1 ? +parts[0].value || 0 : parts.filter(okP).length,
+      target: parts.length === 1 ? +parts[0].target || 0 : parts.length, unit: parts.length === 1 ? (parts[0].key === 'impact' ? 'n' : parts[0].unit === 'months' ? 'mo' : '₪') : 'n', met: all });
+    const H = m.goalHold; if (H && H.need) out.push({ id: 'hold', icon: '⏳', title: `היעד מחזיק ${paydays(H.need)} ברצף`, value: Math.min(H.streak || 0, H.need), target: H.need, unit: 'n', met: (H.streak || 0) >= H.need });
+  }
+  return out;
+}
+/** the next unmet rung as the #hNext card data ({id, title, value, target, unit, valText, step, of}) — null when none is left */
+export function nextMilestone(m) {
+  if (!m || m.goalType === 'benchmark') return null;
+  const L = milestoneLadder(m); const i = L.findIndex((x) => !x.met); if (i < 0) return null;
+  const x = L[i];
+  // "X מתוך Y" (words, not a slash: a fraction inside a Hebrew line reads in either order)
+  const valNum = x.unit === '₪' ? `${fmtM(x.value)} מתוך ${fmtM(x.target)}` : x.unit === 'pge' ? `${x.id === 'capRatio' ? pct1(x.value) : pctT(x.value)} (היעד: לפחות ${x.id === 'capRatio' ? pct1(x.target) : pctT(x.target)})` : x.unit === 'xle' ? `${xT(x.value)} (היעד: עד ×${nf(x.target)})` : x.unit === '%' ? `${pctT(x.value)} (היעד: עד ${pctT(x.target)})` : x.unit === 'mo' ? `${x.value} מתוך ${x.target}` : `${nf(x.value)} מתוך ${nf(x.target)}`;
+  const valUnit = x.unit === 'mo' ? 'חודשים' : '';
+  return { id: 'ms:' + x.id, icon: x.icon, title: x.title, value: Math.max(0, x.value), target: x.target, unit: x.unit === '₪' ? '₪' : '', valNum, valUnit,
+    valText: valUnit ? `${valNum} ${valUnit}` : valNum, step: i + 1, of: L.length, done: false };
+}
+
+/* ---------- wave 3a (J1 P0-4, brief §18): one "💼 ניהול כסף" hub — the model (engine values only; every action is an existing call) */
+/**
+ * m = E.metrics(S). Rows in the order fund → loans → index → plan → focus; each row: current value text + its actions
+ * (act ids game.js already handles: save / unsave → E.moveSavings, loan / repay / credit → E.takeLoan / repayLoan / payCredit,
+ * invest → E.invest / E.setAutoInvest, plan → E.setPlan, focus → E.setFocus). `on` mirrors the engine's own enable flags.
+ */
+export function moneyHubModel(m) {
+  const E = m.emergency || { months: 0, target: 3, balance: 0 };
+  const ix = m.index || null; const L = m.life || {}; const F = m.focus || null;
+  const loans = +m.loans || 0, card = +m.credit || 0; const monthly = debtMonthly(m);
+  const planLabel = ((L.plans || []).find((p) => p.id === L.plan) || {}).label || '';
+  const rows = [
+    { id: 'fund', icon: '🛟', title: 'קרן חירום', value: `${Math.round((+E.months || 0) * 10) / 10} מתוך ${E.target || 3} חודשי הוצאות · ${fmtM(+E.balance || 0)}`,
+      acts: [{ act: 'save', label: 'להפקיד', on: (+m.cash || 0) > 0 }, { act: 'unsave', label: 'למשוך', on: (+E.balance || 0) > 0 }] },
+    { id: 'loans', icon: '🏦', title: 'הלוואות ואשראי', value: loans || card ? `הלוואות ${fmtM(loans)}${card ? ` · אשראי ${fmtM(card)}` : ''}${monthly ? ` · ריבית ${fmtM(monthly)} בחודש` : ''}` : 'אין חובות',
+      acts: [{ act: 'loan', label: `לקחת ${fmtM(+m.loanUnit || 0)}`, on: m.canBorrow !== false }, { act: 'repay', label: `להחזיר ${fmtM(+m.loanUnit || 0)}`, on: !!m.canRepay }, ...(card ? [{ act: 'credit', label: 'לסגור אשראי', on: !!m.canPayCredit }] : [])] },
+  ];
+  if (ix) rows.push({ id: 'index', icon: '📊', title: 'קרן מדד', value: `${nf(ix.qty)} יחידות · ${fmtM(+ix.value || 0)}${ix.autoInvest ? ` · הוראת קבע ${fmtM(ix.autoInvest)} בחודש` : ' · בלי הוראת קבע'}`,
+    acts: [{ act: 'invest', label: 'לקנות / למכור · הוראת קבע', on: true }] });
+  if (L.plans && L.plans.length) rows.push({ id: 'plan', icon: '📅', title: 'התוכנית החודשית', value: planLabel || L.plan || '', acts: [{ act: 'plan', label: 'לשנות', on: true }] });
+  // worlds wave 1: a world with a panel descriptor (w5 "עונות ותפוסה") opens it from the hub too
+  const WI = m.worldIndicators || {};
+  if (WI.panel) {
+    const cr = WI.credit; const tr = WI.trials; const isr = WI.insure; const bl = WI.bell; const fd = WI.funds;   // w14 / w17 / w18 / w19 / w20
+    const se = WI.season; const pl = WI.plant; const ch = WI.chain; const pj = WI.proj; const en = WI.energy; const pf = WI.portfolio; const lg = WI.league; const mn = WI.multinational; const pfm = WI.platform; const hd = WI.holding; const hv = WI.harvest; const g = (WI.panel.gauges || []).find((x) => x.id === 'runway');
+    // w6 (plant): lines, utilisation, lines down, runway (metrics values only)
+    const down = pl ? (WI.panel.rows || []).filter((r) => r.down).length : 0;
+    const value = se ? `ביקוש ${(Math.round((+se.tour || 0) * 100) / 100).toFixed(2)}${g && g.value != null ? ` · כרית לחורף ${Math.round(g.value * 10) / 10} חודשים` : ''}${se.line ? ` · קו עונתי ${fmtM(se.line)}` : ''}`
+      : pl ? `${pl.lines} מתוך ${pl.slots} קווים${pl.utilisation != null ? ` · ניצולת ${Math.round(pl.utilisation * 100)}%` : ''}${down ? ` · ${down} בתקלה` : ''}${pl.runway != null ? ` · כרית ${Math.round(pl.runway * 10) / 10} חודשי קבועות` : ''}`
+      // w7 (chain): branches (+ franchises), managers' span, liquidity months; w8 (projects): open projects, equity still owed, the rate
+      : ch ? `${ch.branches} סניפים${ch.franchises ? ` · ${ch.franchises} בזכיינות` : ''} · ניהול ${ch.branches}/${ch.span} · קופה ${monthsText(ch.liqMonths)}`
+      : pj ? `${pj.open} ${pj.open === 1 ? 'פרויקט פתוח' : 'פרויקטים פתוחים'}${pj.equityCalls ? ` · הון עצמי שעוד צריך ${fmtM(pj.equityCalls)}` : ''} · ריבית ${pj.rate}%${(pj.plots || []).length ? ` · ${pj.plots.length} מגרשים` : ''}`
+      // w9 (energy): operating income after debt service vs the target, the rate, free grid slots; w10 (portfolio): net worth, LTV, liquid vs owed
+      : en ? `הכנסה תפעולית ${fmtM(en.income)} מתוך ${fmtM(en.target)} בחודש · ריבית ${en.rate}%${en.slots ? ` · ${en.slots.free} חיבורים פנויים` : ''}`
+      : pf ? `שווי נקי ${fmtM(pf.nw)} · מינוף ${Math.round((+pf.ltv || 0) * 100)}%${pf.call ? ' · ⚠️ קריאת מרווח' : ''}${pf.unfunded ? ` · התחייבויות פתוחות ${fmtM(pf.unfunded)}` : ''}`
+      // w13 (league): the place in the table and the tier, wages vs revenue (12 months)
+      : lg ? `מקום ${lg.rank} ב${lg.divName} · מחזור ${lg.round}/${lg.rounds} · שכר ${+lg.wageRatio > 0 ? `${pctT(lg.wageRatio)} מההכנסות` : 'מול הכנסות: עוד אין נתונים'}${lg.window ? ' · חלון העברות פתוח' : ''}`
+      // w11 (multinational): subs, attention, trust; w15 (platform): runway, stake, users
+      : mn ? `${mn.subs} חברות־בנות · קשב ${mn.used}/${mn.slots} · ${(WI.panel.rows || []).some((r) => r.mgr) ? `אמון ${pctT(mn.trust)}` : 'בלי מנהלים'}${mn.frauds ? ` · ${mn.frauds} הונאות` : ''}`
+      : pfm ? (pfm.sold ? `החברה נמכרה ב־${fmtM(pfm.proceeds)}` : `${+pfm.runway >= NO_FIXED ? 'רווחית' : `מזומן ל־${mo1(pfm.runway)} חודשים`} · החלק שלך ${pctT(pfm.stake)} · ${(+pfm.users || 0).toLocaleString('en-US')} משתמשים`)
+      // w12 (holding): divisions, the rating, coverage in × and months; w16 (harvest): the regime, the farm's month, fields growing
+      : hd ? `${hd.divs} חטיבות · ${hd.guaranteed} בערבות · דירוג ${hd.rating} · כיסוי ${covX(hd.covMonths)} (${monthsText(hd.covMonths, 'cov')})${hd.storm ? ` · סערה: ${hd.storm.name}` : ''}`
+      : hv ? `${hv.regimeLabel} · הכנסת המשק החודש ${fmtM(hv.income)} · ${((n) => (n === 1 ? 'שדה אחד' : `${n} שדות`))((hv.slots || []).filter((x) => x && x.phase === 'grow').length)} בגידול${hv.forced ? ` · ${hv.forced} סגירות בכוח` : ''}`
+      // w14 (credit): the capital ratio, confidence, the equity; w17 (trials): candidates, drugs, the lab's month; w18 (insure): solvency, combined, reinsurance;
+      // w19 (bell): listed or not, the price vs the peers, net debt ÷ EBITDA; w20 (funds): money managed, the return vs the index, redemptions
+      : cr ? `יחס הון ${pct1(cr.capRatio)} · אמון ${nf(cr.conf)} מתוך 100 · ההון שלך ${fmtM(cr.equity)}${cr.crunch ? ' · משבר אשראי' : ''}${cr.regs ? ` · ${nf(cr.regs)} כניסות של המפקח` : ''}`
+      : tr ? `${drugsT(tr.earning)} מרוויחות · ${tr.sectorLabel} · המעבדה החודש ${fmtM(tr.inc)}${tr.fails ? ` · ${nf(tr.fails)} ניסויים נכשלו` : ''}`
+      : isr ? `כושר פירעון ${pctT(isr.solvency)} · יחס משולב ${pctT(isr.combined12)} · ${isr.xol ? `${nf(isr.xol)} שכבות ביטוח משנה` : 'בלי ביטוח משנה לסערות'}${isr.stormSeason ? ' · עונת הסערות' : ''}`
+      : bl ? `${bl.listed ? `מניה ₪${(Math.round((+bl.price || 0) * 100) / 100).toFixed(2)} מול ₪${(Math.round((+bl.peer || 0) * 100) / 100).toFixed(2)} אצל המתחרים` : 'עוד לא רשומה בבורסה'} · חוב נטו ${xT(bl.netDebtEbitda)} מהרווח · ${bl.sectorLabel}`
+      : fd ? `${fmtM(fd.aum)} בניהול · מול המדד ${Math.abs(fd.rel12) < 0.0005 ? '0%' : (fd.rel12 > 0 ? '+' : '−') + pct1(Math.abs(fd.rel12))} ב־12 חודשים${fd.pending ? ` · בקשות פדיון ${fmtM(fd.pending)}` : ''}${fd.gate ? ' · פדיונות נעולים' : ''}`
+      : (WI.panel.title || '');
+    rows.push({ id: 'world', icon: cr ? '🏦' : tr ? '🧪' : isr ? '☂️' : bl ? '🔔' : fd ? '📈' : se ? '🌴' : pl ? '🏭' : ch ? '🛍️' : pj ? '🏗️' : en ? '☀️' : pf ? '📊' : lg ? '🏟️' : mn ? '🌍' : pfm ? '☁️' : hd ? '👑' : hv ? '🌾' : '🧭', title: WI.panel.title || 'לוח המפה', value,
+      acts: [{ act: 'world', label: se ? 'מחירים, צוות וקו עונתי' : pl ? 'תחזוקה, משמרות וחוזים' : ch ? 'מלאי, מנהלים וסניפים' : pj ? 'מכירות מוקדמות, שלבים ומימון' : en ? 'מימון מחדש, חוזים וחיבורים' : pf ? 'מניות, נרות, מינוף וקרנות' : lg ? 'הטבלה, הסגל והאצטדיון' : mn ? 'מנהלים, ביקורות, ספקים ומטבעות' : pfm ? 'פרסום, קבוצות משתמשים וגיוסים' : hd ? 'ערבויות, תמיכה, צמיחה ומכירות' : hv ? 'גידולים, גידור, ממגורה וקרקע' : cr ? 'מחירי אשראי, נזילות, הון ודיבידנד' : tr ? 'להמשיך, לעצור או להעביר לשותף' : isr ? 'מחירים, ביטוח משנה והשקעות' : bl ? 'הנפקה, הדרכה, דיבידנד וצמיחה' : fd ? 'לונג, שורט, סיכון ופדיונות' : 'לפתוח', on: true }] });
+  }
+  if (F && F.current) rows.push({ id: 'focus', icon: '🎯', title: 'מוקד החודש', value: F.opsOpen ? 'לוח העסק מחכה' : F.current.label, acts: [{ act: 'focus', label: F.opsOpen ? 'לפתוח את לוח העסק' : 'לבחור', on: true }] });
+  return { rows, cash: +m.cash || 0, cashText: fmtM(+m.cash || 0) };
+}

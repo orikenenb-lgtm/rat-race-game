@@ -133,7 +133,7 @@ async def t_learn(b):
     end = await pg.inner_text('.end-card')
     check('בתרגול 🎓' in end and 'במשחק רגיל' in end and 'במצב תרגול לא נאספים כוכבים' in end, 'AC-L4 S-L1 + S-L3 + S-L5 on the learning end screen')
     check(await pg.locator('#endShare').count() == 0 and await pg.locator('[data-act=end-normal]').count() == 1 and await pg.locator('[data-act=end-learn]').count() == 1, 'AC-L4 no duel/share button; S-L6 + S-L7 present')
-    check(await pg.locator('.end-acts [data-act=end-next][data-id=w2]').count() == 1 and (p1.get('cleared') or {}).get('w1') is True, 'P0 a practice escape from w1 opens w2: "לעולם הבא" on the learning end screen + cleared.w1')
+    check(await pg.locator('.end-acts [data-act=end-next][data-id=w2]').count() == 1 and (p1.get('cleared') or {}).get('w1') is True, 'P0 a practice escape from w1 opens w2: "למפה הבאה" on the learning end screen + cleared.w1')
     keys2 = await pg.evaluate("Object.keys(localStorage)")
     check('rr2-save-learn-w1' not in keys2 and 'rr2-save-free-w1' in keys2, 'learning save cleared at the end; the normal save is kept')
     check(await pg.locator('.end-near').count() == 0 and await pg.locator('.end-gate').count() == 0, 'review m-1 the learning end screen shows no engine star line (end-near ★ / ★★★ gate)')
@@ -293,7 +293,11 @@ async def t_naming(b):
         if go: await pg.evaluate("document.querySelector('[data-act=home]') && document.querySelector('[data-act=home]').click()"); await pg.wait_for_timeout(200); await pg.evaluate(go); await pg.wait_for_selector(sel)
         texts.append(await pg.evaluate("document.body.innerText + ' ' + [...document.querySelectorAll('[aria-label],[title]')].map(e=>(e.getAttribute('aria-label')||'')+' '+(e.title||'')).join(' ')"))
     allt = ' '.join(texts)
-    check('אנרגי' not in allt, 'AC-N1 no "אנרגיה" in the lobby screens (text, aria-label, title)')
+    # a map's own name / lines are content, not the ⚡ wording (w9 "מדבר האנרגיה" has been on the map since it was registered — this check
+    # failed on fb8db75 before the worlds / maps split for that reason alone): drop every meta / planned name, tagline and learn line first
+    names = await pg.evaluate("Promise.all([import('./js/worlds/meta.js'), import('./js/worlds-groups.js')]).then(([M, G]) => [...M.WORLD_META.flatMap((m) => [m.name, m.tagline, m.learn, m.newHere, m.goalLabel]), ...Object.values(G.PLANNED).flatMap((p) => [p.name, p.tagline]), ...G.WORLD_GROUPS.map((g) => g.learn)].filter(Boolean))")
+    for nm in sorted(names, key=len, reverse=True): allt = allt.replace(nm, ' ')
+    check('אנרגי' not in allt, 'AC-N1 no "אנרגיה" in the lobby screens (text, aria-label, title) — map names and lines aside')
     check('אל תשבור' not in allt, '§11 no threatening streak copy')
     await ctx.close()
 

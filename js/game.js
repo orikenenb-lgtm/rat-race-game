@@ -23,6 +23,20 @@ import * as onboard from './onboard.js';   // T4 IR-T4-3: tutorial / world coach
 import { assetInfo } from './render/assetinfo.js';          // T5 CR-B2: data behind a tapped city item (reads metrics only)
 import { CHAR_STYLE, CHAR_FALLBACK } from './render/vocab.js'; // T5 CR-B5: the pawn's ring colour per character
 import { suspendAudio, resumeAudio } from './audio.js';      // T5 CR-B7
+import { tileSheet, tileText, whereText, stepsTo, landedText, prepareWorldText } from './render/tiles.js';
+import { packCheckpoint, unpackCheckpoint } from './ckcodec.js';
+import { nextMilestone, moneyHubModel } from './hudgoal.js';
+import { NEWS as WV3NEWS } from './render/worldview1420.js';   // w14 / w17 / w18 / w19 / w20: the news kinds (icon, bad, keep)
+import * as CL from './candlelog.js';   // CATALOG-25 §3.9: light candle view — candles rebuilt from st.actions (never saved)
+import { debtSnap, newDebt } from './hudgoal.js';   // wave 2 (A2 G-07): new-debt chip = difference of two engine snapshots   // 3D upgrade wave 1: tile names / descriptions (render-side)
+/* wave 3b — live rooms: a RemoteDriver (js/remote.js) holds the game on the server. D = null → a local game, nothing changes.
+ * With D: every engine mutation is an intent (await), S is replaced in place by the server's redacted view, no saves/⚡/ghosts. */
+let D = null;
+export function setDriver(d) {
+  D = d || null;
+  if (D && D.on) D.on((k) => { if (D !== d || k !== 'change' || !S || !CFG || !CFG.room || busy || card) return; D.adopt(S); render(); ui.setRollEnabled(!S.over && D.canRoll()); });
+}
+const mut = (name, ...a) => (D ? D.call(name, S, ...a) : E[name](S, ...a));   // → the engine's result (a promise in a room)
 
 const STR = OV.STR, SS = saves.STR;
 /** the active renderer: starts as the no-op scene so nothing can crash before init */
@@ -75,7 +89,7 @@ function enterStuck(err, where, variant = null) {
 function barLobby() { try { persist(); } catch (e) { /* ignore */ } OV.hideRecover(); bus.emit('lobby:open', {}); } // stuck stays true: resume-active recovers
 function showRecoverBar(v) {
   const lobby = { label: STR.Rlobby, fn: barLobby };
-  if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
+  if (v === 'R3') OV.showRecover({ title: STR.R3t, body: STR.R3b, details: STR.tech('context-lost', rendererInfo && rendererInfo.gpu), actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.R3d, fn: () => reloadInto3D() }, lobby] });
   else if (v === 'R2' && scene.kind !== '3d') OV.showRecover({ title: STR.R1t, body: STR.R2b2d, actions: [{ label: STR.Rsave, primary: true, fn: () => recover() }, lobby] }); // already מצב קל / none: nothing lighter to offer
   else if (v === 'R2') OV.showRecover({ title: STR.R1t, body: STR.R2b, actions: [{ label: STR.Rlite, primary: true, fn: () => recover({ lite: true }) }, { label: STR.Rsave, fn: () => recover() }, lobby] });
   else {
@@ -126,7 +140,7 @@ export function saveKeyFor(cfg) {
 const keyOf = (k) => (typeof k === 'string' ? k : saveKeyFor(k));
 let quotaWarned = false;
 function persist() {
-  if (!S || !CFG) return;
+  if (!S || !CFG || D) return;
   const r = saves.write(saveKeyFor(CFG), CFG, S);
   // full (quota) or blocked storage (SecurityError, review m-2): tell the player once per game; a refused future-save
   // overwrite is not a storage failure (the future save is kept on purpose)
@@ -149,10 +163,10 @@ function toastWhenIdle(text, opts) { ui.toast(text, { ...opts, urgent: true }); 
 let ckBusy = false, ckNext = null, ckTimer = 0;
 const ranked = () => !!(CFG && CFG.resultId && CFG.mode && CFG.mode !== 'free' && (!net.hasMe || net.hasMe()));
 function checkpoint() {
-  if (!S || !ranked()) return;
+  if (!S || D || !ranked()) return;
   S.ui.seq = (S.ui.seq || 0) + 1;
   persist();
-  ckNext = { rid: CFG.resultId, seq: S.ui.seq, state: JSON.parse(JSON.stringify(S)) };
+  ckNext = { rid: CFG.resultId, seq: S.ui.seq, state: packCheckpoint(S) };   // wave 3a (ONLINE §13): key-order safe (js/ckcodec.js)
   pumpCheckpoint();
 }
 async function pumpCheckpoint() {
@@ -189,7 +203,7 @@ export function savedGame(k) {
   return out;
 }
 export function clearSave(k) { saves.clear(keyOf(k)); }
-export function hasActiveGame() { return !!(S && !S.over); }
+export function hasActiveGame() { return !!(S && !S.over && !summarized); }   // wave 3a: a summarised run has ended (E.endNow)
 export function activeConfig() { return CFG ? { ...CFG } : null; }
 
 /* ============================================================ init */
@@ -257,7 +271,8 @@ async function initRenderer() {
   const r = await loadRenderer({ want: ch.kind, reason: ch.reason, canvas: $('#c'), root: $('#board2d'), onSlow: () => emitInit({ type: 'slow' }) });
   scene = r.scene;
   try { scene.onPick?.(onAssetPick); } catch (e) { console.warn(e); }   // T5 CR-B2
-  rendererInfo = { kind: r.kind, reason: r.reason };
+  try { scene.onTilePick?.(onTilePick); } catch (e) { console.warn(e); }   // wave 1: tap / Enter on a board tile → the tile sheet
+  rendererInfo = { kind: r.kind, reason: r.reason, gpu: r.gpu || '' };
   initPhase = 'models';
   emitInit({ type: 'renderer', kind: r.kind });
   try { scene.setSpeed(speed()); } catch (e) { console.error(e); }
@@ -278,7 +293,7 @@ async function initRenderer() {
   if (scene.kind !== '3d') { scene.buildWorld(w1); scene.placePawn(0); }
   ui.applyTheme(w1);
   frame();
-  if (!S) $('#mText').textContent = 'בחר עולם ודמות, ונתחיל.';
+  if (!S) $('#mText').textContent = 'בחר מפה ודמות, ונתחיל.';
   initPhase = 'done';
   // life / history models (~2.5 MB) are not needed for the lobby: fetch them after boot, off the critical path
   // (startGame awaits the same promise, with its own loading stage)
@@ -289,6 +304,10 @@ async function initRenderer() {
     scene.onContextLost(onContext);
   } else { lifeP = Promise.resolve(); lifeSettled = true; }
   const cam = $('#camBtn'); if (cam) { cam.hidden = scene.kind !== '3d'; cam.dataset.kind = scene.kind; }
+  ui.boardTools({ onHome: homeView, onList: () => openTileList() }); ui.turnChip();
+  ui.setCandleSource?.(candleVm);            // CATALOG-25 §3.9: the trade card's compact chart + the full view read this
+  ui.moneyHubBtn?.(() => openMoneyHub());   // wave 3a (J1 P0-4): one "💼 ניהול כסף" entry   // wave 1: "מבט ראשי", the tile list, the turn chip
+  lastRect = ''; frame();
   syncLiteBtn();
   scene.setPaused(!$('#start').hidden);
 }
@@ -335,22 +354,16 @@ function rendererNotice() {
   if (!rendererInfo) return;
   if (liteJustOn && scene.kind === '2d') { liteJustOn = false; ui.toast(STR.N4, { ms: 6000 }); return; }
   if (noticeDone) return;
-  const { kind, reason } = rendererInfo;
-  if (kind === 'none') { noticeDone = true; ui.toast(STR.N5, { ms: 6000 }); return; }
-  if (kind === '2d') {
-    noticeDone = true;
-    if (reason === 'no-webgl') ui.toast(STR.N1, { ms: 6000 });
-    else if (reason === 'three-failed' || reason === 'three-timeout') ui.toast(STR.N2, { ms: 6000, action: { label: STR.N2a, fn: () => reloadInto3D() } });
-    else if (reason === 'webgl-init-failed') ui.toast(STR.N3, { ms: 6000 });
-    return;
-  }
+  // team ב: one notice per real cause (render/overlay.js noticeFor) + a "פרטים טכניים" line
   let failed = [];
-  try { failed = scene.failedModels(); } catch (e) { failed = []; }
-  if (failed.length) { noticeDone = true; ui.toast(STR.N6, { ms: 6000 }); return; }
-  if (scene.lowPower && !settings.liteOffered && flag('board2d') !== 'off') {
-    noticeDone = true; settings.liteOffered = true; writeSettings({ liteOffered: true });
-    ui.toast(STR.N7, { ms: 6000, action: { label: STR.N7a, fn: () => setLite(true) } });
-  }
+  if (rendererInfo.kind === '3d') { try { failed = scene.failedModels(); } catch (e) { failed = []; } }
+  const n = OV.noticeFor({ ...rendererInfo, failed: failed.length, lowPower: !!scene.lowPower, liteOffered: !!settings.liteOffered, liteAllowed: flag('board2d') !== 'off' });
+  if (!n) return;
+  noticeDone = true;
+  if (!n.text) return;
+  if (n.id === 'N7') { settings.liteOffered = true; writeSettings({ liteOffered: true }); }
+  const fn = n.action === 'reload3d' ? () => reloadInto3D() : n.action === 'lite' ? () => setLite(true) : null;
+  ui.toast(n.text, { ms: n.ms, sub: n.sub, ...(fn ? { action: { label: n.actionLabel, fn } } : {}) });
 }
 function applySettings() {
   scene.setSpeed(speed()); ui.setSpeed(speed());
@@ -374,7 +387,7 @@ function wireUI() {
   bus.on('energy:change', () => updateRollEnergy());
   setInterval(() => { if (!document.hidden && S && usesEnergy() && $('#start').hidden) updateRollEnergy(); }, 1000);
   $('#camBtn').innerHTML = ui.ICON.overview;
-  const lb = $('#liteBtn'); if (lb) lb.onclick = () => { sfx('click'); setLite(scene.kind === '3d'); }; // T1: מצב קל
+  const lb = $('#liteBtn'); if (lb) lb.onclick = () => { if (outPending) { ui.toast('אפשר לעבור למצב קל כשהחייל עוצר'); return; } sfx('click'); setLite(scene.kind === '3d'); }; // T1: מצב קל (wave 3a MINOR-4: not mid-roll)
   $('#camBtn').onclick = () => { const o = scene.getCameraMode() !== 'overview'; scene.setCameraMode(o ? 'overview' : 'follow'); $('#camBtn').setAttribute('aria-pressed', String(o)); $('#camBtn').title = o ? 'חזרה למצלמה שעוקבת אחרי החייל' : 'מבט על כל הלוח'; sfx('click'); };
   $('#homeBtn').onclick = () => { sfx('click'); goLobby(); };
   $('#turboBtn').onclick = () => { settings.turbo = !settings.turbo; writeSettings({ turbo: settings.turbo }); applySettings(); sfx('click'); ui.toast(settings.turbo ? 'טורבו פועל: הכל זז פי 2' : 'מהירות רגילה'); };
@@ -392,6 +405,7 @@ function wireUI() {
     if (ab) { sfx('click'); if (innerWidth <= 820) ui.toggleSheet(false); onAssetPick(ab.dataset.assetOpen); return; }   // T5 CR-B2 keyboard path
     const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
     if (b.dataset.act === 'close') { ui.toggleSheet(false); return; }
+    if (b.dataset.act === 'candles') { sfx('click'); if (!busy) ui.candlesFull?.(b.dataset.tk || null); return; }   // §3.9 read-only view
     sheetAction(b.dataset.act);
   };
   addEventListener('keydown', (e) => {
@@ -409,7 +423,7 @@ function wireUI() {
   // T1 verify D-1: the HUD's second row (life chips) and the mentor bar settle after the first paint and change height without a
   // window resize — re-frame the board whenever their size changes (2D needs it; 3D only re-fits). Only a changed free rect counts.
   if (typeof ResizeObserver === 'function') {
-    let raf = 0; const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (S) frame(false); }); });
+    let raf = 0; const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (!S) return; frame(false); try { ui.placeBoardUi?.(null, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); } }); });
     for (const id of ['hud', 'bar']) { const el = document.getElementById(id); if (el) ro.observe(el); }
   }
 }
@@ -418,11 +432,145 @@ function frame(force = true) {
   const r = ui.freeRect(); const k = [r.x0, r.y0, r.x1, r.y1].map(Math.round).join(',');
   if (!force && k === lastRect) return;
   lastRect = k; scene.frame(r);
+  try { ui.placeBoardUi?.(r, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); }   // wave 3a (NIT-3): the list is the board's text alternative — also with no renderer
+}
+/** wave 1 (B1 G7): "מבט ראשי" — the follow camera at its starting angle and distance (the overview toggle goes back to off) */
+function homeView() {
+  try { scene.homeView?.(); } catch (e) { console.warn(e); }
+  const c = $('#camBtn'); if (c) { c.setAttribute('aria-pressed', 'false'); c.title = 'מבט על כל הלוח'; }
+}
+
+/* ============================================================ wave 1 (B1 G5/G6, A2 G-05): board tiles */
+function boardTiles() { try { return E.boardInfo(S ? S.worldId : (W && W.id) || 'w1'); } catch (e) { return []; } }
+/** tap / click / Enter on a tile (3D raycast or a 2D tile button) → the tile sheet. Never over a card, dialog, coach or the lobby. */
+function onTilePick(i) {
+  const coach = document.querySelector('#coach:not([hidden])');
+  if (!S || busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || coach) return;
+  const tiles = boardTiles(); const t = tiles[i]; if (!t) return;
+  sfx('click');
+  ui.tileSheet?.(tileSheet(t, i, S.pos, tiles.length, W), { onList: () => openTileList() });   // wave 3a (MAJOR-2): the world's own decks
+}
+/** the text alternative of the board (3D canvas and 2D): every tile in play order → its sheet */
+async function openTileList() {
+  // wave 3a (review MAJOR-1): never during a move or under / over a card — the list would stack with the landing card
+  if (!S || busy || ui.isEventOpen() || !$('#gm').hidden || !$('#start').hidden || document.querySelector('#coach:not([hidden])')) return;
+  const tiles = boardTiles(); const pos = S.pos;
+  const items = tiles.map((t, i) => { const tx = tileText(t); return { index: i, name: tx.name, emoji: tx.emoji, where: whereText(stepsTo(pos, i, tiles.length)) }; });
+  const i = await ui.tileList?.(items, { pos });
+  if (i != null && S) onTilePick(i);
+}
+/** the landing: markers + the turn chip + the live region */
+function landed(pos) {
+  try { scene.markTile?.('dest', null); scene.markTile?.('current', pos); } catch (e) { console.warn(e); }
+  const t = boardTiles()[pos]; if (!t) return;
+  const txt = landedText(t);
+  ui.turnChip?.(txt, { quiet: true, ms: 2600 }); ui.announce?.(txt);
+}
+/** A2 G-03: the city always equals E.cityModels(S) (+ the life markers syncLifeCity keeps). Idempotent; engine spawns keep their
+ *  animation (they are already in the scene, so this changes nothing then). Dev fixtures (?fx=, perf) are ignored. */
+const DEV_KEY = /^(fx|perf)/;
+let cityGen = -1;   // the gen whose world + city the scene shows (startGame); reconcile only then
+function cityWant() { return [...E.cityModels(S)]; }
+function reconcileCity() {
+  // wave 3a (review MINOR-3): never between E.rollDice and applyOut(out) of that roll — the roll already changed cityModels(S), the
+  // exit / despawn animation is still to play; the render() right after applyOut reconciles
+  if (!S || outPending || cityGen !== gen || typeof scene.cityKeys !== 'function' || scene.kind === 'none') return;
+  try {
+    const want = cityWant(); const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k));
+    const life = have.filter((k) => k.startsWith('L:'));
+    const wantKeys = new Set([...want.map((m) => m.key), ...life]);
+    if (have.length === wantKeys.size && have.every((k) => wantKeys.has(k))) return;
+    const MODEL = lifeModels();
+    scene.syncCity([...want, ...life.map((k) => ({ key: k, model: MODEL[k] }))], { silent: true });
+    syncLevels(false);
+  } catch (e) { console.warn('[game] reconcileCity', e); }
+}
+/** test hook (not part of the lobby contract): the city the engine wants vs the one on screen, the position and the turn */
+export function cityAudit() {
+  if (!S) return null;
+  const have = (scene.cityKeys?.() || []).filter((k) => !DEV_KEY.test(k)).sort();
+  const want = [...new Set([...E.cityModels(S).map((m) => m.key), ...have.filter((k) => k.startsWith('L:'))])].sort();
+  let pawnTile = S.pos; try { const u = scene.boardUx?.(); if (u) pawnTile = u.pawnTile; } catch (e) { /* ignore */ }
+  // worlds wave 1: the city-piece levels the game set (w5 occupancy: {kind:'occ', n, closed, wing}) beside the engine's own hints
+  const levels = Object.fromEntries([...prevLevels].filter(([, L]) => L));
+  const occ = Object.fromEntries(E.cityModels(S).filter((m) => m.occDecile != null || m.closed).map((m) => [m.key, { decile: m.occDecile ?? 0, closed: !!m.closed }]));
+  // w6: the engine's line state per city piece (plant.js cityModels) — tests compare it with levels / scene.levelOf
+  const plant = Object.fromEntries(E.cityModels(S).filter((m) => m.condPips != null).map((m) => [m.key, { pips: m.condPips, light: m.condLight, running: !!m.running, down: !!m.down, pending: !!m.pending, mothball: !!m.mothball }]));
+  // w7: every branch's engine state (chain.js cityModels) and the managers; w8: every site / rental / plot (projects.js cityModels)
+  const cm = E.cityModels(S);
+  const chain = Object.fromEntries(cm.filter((m) => m.lights != null && 'franchise' in m).map((m) => [m.key, { stage: m.stage, own: !!m.own, fitout: !!m.fitout, flicker: !!m.flicker, stockout: !!m.stockout }]));
+  const managers = cm.filter((m) => m.kind === 'manager').map((m) => m.key);
+  const proj = Object.fromEntries(cm.filter((m) => m.tech == null && (m.pct != null || m.fence || m.stage === 5)).map((m) => [m.key, { stage: m.stage, pct: m.pct ?? null, floors: m.floors ?? null, stalled: !!m.stalled, crane: !!m.craneOn, permit: !!m.permit, presold: m.presold ?? 0, rental: m.stage === 5, plot: !!m.fence }]));
+  // w9: every plant / project / slot / plot (energy.js cityModels); w10: every holding block (portfolio.js cityModels: class, value, call)
+  const energy = Object.fromEntries(cm.filter((m) => m.tech != null).map((m) => [m.key, { tech: m.tech, stage: m.stage ?? 0, pct: m.pct ?? null, unconnected: !!m.unconnected, stalled: !!m.stalled, output: m.output ?? null, offtake: m.offtake || null, stake: m.stake ?? 1, down: !!m.down, slot: !!m.slot, plot: !!m.fence }]));
+  const hold = Object.fromEntries(cm.filter((m) => m.cls != null).map((m) => [m.key, { cls: m.cls, value: m.value ?? 0, call: !!m.call, frozen: !!m.frozen, lockUntil: m.lockUntil ?? null }]));
+  // w13: the stadium (league.js cityModels) and the sponsors' billboards
+  const club = Object.fromEntries(cm.filter((m) => m.seats != null && m.floodlights != null).map((m) => [m.key, { seats: m.seats, stage: m.stage ?? 0, expanded: m.expanded ?? 0, fill: m.fill ?? 0, div: m.div ?? 1, rank: m.rank ?? 0, training: !!m.training, academy: !!m.academy }]));
+  const sponsors = Object.fromEntries(cm.filter((m) => m.expired != null && m.model === 'billboard').map((m) => [m.key, { expired: !!m.expired }]));
+  // w11: every subsidiary (multinational.js cityModels); w15: the app (platform.js cityModels)
+  const subs = Object.fromEntries(cm.filter((m) => m.country != null && m.kind2 != null).map((m) => [m.key, { country: m.country, kind2: m.kind2, self: !!m.self, managed: !!m.managed, trust: m.trust ?? null, audited: !!m.audited, disrupted: !!m.disrupted, dual: !!m.dual, hedged: !!m.hedged, supplier: m.supplier || null }]));
+  const app = Object.fromEntries(cm.filter((m) => m.users != null && m.runway != null).map((m) => [m.key, { users: m.users, runway: m.runway, net: !!m.net, regime: m.regime || null, sold: !!m.sold, stake: m.stake ?? null }]));
+  // w12: every division (holding.js cityModels); w16: the farm (harvest.js cityModels)
+  const divs = Object.fromEntries(cm.filter((m) => m.struct != null && m.kind2 != null && m.country == null).map((m) => [m.key, { kind2: m.kind2, home: m.home || null, struct: m.struct, cable: !!m.cable, fence: !!m.fence, health: m.health ?? null, distress: !!m.distress, support: m.support !== false, stormHit: !!m.stormHit }]));
+  const farm = Object.fromEntries(cm.filter((m) => Array.isArray(m.fields)).map((m) => [m.key, { fields: m.fields.map((f) => (f ? { crop: f.crop, ph: f.ph, hedged: f.hedged ?? 0, irr: !!f.irr } : null)), silo: m.silo ?? 0, regime: m.regime || null }]));
+  // w14 / w17 / w18 / w19 / w20: the bank, the lab, the insurer, the listed company, the fund (their cityModels, as the scene gets them)
+  const bank = Object.fromEntries(cm.filter((m) => m.vault && Array.isArray(m.segments)).map((m) => [m.key, { capRatio: m.capRatio, conf: m.conf, queue: m.queue, segments: m.segments.map((x) => ({ seg: x.seg, book: x.book })) }]));
+  const lab = Object.fromEntries(cm.filter((m) => Array.isArray(m.flasks)).map((m) => [m.key, { flasks: m.flasks.map((f) => (f ? { state: f.state, stage: f.stage, fill: f.fill, cracked: !!f.cracked, lic: !!f.lic } : null)), plant: !!m.plant }]));
+  const ins = Object.fromEntries(cm.filter((m) => Array.isArray(m.lines) && m.solvency != null).map((m) => [m.key, { lines: m.lines.map((x) => ({ line: x.line, prem: x.prem, rel: x.rel, stop: !!x.stop })), solvency: m.solvency, xol: m.xol, qs: !!m.qs, bond: !!m.bond, stormSeason: !!m.stormSeason, cats: m.cats }]));
+  const listco = Object.fromEntries(cm.filter((m) => Array.isArray(m.candle) && Array.isArray(m.divisions)).map((m) => [m.key, { listed: !!m.listed, price: m.price, peer: m.peer, candle: m.candle.slice(), divisions: m.divisions.map((d) => ({ ...d })), activist: !!m.activist }]));
+  const fund = Object.fromEntries(cm.filter((m) => Array.isArray(m.book) && m.aum != null).map((m) => [m.key, { aum: m.aum, peak: m.peak, pending: m.pending, gate: !!m.gate, book: m.book.map((b) => ({ co: b.co, w: b.w })), idxProduct: !!m.idxProduct }]));
+  return { want, scene: have, pos: S.pos, turn: S.turn || 0, pawnTile, levels, occ, plant, chain, managers, proj, energy, hold, club, sponsors, subs, app, divs, farm, bank, lab, ins, listco, fund };
 }
 
 /* ============================================================ T5 CR-B1: business stages / upgrade levels in the city */
 const prevLevels = new Map();
 function levelOf(entry, m) {
+  // w13 (league.js cityModels): the club's stadium (seats, the expansion's stage, fill, tier, rank, floodlights, training ground, academy);
+  // a sponsor's billboard (dark once the contract ended). First: the stadium's `stage` is the stand's works, not a business stage.
+  if (entry.seats != null && entry.floodlights != null) return { kind: 'club', stage: entry.stage ?? 0, seats: entry.seats, expanded: entry.expanded ?? 0, fill: entry.fill ?? 0, div: entry.div ?? 1, rank: entry.rank ?? 4,
+    floodlights: !!entry.floodlights, training: !!entry.training, academy: !!entry.academy };
+  if (entry.expired != null && entry.model === 'billboard') return { kind: 'sponsor', expired: !!entry.expired };
+  // w11 (multinational.js cityModels): a subsidiary — its country, kind, who runs it, the shown trust, audited, disrupted supplier, dual source, hedged
+  if (entry.country != null && entry.kind2 != null) return { kind: 'sub', country: entry.country, supplier: entry.supplier || null, kind2: entry.kind2, self: !!entry.self, managed: !!entry.managed, trust: entry.trust ?? null,
+    audited: !!entry.audited, disrupted: !!entry.disrupted, dual: !!entry.dual, hedged: !!entry.hedged };
+  // w15 (platform.js cityModels): the app — users, runway (99 = cash flow ≥ 0), the network effect, the regime, sold, your stake
+  if (entry.users != null && entry.runway != null) return { kind: 'app', users: entry.users, runway: entry.runway, net: !!entry.net, regime: entry.regime || 'growth', sold: !!entry.sold, stake: entry.stake ?? 0 };
+  // w12 (holding.js cityModels): a division — its kind (home world), guaranteed (a cable to HQ) or ring-fenced (a fence), health, a deficit, HQ support, the storm
+  if (entry.struct != null && entry.kind2 != null) return { kind: 'div', kind2: entry.kind2, home: entry.home || '', struct: entry.struct, health: entry.health ?? 70, distress: !!entry.distress, support: entry.support !== false, stormHit: !!entry.stormHit };
+  // w14 (credit.js cityModels): the bank — the capital ratio, the depositors' confidence, the queue at the door, the book by segment
+  if (entry.vault && Array.isArray(entry.segments)) return { kind: 'bank', cap: entry.capRatio ?? 0, conf: entry.conf ?? 70, queue: entry.queue ?? 0, segs: entry.segments };
+  // w17 (trials.js cityModels): the lab — a flask per candidate slot (state, stage, fill, cracked, licensed), the plant
+  if (Array.isArray(entry.flasks)) return { kind: 'lab', flasks: entry.flasks, plant: !!entry.plant };
+  // w18 (insure.js cityModels): the insurer — its lines (premium, price vs the market, closing), solvency, XoL, quota share, a cat bond, the storm season
+  if (Array.isArray(entry.lines) && entry.solvency != null) return { kind: 'ins', lines: entry.lines, solvency: entry.solvency, xol: entry.xol ?? 0, qs: !!entry.qs, bond: !!entry.bond, season: !!entry.stormSeason, cats: entry.cats ?? 0 };
+  // w19 (bell.js cityModels): the company — listed, the price vs the peers, six months of EBITDA, the divisions, an activist
+  if (Array.isArray(entry.candle) && Array.isArray(entry.divisions)) return { kind: 'listco', listed: !!entry.listed, price: entry.price ?? 0, peer: entry.peer ?? 0, candle: entry.candle, divisions: entry.divisions, activist: !!entry.activist };
+  // w20 (funds.js cityModels): the fund — money managed vs its peak, redemptions waiting, the gate, the book, the index product
+  if (Array.isArray(entry.book) && entry.aum != null) return { kind: 'fund', aum: entry.aum, peak: entry.peak ?? entry.aum, pending: entry.pending ?? 0, gate: !!entry.gate, book: entry.book, idx: !!entry.idxProduct };
+  // w16 (harvest.js cityModels): the farm — its fields (crop, phase, hedged share, irrigated), the silo, the supply regime
+  if (Array.isArray(entry.fields)) return { kind: 'farm', fields: entry.fields, silo: entry.silo ?? 0, regime: entry.regime || 'normal' };
+  // w5 (season.js cityModels): occupancy decile / closed on the asset's own city piece; a closed wing from the panel rows
+  if (entry.occDecile != null || entry.closed) {
+    const row = (((m.worldIndicators || {}).panel || {}).rows || []).find((r) => r.assetId === entry.key);
+    return { kind: 'occ', n: entry.occDecile ?? 0, of: 10, occ: entry.occ ?? null, closed: !!entry.closed, wing: !!(row && row.wing) };
+  }
+  // w6 (plant.js cityModels): a production line's condition (pips + light), running / down / ordered / mothballed, shift, hazard band
+  if (entry.condPips != null) return { kind: 'plant', n: entry.condPips, of: 3, light: entry.condLight, cond: entry.cond ?? null, running: !!entry.running, down: !!entry.down,
+    pending: !!entry.pending, mothball: !!entry.mothball, util: entry.util ?? 0, shift: entry.shift || 1, hazard: entry.hazardBand || null };
+  // w7 (chain.js cityModels): a branch's ramp stage 0–4, own / franchise, fit-out, over-span flicker, stock-out; the stock pool; a manager
+  if (entry.lights != null && 'franchise' in entry) return { kind: 'branch', n: entry.stage ?? 0, of: 4, own: !!entry.own, fitout: !!entry.fitout, flicker: !!entry.flicker, stockout: !!entry.stockout, count: entry.count || 1 };
+  if (entry.kind === 'manager') return { kind: 'mgr', links: entry.links || 6 };
+  const CH = (m.worldIndicators || {}).chain;
+  if (CH && entry.kind === 'inventory') return { kind: 'stock', cover: CH.coverNow };
+  // w9 (energy.js cityModels — every piece carries tech): a project (permit 0 / build 1–3, %, slot, stalled, crane), a plant (4: output, offtake,
+  // stake, down, a price spike), a free grid slot, the kibbutz's plot, the hydrogen pilot (5 = failed). Before w8: w9 pieces carry pct / fence too.
+  if (entry.tech != null) return { kind: 'energy', tech: entry.tech, n: entry.stage ?? 0, of: 4, pct: entry.pct ?? 0, units: entry.units || 3, unconnected: !!entry.unconnected, stalled: !!entry.stalled,
+    crane: !!entry.craneOn, output: entry.output ?? 0, offtake: entry.offtake || null, stake: entry.stake ?? 1, down: !!entry.down, spike: !!entry.spike, slot: !!entry.slot, fence: !!entry.fence };
+  // w10 (portfolio.js cityModels): a block per holding — liquidity class (daily glass / monthly stone / locked vault), value, a margin call, a frozen fund, a lock
+  if (entry.cls != null) return { kind: 'hold', cls: entry.cls, value: entry.value ?? 0, call: !!entry.call, frozen: !!entry.frozen, lockUntil: entry.lockUntil ?? null };
+  // w8 (projects.js cityModels): a project (permit / stage / % / floors / stalled / crane / presold), a rental block (stage 5), a fenced plot
+  if (entry.pct != null || entry.fence || entry.stage === 5) return { kind: 'build', n: entry.stage ?? 0, of: 4, pct: entry.pct ?? (entry.stage === 5 ? 1 : 0), floors: entry.floors ?? 0, stalled: !!entry.stalled,
+    crane: !!entry.craneOn, permit: !!entry.permit, presold: entry.presold ?? 0, rental: entry.stage === 5, plot: !!entry.fence };
   const a = (m.assets || []).find((x) => x.id === entry.key); if (!a) return null;
   const stage = a.business ? (a.business.stage ?? (m.businesses || []).find((b) => b.assetId === entry.key)?.stage) : undefined;
   if (a.business && Number.isFinite(stage)) return { kind: 'biz', n: stage, of: 3, type: a.business.type, activity: a.business.activity || null };
@@ -433,9 +581,10 @@ function syncLevels(animate) {
   if (!S || typeof scene.setLevel !== 'function') return;
   const m = E.metrics(S);
   for (const e of E.cityModels(S)) {
+    if (scene.kind !== 'none' && typeof scene.hasKey === 'function' && !scene.hasKey(e.key)) continue;   // w7: a module piece (a manager's office) joins the city at the next reconcile — its level waits for it
     const L = levelOf(e, m); const prev = prevLevels.get(e.key); const changed = JSON.stringify(L) !== JSON.stringify(prev ?? null);
     if (!changed) continue;
-    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined }); } catch (x) { console.warn(x); }
+    try { scene.setLevel(e.key, L, { animate: animate && prev !== undefined && !(L && (L.kind === 'occ' || L.kind === 'plant' || L.kind === 'stock' || L.kind === 'build' || L.kind === 'energy' || L.kind === 'hold' || L.kind === 'club' || L.kind === 'sponsor' || L.kind === 'sub' || L.kind === 'app' || L.kind === 'div' || L.kind === 'farm' || L.kind === 'bank' || L.kind === 'lab' || L.kind === 'ins' || L.kind === 'listco' || L.kind === 'fund' || (L.kind === 'branch' && prev && prev.n >= L.n))) }); } catch (x) { console.warn(x); }   // w5 occupancy / w6 line state / w7 stock / w8 sites change every month: no bump (a branch bumps when it ramps up a stage)
     const name = ((m.assets || []).find((a) => a.id === e.key) || {}).name || '';
     if (animate && prev && L && L.kind === 'biz' && L.n > prev.n) { ui.feedback?.('levelUp', { key: e.key, level: L, name }); sfx('unlock'); }
     if (animate && prev && L && L.kind === 'biz' && L.n < prev.n) ui.feedback?.('levelDown', { key: e.key, level: L, name });
@@ -451,6 +600,13 @@ function onAssetPick(key) {
   if (info) ui.assetInfo?.(key, info, { world: W, opsOpen: !!(m.focus && m.focus.opsOpen) });
 }
 bus.on('asset:ops', () => openOps());
+bus.on('world:panel', () => openWorldPanel());
+let outPending = false;   // wave 3a (MINOR-3 / MINOR-4): a roll's out is drawn but not applied yet (dice, hops, applyOut)
+/** while a roll is in flight: no city reconcile, and 🪶 waits (the roll's payday fx / news / bailout payload would be dropped) */
+function setOutPending(v) {
+  outPending = !!v;
+  const b = $('#liteBtn'); if (b) { b.disabled = outPending; b.setAttribute('aria-disabled', String(outPending)); }
+}
 let rolling = false;   // T5 CR-B3: dice / hops are animating — a tap or Space / Enter skips the animation (never the outcome)
 
 /* ============================================================ start */
@@ -460,7 +616,7 @@ let rolling = false;   // T5 CR-B3: dice / hops are animating — a tap or Space
  *        pawn, pawnColor, tutorial, resume}
  */
 export async function startGame(cfg = {}) {
-  const my = ++gen;
+  const my = ++gen; cityGen = -1;   // no city reconcile until this start has built its world (G-03)
   stuck = false; OV.hideRecover();
   const orig = { ...cfg };
   try { return await startInner(cfg, my); }
@@ -507,12 +663,20 @@ async function startInner(cfg, my) {
   busy = true; quotaWarned = false;
   closeCard(); ui.hideCoach(); ui.toggleSheet(false); ui.setRollEnabled(false);
   // WebGL died while the lobby was up: this start uses the 2D board
-  if (ctxDead && scene.kind === '3d') { ctxDead = false; try { scene.dispose(); } catch (e) { /* ignore */ } scene = nullScene; initDone = false; initP = null; forced2d = 'webgl-init-failed'; }
+  if (ctxDead && scene.kind === '3d') { ctxDead = false; try { scene.dispose(); } catch (e) { /* ignore */ } scene = nullScene; initDone = false; initP = null; forced2d = 'context-lost'; noticeDone = false; }
   cfg = {
     worldId: 'w1', mode: 'free', pawn: 'classic', pawnColor: '#e2483d', tutorial: false, resume: false,
     ...cfg,
   };
+  if (!cfg.room) D = null;   // wave 3b: only a room start keeps the driver
   if (cfg.seed == null) cfg.seed = (Math.floor(Math.random() * 2147483646) + 1) >>> 0;
+  // worlds wave 0: a lazy world (w5 …) needs its rules before createGame / resume / deserialize. The lobby loads them first; this covers
+  // every other way in (main.js resume after a 2D → 3D reload, a room start, the fallback lobby).
+  if (cfg.worldId && cfg.worldId !== 'h' && typeof E.ensureWorld === 'function' && typeof E.isLoaded === 'function' && !E.isLoaded(cfg.worldId)) {
+    try { await E.ensureWorld(cfg.worldId); }
+    catch (e) { console.warn('world rules', e); if (my !== gen) return false; busy = false; OV.hideLoading(); ui.toast('לא הצלחנו לטעון את המפה. בדוק את החיבור ונסה שוב.', { kind: 'bad', ms: 6000 }); bus.emit('lobby:open', {}); return false; }
+    if (my !== gen) return false;
+  }
   let Wt = null; try { Wt = E.getWorld(cfg.worldId); } catch (e) { Wt = null; }
   const pawnKey = (cfg.pawn || 'classic') + '|' + (cfg.pawnColor || '#e2483d');
 
@@ -562,7 +726,9 @@ async function startInner(cfg, my) {
   const key = saveKeyFor(cfg);
   const isRanked = !!cfg.resultId;
   let st = null, srcCfg = null, srcUi = null, note = null;
-  if (cfg.state || cfg.resume) {
+  if (cfg.state != null) { cfg.state = unpackCheckpoint(cfg.state); if (!cfg.state) return rankedFail(); }   // wave 3a: v2 wrapper or the old bare state
+  if (D && cfg.room) st = D.adopt({ ui: {} });   // wave 3b: the server's view is the state (no local save)
+  else if (cfg.state || cfg.resume) {
     let lr = saves.load(key);
     if (lr.status === 'backup_failed') {
       const go = await noBackupModal(true);
@@ -612,9 +778,11 @@ async function startInner(cfg, my) {
     st.ui = saves.normalizeUi({});
     cfg.charId = st.charId;
   }
-  cfg.resume = false;
+  cfg.resume = false; summarized = false;
   if (ckFloor > (st.ui.seq || 0)) st.ui.seq = ckFloor;
   S = st; CFG = cfg; UIS = S.ui; W = E.getWorld(S.worldId);
+  try { await prepareWorldText(W); } catch (e) { /* the number-free tile wording stays */ }   // w5: module tile texts from the module's constants
+  if (my !== gen) return false;
   ui.setGender(S.gender);   // T3 verify D4: the UI's own strings in the player's gender
   ui.applyTheme(W);
   t6Start();
@@ -648,11 +816,14 @@ async function startInner(cfg, my) {
   try {
     scene.buildWorld(W);
     scene.placePawn(S.pos);
+    try { scene.markTile?.('dest', null); scene.markTile?.('current', S.pos); } catch (e) { console.warn(e); }   // wave 1 (G6)
+    ui.turnChip?.(null);
     scene.syncCity(E.cityModels(S), { silent: true });
+    cityGen = my;
     syncLevels(false);
     OV.hideLoading();
     ui.flushFeedback?.({ toasts: false });   // T5 §4.2: the last game's queued cards / verdicts / reveal lines are not this game's
-    ui.resetHud();
+    ui.resetHud(); debtPrev = null;
     frame(); scene.resetCamera();
     try { scene.setPawnRing?.(CHAR_STYLE[S.charId] || CHAR_FALLBACK); } catch (e) { console.warn(e); }   // T5 CR-B5
     const firstInWorld = !resumed && !S.over && !onboard.worldCoached(W.id);
@@ -727,6 +898,7 @@ function fundWarn(m) {
 /* ============================================================ render */
 function ctx() { return { world: W, st: S, cfg: CFG, isRevealed: onboard.isRevealed, t6: t6Hud() }; }
 let opsSeen = false;
+let debtPrev = null;   // wave 2 (G-07): the last render's {total liabilities, loan + card interest} (engine values; never saved)
 function render(animate = true) {
   if (!S) return;
   const m = E.metrics(S);
@@ -735,9 +907,11 @@ function render(animate = true) {
   onboard.revealTick?.(S, { m, cfg: CFG });   // T4 §4.3: month thresholds (fund 4, happy / tools 6, credit 10, age 12) and ⚡ after the free rolls
   ui.renderHUD(m, ctx(), { animate });
   ui.renderSheet(m, ctx());
+  { const ds = debtSnap(m); const nd = newDebt(debtPrev, ds); debtPrev = ds; if (nd && typeof ui.debtChip === 'function') ui.debtChip(nd); }   // wave 2 (G-07)
   if (typeof ui.worldTag === 'function') ui.worldTag(!!(CFG && CFG.learn));       // T4 S-M7
   const goalOn = !!(m.nextGoal && !m.nextGoal.done);
-  if (typeof ui.renderNext === 'function') ui.renderNext(m.nextGoal || null, { show: onboard.isRevealed('next') });   // T4 §4.3 `next`
+  // T4 §4.3 `next` (the tutorial chain); wave 3a (J1 P0-2): after it — and in every other world / mode — the near-goal ladder's next rung
+  if (typeof ui.renderNext === 'function') ui.renderNext(goalOn ? m.nextGoal : nextMilestone(m), { show: goalOn ? onboard.isRevealed('next') : !S.afterWin });
   if (typeof ui.renderDream === 'function') ui.renderDream(goalOn ? null : m.dream || null);      // T4 §6.4: the dream card replaces #hNext once the goal chain is done
   // T2: an "ops" focus from the agenda is ready → offer to open the business panel between rolls (once per month)
   const ops = !!(m.focus && m.focus.opsOpen);
@@ -746,6 +920,9 @@ function render(animate = true) {
   const wi = m.worldIndicators || {};
   ui.historyStrip(wi.indexHist ? wi.indexHist.map((x) => ({ index: x })) : S.ui.hist, wi.ymText ? wi : null);
   syncLifeCity(m);
+  try { ui.placeBoardUi?.(null, { kind: scene.kind, show: true }); } catch (e) { console.warn(e); }   // wave 3a (MINOR-1): the HUD rows may have grown
+  if (typeof ui.sumRunBtn === 'function') ui.sumRunBtn(canSummarize(), () => summarizeRun(false));   // wave 3a (J1 P0-1)
+  reconcileCity();   // wave 1 (A2 G-03): after every applied decision / roll the city equals cityModels(S) (+ L:*)
 }
 /** Client-side monthly series (saved in st.ui): pension balance and, in history mode, the market path. */
 function track(m) {
@@ -758,9 +935,13 @@ function track(m) {
   if (wi.ymText) { (u.hist ||= []).push({ ym: wi.ym, index: wi.index }); if (u.hist.length > 240) u.hist.shift(); }
 }
 /* life models in the city: family house, university, pension island, index-fund building */
+const LIFE_MODEL = { 'L:home': 'life/home_family', 'L:wedding': 'life/wedding', 'L:uni': 'life/university', 'L:pension': 'life/pension', 'L:index': 'life/index_fund', 'L:side': 'life/side_hustle', 'L:hospital': 'life/hospital' };
+const lifeModels = () => LIFE_MODEL;
 function syncLifeCity(m) {
   const L = m.life; if (!L) return;
   const fam = L.family || {};
+  // A2 G-09 (display only): the wedding age is set BEFORE L:home reads it — an old save without it showed home + wedding together
+  if (fam.partner === 'married') S.ui.weddingAge ??= L.age;
   const want = {
     'L:home': (fam.kids || 0) > 0 || (fam.partner === 'married' && (L.age - (S.ui.weddingAge || 0)) > 0.5),
     'L:wedding': fam.partner === 'married' && !(fam.kids > 0) && (L.age - (S.ui.weddingAge ??= L.age)) <= 0.5,
@@ -772,7 +953,7 @@ function syncLifeCity(m) {
   };
   if (fam.partner !== 'married') delete S.ui.weddingAge;
   if (!want['L:hospital'] && L.plan !== 'rest') S.ui.burnSeen = (S.life && S.life.burnouts) || 0;
-  const MODEL = { 'L:home': 'life/home_family', 'L:wedding': 'life/wedding', 'L:uni': 'life/university', 'L:pension': 'life/pension', 'L:index': 'life/index_fund', 'L:side': 'life/side_hustle', 'L:hospital': 'life/hospital' };
+  const MODEL = LIFE_MODEL;
   const LABEL = { 'L:home': 'הבית של המשפחה', 'L:wedding': 'מזל טוב!', 'L:uni': 'לומד!', 'L:pension': 'קרן הפנסיה', 'L:index': 'קרן מחקה מדד', 'L:side': 'העסק הצדדי', 'L:hospital': 'מנוחה והחלמה' };
   for (const [k, on] of Object.entries(want)) {
     if (on && !scene.hasKey(k)) scene.spawn(k, MODEL[k], { label: busy || ui.isEventOpen() ? LABEL[k] : null, color: 'gold', silent: !S.ui.lifeSeen });
@@ -799,7 +980,7 @@ function safeCall(o, fn, dflt) {
 const RANKED = new Set(['daily', 'weekly', 'challenge']);
 const TUTORIAL_FREE_ROLLS = typeof E.TUTORIAL_FREE_ROLLS === 'number' ? E.TUTORIAL_FREE_ROLLS : 10;
 const usesEnergy = () => {
-  if (!CFG || RANKED.has(CFG.mode) || CFG.resultId) return false;
+  if (!CFG || D || RANKED.has(CFG.mode) || CFG.resultId) return false;
   if (CFG.learn) return false; // T4 §7.1: learning mode never costs ⚡ (also before the engine's rollCost knows st.learn)
   // T4 D-9 (P1): the first 10 rolls of a brand-new player's first game are free (cfg.tutorialFree, set once per player by the lobby;
   // a replayed tutorial does not get it — review M-2); the engine's rollCost takes over once it exports the constant
@@ -884,7 +1065,7 @@ async function lifeChip(kind) {
     void v;
     if (chosenPlan && chosenPlan !== L.plan) {
       const id = chosenPlan; chosenPlan = null;
-      try { const out = E.setPlan(S, id); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי עכשיו'); return; } if (out && out.mentor) ui.mentor(out.mentor); }
+      try { const out = await mut('setPlan', id); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי עכשיו'); return; } if (out && out.mentor) ui.mentor(out.mentor); }
       catch (e) { console.error(e); return; }
       sfx('card'); render(); persist(); checkpoint(); ui.toast('התוכנית עודכנה — מהמשכורת הבאה');
     }
@@ -906,7 +1087,7 @@ async function focusFlow({ inCard = false, cur = null, update = null } = {}) {
     if (!pick || my !== gen || !S || S.over) return;
     if (!inCard && (busy || ui.isEventOpen())) { ui.toast('אפשר לבחור מוקד בין תורות, או בכרטיס המשכורת'); return; }
     let out;
-    try { out = E.setFocus(S, pick.id, pick.slot); } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); return; }
+    try { out = await mut('setFocus', pick.id, pick.slot); } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); return; }
     if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו', { kind: 'bad' }); return; }
     sfx('card');
     await applyOut(out, { inCard });
@@ -920,7 +1101,7 @@ async function focusFlow({ inCard = false, cur = null, update = null } = {}) {
 /** 'ops' from the agenda: open the business panel once, between rolls (E.setFocus('ops', 0)). */
 async function openOps() {
   if (!S || S.over || busy || ui.isEventOpen() || typeof E.setFocus !== 'function') { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
-  let out; try { out = E.setFocus(S, 'ops', 0); } catch (e) { console.error(e); return; }
+  let out; try { out = await mut('setFocus', 'ops', 0); } catch (e) { console.error(e); return; }
   if (!out || out.ok === false) { ui.toast((out && out.error) || 'לא אפשרי עכשיו'); return; }
   await applyOut(out); render(); persist(); checkpoint();
   if (S.pending) await runPending(gen);
@@ -963,7 +1144,7 @@ function storyFlow(card0, my) {
       if (working || my !== gen) return;
       working = true; ctl.busy(true);
       let res;
-      try { res = E.resolveStory(S, cur.itemId, optId); }
+      try { res = await mut('resolveStory', cur.itemId, optId); }
       catch (e) { console.error(e); working = false; ctl.busy(false); ctl.error('לא אפשרי עכשיו'); return; }
       if (!res || res.ok === false) { working = false; ctl.busy(false); if (res && res.error === 'stale') { closeUi(); render(); resolve(null); return; } ctl.error((res && res.error) || 'לא אפשרי עכשיו'); sfx('loss'); return; }
       checkpoint(); closeUi();
@@ -993,7 +1174,7 @@ async function autoInbox(my) {
 }
 /** T2 §15.1: the mentor level, from the ❓ menu (free and history games; ranked shows the fixed level). */
 async function mentorMenu() {
-  if (!S || S.over || typeof E.setMentorLevel !== 'function' || !E.MN) return;
+  if (!S || S.over || D || typeof E.setMentorLevel !== 'function' || !E.MN) return;   // a room's help level is a room setting
   const M = E.metrics(S).mentor; const locked = !(S.mode === 'free' || S.mode === 'history');
   const lv = await ui.mentorPicker(M, { locked, levels: E.MN.LEVEL_TEXT });
   if (!lv || !S || S.over) return;
@@ -1026,12 +1207,13 @@ function wireHold() {
 
 /* ============================================================ turn */
 async function turn() {
-  if (stuck || busy || !S || S.over || ui.isEventOpen() || !$('#start').hidden) return;
+  if (stuck || busy || !S || S.over || summarized || ui.isEventOpen() || !$('#start').hidden) return;
+  if (D && !D.canRoll()) { ui.toast(D.waiting() ? 'סיימת את הסבב — מחכים ליריבים' : 'רגע…'); return; }
   const my = gen; busy = true; ui.setRollEnabled(false); ui.toggleSheet(false); ui.hidePractice?.(); ui.clearStickyNews?.();
   flows++; flowTick++;
   try { await turnBody(my); }
   catch (e) { if (my === gen && !stuck) enterStuck(e, 'turn'); }
-  finally { flows--; flowTick++; rolling = false; }
+  finally { flows--; flowTick++; rolling = false; setOutPending(false); }
 }
 async function turnBody(my) {
   const m0 = E.metrics(S);
@@ -1046,7 +1228,10 @@ async function turnBody(my) {
       showNoEnergy(en); return;
     }
   }
-  try { out = E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); return; }
+  ui.turnChip?.('זורקים…');   // §13 turn state
+  ui.debtChip?.(null);          // wave 2 (G-07): the new-debt chip stays until the next roll (no timed dismissal)
+  try { out = D ? await D.roll(S) : E.rollDice(S); } catch (e) { console.error(e); scene.cancelHold(); busy = false; ui.setRollEnabled(true); ui.turnChip?.(null); return; }
+  setOutPending(true);
   persist(); // T1: save the rolled state before any scene/ui work (a reload or a broken flow resumes at the landing, same dice, no extra ⚡)
   flowTick++;
   const faces = Array.isArray(out.dice) && out.dice.length ? out.dice : [out.die];
@@ -1060,6 +1245,10 @@ async function turnBody(my) {
   ui.landDice(faces);
   if (faces.length === 2 && faces[0] === faces[1]) { sfx('golden'); ui.vibrate([12, 30, 12]); }
   if (my !== gen) return;
+  // wave 1 (B1 G6): the destination is marked before the first hop; the current-tile outline leaves with the pawn
+  const dest = out.steps.length ? out.steps[out.steps.length - 1] : S.pos;
+  try { scene.markTile?.('current', null); scene.markTile?.('dest', dest); } catch (e) { console.warn(e); }
+  ui.turnChip?.(out.steps.length === 1 ? 'זזים צעד אחד' : `זזים ${out.steps.length} צעדים`, { quiet: true });   // #dieSr already says the total
   await pause(180);
   let cash = m0.cash;
   for (let i = 0; i < out.steps.length; i++) {
@@ -1072,9 +1261,11 @@ async function turnBody(my) {
     if (pd) { cash += pd.amount; paydayFx(pd, cash); }
   }
   rolling = false;
+  landed(S.pos);
   // remaining roll results: news (exits, signals), auto-loans, achievements…
   const skip = (out.paydays || []).map((p) => (p.amount >= 0 ? 'coin' : 'loss'));
   await applyOut(out, { skipSounds: ['roll', ...skip], skipPawnCash: true });
+  setOutPending(false);
   render();
   persist();
   flowTick++;
@@ -1088,7 +1279,8 @@ async function turnBody(my) {
   if (my !== gen || stuck) return;
   busy = false;
   if (S.over) return;
-  ui.setRollEnabled(true); ui.focusRoll();
+  ui.setRollEnabled(!D || D.canRoll()); ui.focusRoll();
+  if (!D && await offerSummary(my)) return;   // wave 3a (J1 P0-1): the ★ month limit just passed in a free run
   await onboard.afterTurn(hooks(my)); // T4 IR-T4-3
 }
 
@@ -1098,7 +1290,7 @@ function paydayFx(pd, runningCash) {
   scene.floatLabel((pos ? 'משכורת ' : '') + E.sgn(pd.amount), pos ? 'green' : 'red', 'pawn');
   if (pos) { ui.flyCoins(scene.project('pawn'), 7); sfx('coin'); ui.vibrate(12); } else sfx('loss');
   ui.setCash(runningCash, true);
-  ui.setMonth(pd.month, S.mode === 'free' ? 0 : S.maxMonths);
+  ui.setMonth(pd.month, S.mode === 'free' ? 0 : S.maxMonths, starLimit());
 }
 
 /** Resolve the landing event(s) of this turn (or of a resumed save). A broken flow → recover bar (callers check `stuck`). */
@@ -1109,7 +1301,7 @@ async function handleLanding(my) {
   finally { flows--; flowTick++; }
 }
 async function landingBody(my) {
-  let ev = E.landing(S) || E.currentEvent(S);
+  let ev = D ? D.landing(S) : (E.landing(S) || E.currentEvent(S));
   render(); // drawing a card can move the world (rate / dollar / prices) before any decision
   persist();
   if (ev) checkpoint();
@@ -1120,7 +1312,7 @@ async function landingBody(my) {
       // no card: routine payday (coins already flew) or an event that does not touch you (engine marks it auto)
       if (ev.auto) { ui.toast(ev.toastText || ev.title, { ms: 1300 * speed() + 200 }); sfx(ev.sound === 'loss' ? 'card' : ev.sound || 'card'); }
       const opt = ev.auto ? ev.options[0].id : 'ok';
-      const res = E.choose(S, ev, opt);
+      const res = D ? await D.choose(S, ev, opt) : E.choose(S, ev, opt);
       if (ev.mentor && !ev.auto) ui.mentor(ev.mentor);
       await applyOut(res, { noVerdict: true });
       render(); persist(); checkpoint(); flowTick++;
@@ -1151,7 +1343,10 @@ function resolveCard(ev, my) {
     // T2 card API: the UI asks, the engine answers (no finance math in ui.js). A hint is an action (['H']): saved like a decision.
     const api = {
       mentor: () => (S ? E.metrics(S).mentor : null),
-      hint: () => {
+      hint: D ? async () => {   // rooms polish: the in-card 💡 works in a room too — the hint is a server intent (code H), answered async
+        if (working || my !== gen) return null;
+        try { return await mut('requestHint'); } catch (e) { return { ok: false, error: (e && e.message) || 'אין כאן רמז' }; }
+      } : () => {
         if (working || my !== gen || typeof E.requestHint !== 'function') return null;
         const r = E.requestHint(S);
         if (r && r.ok !== false) { persist(); checkpoint(); }
@@ -1169,10 +1364,10 @@ function resolveCard(ev, my) {
       if (working || my !== gen) return;
       working = true; ctl.busy(true); flowTick++;
       let res;
-      try { res = E.choose(S, cur, optId, params || {}); }
+      try { res = D ? await D.choose(S, cur, optId, params || {}) : E.choose(S, cur, optId, params || {}); }
       catch (e) {
         console.error(e);
-        cur = E.currentEvent(S);
+        cur = D ? D.currentEvent(S) : E.currentEvent(S);
         if (!cur) { close(); resolve({ done: true, end: E.checkEnd(S) }); }
         else ctl.update(cur);
         working = false; ctl.busy(false); return;
@@ -1245,8 +1440,23 @@ async function applyOut(out, opts = {}) {
   if (out.dream && out.dream.length && typeof ui.dreamToast === 'function') ui.dreamToast(out.dream, S ? safe0(() => E.metrics(S).dream) : null); // T4 IR-T4-4 (E-7)
   if (out.decision && !opts.noVerdict) ui.verdict(out.decision, { inCard: !!opts.inCard });
   if (out.double && out.double.text) ui.toast('🎲 ' + out.double.text, { kind: 'gold' });
+  let mkt = 0, mktFirst = null; const lg = []; let lgBad = false; const wn = new Map();   // w14 / w17 / w18 / w19 / w20: a world's lines of one payday → ONE toast (important ones keep their own)   // w10: the market's monthly lines (up to ~6) become ONE toast — the full news are on the market screen
   for (const n of out.news || []) {
     if (n.kind === 'bailout' || n.kind === 'double' || n.kind === 'burnout' || (out.double && n.text === out.double.text)) continue; // own cards / toasts
+    if (n.kind === 'market' && n.text) { mkt++; if (!mktFirst || (mktFirst.rumor && !n.rumor)) mktFirst = n; continue; }
+    if (n.kind === 'portfolio' && n.text) { const hard = /קריאת מרווח|מכירה כפויה|נמכר בכפייה|קראה להון/.test(n.text); ui.toast('🏦 ' + n.text, { kind: hard ? 'bad' : '', keep: hard }); continue; }   // w10: calls are never dropped
+    if (n.kind === 'league' && n.text) {   // w13: the season's end / a fine / a relegation keep their own toast; the month's fixture, injuries and the wage line become ONE toast
+      if (/סוף העונה|קנס|יורדים|ירידה ל|עולים|עלייה ל/.test(n.text)) { const up = /עולים|עלייה ל/.test(n.text); ui.toast('⚽ ' + n.text, { kind: up ? 'gold' : 'bad', keep: true }); ui.announce?.(n.text); }
+      else { lg.push(n.text); if (/נפצע|עזב בלי תמורה|אוכל|שרים נגדך/.test(n.text)) lgBad = true; }
+      continue; }
+    if (n.kind === 'mn' && n.text) { const bad = /הונאה|שיבוש/.test(n.text); ui.toast('🌍 ' + n.text, { kind: bad ? 'bad' : '', keep: /הונאה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w11: a fraud is never dropped
+    if (WV3NEWS[n.kind] && n.text) { const R = WV3NEWS[n.kind];
+      if (R.keep.test(n.text)) { const bad = R.bad.test(n.text); ui.toast(R.ic + ' ' + n.text, { kind: bad ? 'bad' : R.gold && R.gold.test(n.text) ? 'gold' : '', keep: true }); if (bad) ui.announce?.(n.text); continue; }
+      if (!wn.has(n.kind)) wn.set(n.kind, { R, t: [], bad: false, gold: false }); const W = wn.get(n.kind); W.t.push(n.text); if (R.bad.test(n.text)) W.bad = true; if (R.gold && R.gold.test(n.text)) W.gold = true; continue; }
+    if (n.kind === 'hd' && n.text) { const bad = /לא עמדה|קרסה|הפרה|גירעון|דירקטוריון|→|מיתון|משבר|זינוק/.test(n.text); ui.toast('👑 ' + n.text, { kind: bad ? 'bad' : /פריחה/.test(n.text) ? 'gold' : '', keep: /לא עמדה|קרסה|הפרה/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w12: a group default / a lost division / a breach stay
+    if (n.kind === 'hv' && n.text) { const bad = /קריאת מרווח|סגר את הגידור|בכוח|בצורת|ברד/.test(n.text); ui.toast('🌾 ' + n.text, { kind: bad ? 'bad' : /קציר/.test(n.text) ? 'gold' : '', keep: /בכוח|סגר את הגידור/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w16: a forced liquidation stays
+    if (n.kind === 'pf' && n.text) { const bad = /נגמר הכסף|הפרת תנאי|חורף/.test(n.text); ui.toast('☁️ ' + n.text, { kind: bad ? 'bad' : /בועה|אפקט הרשת/.test(n.text) ? 'gold' : '', keep: /נגמר הכסף|הפרת תנאי/.test(n.text) }); if (bad) ui.announce?.(n.text); continue; }   // w15: the emergency round / a covenant breach stay
+    if (n.kind === 'energy' && n.text) { const bad = /אזהרה|עומד|קראו להלוואות|קרא להלוואה|עיכוב/.test(n.text); ui.toast('☀️ ' + n.text, { kind: bad ? 'bad' : '', keep: /קראו להלוואות|אזהרה/.test(n.text) }); continue; }   // w9
     if (n.kind === 'headline') { ui.newspaper(n); continue; }
     if (n.kind === 'exit' && n.big) { ui.achievementToast({ label: 'אקזיט!', name: n.name, desc: n.text, sound: 'none' }); continue; }
     if (n.kind === 'business') { // monthly result of a managed business (no top-level text in the engine news)
@@ -1269,6 +1479,9 @@ async function applyOut(out, opts = {}) {
     if (n.kind === 'story') { ui.toast('📖 ' + n.text, { keep: true, ms: 4200 }); ui.announce?.(n.text); continue; }
     ui.toast(n.text, { kind: n.kind === 'exit' ? (n.mult >= 1 ? 'gold' : 'bad') : '' });
   }
+  for (const W of wn.values()) ui.toast(W.R.ic + ' ' + W.t.join(' · '), { kind: W.bad ? 'bad' : W.gold ? 'gold' : '', ms: 3400 + 900 * Math.min(3, W.t.length - 1) });
+  if (lg.length) ui.toast('⚽ ' + lg.join(' · '), { kind: lgBad ? 'bad' : '', ms: 3400 + 900 * Math.min(3, lg.length - 1) });
+  if (mkt) ui.toast(`📈 ${mktFirst.rumor ? '🗣️ שמועה: ' : ''}${mktFirst.text}${mkt > 1 ? ` · עוד ${mkt - 1} בלוח הבורסה` : ''}`);
   if (out.mentor) ui.mentor(out.mentor);
   if (out.toast) ui.toast(out.toast, { kind: 'bad' });
 }
@@ -1304,12 +1517,14 @@ function sheetAction(act) {
 function sheetBody(act) {
   if (!S || S.over || busy || ui.isEventOpen()) { if (busy) ui.toast('רגע, החייל עוד זז'); return; }
   if (act === 'invest') { indexModal(); return; }
+  if (act === 'world') { ui.toggleSheet(false); openWorldPanel(); return; }   // w5: the season box in the report
   if (act === 'save' || act === 'unsave') { savingsModal(act === 'save'); return; }
   if (act === 'report') {
     if (typeof E.setSideReport !== 'function') return;
-    let o; try { o = E.setSideReport(S, true); } catch (e) { console.error(e); return; }
-    if (o && o.ok === false) { ui.toast(o.error || 'לא אפשרי עכשיו'); return; }
-    applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
+    Promise.resolve(mut('setSideReport', true)).then((o) => {
+      if (o && o.ok === false) { ui.toast(o.error || 'לא אפשרי עכשיו'); return; }
+      applyOut(o); render(); persist(); checkpoint(); ui.toast('🧾 נפתח תיק: מעכשיו מקדמות כל חודש');
+    }).catch((e) => console.error(e));
     return;
   }
   if ((act === 'loan' || act === 'repay' || act === 'credit') && typeof E.impactFor === 'function') { loanWithImpact(act); return; }
@@ -1327,15 +1542,85 @@ async function loanWithImpact(act) {
   if (v !== 'go' || !S || S.over || busy || ui.isEventOpen()) return;
   try { doLoan(act); } catch (e) { if (!stuck) enterStuck(e, 'sheet'); }
 }
-function doLoan(act) {
+async function doLoan(act) {
   let out;
-  try { out = act === 'loan' ? E.takeLoan(S) : act === 'repay' ? E.repayLoan(S) : act === 'credit' ? E.payCredit(S) : null; }
+  try { out = act === 'loan' ? await mut('takeLoan') : act === 'repay' ? await mut('repayLoan') : act === 'credit' ? await mut('payCredit') : null; }
   catch (e) { console.error(e); return; }
   if (!out) return;
   if (out.ok === false) { ui.toast(out.error); sfx('loss'); return; }
   applyOut(out);
   render(); persist(); checkpoint();
   if (out.end) { ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
+}
+
+/* ============================================================ CATALOG-25 §3.9: the light candle view's data (js/candlelog.js)
+   A shadow game replays S.actions (exactly like E.replay) and samples the prices after every step: the candles hold only prices the
+   game really had, and the same log rebuilds them after a reload. Lazy (first chart), incremental, async in ~8 ms slices. */
+async function candleVm() {
+  const st = S; if (!st) return null;
+  const book = await CL.sync(st);
+  return st === S ? CL.viewModel(st, book) : null;
+}
+
+/* ============================================================ wave 3a (J1 P0-4): the money hub — a menu over the existing actions */
+async function openMoneyHub() {
+  if (!S || S.over || summarized) return;
+  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לנהל את הכסף בין תורות'); return; }
+  const H = moneyHubModel(E.metrics(S));
+  // past the ★ limit of a free run: "לסכם את הריצה" is here too (on phones the HUD has no room for the 🏁 button)
+  if (canSummarize()) H.rows.push({ id: 'sum', icon: '🏁', title: 'הריצה', value: `עבר מועד הכוכבים (חודש ${S.maxMonths})`, acts: [{ act: 'summarize', label: 'לסכם את הריצה', on: true }] });
+  if (S.prices && Object.keys(S.prices).length && ui.candlesFull) H.more = [{ act: 'candles', label: '📈 מחירים, נרות וחדשות' }];   // §3.9: outside the rows (the rows stay the engine model)
+  const act = await ui.moneyHub?.(H);
+  if (!act || !S || S.over || busy || ui.isEventOpen()) return;
+  if (act === 'candles') { ui.candlesFull(null); return; }
+  if (act === 'summarize') { summarizeRun(false); return; }
+  if (act === 'world') { openWorldPanel(); return; }
+  if (act === 'plan' || act === 'focus') { lifeChip(act); return; }
+  sheetAction(act);   // save / unsave / loan / repay / credit / invest — the same flows as the report's buttons
+}
+
+/* ============================================================ worlds wave 1: the world panel (metrics().worldIndicators.panel) + E.worldAction
+   Between rolls only (like the money hub). In a room the action goes to the server as code Z (RemoteDriver ROOM_CODE.worldAction). */
+function panelData() {
+  if (!S) return null;
+  const m = E.metrics(S); const wi = m.worldIndicators || {};
+  const part = (m.goalParts || [])[0] || {};
+  return wi.panel ? { panel: wi.panel, season: wi.season || null, plant: wi.plant || null, chain: wi.chain || null, proj: wi.proj || null, energy: wi.energy || null, market: wi.market || null, portfolio: wi.portfolio || null, league: wi.league || null, auction: wi.auction || null, multinational: wi.multinational || null, platform: wi.platform || null, holding: wi.holding || null, harvest: wi.harvest || null, credit: wi.credit || null, trials: wi.trials || null, insure: wi.insure || null, bell: wi.bell || null, funds: wi.funds || null,
+    month: m.month || 0, target: part.key === 'passive12' ? +part.target || 0 : 0 } : null;
+}
+async function openWorldPanel() {
+  if (!S || S.over || summarized) return;
+  if (busy || ui.isEventOpen() || !$('#gm').hidden) { ui.toast(busy ? 'רגע, החייל עוד זז' : 'אפשר לפתוח את לוח המפה בין תורות'); return; }
+  const D0 = panelData(); if (!D0 || typeof ui.worldPanel !== 'function') return;
+  // w10: the market screen (companies, candles, a trade with its costs shown before the tap) — previews are the engine's own pure functions
+  if (D0.panel.id === 'market' && typeof ui.marketPanel === 'function') { await ui.marketPanel(panelData, (a) => worldAct(a.id, a.param), marketApi()); render(false); return; }
+  await ui.worldPanel(panelData, (a) => worldAct(a.id, a.param));
+  render(false);
+}
+/** w10: the order preview of js/worlds/mech/market.js (pure: preview / qtyFor / halfSpread read the state, never write it). The module is
+ *  already loaded by the world (ensureWorld('w10') imported it), so the import costs no request. */
+let MKT = null;
+function marketApi() {
+  if (!MKT) import('./worlds/mech/market.js').then((M) => { MKT = M; }).catch((e) => console.warn('market preview', e));
+  return {
+    ready: () => import('./worlds/mech/market.js').then((M) => { MKT = M; return true; }),
+    preview: (id, side, qty) => (S && S.mkt && MKT ? MKT.preview(S, id, side, qty) : null),
+    qtyFor: (id, cash) => (S && S.mkt && MKT ? MKT.qtyFor(S, id, cash) : 0),
+    block: (id) => (S && S.mkt && MKT ? MKT.tradeBlock(S, id) : 'לא אפשרי עכשיו'),
+    cash: () => (S ? S.cash : 0), month: () => (S ? S.month : 0),
+  };
+}
+/** one module action (E.worldAction) → {ok, error?, toast?}; applies the out like every other between-roll action */
+async function worldAct(id, param) {
+  if (!S || S.over || busy || typeof E.worldAction !== 'function') return { ok: false, error: 'לא אפשרי עכשיו' };
+  let out;
+  try { out = await mut('worldAction', id, param ?? null); } catch (e) { console.error(e); return { ok: false, error: (e && e.message) || 'לא אפשרי עכשיו' }; }
+  if (!out || out.ok === false) { sfx('loss'); return { ok: false, error: (out && out.error) || 'לא אפשרי עכשיו' }; }
+  const toast = out.toast || null; out.toast = null;   // the panel shows it in place (applyOut would raise it as a warning toast)
+  await applyOut(out); render(); persist(); checkpoint();
+  if (out.mentor) ui.mentor(out.mentor);
+  if (out.end) { document.querySelector('#gmCard.wpanel .acts button.primary')?.click(); closeCard(); ui.toggleSheet(false); const my = gen; busy = true; ui.setRollEnabled(false); endGame(out.end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); }); }
+  return { ok: true, toast };
 }
 
 /* ============================================================ index fund any time (E.invest / E.setAutoInvest) */
@@ -1353,8 +1638,8 @@ async function indexModal() {
     actions: [{ label: 'לבצע', cls: 'primary', v: 'go', fn: () => { qty = Math.trunc(+document.getElementById('ixq').value || 0); const a = document.getElementById('ixa'); if (a) auto = Math.max(0, Math.round(+a.value || 0)); if (qty > maxBuy || -qty > maxSell) { document.getElementById('ixe').textContent = 'הכמות לא אפשרית'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
   if (v !== 'go') return;
   try {
-    if (qty) { const out = E.invest(S, qty > 0 ? 'buy' : 'sell', Math.abs(qty)); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); } else if (out) await applyOut(out); }
-    if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = E.setAutoInvest(S, auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
+    if (qty) { const out = await mut('invest', qty > 0 ? 'buy' : 'sell', Math.abs(qty)); if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); } else if (out) await applyOut(out); }
+    if (typeof E.setAutoInvest === 'function' && auto !== ((m.index && m.index.autoInvest) || 0)) { const o2 = await mut('setAutoInvest', auto); if (o2 && o2.mentor) ui.mentor(o2.mentor); ui.toast(auto ? `הוראת קבע: ${E.fmtM(auto)} בחודש לקרן` : 'הוראת הקבע בוטלה'); }
   } catch (e) { console.error(e); ui.toast('לא אפשרי עכשיו'); }
   render(); persist(); checkpoint();
 }
@@ -1372,7 +1657,7 @@ async function savingsModal(deposit) {
       <label class="note" for="svq">סכום (₪) — עד ${ui.esc(E.fmtM(max))}</label><input id="svq" type="number" inputmode="numeric" dir="ltr" step="100" min="0" max="${max}" value="${sug > 0 ? sug : Math.min(max, 1000)}"><p class="err" id="sve"></p>`,
     actions: [{ label: deposit ? 'להפקיד' : 'למשוך', cls: 'primary', v: 'go', fn: () => { amt = Math.round(+document.getElementById('svq').value || 0); if (amt <= 0 || amt > max) { document.getElementById('sve').textContent = 'הסכום לא אפשרי'; return false; } } }, { label: 'ביטול', v: null }], dismissable: true });
   if (v !== 'go' || !amt) return;
-  let out; try { out = E.moveSavings(S, deposit ? amt : -amt); } catch (e2) { console.error(e2); ui.toast('לא אפשרי עכשיו'); return; }
+  let out; try { out = await mut('moveSavings', deposit ? amt : -amt); } catch (e2) { console.error(e2); ui.toast('לא אפשרי עכשיו'); return; }
   if (out && out.ok === false) { ui.toast(out.error || 'לא אפשרי'); return; }
   await applyOut(out); render(); persist(); checkpoint();
 }
@@ -1386,20 +1671,21 @@ async function savingsModal(deposit) {
 function goLobby() {
   persist();
   ui.hideCoach(); onboard.hidePractice(); ui.toggleSheet(false); // IR-T4-9
-  bus.emit('lobby:open', {});
+  bus.emit('lobby:open', D && CFG && CFG.room ? { k: 'room', id: CFG.room } : {});   // wave 3b: back to the room screen
 }
 
 /* ============================================================ T6: ghosts, practice rewind, after the win (spec §2, §7, §9) */
 function t6Start() {
   try { if (E.RIVALS) ui.setPersonas?.(E.RIVALS); } catch (e) { /* ignore */ }
-  try { if (S && !S.over) ghosts.start(S); else ghosts.stop(); } catch (e) { console.warn('ghosts', e); }
+  try { if (S && !S.over && !D) ghosts.start(S); else ghosts.stop(); } catch (e) { console.warn('ghosts', e); }
   const br = S && S.ui && S.ui.branch;
   ui.branchBanner?.(br ? { back: () => backToOrigin(), compare: () => openCompare() } : null);
 }
 function t6Hud() {
   if (!S || S.over) return null;
   const aw = S.afterWin ? { n: Math.max(0, (S.month | 0) - (S.afterWin.m | 0)) } : null;
-  return { rivals: ghosts.enabledFor(S) && ghosts.status().state !== 'unavailable', moments: !!(CFG && rewind.allowed(CFG)), afterWin: aw && flagFor('afterwin', CFG) ? aw : null };
+  // rooms polish: in a room the opponents are real (the room screen lists them) — no 👥 ghost-rivals chip (ghosts never start there)
+  return { rivals: !D && ghosts.enabledFor(S) && ghosts.status().state !== 'unavailable', moments: !!(CFG && rewind.allowed(CFG)), afterWin: aw && flagFor('afterwin', CFG) ? aw : null };
 }
 function rivalsData() {
   const m = E.metrics(S); const parts = m.goalParts || [];
@@ -1452,7 +1738,9 @@ function backToOrigin() {
 }
 function openCompare() {
   const d = S ? rewind.compareData(S) : null;
-  if (!d || !d.originTl) { ui.toast('המשחק המקורי כבר לא זמין להשוואה'); return; }   // T6 review M2: the original changed or is gone
+  // T6 review M2: the original changed or is gone. The answer to a tap goes to the FRONT of the toast queue (urgent): behind a new branch's
+  // first-month toasts (focus, turbo, library) it waited > 15 s — the t6_e2e rewind failure after the branch-from-the-oldest-decision fix
+  if (!d || !d.originTl) { ui.toast('המשחק המקורי כבר לא זמין להשוואה', { urgent: true }); return; }
   ui.compareSheet({ branchTl: tlOf(S), originTl: d.originTl, month: S.month });
 }
 /** T6 §9.2: keep living after the win (engine W) — only when the engine exports it and the flag is on (free / learn) */
@@ -1501,12 +1789,49 @@ function t6End(end) {
     // RW.allowed (learning games only); a branch's end never offers a rewind (its log is not the last game)
     out.rewindAllowed = !branch && rewind.endAllowed(CFG);
     out.afterwinAllowed = end.status === 'won' && !S.afterWin && !end.afterWin && typeof E.continueAfterWin === 'function' && flagFor('afterwin', CFG) && CFG.mode === 'free';
-    if (ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
+    if (!D && ghosts.enabledFor(S)) { ghosts.finish(S); const st0 = ghosts.status().state; out.rivals = st0 === 'unavailable' ? 'off' : 'pending'; out.ghostsKey = ghosts.status().key; }
     if (branch) { const d = rewind.compareData(S); out.branchTl = d && d.originTl; out.branchCmp = branchCmp(d, end); }
     else if (out.rewindAllowed) out.lastSaved = rewind.saveLastGame({ cfg: CFG, state: S, endLite: { ...endLite(end, out), ...cmpSide(end) }, ghostsKey: out.ghostsKey || null });
     persist();
   } catch (e) { console.warn('t6 end', e); }
   return out;
+}
+
+/* ============================================================ wave 3a (J1 P0-1, brief §17): summarise a free run after the ★ limit */
+// In a free game nothing happens at the month limit (engine checkEnd ends on time only outside free mode), so a losing run never
+// reached the end screen: 18–34 more months without a decision that changes the outcome, or a new game that deletes the save (no
+// summary, no "רגעי החלטה"). Once the ★ limit (S.maxMonths) passes, the player may end the run here: E.endNow(S) (pure, the
+// engine's own 'capped' result: recap, graph, learning — state untouched) goes through the normal endGame path, so the end screen,
+// the summary and rr2-last-game (rewind) are the usual ones. Nothing new in the save: "offered once" lives in rr2-sum-offered.
+let summarized = false;
+const SUM_KEY = 'rr2-sum-offered';
+/** the ★ limit shown in the HUD in a free game with stars ("★ עד חודש N"); 0 elsewhere (ranked shows month / max already) */
+function starLimit() { return S && S.mode === 'free' && !S.afterWin && !(CFG && CFG.learn) && S.worldId !== 'h' && S.maxMonths > 0 ? S.maxMonths : 0; }
+function canSummarize() { return !!(S && !S.over && !summarized && CFG && !CFG.resultId && CFG.slot !== 'branch' && starLimit() && S.month > S.maxMonths && typeof E.endNow === 'function'); }
+const runId = () => `${S.worldId}|${S.charId}|${S.seed >>> 0}`;
+function offeredRuns() { try { const v = JSON.parse(localStorage.getItem(SUM_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function markOffered() { try { const v = offeredRuns().filter((x) => x !== runId()); v.push(runId()); localStorage.setItem(SUM_KEY, JSON.stringify(v.slice(-30))); } catch (e) { /* storage full / blocked: offered again next time */ } }
+/** after a turn: the one-time offer (true when the run was summarised — the caller stops) */
+async function offerSummary(my) {
+  if (!canSummarize() || offeredRuns().includes(runId()) || ui.isEventOpen() || !$('#gm').hidden) return false;
+  markOffered();
+  const v = await ui.summaryOffer?.({ limit: S.maxMonths, month: S.month, gender: S.gender });
+  if (my !== gen || !S) return true;
+  if (v === 'sum') { await summarizeRun(true); return true; }
+  return false;
+}
+async function summarizeRun(confirmed = false) {
+  if (!canSummarize()) return;
+  if (busy || ui.isEventOpen()) { ui.toast('אפשר לסכם את הריצה בין תורות'); return; }
+  if (!confirmed) {
+    const v = await ui.summaryOffer?.({ limit: S.maxMonths, month: S.month, gender: S.gender });
+    if (v !== 'sum' || !canSummarize() || busy || ui.isEventOpen()) return;
+  }
+  let end = null; try { end = E.endNow(S); } catch (e) { console.warn('endNow', e); }
+  if (!end) { ui.toast('לא אפשרי עכשיו'); return; }
+  summarized = true; ui.sumRunBtn?.(false);
+  persist(); const my = gen; busy = true; ui.setRollEnabled(false);
+  await endGame(end, my).catch((e) => { if (my === gen && !stuck) enterStuck(e, 'end'); });
 }
 
 /* ============================================================ end of game */
@@ -1524,6 +1849,7 @@ async function endGameBody(end, my) {
   if (win) ui.vibrate([30, 60, 30, 60, 80]);
   await scene.celebrate(win);
   if (my !== gen) return;
+  if (D && CFG && CFG.room) { busy = false; bus.emit('lobby:open', { k: 'room', id: CFG.room }); return; }   // wave 3b: the room's results are server-ranked
   // T6 §6.1: with the new summary (flag recap2) the life story is a section of the end screen, not an overlay
   if (end.lifeSummary && !flag('recap2')) { await ui.lifeStory(end.lifeSummary, { won: win }); if (my !== gen) return; }
   await pause(win ? 350 : 250);

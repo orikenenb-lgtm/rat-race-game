@@ -5,11 +5,13 @@
 import assert from 'node:assert/strict';
 import { collect, bundleText, sha256 } from '../tools/build-edge.mjs';
 import { loadEngine } from '../supabase/functions/verify-result/engine_loader.js';
-import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM, isoDay, inCutoverWeek } from '../supabase/functions/verify-result/verify_core.js';
+import { verifyGame, parseRequest, validateActions, configFor, normalize, dailyCharId, clientEngine, rulesFor, RULES4_FROM, RULES5_FROM, isoDay, inCutoverWeek } from '../supabase/functions/verify-result/verify_core.js';
 import * as Local from '../js/engine.js';
 import { playOut, prng } from './lib/random-player.mjs';
 
 const GAMES = +(process.argv[2] || 120);
+/** Worlds wave 0: a ranked day ≥ RULES5_FROM is rules 6 while RULES6_FROM = RULES5_FROM (placeholder); rules 6 ≡ rules 5 in w1–w4. */
+const R5D = Local.RULES7_FROM === RULES5_FROM ? 7 : Local.RULES6_FROM === RULES5_FROM ? 6 : 5; // CATALOG-25: 7 while RULES7_FROM = RULES6_FROM = RULES5_FROM
 let passed = 0, failed = 0;
 async function test(name, fn) {
   const t0 = Date.now();
@@ -20,7 +22,7 @@ async function test(name, fn) {
 /** The server row a ranked game produces (rr_begin + rr_finish), from the client's final state. */
 function rowFor(E, st, { mode, profession, seed }) {
   const end = normalize(st.result);
-  return { mode, world: st.worldId, profession, seed: String(seed), max_months: mode === 'daily' ? 24 : null, daily_key: mode === 'daily' ? '2026-12-09' : null, weekly_start: mode === 'weekly' ? '2026-12-07' : null, challenge_day: mode === 'challenge' ? '2026-12-08' : null,
+  return { mode, world: st.worldId, profession, seed: String(seed), max_months: mode === 'daily' ? 24 : null, daily_key: mode === 'daily' ? '2026-12-23' : null, weekly_start: mode === 'weekly' ? '2026-12-21' : null, challenge_day: mode === 'challenge' ? '2026-12-22' : null, // rules-5 days (a game without a date key is a current-rules game)
     status: end.status, months: end.months, passive: end.passive, expenses: end.expenses, net_worth: end.netWorth,
     claim_stars: st.result.stars || 0, claim_progress: st.result.progress ?? null };
 }
@@ -99,7 +101,7 @@ await test('tampered / foreign action logs are rejected (edited decision, droppe
 await test('replay config comes only from the server row (client cannot pick seed / bailout / tutorial / month limit)', async () => {
   const w = E.getWorld('w2');
   const c = configFor(E, { mode: 'daily', world: 'w2', profession: 'idx:4', seed: '123', max_months: 24, bailout: true, tutorial: true });
-  assert.deepEqual(c, { worldId: 'w2', charId: dailyCharId(w, 4), seed: 123, mode: 'daily', tutorial: false, bailout: false, mentor: 'hint', rules: 4, maxMonths: 24 });
+  assert.deepEqual(c, { worldId: 'w2', charId: dailyCharId(w, 4), seed: 123, mode: 'daily', tutorial: false, bailout: false, mentor: 'hint', rules: Local.RULES_CURRENT, maxMonths: 24 }); // no date → the current rules
   assert.throws(() => configFor(E, { mode: 'free', world: 'w1', profession: 'idx:0', seed: '1' }), /unsupported_mode/);
   assert.throws(() => configFor(E, { mode: 'weekly', world: 'w9', profession: 'idx:0', seed: '1' }), /bad_world/);
   assert.throws(() => configFor(E, { mode: 'challenge', world: 'w1', profession: 'hacker', seed: '1' }), /bad_char/);
@@ -133,7 +135,8 @@ await test('T17: F/H/M are accepted codes; rulesFor maps a legacy day to rules 3
   assert.ok(validateActions([['F', 'scout', 0], ['F', 'none', 2], ['H'], ['M', 'pro']]));
   assert.equal(RULES4_FROM, '2026-12-07');
   assert.equal(rulesFor({ daily_key: '2026-12-06' }), 3); assert.equal(rulesFor({ daily_key: '2026-12-07' }), 4); assert.equal(rulesFor({ weekly_start: '2026-11-23' }), 3);
-  assert.equal(rulesFor({ challenge_day: '2026-12-09' }), 4); assert.equal(rulesFor({ daily_key: '20261129' }), 3); assert.equal(rulesFor({}), 4);
+  assert.equal(rulesFor({ challenge_day: '2026-12-09' }), 4); assert.equal(rulesFor({ daily_key: '20261129' }), 3); assert.equal(rulesFor({}), Local.RULES_CURRENT);
+  assert.equal(RULES5_FROM, '2026-12-21'); assert.equal(rulesFor({ daily_key: '2026-12-20' }), 4); assert.equal(rulesFor({ daily_key: '2026-12-21' }), R5D); assert.equal(rulesFor({ weekly_start: '2026-12-21' }), R5D);
   assert.equal(configFor(E, { mode: 'weekly', world: 'w1', profession: 'idx:0', seed: '5', weekly_start: '2026-11-16' }).rules, 3);
   // a game started under v3 rules (before the release day) replays with rules 3 and verifies
   const w = Local.getWorld('w3'); const charId = dailyCharId(w, 1);
@@ -149,8 +152,8 @@ await test('T17: F/H/M are accepted codes; rulesFor maps a legacy day to rules 3
   const bad = verifyGame(E, g.row, acts); assert.equal(bad.ok, false); assert.match(bad.error, /^replay:/);
 });
 
-await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier uses (js/systems/rules.js ≡ verify_core rulesFor); honest ranked games before RULES4_FROM verify with rules 3, after with rules 4', async () => {
-  assert.equal(Local.RULES4_FROM, RULES4_FROM, 'one release day');
+await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier uses (js/systems/rules.js ≡ verify_core rulesFor); honest ranked games before RULES4_FROM verify with rules 3, then 4, from RULES5_FROM 5', async () => {
+  assert.equal(Local.RULES4_FROM, RULES4_FROM, 'one release day'); assert.equal(Local.RULES5_FROM, RULES5_FROM, 'one rules-5 day');
   // equality of the two pure functions over every day of 2025–2027, YYYYMMDD keys, ISO weeks, junk
   const keys = [];
   for (let d = Date.UTC(2025, 0, 1); d <= Date.UTC(2027, 11, 31); d += 86400000) { const s = new Date(d).toISOString().slice(0, 10); keys.push(s, s.replace(/-/g, '')); }
@@ -165,15 +168,17 @@ await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier
   // ISO weeks: index.ts weekly_start = to_date(key,'IYYY-"W"IW') = the Monday
   assert.equal(isoDay('2026-W49'), '2026-11-30'); assert.equal(isoDay('2026-W01'), '2025-12-29'); assert.equal(isoDay('2026-W53'), '2026-12-28');
   assert.equal(Local.rulesForDay('2026-W48'), 3); assert.equal(Local.rulesForDay('2026-W49'), 3, 'week of Mon 30.11 is a legacy week'); assert.equal(Local.rulesForDay('2026-W50'), 4, 'RULES4_FROM is the Monday of W50');
-  assert.equal(Local.rulesForDay('2026-12-06'), 3); assert.equal(Local.rulesForDay('2026-12-07'), 4); assert.equal(Local.rulesForDay(null), 4);
+  assert.equal(Local.rulesForDay('2026-12-06'), 3); assert.equal(Local.rulesForDay('2026-12-07'), 4); assert.equal(Local.rulesForDay(null), Local.RULES_CURRENT);
+  assert.equal(Local.rulesForDay('2026-W51'), 4); assert.equal(Local.rulesForDay('2026-W52'), R5D, 'RULES5_FROM is the Monday of W52'); assert.equal(Local.rulesForDay('2026-12-20'), 4); assert.equal(Local.rulesForDay('2026-12-21'), R5D);
   // createGame: ranked + dateKey decides st.rules (wins over `rules`); free ignores dateKey
   assert.equal(Local.createGame({ worldId: 'w1', mode: 'daily', dateKey: '2026-11-25', rules: 4 }).rules, 3);
   assert.equal(Local.createGame({ worldId: 'w1', mode: 'challenge', dateKey: '2026-12-08', rules: 3 }).rules, 4);
   assert.equal(Local.createGame({ worldId: 'w1', mode: 'weekly', dateKey: '2026-W48' }).rules, 3);
-  assert.equal(Local.createGame({ worldId: 'w1', mode: 'free', dateKey: '2026-11-25' }).rules, 4);
+  assert.equal(Local.createGame({ worldId: 'w1', mode: 'free', dateKey: '2026-11-25' }).rules, Local.RULES_CURRENT); // free: the current rules
+  assert.equal(Local.dailyConfig('2026-12-21').rules, R5D);
   assert.equal(Local.dailyConfig('2026-11-25').rules, 3); assert.equal(Local.dailyConfig('2026-12-09').rules, 4);
   // honest games in both eras and all three modes: created by the client from the key, verified by the server from the row
-  const eras = [['2026-11-25', '2026-W48', '2026-11-20', 3], ['2026-12-09', '2026-W50', '2026-12-08', 4]];
+  const eras = [['2026-11-25', '2026-W48', '2026-11-20', 3], ['2026-12-09', '2026-W50', '2026-12-08', 4], ['2026-12-23', '2026-W52', '2026-12-22', R5D]];
   for (const [day, week, chDay, rules] of eras) for (const mode of ['daily', 'weekly', 'challenge']) {
     const w = Local.getWorld(['w1', 'w2', 'w3'][['daily', 'weekly', 'challenge'].indexOf(mode)]);
     const seed = 900 + rules * 10 + mode.length;
@@ -181,7 +186,7 @@ await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier
     if (mode === 'daily') { cfg = { ...Local.dailyConfig(day), worldId: w.id, charId: dailyCharId(w, 1), seed }; profession = 'idx:1'; }
     else if (mode === 'weekly') { cfg = { worldId: w.id, charId: dailyCharId(w, 2), seed, mode, dateKey: week }; profession = 'idx:2'; }
     else { cfg = { worldId: w.id, charId: w.characters[0].id, seed, mode, dateKey: chDay }; profession = w.characters[0].id; }
-    const st = playOut(Local, cfg, prng(seed), { v4: rules === 4 });
+    const st = playOut(Local, cfg, prng(seed), { v4: rules >= 4 });
     assert.equal(st.rules, rules, `${mode} ${day} created with rules ${rules}`);
     const row = { ...rowFor(Local, st, { mode, profession, seed }), daily_key: mode === 'daily' ? day : null, weekly_start: mode === 'weekly' ? isoDay(week) : null, challenge_day: mode === 'challenge' ? chDay : null };
     const out = verifyGame(E, row, st.actions);
@@ -192,7 +197,7 @@ await test('CR-29: createGame(ranked, dateKey) takes the SAME rules the verifier
 await test('review B1: RULES4_FROM is a Monday; a rules-3 row whose game was played under rules 4 verifies by ONE fallback to 4 (flagged); never 4 → 3; a forged log still fails', async () => {
   const [y, m, d] = RULES4_FROM.split('-').map(Number); assert.equal(new Date(Date.UTC(y, m - 1, d)).getUTCDay(), 1, 'Monday');
   const w = Local.getWorld('w2'); const charId = dailyCharId(w, 2);
-  const st = playOut(Local, { worldId: 'w2', charId, seed: 6161, mode: 'daily', maxMonths: 24 }, prng(61), { v4: true, stories: true }); // a v4 client, no date key
+  const st = playOut(Local, { worldId: 'w2', charId, seed: 6161, mode: 'daily', maxMonths: 24, rules: 4 }, prng(61), { v4: true, stories: true }); // a v4 client, no date key
   assert.equal(st.rules, 4);
   const row = { ...rowFor(Local, st, { mode: 'daily', profession: 'idx:2', seed: 6161 }), daily_key: '2026-11-28', finished_day: RULES4_FROM }; // the server dates it before the cut-over; finished in the cut-over week
   const out = verifyGame(E, row, st.actions); assert.ok(out.ok, out.error); assert.equal(out.rulesFallback, true); assert.equal(out.cfg.rules, 4);

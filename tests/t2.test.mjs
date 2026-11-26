@@ -56,8 +56,8 @@ function dealState(worldId, card, o = {}) { // a deal pending built by hand (rul
 }
 
 /* ------------------------------------------------------------------ T1 streams */
-test('T1 STREAMS = 15 names (append-only; T3 appended story); makeStreams for indexes 0–9 equals the v3 fixture', () => {
-  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story']);
+test('T1 STREAMS = 16 names (append-only; T3 appended story, worlds wave 0 appended world); makeStreams for indexes 0–9 equals the v3 fixture', () => {
+  assert.deepEqual(STREAMS, ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index', 'dd', 'cycle', 'rival', 'listing', 'story', 'world']);
   const fx = JSON.parse(readFileSync(FIX('v3-streams.json'), 'utf8'));
   for (const [seed, s] of Object.entries(fx)) { const now = makeStreams(+seed); for (const k of OLD_STREAMS) assert.equal(now[k], s[k], `seed ${seed} ${k}`); }
   assert.equal(Object.keys(fx).length, 20);
@@ -106,10 +106,10 @@ test('T2+T3 fixed draws: decisions (inspect, focus, hints, offers, mentor level)
 });
 
 /* ------------------------------------------------------------------ T4 replay */
-test('T4 replay(replayConfig(st), st.actions) is byte-identical with F/H/M/inspect — every world, ranked + free + history, rules 3 and 4', () => {
+test('T4 replay(replayConfig(st), st.actions) is byte-identical with F/H/M/inspect — every world, ranked + free + history, rules 3, 4 and 5', () => {
   let n = 0, hs = 0, fs = 0, ms = 0;
   const cfgs = [];
-  for (const w of E.WORLDS) for (const mode of ['free', 'daily', 'weekly', 'challenge']) for (const rules of [4, 3]) cfgs.push({ worldId: w.id, charId: w.characters[n++ % w.characters.length].id, seed: 300 + n * 7, mode, rules, maxMonths: mode === 'daily' ? 24 : undefined, mentor: ['guide', 'hint', 'pro'][n % 3], tutorial: mode === 'free' && n % 4 === 0, bailout: n % 2 === 0 });
+  for (const w of E.WORLDS) for (const mode of ['free', 'daily', 'weekly', 'challenge']) for (const rules of [5, 4, 3]) cfgs.push({ worldId: w.id, charId: w.characters[n++ % w.characters.length].id, seed: 300 + n * 7, mode, rules, maxMonths: mode === 'daily' ? 24 : undefined, mentor: ['guide', 'hint', 'pro'][n % 3], tutorial: mode === 'free' && n % 4 === 0, bailout: n % 2 === 0 });
   cfgs.push({ mode: 'history', scenarioId: 'gfc', seed: 5 }, { mode: 'history', scenarioId: 'covid', seed: 6, rules: 3 }, { worldId: 'w2', seed: 99, mode: 'free', _dev: { noCycle: true, noDD: true } });
   for (const cfg of cfgs) {
     const st = playOut(E, cfg, prng(cfg.seed * 3 + 1), { v4: true });
@@ -123,12 +123,13 @@ test('T4 replay(replayConfig(st), st.actions) is byte-identical with F/H/M/inspe
 
 /* ------------------------------------------------------------------ T5 config */
 test('T5 config: replayConfig carries mentor + rules; ranked forces hint, tutorial guide; ranked M and rules-3 F are refused and not logged', () => {
-  const a = E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', mentor: 'guide' }); assert.equal(a.mentor, 'hint'); assert.equal(a.rules, 4);
-  const c = E.replayConfig(a); assert.equal(c.mentor, 'hint'); assert.equal(c.rules, 4);
+  const a = E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', mentor: 'guide' }); assert.equal(a.mentor, 'hint'); assert.equal(a.rules, E.RULES_CURRENT); // no date key → the current rules (5)
+  const c = E.replayConfig(a); assert.equal(c.mentor, 'hint'); assert.equal(c.rules, E.RULES_CURRENT);
+  assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'daily', rules: 4 }).rules, 4); assert.equal(E.createGame({ worldId: 'w3', seed: 1, mode: 'free' }).rules, E.RULES_CURRENT);
   assert.equal(E.createGame({ worldId: 'w2', seed: 1, mode: 'free', tutorial: true, mentor: 'pro' }).mentor, 'guide');
   assert.equal(E.createGame({ worldId: 'w1', seed: 1 }).mentor, 'guide'); assert.equal(E.createGame({ worldId: 'w2', seed: 1 }).mentor, 'hint');
   assert.equal(E.createGame({ worldId: 'w2', seed: 1, mentor: 'pro' }).mentor, 'pro');
-  assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 3 }).rules, 3); assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 7 }).rules, 4);
+  assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 3 }).rules, 3); assert.equal(E.createGame({ worldId: 'w1', seed: 1, rules: 7 }).rules, E.RULES_CURRENT);
   const n0 = a.actions.length; const r = E.setMentorLevel(a, 'pro'); assert.equal(r.ok, false); assert.equal(a.actions.length, n0);
   const old = E.createGame({ worldId: 'w1', seed: 2, rules: 3 }); const r2 = E.setFocus(old, 'scout', 0); assert.equal(r2.ok, false); assert.equal(old.actions.length, 0);
   assert.equal(old.econ, null); assert.equal(old.rng.cycle, makeStreams(2).cycle, 'rules 3 never touches the cycle stream');
@@ -160,7 +161,7 @@ test('T6 v3 → v4 migration from fixtures (roll, mid-deal, mid-trade, ranked da
   // v2 (st.v = 1) → v3 → v4
   const base = JSON.parse(saves.roll); base.v = 1; base.pos = 13; base.phase = 'roll'; base.pending = null; delete base.life; delete base.lessons; delete base.taxes; delete base.actions; delete base.rng.life; delete base.rng.index; delete base.holdings.IDX; delete base.prices.IDX;
   const v2 = E.deserialize(JSON.stringify(base)); assert.equal(v2.v, 4); assert.equal(v2.rules, 4); assert.ok(v2.life.focus);
-  for (const bad of [{ ...JSON.parse(saves.roll), v: 5 }, { ...JSON.parse(saves.roll), v: 2 }, { v: 4, worldId: 'w9' }, 'null', '"x"']) assert.throws(() => E.deserialize(typeof bad === 'string' ? bad : JSON.stringify(bad)), /save_incompatible/);
+  for (const bad of [{ ...JSON.parse(saves.roll), v: 5 }, { ...JSON.parse(saves.roll), v: 2 }, { v: 4, worldId: 'w99' }, 'null', '"x"']) assert.throws(() => E.deserialize(typeof bad === 'string' ? bad : JSON.stringify(bad)), /save_incompatible/);
 });
 
 /* ------------------------------------------------------------------ T7 legacy equivalence */
@@ -483,7 +484,8 @@ test('T15 focus: cost on activation, one per month, agenda pops at payday (disab
   // frugal: cancels the priciest subscription, or cuts a line once; setpoint −1 per audit (max 4)
   const s5 = W1(); s5.subs.push({ id: 's1', label: 'סטרימינג', amount: 90 }, { id: 's2', label: 'חדר כושר', amount: 250 }); const h5 = s5.life.happiness;
   assert.ok(E.setFocus(s5, 'frugal', 0).ok); assert.deepEqual(s5.subs.map((x) => x.id), ['s1']); assert.equal(s5.life.happiness, h5 - 3); assert.equal(s5.life.frugalCuts, 1);
-  const s6 = W1(); const line = s6.expenses.find((x) => /אוכל/.test(x.label)); const a6 = line.amount; E.setFocus(s6, 'frugal', 0); assert.equal(line.amount, a6 - Math.round(a6 * 0.1 / 10) * 10); assert.equal(line.audited, true);
+  const s6 = W1({ rules: 4 }); const line = s6.expenses.find((x) => /אוכל/.test(x.label)); const a6 = line.amount; E.setFocus(s6, 'frugal', 0); assert.equal(line.amount, a6 - Math.round(a6 * 0.1 / 10) * 10); assert.equal(line.audited, true);
+  const s6b = W1(); const line5 = s6b.expenses.find((x) => /אוכל/.test(x.label)); const a6b = line5.amount; E.setFocus(s6b, 'frugal', 0); assert.equal(line5.amount, a6b - Math.round(a6b * 0.05 / 10) * 10, 'rules 5 (E1 C1): w1 cuts 5 %');
   // network: +0.10 on negotiation and raise chances
   const s7 = dealState('w1', { k: 're', n: 'x', d: 'x', cost: 80000, down: 8000, cf: 500 }, { cash: 50000, dd: null }); const ch0 = E.currentEvent(s7).options.find((o) => o.id === 'offer:10').chance;
   s7.life.focus = { id: 'network', m: s7.month }; assert.equal(E.currentEvent(s7).options.find((o) => o.id === 'offer:10').chance, Math.round((ch0 + 0.1) * 100) / 100);

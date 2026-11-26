@@ -1,0 +1,461 @@
+{
+ "_doc": "tests/fallback_probe.py --phones on a private copy of the branch + team ב changes + the game.js call-site patch (2026-11-23). Headless Chrome, SwiftShader GL, offline (fake-backend guard clean).",
+ "runs": [
+  {
+   "cause": "nogl",
+   "view": "desk",
+   "secondsToPlayable": 5.1,
+   "renderer": "2d",
+   "notice": {
+    "main": "התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה.",
+    "sub": "פרטים טכניים: no-webgl",
+    "act": "",
+    "at": 1795420782053
+   },
+   "allToasts": [
+    "התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": false,
+    "gl1": false,
+    "renderer": ""
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/nogl_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "nogl",
+   "view": "phone",
+   "secondsToPlayable": 2.8,
+   "renderer": "2d",
+   "notice": {
+    "main": "התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה.",
+    "sub": "פרטים טכניים: no-webgl",
+    "act": "",
+    "at": 1795420787497
+   },
+   "allToasts": [
+    "התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": false,
+    "gl1": false,
+    "renderer": ""
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/nogl_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "webgl1",
+   "view": "desk",
+   "secondsToPlayable": 4.3,
+   "renderer": "2d",
+   "notice": {
+    "main": "הדפדפן או המכשיר הזה תומכים רק בגרסה הישנה של WebGL, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: no-webgl2 · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "",
+    "at": 1795420793899
+   },
+   "allToasts": [
+    "הדפדפן או המכשיר הזה תומכים רק בגרסה הישנה של WebGL, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": false,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/webgl1_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "webgl1",
+   "view": "phone",
+   "secondsToPlayable": 2.5,
+   "renderer": "2d",
+   "notice": {
+    "main": "הדפדפן או המכשיר הזה תומכים רק בגרסה הישנה של WebGL, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: no-webgl2 · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "",
+    "at": 1795420797993
+   },
+   "allToasts": [
+    "הדפדפן או המכשיר הזה תומכים רק בגרסה הישנה של WebGL, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": false,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/webgl1_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "threefail",
+   "view": "desk",
+   "secondsToPlayable": 3.2,
+   "renderer": "2d",
+   "notice": {
+    "main": "לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: three-failed · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795420803028
+   },
+   "allToasts": [
+    "לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/threefail_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "threefail",
+   "view": "phone",
+   "secondsToPlayable": 2.3,
+   "renderer": "2d",
+   "notice": {
+    "main": "לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: three-failed · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795420806842
+   },
+   "allToasts": [
+    "לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/threefail_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "threeslow",
+   "view": "desk",
+   "secondsToPlayable": 23.3,
+   "renderer": "2d",
+   "notice": {
+    "main": "התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: three-timeout · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795420832228
+   },
+   "allToasts": [
+    "התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/threeslow_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "threeslow",
+   "view": "phone",
+   "secondsToPlayable": 22.6,
+   "renderer": "2d",
+   "notice": {
+    "main": "התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה.",
+    "sub": "פרטים טכניים: three-timeout · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795420857247
+   },
+   "allToasts": [
+    "התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/threeslow_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "glbfail",
+   "view": "desk",
+   "secondsToPlayable": 38.6,
+   "renderer": "3d",
+   "notice": {
+    "main": "חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק.",
+    "sub": "",
+    "act": "",
+    "at": 1795420863600
+   },
+   "allToasts": [
+    "חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 5,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/glbfail_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "glbfail",
+   "view": "phone",
+   "secondsToPlayable": 13.1,
+   "renderer": "3d",
+   "notice": {
+    "main": "חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק.",
+    "sub": "",
+    "act": "",
+    "at": 1795420904256
+   },
+   "allToasts": [
+    "חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 5,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/glbfail_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "ctxgame",
+   "view": "desk",
+   "secondsToPlayable": 15.2,
+   "cardOpen": true,
+   "lost": true,
+   "recover": {
+    "title": "התצוגה התלת־ממדית נעצרה",
+    "body": "כנראה נגמר הזיכרון הגרפי, או שהדפדפן איפס את התצוגה. ההתקדמות שמורה.",
+    "tech": "פרטים טכניים: ⁦context-lost · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…⁩",
+    "acts": [
+     "להמשיך במצב קל",
+     "לנסות שוב בתלת־ממד",
+     "חזרה ללובי"
+    ]
+   },
+   "recoverCoversCardButtons": {
+    "buttons": 11,
+    "decisionButtons": 3,
+    "coveredDecision": [],
+    "coveredOther": [],
+    "bar": [
+     8,
+     161
+    ],
+    "card": [
+     140,
+     804
+    ]
+   },
+   "renderer": "3d",
+   "notice": null,
+   "allToasts": [
+    "התלת־ממד כבד למכשיר הזה? במצב קל הכל זז מהר יותר."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 15,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/ctxgame_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "ctxgame",
+   "view": "phone",
+   "secondsToPlayable": 19.7,
+   "cardOpen": true,
+   "lost": true,
+   "recover": {
+    "title": "התצוגה התלת־ממדית נעצרה",
+    "body": "כנראה נגמר הזיכרון הגרפי, או שהדפדפן איפס את התצוגה. ההתקדמות שמורה.",
+    "tech": "פרטים טכניים: ⁦context-lost · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…⁩",
+    "acts": [
+     "להמשיך במצב קל",
+     "לנסות שוב בתלת־ממד",
+     "חזרה ללובי"
+    ]
+   },
+   "recoverCoversCardButtons": {
+    "buttons": 15,
+    "decisionButtons": 7,
+    "coveredDecision": [],
+    "coveredOther": [
+     "אעאבא עשיר אומר: לפני שאת מחלי",
+     "💡 רמז רמזים: 0"
+    ],
+    "bar": [
+     8,
+     255
+    ],
+    "card": [
+     138,
+     844
+    ]
+   },
+   "renderer": "3d",
+   "notice": null,
+   "allToasts": [
+    "התלת־ממד כבד למכשיר הזה? במצב קל הכל זז מהר יותר.",
+    "🎲 דאבל! קפה טוב ושינה טובה: +8 🔋 כוח.",
+    "קומת משרדים בפתח תקווה: עוד אין לך מספיק הון, והבנק לא מממן עסקה כזו.",
+    "📚 שיעור חדש בספרייה: ברוטו ונטו"
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 15,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/ctxgame_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "ctxlobby",
+   "view": "desk",
+   "readyBehindPicker": true,
+   "pickerUp": true,
+   "lost": true,
+   "secondsToPlayable": 17.7,
+   "renderer": "2d",
+   "notice": {
+    "main": "התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה.",
+    "sub": "פרטים טכניים: context-lost · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795421081566
+   },
+   "allToasts": [
+    "התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 1,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/ctxlobby_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "ctxlobby",
+   "view": "phone",
+   "readyBehindPicker": true,
+   "pickerUp": true,
+   "lost": true,
+   "secondsToPlayable": 16.4,
+   "renderer": "2d",
+   "notice": {
+    "main": "התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה.",
+    "sub": "פרטים טכניים: context-lost · ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (…",
+    "act": "לנסות שוב בתלת־ממד",
+    "at": 1795421100060
+   },
+   "allToasts": [
+    "התצוגה התלת־ממדית נעצרה (כנראה נגמר הזיכרון הגרפי), אז עברנו למצב קל. ההתקדמות שמורה."
+   ],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": true,
+   "glbRequested": 1,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/ctxlobby_phone.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "lite",
+   "view": "desk",
+   "secondsToPlayable": 6.5,
+   "renderer": "2d",
+   "notice": null,
+   "allToasts": [],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/lite_desk.jpg",
+   "guard": "clean"
+  },
+  {
+   "cause": "lite",
+   "view": "phone",
+   "secondsToPlayable": 3.5,
+   "renderer": "2d",
+   "notice": null,
+   "allToasts": [],
+   "gl": {
+    "gl2": true,
+    "gl1": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+   },
+   "threeRequested": false,
+   "glbRequested": 0,
+   "external": [],
+   "pageErrors": [],
+   "shot": "docs/3d-upgrade/shots/fallback/lite_phone.jpg",
+   "guard": "clean"
+  }
+ ]
+}

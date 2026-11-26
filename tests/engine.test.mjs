@@ -663,8 +663,13 @@ test('credit score: forced loans hurt, repaying helps, a poor score blocks volun
   const r = E.takeLoan(st); assert.equal(r.ok, false); assert.ok(/דירוג האשראי/.test(r.error));
   const rw = E.metrics(st).realWorldRates; assert.equal(rw.bankLoan.realPerYear, null, 'no real-world loan offer for a poor score');
   st.life.creditScore = 700; const rw2 = E.metrics(st).realWorldRates; assert.ok(rw2.bankLoan.gamePerYear === 36 && rw2.bankLoan.realPerYear > 5 && rw2.bankLoan.realPerYear < 12, JSON.stringify(rw2.bankLoan));
-  st.life.creditScore = 680; E.takeLoan(st); const s0 = st.life.creditScore; E.repayLoan(st); assert.equal(st.life.creditScore, s0 + 6);
+  // rules 5+ (E1 B1, credit-farm fix): a loan taken and repaid between two paydays earns NO repayment bonus …
+  st.life.creditScore = 680; E.takeLoan(st); const s0 = st.life.creditScore; E.repayLoan(st); assert.equal(st.life.creditScore, s0, 'same-period take → repay: no bonus (rules ≥ 5)');
+  // … but principal that was owed at the previous payday does (the payday sets L.repayOk = loans owed then)
+  E.takeLoan(st); st.life.repayOk = st.loans; st.life.repayCr = 0; const s1 = st.life.creditScore; E.repayLoan(st); assert.equal(st.life.creditScore, s1 + 6, 'principal owed at the last payday → +6');
   assert.equal(E.metrics(st).life.creditBand, 'טוב');
+  // rules ≤ 4 keep the old behaviour: any repayment helps
+  const s4 = W1({ rules: 4 }); s4.econ = null; s4.life.creditScore = 680; E.takeLoan(s4); const s40 = s4.life.creditScore; E.repayLoan(s4); assert.equal(s4.life.creditScore, s40 + 6, 'rules 4: repaying helps');
 });
 
 test('★★★ needs money AND happiness; checkEnd carries "סיפור החיים שלך"', () => {

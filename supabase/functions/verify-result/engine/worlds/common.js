@@ -20,6 +20,20 @@ export const TILE_TYPES = {
   T: { type: 'tax', name: 'מס הכנסה', color: '#64748b', ink: '#ffffff', icon: 'tax' },
   I: { type: 'index', name: 'קרן מדד ופנסיה', color: '#0f766e', ink: '#ffffff', icon: 'piggy' },
   K: { type: 'business', name: 'העסק שלך', color: '#b45309', ink: '#ffffff', icon: 'shop' },
+  // worlds wave 1 (w5): a module tile — its type is the module's (js/worlds/mech/season.js tiles.N)
+  N: { type: 'allot', name: 'מפעיל תיירות', color: '#0ea5a4', ink: '#ffffff', icon: 'plane' },
+  // worlds wave 2 (w6): a module tile — js/worlds/mech/plant.js tiles.C (a 24-month supply contract)
+  C: { type: 'contract', name: 'חוזה אספקה', color: '#f97316', ink: '#ffffff', icon: 'doc' },
+  // worlds wave 3 (w7): a module tile — js/worlds/mech/chain.js tiles.R (a site for a new branch: open, franchise, survey or pass)
+  R: { type: 'site', name: 'מיקום לסניף', color: '#e63946', ink: '#ffffff', icon: 'shop' },
+  // worlds wave 3 (w8): a module tile — js/worlds/mech/projects.js tiles.Q (land for a project: buy with a contractor tier, a permit check, or pass)
+  Q: { type: 'land', name: 'קרקע לפרויקט', color: '#eab308', ink: '#3a2400', icon: 'crane' },
+  // worlds wave 4 (w9): a module tile — js/worlds/mech/energy.js tiles.V (a site for a power project: a resource study, develop, or pass)
+  V: { type: 'powerSite', name: 'אתר אנרגיה', color: '#06b6d4', ink: '#ffffff', icon: 'bolt' },
+  // CATALOG-25 wave A1 (w10): module tiles — js/worlds/mech/market.js tiles.W (the trading floor: the month's news, a free look at a
+  // company) and js/worlds/mech/portfolio.js tiles.Y (a private deal: due diligence, commit, half, or pass)
+  W: { type: 'exchange', name: 'הבורסה', color: '#1d4ed8', ink: '#ffffff', icon: 'bars' },
+  Y: { type: 'privateDeal', name: 'השקעה פרטית', color: '#a16207', ink: '#ffffff', icon: 'lock' },
 };
 
 /** v3: the index fund ("קרן מחקה מדד") — tradeable in every world. Price is driven by the engine (pre-drawn monthly returns). */

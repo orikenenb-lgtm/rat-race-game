@@ -70,7 +70,7 @@ for (const t of TEXT) {
 /* ---------- A-1: --accent-ink for the 5 worlds × 2 modes (w1 = :root; others from body[data-world=…]) */
 const accentInk = { w1: tok('--accent-ink') };
 const accentFill = {};
-for (const w of ['w2', 'w3', 'w4', 'h']) {
+for (const w of ['w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'h']) {
   const b = block(GAME, `body[data-world=${w}]`);
   ok(!!b, `game.css has body[data-world=${w}]`);
   const d = decls(b || '');
@@ -78,7 +78,7 @@ for (const w of ['w2', 'w3', 'w4', 'h']) {
   ok(!!accentInk[w], `body[data-world=${w}] sets --accent-ink as light-dark(hex,hex)`);
   if (d['--accent']) accentFill[w] = d['--accent'];
 }
-const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], h: ['#7a5520', '#c8a24a'] };
+const SPEC_INK = { w1: ['#8a5a00', '#f2b632'], w2: ['#9d1784', '#ff4fd8'], w3: ['#0b5f78', '#38bdf8'], w4: ['#6d28d9', '#22d3ee'], w5: ['#9a3412', '#ff9f7f'], w6: ['#9a3412', '#fb923c'], w7: ['#9b1c24', '#ff8a93'], w8: ['#854d0e', '#facc15'], w9: ['#155e75', '#67e8f9'], w10: ['#7a5a0a', '#facc15'], w13: ['#7f1d1d', '#fca5a5'], w11: ['#92400e', '#fbbf24'], w15: ['#4c1d95', '#c4b5fd'], w12: ['#14532d', '#86efac'], w16: ['#075985', '#7dd3fc'], w14: ['#334155', '#cbd5e1'], w17: ['#115e59', '#5eead4'], w18: ['#3730a3', '#a5b4fc'], w19: ['#7c2d12', '#fdba74'], w20: ['#155e75', '#22d3ee'], h: ['#7a5520', '#c8a24a'] };
 for (const [w, p] of Object.entries(accentInk)) {
   if (!p) continue;
   ok(p.light.toLowerCase() === SPEC_INK[w][0] && p.dark.toLowerCase() === SPEC_INK[w][1], `--accent-ink ${w} matches the §3 identity sheet`);
@@ -122,9 +122,9 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
 }
 
 /* ---------- text on world accent FILLS uses --ink (§2.1, h fill becomes #c8a24a) */
-const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
+const worldsSrc = Object.fromEntries(['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'h'].map((w) => [w, read(`js/worlds/${w}.js`)]));
 const fillOf = (w) => accentFill[w] || (worldsSrc[w].match(/accent:\s*'(#[0-9a-f]{6})'/i) || worldsSrc.w1.match(/accent:\s*'(#[0-9a-f]{6})'/i))[1];
-for (const w of ['w1', 'w2', 'w3', 'w4', 'h']) {
+for (const w of ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'h']) {
   const f = fillOf(w), r = cr(tok('--ink').light, f);
   ok(r >= 4.5, `--ink on ${w} accent fill ${f} ≥ 4.5 (${f2(r)})`);
   table.push({ token: `--ink on accent ${w}`, light: `${f} ${f2(r)}` });
@@ -206,6 +206,51 @@ for (const [name, css] of [['game.css', G], ['lobby.css', L]]) {
   for (const b of blocks) ok(!/(^|\})\s*(?!:root:not\(\[data-motion=full\]\))[.#\w]/.test(b[1].replace(/\s*:root:not\(\[data-motion=full\]\)[^{]*\{[^}]*\}/g, '')), `${name}: OS reduced-motion rules are scoped by :root:not([data-motion=full])`);
   const osCount = (css.match(/:root:not\(\[data-motion=full\]\)/g) || []).length, appCount = (css.match(/:root\[data-motion=reduce\]/g) || []).length;
   ok(appCount === osCount, `${name}: ${appCount} data-motion=reduce rules mirror ${osCount} OS rules`);
+}
+
+/* ---------- 3D upgrade wave 2 (A3): a tag inside a gold (primary) button — "המנטור ממליץ לבדוק", "הבחירה של המנטור" — in both themes */
+{
+  const sG = strip(G);
+  const last = (sel) => { let v = null; for (const m of sG.matchAll(/([^{}]+)\{([^}]*)\}/g)) if (m[1].split(',').map((x) => x.trim()).includes(sel)) { const c = m[2].match(/(?:^|;)\s*color:\s*([^;]+)/); if (c) v = c[1].trim(); } return v; };
+  const res = (v) => (v && v.startsWith('var(') ? tok(v.slice(4, -1)) : pair(v));
+  for (const sel of ['.primary .tagc', '.primary .tagc.dflt', '.primary .tagc.rec', '.choice.primary .tagc.rec', '.ddins .insp.primary .tagc.rec']) {
+    const p = res(last(sel));
+    ok(p && cr(p.light, gold) >= 4.5 && cr(p.dark, gold) >= 4.5, `${sel} on the gold fill ≥ 4.5 in light and dark (${p ? f2(cr(p.light, gold)) + ' / ' + f2(cr(p.dark, gold)) : 'no rule'})`);
+    if (p) table.push({ token: `${sel} on --gold`, light: `${p.light} ${f2(cr(p.light, gold))}`, dark: `${p.dark} ${f2(cr(p.dark, gold))}` });
+  }
+}
+
+/* ---------- worlds wave 3 (w7 / w8): every later world's board (WORLD_STYLE, the render identity) is ΔE76 ≥ 10 from every other world's board,
+   so a screenshot never leaves you guessing which world it is (w1–w4 / h keep their own spacing, checked in render_vocab) */
+{
+  const { WORLD_STYLE } = await import('../js/render/vocab.js');
+  const lab = (h) => { const [r, g, b] = hex(h).map(lin); const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    const X = f((r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047), Y = f(r * 0.2126 + g * 0.7152 + b * 0.0722), Z = f((r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)]; };
+  const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+  const ids = Object.keys(WORLD_STYLE);
+  for (const w of ['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20']) for (const o of ids) if (o !== w) { const d = dE(WORLD_STYLE[w].board, WORLD_STYLE[o].board); ok(d >= 10, `board ΔE76 ${w} ${WORLD_STYLE[w].board} ↔ ${o} ${WORLD_STYLE[o].board} = ${d.toFixed(1)} ≥ 10`); }
+  // the 3D accent and the UI fill: w7's UI fill is lighter than its awning red so --ink on it stays ≥ 4.5 (checked above); the 3D accents differ per world
+  ok(new Set(['w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20'].map((w) => WORLD_STYLE[w].accent)).size === 16, 'w5–w20 accents are distinct');
+  // w12 tile Z: white on the deep green ≥ 4.5; w16 tile H: white on #0284c7 is 4.1 — the tile names are LARGE text on the 3D tile (≥ 3:1) and
+  // carry a dark text shadow on the 2D tile (stability.css .b2d-tile[data-type="produce"]); the card's tag uses the w16 UI colours
+  ok(cr('#ffffff', '#166534') >= 4.5, `w12 tile Z: #fff on #166534 ≥ 4.5 (${f2(cr('#ffffff', '#166534'))})`);
+  ok(cr('#ffffff', '#0284c7') >= 3, `w16 tile H: #fff on #0284c7 ≥ 3 (large text; ${f2(cr('#ffffff', '#0284c7'))})`);
+  ok(/\.b2d-tile\[data-type="produce"\]\{text-shadow:/.test(read('css/stability.css')), 'w16 tile H on the 2D board: a dark text shadow behind the white name');
+  // w14 tile J / w18 tile Z / w19 tile W / w20 tile W: white ≥ 4.5; w17 tile V: white on #0d9488 is 3.7 — large text on the 3D tile, a dark text
+  // shadow on the 2D tile (stability.css .b2d-tile[data-type="candidate"])
+  for (const [w, c] of [['w14', '#475569'], ['w18', '#312e81'], ['w19', '#b45309'], ['w20', '#0e7490']]) ok(cr('#ffffff', c) >= 4.5, `${w} tile: #fff on ${c} ≥ 4.5 (${f2(cr('#ffffff', c))})`);
+  ok(cr('#ffffff', '#0d9488') >= 3, `w17 tile V: #fff on #0d9488 ≥ 3 (large text; ${f2(cr('#ffffff', '#0d9488'))})`);
+  ok(/\.b2d-tile\[data-type="candidate"\]\{text-shadow:/.test(read('css/stability.css')), 'w17 tile V on the 2D board: a dark text shadow behind the white name');
+  for (const c of ['#334155', '#115e59', '#3730a3', '#7c2d12', '#155e75']) ok(cr('#ffffff', c) >= 4.5, `w14 / w17 / w18 / w19 / w20 panel tag: #fff on ${c} ≥ 4.5 (${f2(cr('#ffffff', c))})`);
+  // the panels' modal tags (ui.js worldPanel colours) carry white text
+  for (const c of ['#14532d', '#075985']) ok(cr('#ffffff', c) >= 4.5, `w12 / w16 panel tag: #fff on ${c} ≥ 4.5 (${f2(cr('#ffffff', c))})`);
+  // w11 tile Z: the ink #3a2400 on amber; w15 tile H: white on violet ≥ 4.5; the manager-token ring and the cohort bars are not the only carrier (words beside them)
+  ok(cr('#3a2400', '#f59e0b') >= 4.5, `w11 tile Z: #3a2400 on #f59e0b ≥ 4.5 (${f2(cr('#3a2400', '#f59e0b'))})`);
+  ok(cr('#ffffff', '#7c3aed') >= 4.5, `w15 tile H: #fff on #7c3aed ≥ 4.5 (${f2(cr('#ffffff', '#7c3aed'))})`);
+  // w13 tile H: white on the club red ≥ 4.5; the age-ring badges (white digits on the ring colour) ≥ 4.5
+  ok(cr('#ffffff', '#dc2626') >= 4.5, `w13 tile H: #fff on #dc2626 ≥ 4.5 (${f2(cr('#ffffff', '#dc2626'))})`);
+  for (const c of ['#15803d', '#0e7490', '#1d4ed8', '#a16207', '#7c2d12']) ok(cr('#ffffff', c) >= 4.5, `w13 age ring badge: #fff on ${c} ≥ 4.5 (${f2(cr('#ffffff', c))})`);
 }
 
 /* ---------- report */

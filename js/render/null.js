@@ -10,6 +10,9 @@ export const SCENE_API = Object.freeze([
   // T5 §10.2 (living city, picking, motion, quality, turn skip)
   'setLevel', 'pulse', 'onPick', 'pickAt', 'highlight', 'setMotion', 'setQuality', 'getQuality', 'skip', 'introWorld', 'setPawnRing', 'perfStats',
 ]);
+/** 3D upgrade wave 1 (team ג): optional additions. game.js calls them as scene.name?.(…); every renderer exports them
+ * (tests/board_ux.test.mjs). Kept out of SCENE_API so its frozen 48-name contract (tests/render_api.test.mjs) is unchanged. */
+export const SCENE_OPTIONAL = Object.freeze(['markTile', 'onTilePick', 'cityKeys', 'homeView']);
 
 export const kind = 'none';
 let camMode = 'follow';
@@ -67,3 +70,8 @@ export function skip() {}
 export function introWorld() {}
 export function setPawnRing() {}
 export function perfStats() { return {}; }
+// wave 1 (SCENE_OPTIONAL)
+export function markTile() {}
+export function onTilePick() { return () => {}; }
+export function cityKeys() { return []; }
+export function homeView() {}

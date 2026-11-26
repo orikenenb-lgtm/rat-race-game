@@ -9,16 +9,16 @@
 <meta name="description" content="משחק לוח תלת־ממדי שמלמד איך יוצאים ממירוץ העכברים. ארבעה עולמות, אתגר יומי, קבוצות עם חברים.">
 <meta property="og:title" content="מירוץ העכברים">
 <meta property="og:description" content="תצליח לצאת ממירוץ העכברים מהר יותר מהחברים שלך?">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&family=Secular+One&display=swap" rel="stylesheet">
+<!-- fonts (Rubik, Secular One — SIL OFL) are self-hosted: @font-face in css/stability.css, files in vendor/fonts/ (ATTRIBUTION.md) -->
 <link rel="stylesheet" href="css/game.css">
 <!-- T7 CR-33: the in-game styles, off the lobby's critical path: no href (nothing is fetched) until window.__rrPlayCss() (below)
      sets it once the lobby is open. The element stays at this spot, so the cascade order is the one from before the split. -->
 <link id="playCss" data-href="css/game-play.css">
 <link rel="stylesheet" href="css/lobby.css">
 <link rel="stylesheet" href="css/stability.css">
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<!-- three.js 0.170.0 (MIT) is self-hosted (vendor/three/VERSION); plain paths like the rest of the site, relative so they work under
+     the GitHub Pages base /rat-race-game/. Only the addons the game imports are vendored (tests/fallback_reasons.test.mjs). -->
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.min.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
 <!-- T7 CR-33: the lobby's whole static module graph (main.js + lobby.js), fetched in parallel instead of a 7-level waterfall.
      Lobby-critical modules only: the in-game graph (game.js, ui.js, scene, three…) loads after the lobby is open.
      Kept in sync with the real import graph by tests/preload.test.mjs. -->
@@ -54,6 +54,7 @@
 <link rel="modulepreload" href="js/systems/rivals.js">
 <link rel="modulepreload" href="js/systems/dreams.js">
 <link rel="modulepreload" href="js/systems/recap.js">
+<link rel="modulepreload" href="js/systems/content.js">
 <link rel="modulepreload" href="js/worlds/w1.js">
 <link rel="modulepreload" href="js/worlds/w2.js">
 <link rel="modulepreload" href="js/worlds/w3.js">
@@ -61,6 +62,10 @@
 <link rel="modulepreload" href="js/worlds/h.js">
 <link rel="modulepreload" href="js/data/tax.js">
 <link rel="modulepreload" href="js/worlds/common.js">
+<link rel="modulepreload" href="js/worlds/meta.js">
+<link rel="modulepreload" href="js/worlds-groups.js">
+<link rel="modulepreload" href="js/worlds/goals.js">
+<link rel="modulepreload" href="js/money.js">
 </head>
 <body data-world="w1">
 <canvas id="c" aria-label="לוח המשחק התלת־ממדי"></canvas>

@@ -125,7 +125,7 @@ eq([S2.games, S2.dqHistory, S2.principles.map((x) => [x.id, x.mastery])], [0, [5
   eq([P.isUnlocked('w2'), P.getProgress().cleared], [true, { w1: true }], 'P0 repair: the last practice escape (learning signature) opens w2');
   P._reset({ learn: { games: 1, dq: [70], principles: {}, lastSig: '|learn|w1|123|38|lost' } });
   eq(P.isUnlocked('w2'), false, 'P0 repair: a practice loss is not an escape');
-  P._reset({ cleared: { w1: 'yes', w9: true, w2: true } });
+  P._reset({ cleared: { w1: 'yes', w99: true, w2: true } });
   eq(P.getProgress().cleared, { w2: true }, 'P0 cleared keeps only known worlds with a literal true');
   // pre-hotfix 0★ escape (best recorded, 0 stars) is healed by the rule itself
   P._reset({ stars: { w1: 0 }, best: { w1: 61 } });

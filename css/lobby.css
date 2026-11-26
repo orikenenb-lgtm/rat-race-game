@@ -992,6 +992,50 @@ body.lb-lobby-open { overflow: hidden; }
 .t6-bcmp table{width:100%;border-collapse:collapse;font-size:14px}
 .t6-bcmp th,.t6-bcmp td{padding:5px 4px;text-align:start;border-bottom:1px solid rgba(0,0,0,.08)}
 .t6-bcmp td.pos{color:var(--green,#15803d);font-weight:700}.t6-bcmp td.neg{color:var(--red,#b91c1c);font-weight:700}
+
+/* ======================================================================= worlds wave 0 + w5: the 12-world map (lobby lane) */
+/* generated card art for worlds without a painted card (sky gradient + motif) — never a missing image */
+.gen-art { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-height: 100%; background: radial-gradient(120% 90% at 70% 110%, rgba(255, 255, 255, .35), transparent 60%), linear-gradient(170deg, var(--g1), var(--g2)); }
+.gen-motif { font-size: clamp(34px, 7vw, 58px); line-height: 1; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .25)); }
+.map-art .gen-art { position: absolute; inset: 0; }
+.map-card:hover .map-art .gen-motif { transform: scale(1.08); transition: transform .3s ease; }
+.map-card.is-locked .gen-art { filter: grayscale(.85) brightness(.75); }
+.wv-hero .gen-art { aspect-ratio: 5 / 3; max-height: 300px; }
+.wv-hero .gen-motif { font-size: 84px; }
+.wv-hero.is-locked .gen-art { filter: grayscale(.8) brightness(.72); }
+.pf-w .gen-art { width: 70px; aspect-ratio: 5 / 3; border-radius: 10px; flex: none; }
+.pf-w .gen-motif, .end-unlock .gen-motif { font-size: 26px; }
+.end-unlock .gen-art { width: 120px; aspect-ratio: 5 / 3; border-radius: 12px; flex: none; }
+.end-art .gen-art { position: absolute; inset: 0; }
+/* the learn / difficulty / length lines of the later worlds (BRIEF-worlds §5) */
+.map-learn { font-size: 13px; line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.map-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--mut); font-weight: 700; }
+.map-diff { display: inline-flex; align-items: center; gap: 4px; }
+.map-diff > span { letter-spacing: 1px; color: light-dark(#b45309, #f4b860); font-size: 12px; }
+.map-diff em { font-style: normal; }
+.map-fork, .map-free { padding: 1px 8px; border-radius: 999px; background: light-dark(#f1e7d6, #3a3346); color: var(--ink); font-weight: 700; }
+/* planned worlds: a "בקרוב" pin, not a button */
+.map-card.is-soon { cursor: default; background: light-dark(#f3eee6, #24212b) !important; box-shadow: 0 3px 10px rgba(60, 30, 0, .10); }
+.map-card.is-soon:hover { transform: none; border-color: transparent !important; box-shadow: 0 3px 10px rgba(60, 30, 0, .10); }
+.map-card.is-soon .gen-art { filter: grayscale(.55) brightness(.92) saturate(.8); }
+.map-card.is-soon .map-name { color: var(--mut); }
+.map-soon { position: absolute; inset: auto 0 10px 0; margin: auto; width: max-content; padding: 3px 12px; border-radius: 999px; background: rgba(20, 14, 30, .62); color: #fff; font-weight: 800; font-size: 13px; }
+.map-soon-t { font-size: 12px; font-weight: 800; color: var(--mut); white-space: nowrap; }
+.map-trail li.soon span { background: transparent; box-shadow: 0 0 0 2px light-dark(#e6d6b6, #4b4358) inset; color: var(--mut); white-space: nowrap; }
+/* the world view of a lazy world: loading / error, and the extra rows */
+.wv-loading, .wv-loaderr { display: grid; justify-items: center; gap: 6px; }
+.lb-spin { width: 34px; height: 34px; border-radius: 50%; border: 4px solid light-dark(#efe5d2, #3a3346); border-top-color: var(--gold); animation: lb-spin .9s linear infinite; }
+.wv-diff5 b { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+@media (max-width: 600px) {
+  .map-learn { font-size: 12px; -webkit-line-clamp: 3; }
+  .map-meta { font-size: 12px; gap: 3px 6px; }
+  .map-free { display: none; }
+  .map-soon { font-size: 12px; bottom: 6px; }
+  .map-soon-t { display: none; }
+  .gen-motif { font-size: 34px; }
+  .map-trail li.soon span { font-size: 12px; }
+}
+
 /* owner (admin) tools in the profile */
 .pf-admin-rows { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .pf-admin-rows li { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: var(--paper); border-radius: 12px; }
@@ -999,3 +1043,67 @@ body.lb-lobby-open { overflow: hidden; }
 .pf-admin-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-admin-give { display: flex; gap: 6px; }
 .pf-admin-claim summary { cursor: pointer; font-weight: 600; }
+
+/* ---------------- 2026-11-25 (owner: "תחלק את המפות לעולמות"): the map is 6 worlds (chapters), each a heading + its maps */
+.map-grid.map-worlds { display: flex; flex-direction: column; gap: 18px; }
+.mw { border-radius: 22px; padding: 12px; background: light-dark(rgba(255, 255, 255, .55), rgba(255, 255, 255, .04)); border: 1px solid light-dark(#eadcc2, #3a3346); }
+.mw-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 10px; flex-wrap: wrap; }
+.mw-ic { flex: none; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: var(--gold); box-shadow: 0 3px 0 var(--gold2); }
+.mw-txt { flex: 1 1 220px; min-width: 0; }
+.mw-txt h3 { margin: 0; font: 22px/1.15 "Secular One", Rubik, sans-serif; color: var(--ink); }
+.mw-txt h3 small { display: block; font: 800 12px/1.3 Rubik, sans-serif; color: var(--gold-text); letter-spacing: .02em; }
+.mw-learn { margin: 2px 0 0; font-size: 14px; color: var(--mut); line-height: 1.35; }
+.mw-state { margin: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 13px; font-weight: 800; }
+.mw-count { color: var(--ink); white-space: nowrap; }
+.mw-st { padding: 2px 10px; border-radius: 999px; background: light-dark(#f1e7d6, #3a3346); color: var(--ink); white-space: nowrap; }
+.mw.is-open .mw-st { background: #157a4b; color: #fff; }
+.mw.is-done .mw-st { background: var(--gold); color: #3a1f00; }
+.mw.is-locked .mw-ic, .mw.is-soon .mw-ic { background: light-dark(#e6d6b6, #4b4358); box-shadow: none; }
+.mw-maps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.mw-maps > li { display: flex; min-width: 0; }
+.mw-maps > li > .map-card { flex: 1 1 auto; min-width: 0; }
+.map-trail li.w-start { margin-inline-start: 6px; }
+.wv-kicker { font-size: 13px; font-weight: 800; letter-spacing: .02em; }
+@media (max-width: 600px) {
+  .map-grid.map-worlds { gap: 12px; }
+  .mw { padding: 8px; border-radius: 18px; }
+  .mw-head { gap: 8px; margin-bottom: 8px; }
+  .mw-ic { width: 36px; height: 36px; border-radius: 12px; font-size: 20px; }
+  .mw-txt h3 { font-size: 18px; }
+  .mw-learn { font-size: 12px; }
+  .mw-state { flex-direction: row; flex-wrap: wrap; width: 100%; justify-content: space-between; align-items: center; font-size: 12px; }
+  .mw-maps { gap: 10px; }
+  .wv-kicker { font-size: 12px; }
+}
+/* the trail of 17+ maps wraps under the heading instead of covering it */
+.map-head { flex-wrap: wrap; }
+.map-trail { flex-wrap: wrap; row-gap: 6px; min-width: 0; max-width: 100%; }
+
+/* owner moderation panel (js/admin.js) — inside .pf-admin; every destructive button arms first (.armed) and acts on the second tap */
+.pf-mod { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pf-mod button { touch-action: manipulation; }
+.pf-mod-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-mod-tabs [aria-selected="true"] { background: var(--gold); color: #1b1300; font-weight: 700; }
+.pf-mod-pane h4, .pf-mod-card h4 { margin: 12px 0 4px; }
+.pf-mod-rows, .pf-mod-rooms, .pf-mod-seats, .pf-mod-msgs, .pf-mod-log { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.pf-mod-rows > li, .pf-mod-rooms > li, .pf-mod-msgs > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 8px 10px; border-radius: 12px; background: var(--paper); }
+.pf-mod-rows > li > span:first-child, .pf-mod-msgs > li > span:first-child { display: flex; flex-direction: column; min-width: 0; }
+.pf-mod-rows small, .pf-mod-rooms small, .pf-mod-msgs small, .pf-mod-log small { color: var(--mut); }
+.pf-mod-rooms > li { flex-direction: column; align-items: stretch; }
+.pf-mod-rh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pf-mod-rh b { font: 800 18px/1 Rubik, sans-serif; letter-spacing: .12em; }
+.pf-mod-seats > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 4px 8px; border-radius: 10px; background: var(--paper2); }
+.pf-mod-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+.pf-mod-text { font-size: 15px; overflow-wrap: anywhere; }
+.pf-mod-rep { display: flex; flex-direction: column; min-width: 0; flex: 1 1 220px; }
+.pf-mod .is-hidden { opacity: .6; }
+.pf-mod .armed { background: var(--red) !important; color: #fff !important; border-color: var(--red) !important; font-weight: 700; }
+.pf-mod-card { padding: 10px 12px; border-radius: 14px; border: 2px solid var(--gold); background: var(--paper); }
+.pf-mod-ph { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pf-mod-ph h3 { margin: 0; }
+.pf-mod-ph button { margin-inline-start: auto; }
+.pf-mod-counts { margin: 6px 0; font-size: 14px; color: var(--mut); }
+.pf-mod-ban { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 10px; border-radius: 12px; background: light-dark(#ffe9e9, #4a1c1c); }
+.pf-mod-banf { margin-top: 8px; }
+.pf-mod-banf select, .pf-mod-banf input { min-height: 44px; font: inherit; font-size: 16px; }
+.pf-mod-log li { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 14px; }

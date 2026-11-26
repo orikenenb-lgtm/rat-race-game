@@ -56,14 +56,19 @@ eq(P.recordDream({ ...dEnd }), null, 'm-9 the same game:end twice is recorded on
 P.recordDream({ mode: 'free', learn: true, dream: { id: 'biz', missions: [{ id: 'biz_own', done: true }] } });
 eq(P.getProgress().dreams.biz, { done: ['biz_seed'], games: 1 }, 'recordDream: normal games only, merged badges, counted once');
 const synced = JSON.stringify(Object.keys((await import('../js/progress.js')).getProgress()));
-ok(!/learnGames|mentorPref/.test(readFileSync(join(ROOT, 'js/progress.js'), 'utf8').match(/const metaOf = [^\n]*/)[0]), 'T4 fields are not in metaOf() (never synced)'); void synced;
+ok(!/learnGames|mentorPref/.test(readFileSync(join(ROOT, 'js/progress.js'), 'utf8').match(/const profileMeta = [^\n]*/)[0]), 'T4 fields are not in profileMeta() (never synced; was metaOf before worlds wave 0)'); void synced;
 
 /* ---------------- T-M2 lessons-meta.js */
 const ids = E.LESSONS.map((l) => l.id);
-const missing = ids.filter((id) => !LESSON_META[id] || !LESSON_META[id].teaser || !LESSON_META[id].hint);
-eq(missing, [], `T-M2 every engine lesson (${ids.length}) has teaser + hint`);
+// w13+: a lazy world's lessons travel in its pack (world.lessonDefs, registered by ensureWorld) — read them from the world files without
+// registering them, so every lesson a player can meet needs its meta (E.LESSONS itself stays the core list for the checks below)
+const { LAZY_IDS } = await import('../js/worlds/index.js');
+const lazyIds = (await Promise.all(LAZY_IDS.map((w) => import(`../js/worlds/${w}.js`).then((m) => (m.default.lessonDefs || []).map((l) => l.id))))).flat();
+const allIds = [...new Set([...ids, ...lazyIds])];
+const missing = allIds.filter((id) => !LESSON_META[id] || !LESSON_META[id].teaser || !LESSON_META[id].hint);
+eq(missing, [], `T-M2 every engine lesson (${ids.length} core + ${allIds.length - ids.length} from the lazy worlds' packs) has teaser + hint`);
 // review M-1: meta written ahead of an engine lane (T3 lessons) is PENDING until that engine work is committed — not a failure
-for (const id of Object.keys(LESSON_META).filter((x) => !ids.includes(x))) pending(`T-M2 lessons-meta has '${id}'; the engine has no such lesson yet (engine lane, T3)`);
+for (const id of Object.keys(LESSON_META).filter((x) => !allIds.includes(x))) pending(`T-M2 lessons-meta has '${id}'; the engine has no such lesson yet (engine lane, T3)`);
 const trig = [...new Set(PR.PRACTICE.flatMap((x) => x.after))];
 eq(trig.filter((id) => !(LESSON_META[id] && LESSON_META[id].example)), [], 'T-M2 / AC-B5 every practice-trigger lesson has a worked example');
 eq(trig.filter((id) => !ids.includes(id)), [], 'practice triggers are real lesson ids');
@@ -196,6 +201,8 @@ if (E.rollCost({ mode: 'free', learn: true }) !== 0) pending('E-2 rollCost(st.le
 {
   const t0 = Date.now();
   const { play, POLICIES } = await import('../tools/sim.mjs');
+  await import('../js/worlds/all.js');   // worlds wave 0: the lazy worlds (w5 …) — their lessons are reachable only in their own games
+  const WS = (typeof E.loadedWorlds === 'function' ? E.loadedWorlds() : E.WORLDS).map((w) => w.id);
   if (typeof E.loadRealData === 'function') { try { await E.loadRealData(); } catch (e) { /* history scenarios may stay empty offline */ } }
   const all = new Set(E.LESSONS.map((l) => l.id)); const got = new Map();
   const note = (st, tag) => { for (const id of st.lessons || []) if (all.has(id) && !got.has(id)) got.set(id, tag); };
@@ -220,10 +227,10 @@ if (E.rollCost({ mode: 'free', learn: true }) !== 0) pending('E-2 rollCost(st.le
     return st;
   };
   const stages = [
-    ['sim seed 1', function* () { for (const w of ['w1', 'w2', 'w3', 'w4']) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + pol.length, pol, 120).st; }],
+    ['sim seed 1', function* () { for (const w of WS) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + pol.length, pol, 120).st; }],
     ['history', function* () { for (const sc of E.scenarioList()) yield () => roam(E.createGame({ mode: 'history', scenarioId: sc.id, seed: 7 }), rnd(8), false); }],
     ['business / story', function* () { for (let s = 0; s < 120; s++) for (const ch of ['founder', 'engineer', 'social', 'teacher', 'dev']) { const w = ['founder', 'engineer', 'social'].includes(ch) ? 'w4' : 'w1'; yield () => roam(E.createGame({ worldId: w, charId: ch, seed: 300 + s, mode: 'free' }), rnd(s + 11), true); } }],
-    ['sim seeds 2–3', function* () { for (let k = 1; k <= 2; k++) for (const w of ['w1', 'w2', 'w3', 'w4']) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + k * 31 + pol.length, pol, 120).st; }],
+    ['sim seeds 2–3', function* () { for (let k = 1; k <= 2; k++) for (const w of WS) for (const ch of E.getWorld(w).characters) for (const pol of pols) yield () => play(w, ch.id, 1000 + k * 31 + pol.length, pol, 120).st; }],
   ];
   const games = {};
   for (const [name, gen] of stages) {

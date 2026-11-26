@@ -44,7 +44,7 @@ export default {
       hotel: { label: 'ספא וחדרים משודרגים', costPct: 0.06, gainPct: 0.25, valuePct: 0.1 },
     },
   },
-  trim: { pct: 0.35, costMonths: 5 },
+  trim: { pct: 0.35, costMonths: 5, costMonths5: 8 }, // rules 5 (E1 C1): 8 months of the cut, and a cut feels like one (frugalCuts)
   models: { tower: 'tower', mall: 'mall', hotel: 'hotel', side: 'mall', biz: 'mall', stake: 'mall' },
   bizOffers: ['pizza', 'laundromat', 'coffee'],
   kinds: { tower: { label: 'נדל"ן למגורים', debtLabel: 'משכנתא', rent: true }, mall: { label: 'מסחר', debtLabel: 'הלוואה', rent: true }, hotel: { label: 'מלונאות', debtLabel: 'הלוואה' }, side: { label: 'עסק צדדי', debtLabel: 'הלוואה' }, biz: { label: 'עסק', debtLabel: 'הלוואה' }, stake: STAKE_KIND },

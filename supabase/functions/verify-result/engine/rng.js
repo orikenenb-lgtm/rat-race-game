@@ -58,15 +58,30 @@ export function mix32(x) {
 /**
  * Build the named streams object for a seed. Stream order/names are part of the save format — APPEND ONLY (a stream's seed
  * comes from its index). 0–9 v1–v3 · 10 dd, 11 cycle (T2, rules 4 only) · 12 rival, 13 listing (reserved for T6, unused) ·
- * 14 story (T3, rules 4 only: exactly 2 draws per payday). Per-business sealed streams live in state.bizRng / state.bizStory (not here).
- * Next free index: 15.
+ * 14 story (T3, rules 4 only: exactly 2 draws per payday) · 15 world (worlds wave 0: drawn ONLY by world mechanic modules js/worlds/mech/*,
+ * each with its declared fixed counts per payday / per landing type; w1–w4 never touch it). Per-business sealed streams live in
+ * state.bizRng / state.bizStory (not here). Indices 16+ are LAZY streams (LAZY_STREAMS below), never in makeStreams.
  */
 export const STREAMS = ['dice', 'deal', 'doodad', 'market', 'crisis', 'mystery', 'special', 'drift', 'life', 'index',
-  'dd', 'cycle', 'rival', 'listing', 'story'];
+  'dd', 'cycle', 'rival', 'listing', 'story', 'world'];
 export function makeStreams(seed) {
   const s = {};
   STREAMS.forEach((name, k) => { s[name] = mix32((seed >>> 0) + Math.imul(k + 1, 0x9E3779B9)); });
   return s;
+}
+/**
+ * CATALOG-25 §3.8 / §4.3 (rules 7): streams created ONLY in the state of a world that declares them (`world.streams: ['exch', …]`), so
+ * every other world's state — and every old save — keeps exactly the 16 streams above (byte-identical JSON). Their seeds use the same
+ * formula, from their index: 16 `exch` (the market module js/worlds/mech/market.js: prices, regimes, company events, relisting — fixed
+ * counts per payday) · 17 `content` (js/systems/content.js: pool picks, generated numbers and template text — fixed counts per pool).
+ * APPEND ONLY. Next free index: 18.
+ */
+export const LAZY_STREAMS = ['exch', 'content'];
+/** The seed of a lazy stream (its index = 16 + its LAZY_STREAMS position). */
+export function lazyStreamSeed(seed, name) {
+  const k = STREAMS.length + LAZY_STREAMS.indexOf(name);
+  if (k < STREAMS.length) throw new Error('unknown lazy stream ' + name);
+  return mix32((seed >>> 0) + Math.imul(k + 1, 0x9E3779B9));
 }
 
 /** Seed from a string (e.g. a daily-challenge date "2026-11-19:w3"). FNV-1a → uint32, never 0. */

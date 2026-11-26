@@ -322,9 +322,29 @@ export function dimRowsHtml(dims, ctx = {}) {
 }
 /** §6.2.3 — the engine's recap.suggestion; until it exists, the engine's own tip (tipFor) with no rewind point */
 export function suggestionOf(end) {
-  if (end && end.recap && end.recap.suggestion && end.recap.suggestion.text) return end.recap.suggestion;
+  if (end && end.recap && end.recap.suggestion && end.recap.suggestion.text) return focusedLesson(end.recap.suggestion, end.recap);
   if (end && end.tip) return { rule: 4, text: end.tip, k0: null };
   return null;
+}
+/* wave 3a (J1 P0-5, brief §17): the engine's rule-1 lesson used to read "בפעם הבאה: השאיר אותך בלי כרית" — no subject, month or
+ * decision. Display-side fix for results from an engine without J1 E3 (recap.js T.next): name the month and the card of that
+ * decision (its rewind point k0 → recap.decisions / recap.grid) and make the why a clause. A newer engine text passes unchanged. */
+const OLD_NEXT = /^בפעם הבאה:\s*/;
+/** "השאיר אותך בלי כרית" → a clause with a subject; "היה עדיף: X" → quoted (the same rewording as the engine's whyClause) */
+export function whyClause(why) {
+  const w = String(why || '').trim().replace(/[.。]+$/, '');
+  if (w === 'השאיר אותך בלי כרית') return 'כמעט לא נשארה לך כרית ביטחון';
+  const m = /^היה עדיף: (.+)$/.exec(w); return m ? `היה עדיף "${m[1]}"` : w;
+}
+export function focusedLesson(sug, recap = null) {
+  if (!sug || sug.rule !== 1 || !OLD_NEXT.test(String(sug.text || ''))) return sug;
+  const why = whyClause(sug.why || String(sug.text).replace(OLD_NEXT, ''));
+  const R = recap || {}; const k0 = sug.k0;
+  const all = [...(Array.isArray(R.decisions) ? R.decisions : []), ...Object.values(R.grid || {}).filter(Boolean)];
+  const d = (k0 != null && all.find((x) => x && x.k0 === k0)) || all.find((x) => x && x.why && whyClause(x.why) === why) || null;
+  const m = sug.m ?? (d && d.m); const c = sug.card ?? (d && d.c);
+  const text = m != null && c ? `בחודש ${m}, בכרטיס "${c}": ${why}. זה הלקח לפעם הבאה.` : `הלקח לפעם הבאה: ${why}.`;
+  return { ...sug, text, m: m ?? null, card: c || null, why };
 }
 /** "מול היריבים" — the full table (§5.2) + each persona's rule card + lost deals */
 export function rivalsSection(e, ctx = {}) {

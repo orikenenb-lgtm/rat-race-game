@@ -48,7 +48,7 @@ const round2 = (x) => Math.round(x * 100) / 100;
 const invCdf = (ps, r) => { let acc = 0; for (let i = 0; i < ps.length; i++) { acc += ps[i]; if (r < acc) return i; } return ps.length - 1; };
 
 /** The pool for a card: rented kinds → re; everything else → biz (w3 adds the trade flags). */
-export function poolFor(worldId, rent) { return rent ? FLAG_POOLS.re : worldId === 'w3' ? FLAG_POOLS.biz.concat(FLAG_POOLS.trade) : FLAG_POOLS.biz; }
+export function poolFor(worldId, rent) { const c = CFG[worldId]; if (c && c.pool) return rent && c.poolRent ? c.poolRent : c.pool; return rent ? FLAG_POOLS.re : worldId === 'w3' ? FLAG_POOLS.biz.concat(FLAG_POOLS.trade) : FLAG_POOLS.biz; }
 
 /**
  * Build the sealed due-diligence record of an asset deal from the 6 draws.
@@ -94,13 +94,24 @@ function p10Of(ps, ranges) {
   let lo = -1, hi = 2; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (cdf(m) < 0.1) lo = m; else hi = m; }
   return round2(hi);
 }
-for (const wid of Object.keys(CFG)) for (let k = 0; k <= 2; k++) {
+function tables(wid) { for (let k = 0; k <= 2; k++) {
   const C = CFG[wid]; const p = post(wid, k); const key = wid + ':' + k;
   POST[key] = p;
   const mean = (tab) => p.reduce((a, pr, r) => a + pr * (tab[r][0] + tab[r][1]) / 2, 0);
   EXP[key] = { f: mean(C.cf), fNoi: C.noi ? mean(C.noi) : mean(C.cf), vf: mean(C.vf || VF), rep: p.reduce((a, pr, r) => a + pr * REPAIR[r] * REP_MEAN, 0),
     byRisk: RISKS.map((r) => ({ r, p: p[r], f: (C.cf[r][0] + C.cf[r][1]) / 2, fNoi: C.noi ? (C.noi[r][0] + C.noi[r][1]) / 2 : (C.cf[r][0] + C.cf[r][1]) / 2, vf: ((C.vf || VF)[r][0] + (C.vf || VF)[r][1]) / 2, rep: REPAIR[r] * REP_MEAN })) };
   P10[key] = { f: p10Of(p, C.cf), fNoi: p10Of(p, C.noi || C.cf) };
+} }
+for (const wid of Object.keys(CFG)) tables(wid);
+/** Worlds wave 0 (I4): a later world's due-diligence table — the id of an existing table to copy ('w3') or {prior, cf, vf, noi, minFee, pool}
+ *  over w3's (the "hard" defaults). Precomputes the same posterior / expectation tables. w1–w4 / h are never overwritten. */
+const NAMED = { CF_GENTLE, CF_W1, CF_HARD, CF_W4, CF_W2, VF, VF_HARD, NOI_W2 };
+export function registerWorldCfg(worldId, spec) {
+  if (['w1', 'w2', 'w3', 'w4', 'h'].includes(worldId)) return;
+  const base = typeof spec === 'string' ? CFG[spec] || CFG.w3 : { ...CFG.w3, ...(spec || {}) };
+  const c = { ...base }; for (const k of ['cf', 'vf', 'noi']) if (typeof c[k] === 'string') c[k] = NAMED[c[k]];
+  for (const [id, t] of [...(c.pool || []), ...(c.poolRent || [])]) if (!FLAG_TEXT[id]) FLAG_TEXT[id] = t;
+  CFG[worldId] = c; tables(worldId);
 }
 
 /** P(r | k flags), r = 0..3 (public: from the world's prior and the shared likelihood). */

@@ -9,7 +9,7 @@
 // Storage v2 (T4 §9.4): {v:2, ids, read, ctx:{[id]: {m, w, ev, num:{label,value}|null, at}}, practiced:{[topic]: {n, right}}}.
 // A v1 value ({ids, read}) reads as v2 with empty maps; unknown extra keys are kept (written back additively).
 import { bus } from './bus.js';
-import { LESSON_META } from './data/lessons-meta.js';
+import { LESSON_META, displayLesson } from './data/lessons-meta.js';
 
 const KEY = 'rr2-library';
 let S = load();
@@ -47,7 +47,7 @@ export function lessons() {
     } catch (e) { raw = null; }
     if (!raw) { try { const L = await import('./life.js'); raw = L.LESSONS || (typeof L.lessons === 'function' && L.lessons()) || null; } catch (e) { raw = null; } }
     if (raw && !Array.isArray(raw)) raw = Object.entries(raw).map(([id, v]) => (typeof v === 'string' ? { id, title: v, text: v } : { id, ...v }));
-    LIST = (raw || []).map(norm).filter((l) => l.title);
+    LIST = (raw || []).map(norm).map(displayLesson).filter((l) => l.title);   // wave 3a: display overrides of misleading titles / texts
     return LIST;
   })();
   return listP;

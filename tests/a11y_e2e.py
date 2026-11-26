@@ -94,6 +94,8 @@ async def start_w1(pg, nth=0):
             if await btn.count(): await btn.click()
             else: break
 
+LIVE_PROBE = "document.addEventListener('DOMContentLoaded', () => { window.__live = []; new MutationObserver(() => { const e = document.querySelector('#a11yLive'); if (e && e.textContent && window.__live[window.__live.length - 1] !== e.textContent) window.__live.push(e.textContent); }).observe(document.documentElement, { subtree: true, childList: true, characterData: true }); });"
+
 async def roll_once(pg):
     await pg.click('#roll')
     await pg.wait_for_function("!document.querySelector('#evm').hidden || !document.querySelector('#roll').disabled || !document.querySelector('#gm').hidden", timeout=TO)
@@ -334,13 +336,17 @@ async def checks(b):
     rec('AX-N no visible interactive element without an accessible name', 'PASS' if not names else 'FAIL', names[:10])
     for w, h in ((360, 740), (390, 844), (414, 896), (820, 1180), (1300, 820)):
         ctx, pg = await new_page(b, {'width': w, 'height': h}, 'light')
+        if w == 390: await ctx.add_init_script(LIVE_PROBE)
         await pg.goto(BASE); await pg.wait_for_selector('.lb-home', state='visible'); await pg.evaluate(QUIET)
         lo = await pg.evaluate(OVER); await start_w1(pg); await roll_once(pg); go = await pg.evaluate(OVER)
         widths.append({'w': w, 'lobby_hOverflow': lo['hOverflow'], 'game_hOverflow': go['hOverflow'], 'rollInside': go['rollInside'], 'clipped': go['clipped']})
         if w == 390:
             a = await pg.evaluate("document.querySelector('#dieSr') ? document.querySelector('#dieSr').textContent : null")
             rec('AX-C after a roll a live region has the dice values', 'PASS' if a and re.search(r'\d', a) else 'FAIL', repr(a))
-            rec('AX-C … and the landing tile name', 'REPORT', 'needs E.boardInfo() label source (CR-27: #dieSr has the dice only)')
+            # wave 3a (review MINOR-5): the landing is announced through the shared live region (#a11yLive, ui.announce) — every text it
+            # carried since the page opened is recorded, so a later announcement cannot hide it
+            live = await pg.evaluate("() => (window.__live || []).join(' | ')")
+            rec('AX-C … and the landing tile name ("נחתת על …" in #a11yLive)', 'PASS' if re.search(r'נחתת על \S', live) else 'FAIL', live[:200])
         await ctx.close()
     bad = [x for x in widths if x['lobby_hOverflow'] or x['game_hOverflow'] or x['rollInside'] is False]
     rec('AX-W 360/390/414/820/1300: no horizontal overflow, #roll inside the viewport', 'PASS' if not bad else 'FAIL', bad or widths)

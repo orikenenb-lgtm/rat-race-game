@@ -1,12 +1,21 @@
 // מירוץ העכברים 2.0 — DOM layer: HUD, statement sheet, event cards (incl. the v1.1 trade window), mentor, dice,
 // toasts, achievement toast, coach marks, flying coins. Generic helpers (toast/modal/confirmBox/achievementToast)
 // are also used by the lobby.
-import { fmt, fmtM, sgn, fmtP, genderize } from './engine.js';
+import { fmt, fmtM, sgn, fmtP, genderize, starThresholds, money as moneyOf } from './engine.js';
+import { goalPanelModel, monthsText, partTag, meterLabel, isStreak, covX, partText1420 } from './hudgoal.js';
+import { displayLesson } from './data/lessons-meta.js';   // wave 3a: misleading lesson titles → display overrides   // 3D upgrade wave 2 (A2 G-04): the "יעד העולם" panel model (pure, engine outputs only)
 import { sfx } from './audio.js';
+import { mapLabel, mapNo, groupOf } from './worlds-groups.js';   // 2026-11-25: a level is a מפה inside one of 6 עולמות ("מפה 2 · הכסף הגדול")
 import { reducedMotion } from './motion.js';
 import { bus } from './bus.js';
 import * as T6S from './summary.js';   // T6: graph / table / personas (pure, no DOM at import)
-import { levelText as stageText, levelHint as stageHint } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
+import { levelText as stageText, levelHint as stageHint, ageBand, DIV_HE } from './render/vocab.js';   // T3 UI-5: growth-stage words shared with T5 (pure)
+import { miniHtml as cdlMini, mountChart as cdlMount, fullHtml as cdlFull } from './render/candles-lite.js';
+import * as WV from './render/worldview1115.js';
+import * as WV2 from './render/worldview1216.js';
+import * as WV3 from './render/worldview1420.js';   // w14 / w17 / w18 / w19 / w20: cards, news, panels, the chip / sheet text, the two-tap words (HTML only; the engine's numbers)   // w12 / w16: cards, panels, the chip / sheet text, the two-tap words (HTML only; the engine's numbers)   // w11 / w15: cards, panels and the chip text (HTML only; the engine's numbers)
+import * as MV from './render/marketview.js';   // w10: the market screen (HTML only; the engine's numbers)
+import { marketSeries } from './candlelog.js';  // w10: the engine's candles in the one chart component's series shape   // CATALOG-25 §3.9: light candle view (SVG, no dependency)
 
 const $ = (s, r = document) => r.querySelector(s);
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,12 +34,47 @@ const HEB = /[\u0590-\u05FF]/;
 let uiG = 'm';
 export function setGender(g) { uiG = g === 'f' ? 'f' : 'm'; }
 /** The engine's genderize for a UI string (data is written in the masculine form). */
-export const gz = (t) => genderize(t, uiG);
+/* wave 2 (A3 #5): the engine's table (pinned) turns the masculine "you" into the feminine one but leaves a few verbs after it masculine ("לפני שאת מחליט").
+   A UI-side pass completes those phrases for a female player — display only; the engine text and its table are unchanged. */
+const GZ_UI_W = { עובד: 'עובדת', משלם: 'משלמת', יודע: 'יודעת', גר: 'גרה', צריך: 'צריכה', עייף: 'עייפה', עומד: 'עומדת', מתאהב: 'מתאהבת', מרוויח: 'מרוויחה',
+  מפריש: 'מפרישה', מפסיד: 'מפסידה', מחליט: 'מחליטה', מושך: 'מושכת', מגודר: 'מגודרת', חשוף: 'חשופה', בוחר: 'בוחרת' };   // the words that follow "אתה" in the data
+const GZ_UI = [[new RegExp(`(^|[^\u05D0-\u05EA])((?:ש|ו|כש)?את (?:לא |כבר )?)(${Object.keys(GZ_UI_W).join('|')})(?![\u05D0-\u05EA])`, 'g'), (x, a, b, w) => a + b + GZ_UI_W[w]],
+  [/כסף את שם(?![\u05D0-\u05EA])/g, 'כסף את שמה']];
+export const gzFix = (t, g = uiG) => { if (g !== 'f' || !t) return t; let x = String(t); for (const [re, f] of GZ_UI) x = x.replace(re, f); return x; };
+export const gz = (t) => gzFix(genderize(t, uiG));
 /** Pick the masculine / feminine form of a phrase the GZ table does not cover. */
 export const gw = (m, f) => (uiG === 'f' ? f : m);
 const num = (s, c = '') => (HEB.test(String(s)) ? `<span class="num rtl ${c}">${iso(s)}</span>` : `<span class="num ${c}">${s}</span>`);
 const pctTxt = (x) => `${Math.round(x * 100) / 100}%`;
 const usdTxt = (u) => `₪${Number(u).toFixed(2)}`;
+/* w5 (season): month / band words for the HUD chip and the world panel */
+const MONTH_HE = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const MONTH_S = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+const BAND_HE = { peak: 'עונה', mid: 'רגיל', off: 'שפל' };
+const BAND_IC = { peak: '☀️', mid: '🌤️', off: '🌧️' };
+const tourTxt = (t) => '×' + (Math.round((+t || 0) * 100) / 100).toFixed(2);
+const mS = (n) => moneyOf(Math.round(+n || 0), 'short');   // ₪850 אלף / ₪12.5 מיליון — panel numbers (E.money, wave 0 I6)
+const mSg = (n) => (Math.round(+n || 0) > 0 ? '+' : '') + mS(n);   // signed short money (E.money)
+/* w6 (plant): line words for the HUD chip, the cards and the world panel */
+const MAINT_HE = { preventive: 'מונעת', basic: 'בסיסית', run: 'עד שזה נשבר' };
+const HZ_HE = { low: 'נמוך', mid: 'בינוני', high: 'גבוה' };
+const LIGHT_HE = { green: 'תקין', amber: 'שחוק', red: 'במצב ירוד' };
+const LIGHT_DOT = { green: '🟢', amber: '🟠', red: '🔴' };
+const pctI = (x) => `${Math.round((+x || 0) * 100)}%`;
+const pct1 = (x) => `${Math.round((+x || 0) * 1000) / 10}%`;
+const shiftHe = (n) => (n === 3 ? 'שלוש משמרות' : n === 2 ? 'שתי משמרות' : 'משמרת אחת');
+const pipsOf = (n) => '●'.repeat(Math.max(0, Math.min(3, n | 0))) + '○'.repeat(3 - Math.max(0, Math.min(3, n | 0)));
+/* w7 (chain) / w8 (projects): words for the HUD chip, the site / land cards and the world panel */
+const LOC_HE = { A: 'מיקום מצוין', B: 'מיקום סביר', C: 'מיקום חלש' };
+const STAGE4 = ['בשיפוץ', 'נפתח', 'בהרצה', 'כמעט בשל', 'בשל'];
+const pips4 = (n) => '●'.repeat(Math.max(0, Math.min(4, n | 0))) + '○'.repeat(4 - Math.max(0, Math.min(4, n | 0)));
+const PHASE_HE = { permit: 'ממתין להיתר', build: 'בבנייה', done: 'הושלם' };
+const CTR_HE = { reliable: 'קבלן אמין', cheap: 'קבלן זול' };
+/* w9 (energy) / w10 (market + portfolio): words for the HUD chip, the cards and the panels */
+const TECH_HE = { solar: 'שדה סולארי', wind: 'חוות רוח', storage: 'אגירת סוללות', hybrid: 'סולארי עם אגירה', line: 'קו הולכה', h2: 'פיילוט מימן' };
+const TECH_IC = { solar: '☀️', wind: '🌬️', storage: '🔋', hybrid: '🔆', line: '🗼', h2: '🧪' };
+const OFF_HE = { ppa: 'חוזה PPA קבוע', merchant: 'שוק חופשי', line: 'תעריף מפוקח' };
+const mwh = (x) => `${N(x)} ₪ למגה־ואט שעה`;
 let speed = 1;
 export function setSpeed(f) { speed = f; }
 const vibrate = (p = 12) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { /* ignore */ } };
@@ -47,7 +91,9 @@ export function fmtC(n) {
 const compact = () => innerWidth < 600;
 const tiny = () => innerWidth < 420;
 /** HUD money: exact on desktop, ₪16.6K on phones (₪1.6K on the narrowest ones). */
-const money = (n) => (tiny() && Math.abs(n) >= 1000 ? (n < 0 ? '−' : '') + '₪' + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : (Math.round(Math.abs(n) / 100) / 10) + 'K') : compact() ? fmtC(n) : fmtM(n));
+// worlds wave 1: from ₪100K up a phone uses E.money 'tiny' (3 significant digits, ≤ 6 chars: "₪127K", "₪1.8M", "₪1.25B") — w5's
+// "+₪127.1K" overlapped the cash next to it at 390 px; below ₪100K the old wording stays (w1–w4 phones unchanged)
+const money = (n) => (tiny() && Math.abs(n) >= 1e5 ? moneyOf(n, 'tiny') : tiny() && Math.abs(n) >= 1000 ? (n < 0 ? '−' : '') + '₪' + (Math.abs(n) >= 1e6 ? (Math.abs(n) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M' : (Math.round(Math.abs(n) / 100) / 10) + 'K') : compact() ? fmtC(n) : fmtM(n));
 const moneyS = (n) => (Math.round(n) > 0 ? '+' : '') + money(n);
 
 /* ============================================================ icons */
@@ -75,6 +121,7 @@ export function nearMissText(end) {
   if (f && h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות וגם אושר של 60 לפחות.';
   if (f) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם קרן חירום של 3 חודשי הוצאות.';
   if (h) return 'יצאת בזמן של ★★★, אבל ★★★ דורש גם אושר של 60 לפחות.';
+  if (end.starsBlockedBy && end.starsBlockedBy.label) { const l = String(end.starsBlockedBy.label); return `יצאת בזמן של ★★★, אבל ${/^★/.test(l) ? l : `★★★ רק ${l}`}.`; }   // worlds: a module's star rule (w6: '★★★ רק בלי עצירה…'; w10: 'בלי אף מכירה כפויה')
   return 'יצאת בזמן — הכוכב הבא היה ממש קרוב.';
 }
 /* ============================================================ toasts */
@@ -287,7 +334,7 @@ export function applyTheme(w) {
 }
 export function worldBanner(w, sub = '') {
   const el = $('#banner'); if (!el) return;
-  el.innerHTML = `<small>עולם ${w.order}</small><b>${esc(w.name)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
+  el.innerHTML = `<small>${esc(mapLabel(w.id) || (w.order ? `מפה ${w.order}` : ''))}</small><b>${esc(w.name)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
   el.className = 'banner'; void el.offsetWidth; el.className = 'banner in';
   clearTimeout(el._t); el._t = setTimeout(() => { el.className = 'banner out'; }, (450 + 1600) * Math.max(0.5, Math.min(1, speed)));   // T5 §4.1: in 450, hold 1.6 s, out 350
 }
@@ -308,21 +355,26 @@ export function setCash(v, animate = true) {
     cashRaf = requestAnimationFrame(step);
   } else el.textContent = money(v);
 }
-export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; }
-export function setMonth(month, max) {
+export function resetHud() { shownCash = null; shownMonth = null; ind.key = null; ind.v = null; ind.dir = 0; msBase = null; goalPanel(false); debtChip(null); }
+export function setMonth(month, max, star = 0) {
   const el = $('#hMonth'); if (!el) return;
-  el.innerHTML = max ? `${month}<small>/${max}</small>` : String(month);
+  // wave 3a (J1 P0-1): a free game shows its ★ limit ("★ עד חודש N"; after it: "★ עבר") — the month itself never ends a free game
+  const st = star ? `<small class="mstar${month > star ? ' past' : ''}">${month > star ? `★ עבר<span class="ml"> (${star})</span>` : `★ <span class="ml1">עד </span><span class="ml">חודש </span>${star}`}</small>` : '';
+  el.innerHTML = max ? `${month}<small>/${max}</small>` : `${month}${st}`;
+  el.closest('.stat')?.setAttribute('aria-label', star ? `חודש ${month}. ${month > star ? `עבר מועד הכוכבים (חודש ${star})` : `כוכבים: לצאת מהמירוץ עד חודש ${star}`}` : `חודש ${month}${max ? ` מתוך ${max}` : ''}`);
   if (shownMonth != null && month !== shownMonth) { const st = el.closest('.stat'); st.classList.remove('tick'); void st.offsetWidth; st.classList.add('tick'); }
   shownMonth = month;
 }
 export function bumpCash() { const st = $('#hCash')?.closest('.stat'); if (!st) return; st.classList.remove('bump'); void st.offsetWidth; st.classList.add('bump'); }
 
+/** the ★ month limit of a free game with stars (not learning, not history, not after the win) — 0 when none */
+function starOf(m, ctx) { return m.mode === 'free' && !m.afterWin && !(ctx && ctx.cfg && ctx.cfg.learn) && !(ctx && ctx.world && ctx.world.id === 'h') && m.maxMonths > 0 ? m.maxMonths : 0; }
 /** ctx: {world, st} */
 export function renderHUD(m, ctx, { animate = true } = {}) {
   const w = ctx.world;
   setCash(m.cash, animate);
   const cf = $('#hCf'); cf.textContent = moneyS(m.cashflow); cf.className = 'num ' + cls(m.cashflow);
-  setMonth(m.month, m.mode === 'free' ? 0 : m.maxMonths);
+  setMonth(m.month, m.mode === 'free' ? 0 : m.maxMonths, starOf(m, ctx));
   // world indicator
   const wi = m.worldIndicators || {}; const box = $('#hInd');
   let key = null, v = null, text = '', goodUp = 0, extra = '';
@@ -335,6 +387,76 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const insured = (wi.insuredUntil || 0) >= m.month;
     if (hedged || insured) extra = `<span class="hedge" title="${hedged ? 'יש נכסים מגודרים' : 'המשלוחים מבוטחים'}">${ICON.shield}${hedged ? 'מגודר' : 'מבוטח'}</span>`;
   } else if (w.mechanic === 'angel') { key = 'impact'; v = wi.impact; text = `השפעה ${num(`${wi.impact}/${wi.impactTarget}`)}`; goodUp = 1; }
+  else if (wi.season) {   // w5: the month's season and the city's demand — a button that opens the world panel (עונות ותפוסה)
+    const se = wi.season; key = 'tour'; v = se.tour; goodUp = 1;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc((wi.panel && wi.panel.title) || 'לוח המפה')}: ${esc(MONTH_HE[se.cal - 1] || '')}, ${esc(BAND_HE[se.band] || '')}, ביקוש ${esc(tourTxt(se.tour))}">${BAND_IC[se.band] || '🌴'} <span class="hb-mf">${esc(MONTH_HE[se.cal - 1] || '')}</span><span class="hb-ms">${esc(MONTH_S[se.cal - 1] || '')}</span><span class="hb-b"> · ${esc(BAND_HE[se.band] || '')}</span> <span class="hb-w">· ביקוש </span>${num(tourTxt(se.tour))}</button>`;
+    if (se.festival) extra = '<span class="hedge" title="פסטיבל החודש">🎪</span>';
+  }
+  else if (wi.plant && wi.panel) {   // w6: lines, utilisation and lines down — a button that opens the world panel (קווי ייצור)
+    const P = wi.plant; key = 'util'; v = P.utilisation ?? 0; goodUp = 1;
+    const rows = wi.panel.rows || []; const dn = rows.filter((r) => r.down).length; const pend = rows.filter((r) => r.pending).length;
+    const ut = P.utilisation != null ? pctI(P.utilisation) : '—';
+    const al = `${wi.panel.title || 'קווי ייצור'}: ${P.lines} מתוך ${P.slots} קווים, ניצולת ${ut}${dn ? `, ${dn} בתקלה` : ''}${pend ? `, ${pend} בדרך` : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">🏭 ${num(`${P.lines}/${P.slots}`)}<span class="hb-w"> קווים</span><span class="hb-b"> · ניצולת </span><span class="hb-b">${num(ut)}</span>${dn ? ` · 🔧${num(String(dn))}` : ''}${pend ? `<span class="hb-b"> · ⏳${num(String(pend))}</span>` : ''}</button>`;
+    if (P.noShift3Until >= (m.month || 0) && P.noShift3Until > 0) extra = '<span class="hedge" title="אין עובדים למשמרת לילה">🌙✖</span>';
+  }
+  else if (wi.chain && wi.panel) {   // w7: branches / the managers' span and the liquidity months — a button that opens the world panel (הרשת)
+    const C = wi.chain; key = 'liq'; v = C.liqMonths ?? 99; goodUp = 1;
+    const lq = C.liqMonths >= 99 ? '—' : mo1(C.liqMonths);
+    const al = `${wi.panel.title || 'הרשת'}: ${C.branches} סניפים${C.franchises ? ` ועוד ${C.franchises} בזכיינות` : ''}, יכולת ניהול ${C.branches} מתוך ${C.span}${C.overSpan ? `, ${C.overSpan} מעבר ליכולת` : ''}, קופה: ${monthsText(C.liqMonths)}${C.liqMonths < 99 ? ' של עלויות קבועות' : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">🛍️ ${num(`${C.branches}/${C.span}`)}<span class="hb-w"> סניפים</span><span class="hb-b"> · קופה ${num(lq)} ח׳</span>${C.overSpan ? ' ⚠️' : ''}</button>`;   // phones: the goal meter shows the liquidity months
+    if (C.franchises) extra = `<span class="hedge" title="סניפים בזכיינות">🤝${num(String(C.franchises))}</span>`;
+  }
+  else if (wi.proj && wi.panel) {   // w8: open projects, the policy rate, stalled sites — a button that opens the world panel (הפרויקטים)
+    const PJ = wi.proj; key = 'rate'; v = PJ.rate; goodUp = -1;
+    const st = (wi.panel.rows || []).filter((r) => r.phase !== 'done' && (r.paused || r.delayed || (r.stallRun || 0) > 0)).length;
+    const al = `${wi.panel.title || 'הפרויקטים'}: ${PJ.open} פתוחים${(PJ.plots || []).length ? `, ${PJ.plots.length} מגרשים` : ''}${(PJ.rentals || []).length ? `, ${PJ.rentals.length} בניינים מושכרים` : ''}, ריבית ${PJ.rate}%${PJ.equityCalls ? `, הון עצמי שעוד צריך ${mS(PJ.equityCalls)}` : ''}${st ? `, ${st} עומדים` : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">🏗️ ${num(String(PJ.open))}<span class="hb-w"> פרויקטים</span><span class="hb-b"> · ריבית ${num(PJ.rate + '%')}</span>${st ? ` ⛔${num(String(st))}` : ''}</button>`;   // phones: the count (+ stalled); the rate is in the panel
+    if ((PJ.plots || []).length) extra = `<span class="hedge" title="מגרשים">🚧${num(String(PJ.plots.length))}</span>`;
+  }
+  else if (wi.energy && wi.panel) {   // w9: operating income after debt service vs the target, the rate — a button that opens the world panel (התחנות והפרויקטים)
+    const EN = wi.energy; key = 'opinc'; v = EN.income; goodUp = 1;
+    const al = `${wi.panel.title || 'התחנות'}: הכנסה תפעולית אחרי החזר חוב ${mS(EN.income)} מתוך ${mS(EN.target)} בחודש, ריבית ${EN.rate}%, ${(EN.slots || {}).free || 0} חיבורים פנויים לרשת${(EN.slots || {}).waiting ? `, ${EN.slots.waiting} פרויקטים מחכים לחיבור` : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">☀️ ${num(money(EN.income))}<span class="hb-w"> בחודש</span><span class="hb-b"> · ריבית ${num(EN.rate + '%')}</span>${(EN.slots || {}).waiting ? ` 🔌${num(String(EN.slots.waiting))}` : ''}</button>`;
+    if (EN.spike) extra = '<span class="hedge" title="קפיצה במחיר החשמל">🔥</span>';
+  }
+  else if (wi.portfolio && wi.panel) {   // w10: the regime and the LTV — a button that opens the market screen (הבורסה והתיק)
+    const PF = wi.portfolio; const R = (wi.market || {}).regime || {}; key = 'ltv'; v = PF.ltv; goodUp = -1;
+    const al = `${wi.panel.title || 'הבורסה'}: מצב השוק ${R.label || ''}, מינוף ${pctI(PF.ltv)}${PF.call ? ', קריאת מרווח פתוחה' : ''}, שווי נקי ${mS(PF.nw)}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">📊 <span class="hb-w">${esc(R.label || '')} · </span>מינוף ${num(pctI(PF.ltv))}${PF.call ? ' ⚠️' : ''}</button>`;
+    if (PF.hedge) extra = '<span class="hedge" title="הגנת אופציות פעילה">🛡️</span>';
+  }
+  else if (wi.league && wi.panel) {   // w13: the place in the table and wages vs revenue — a button that opens the club panel (המועדון והטבלה) + the live table strip
+    const LG = wi.league; key = 'rank'; v = LG.rank; goodUp = -1;
+    const al = `${wi.panel.title || 'המועדון'}: מקום ${LG.rank} מתוך 8 ב${LG.divName}, מחזור ${LG.round} מתוך ${LG.rounds}${LG.window ? ', חלון העברות פתוח' : ''}, שכר ${+LG.wageRatio > 0 ? `${pctI(LG.wageRatio)} מההכנסות ב־12 החודשים האחרונים` : 'מול הכנסות: עוד אין נתונים'}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">⚽ <span class="hb-mf">מקום ${num(String(LG.rank))}</span><span class="hb-ms">${num(`${LG.rank}/8`)}</span><span class="hb-w"> ב${esc(LG.divName)}</span><span class="hb-b"> · שכר ${num(wrT(LG.wageRatio))}</span>${LG.window ? ' 🔁' : ''}</button>`;
+    extra = leagueStrip(wi.panel.table, LG);
+  }
+  else if (wi.multinational && wi.panel) {   // w11: attention (self-run subs of the slots) and the trust in the managers — a button to the map panel
+    const X = wi.multinational; key = 'trust'; v = X.trust; goodUp = 1; const dis = (wi.panel.rows || []).filter((r) => r.disrupted).length; const nm = (wi.panel.rows || []).filter((r) => r.mgr).length;   // no manager yet: no trust to show (the engine's 1 is "nothing to doubt")
+    const al = `${wi.panel.title || 'המפה'}: ${X.subs} חברות־בנות, ${X.used} מתוך ${X.slots} בניהול שלך, ${nm ? `אמון ממוצע במנהלים ${pctI(X.trust)}` : 'אין עדיין מנהלים'}${X.frauds ? `, ${X.frauds} הונאות` : ''}${dis ? `, ${dis} עם ספק משובש` : ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">🌍 <span class="hb-mf">קשב </span>${num(`${X.used}/${X.slots}`)}<span class="hb-b"> · ${nm ? `אמון ${num(pctI(X.trust))}` : 'בלי מנהלים'}</span><span class="hb-w"> · ${num(String(X.subs))} חברות</span>${dis ? ' ⚠️' : ''}</button>`;
+    if (X.frauds) extra = `<span class="hedge" title="הונאות שנמצאו">🕵️${num(String(X.frauds))}</span>`;
+  }
+  else if (wi.platform && wi.panel) {   // w15: the runway (months of cash) and your stake — a button to the app panel; 🔥 under 6 months
+    const X = wi.platform; key = 'runway'; v = Math.min(99, +X.runway || 0); goodUp = 1; const prof = +X.runway >= 99;
+    const al = X.sold ? `${wi.panel.title || 'האפליקציה'}: החברה נמכרה ב־${mS(X.proceeds)}` : `${wi.panel.title || 'האפליקציה'}: ${prof ? 'החברה רווחית' : `מזומן ל־${mo1(X.runway)} חודשים`}, החלק שלך ${pctI(X.stake)}, ${(+X.users || 0).toLocaleString('en-US')} משתמשים, שוק: ${X.regimeLabel || ''}`;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(al)}">☁️ ${X.sold ? 'נמכרה' : `${prof ? 'רווחית' : `${num(+X.runway >= 10 ? String(Math.round(X.runway)) : mo1(X.runway))}<span class="hb-mf"> חודשי מזומן</span><span class="hb-ms"> ח׳</span>`}<span class="hb-b"> · חלק ${num(pctI(X.stake))}</span><span class="hb-w"> · ${esc(X.regimeLabel || '')}</span>`}${!X.sold && !prof && X.runway < 6 ? ' 🔥' : ''}</button>`;
+    if (X.net && !X.sold) extra = '<span class="hedge" title="אפקט רשת פעיל">🌐</span>';
+  }
+  else if (wi.holding && wi.panel) {   // w12: liquidity coverage (× and months) and the rating — a button to the group panel; 🌩️ a storm, ⚠️ a division in a deficit
+    const X = wi.holding; key = 'coverage'; v = X.coverage; goodUp = 1; const C = WV2.hdChip(WVH2, X, wi.panel);
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
+  }
+  else if (wi.harvest && wi.panel) {   // w16: the farm's income this month and the regime — a button to the farm panel; 🏜️ a drought, 🔒 hedged fields
+    const X = wi.harvest; key = 'farmInc'; v = X.income; goodUp = 1; const C = WV2.hvChip(WVH2, X, wi.panel);
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
+  }
+  else if (WV3.worldKey(wi)) {   // w14 🏦 capital ratio · w17 🧪 drugs earning · w18 ☂️ solvency · w19 🔔 the price · w20 📈 money managed — a button to the world panel
+    const C = WV3.chip(WVH2, wi); key = C.key; v = C.v; goodUp = C.goodUp;
+    text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog" aria-label="${esc(C.al)}">${C.html}</button>`; extra = C.extra;
+  }
+  else if (wi.panel) { key = 'panel'; v = 0; text = `<button type="button" class="hind-btn" id="worldPanelBtn" aria-haspopup="dialog">🧭 ${esc(wi.panel.title || 'לוח המפה')}</button>`; }   // any later world with a panel descriptor
   if (key) {
     if (ind.key === key && ind.v != null && v !== ind.v) { ind.dir = Math.sign(v - ind.v); ind.good = goodUp ? ind.dir * goodUp : 0; ind.t = performance.now(); }
     if (ind.key !== key) { ind.dir = 0; }
@@ -343,6 +465,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     const arrow = fresh ? `<i class="arr ${ind.good > 0 ? 'pos' : ind.good < 0 ? 'neg' : 'neu'}" aria-label="${ind.dir > 0 ? 'עלייה' : 'ירידה'}">${ind.dir > 0 ? ICON.up : ICON.down}</i>` : '';
     box.innerHTML = `${text}${arrow}${extra}`;
     box.hidden = false;
+    const wb = box.querySelector('#worldPanelBtn'); if (wb) wb.onclick = () => { sfx('click'); bus.emit('world:panel'); };
   } else { box.innerHTML = ''; box.hidden = true; }
   $('#hWorld').classList.toggle('noind', !key);
   renderLife(m, ctx);
@@ -350,16 +473,21 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   const cv = $('#c'); if (cv) { const n = (m.assets || []).length; const t = n ? `לוח המשחק. בעיר שלך ${n === 1 ? 'נכס אחד' : n + ' נכסים'}. פרטים על כל נכס בדוח הכספי.` : 'לוח המשחק. עדיין אין נכסים בעיר.'; if (cv.getAttribute('aria-label') !== t) cv.setAttribute('aria-label', t); }
   // goal meter (updated in place so the bars animate)
   const g = $('#hGoal');
-  const label = m.goalType === 'passive' ? 'מד החופש' : m.goalType === 'netWorth' ? 'שווי נקי' : m.goalType === 'benchmark' ? 'מול "קנה והחזק"' : 'יעד העולם';
+  const label = meterLabel(m);   // w12 'יעד הקבוצה' / w16 'הכנסה ורצף' (a no-event streak is not a cash box)
   const parts = m.goalParts || [];
   const pc = shownPct(m);
   const sig = m.goalType + parts.length;
   if (g.dataset.sig !== sig) {
     g.dataset.sig = sig;
-    g.innerHTML = `<div class="gl"><span>${label}</span><b class="num"></b></div>` +
-      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${p.key === 'impact' ? 'השפעה' : 'שווי'}</em>` : ''}</div>`).join('') +
-      '<div class="gsub num"></div>';
+    // wave 2 (A2 G-04): the meter is an inner role=meter (a meter's children are presentational) + a full-card toggle that opens "יעד העולם"
+    for (const a of ['role', 'aria-label', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-valuetext']) g.removeAttribute(a);
+    g.innerHTML = `<div class="gm" role="meter" aria-valuemin="0" aria-valuemax="100"><div class="gl"><span>${label}</span><b class="num"></b></div>` +
+      parts.map((p) => `<div class="gbar" title="${esc(p.label)}"><s></s><i></i>${parts.length > 1 ? `<em>${partTag(p)}</em>` : ''}</div>`).join('') +
+      '<div class="gsub"></div></div>' +
+      `<button type="button" class="gx" id="hGoalBtn" aria-controls="goalPanel" aria-expanded="${gpOpen}"><span class="gchev" aria-hidden="true"></span></button>`;
+    g.querySelector('.gx').onclick = (e) => { sfx('click'); goalPanel(!gpOpen, { focus: e.detail === 0 }); };
   }
+  const gm = g.querySelector('.gm');
   g.querySelector('.gl b').textContent = pc + '%';
   if (m.goalType !== 'benchmark') milestoneCheck(pc);
   const bars = g.querySelectorAll('.gbar');
@@ -370,12 +498,13 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
     b.querySelector('s').style.width = pend + '%';
   });
   const gh = m.goalHold && m.goalType !== 'benchmark' && m.goalHold.streak > 0 && m.goalHold.streak < m.goalHold.need ? ` · ⏳ מחזיק ${m.goalHold.streak}/${m.goalHold.need}` : '';
-  g.querySelector('.gsub').textContent = parts.map((p) => p.key === 'impact' ? `${N(p.value)}/${N(p.target)}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : `${money(p.value)} / ${money(p.target)}`).join(' · ') + gh;
-  g.setAttribute('aria-label', label);
+  g.querySelector('.gsub').textContent = parts.map((p) => partText1420(p) ? iso(partText1420(p).short) : p.key === 'impact' ? `${iso(N(p.value) + '/' + N(p.target))}${wi.impactPending ? ` (+${wi.impactPending} בדרך)` : ''}` : isStreak(p) ? `🛡️ ${iso(String(Math.round(p.value)))}/${iso(String(p.target))} ח׳` : p.unit === 'months' && wi.holding ? `🛟 ${iso(p.value >= 99 ? '—' : covX(p.value))}` : p.key === 'passive12' && wi.harvest ? `🌾 ${iso(money(p.value))} / ${iso(money(p.target))}` : p.unit === 'months' ? (p.value >= 99 && wi.platform ? '🛟 רווחית' : `🛟 ${iso(p.value >= 99 ? '—' : mo1(p.value))}/${iso(String(p.target))} ח׳`) : p.cmp === 'le' ? `⚖️ שכר ${iso(pctI(p.value))} (עד ${iso(pctI(p.target))})` : `${iso(money(p.value))} / ${iso(money(p.target))}`).join(' · ') + gh;   // w7: liquidity in months   // wave 2: "₪3.2 מיליון" is mixed text — isolate each amount, not the whole line (it read backwards in an LTR box)
+  gm.setAttribute('aria-label', label);
   // T7 CR-01: a role=meter needs its value
-  g.setAttribute('aria-valuemin', '0'); g.setAttribute('aria-valuemax', '100'); g.setAttribute('aria-valuenow', String(pc));
-  g.setAttribute('aria-valuetext', `${pc}%${parts.length > 1 ? ' (הפס החלש מבין השניים)' : ''}`);
+  gm.setAttribute('aria-valuenow', String(pc));
+  gm.setAttribute('aria-valuetext', `${pc}%${parts.length > 1 ? ' (הפס החלש מבין השניים)' : ''}`);
   g.classList.toggle('done', pc >= 100);
+  goalPanelUpdate(m, ctx);
   // the mentor's level next to its name (T2 §15.1 "show metrics().mentor.label")
   const mb = $('#mentor .mt>b');
   if (mb && m.mentor) { const t = `אבא עשיר · ${m.mentor.label}`; if (mb.dataset.t !== t) { mb.dataset.t = t; mb.innerHTML = `אבא עשיר <small class="mlv">· ${esc(m.mentor.label)}</small>`; } }
@@ -384,6 +513,7 @@ export function renderHUD(m, ctx, { animate = true } = {}) {
   if (rev) {
     const set = (k, el) => { if (!el) return; el.hidden = !rev(k); revealPulse(k, el); };
     set('cf', $('#hCf')?.closest('.stat')); set('goal', g); set('sheet', $('#sheetBtn'));
+    if (g.hidden && gpOpen) goalPanel(false);
     document.body.classList.toggle('t4-nosheet', !rev('sheet'));   // desktop: the side sheet waits for its reveal too (freeRect sees it as absent)
     set('tools', $('#turboBtn')); if ($('#camBtn')?.dataset.kind === '3d') set('tools', $('#camBtn'));
   }
@@ -407,6 +537,95 @@ function shownPct(m) {
   const parts = m.goalParts || [];
   const p = parts.length ? Math.min(...parts.map((x) => x.progress)) : (m.goalProgress || 0);
   return Math.max(0, Math.min(100, Math.floor(p * 100)));
+}
+
+/* ============================================================ wave 2 (A2 G-04, brief §14): "יעד העולם" — the world's real win condition
+   Primary info stays in the HUD (meter, %); the panel holds the secondary part: what is missing, the 2-payday hold, ★★ / ★★★ months
+   and gates, total assets / liabilities. Model: hudgoal.js (engine outputs only). Non-modal disclosure: Esc / ✕ / a tap outside closes,
+   focus returns to the toggle. Nothing here is saved. */
+let gpOpen = false, gpData = null, gpHtml = '';
+const gpTick = (ok) => (ok == null ? '' : `<span class="gp-ok ${ok ? 'pos' : 'neg'}" aria-hidden="true">${ok ? '✓' : '✗'}</span><span class="sr">${ok ? ' — עומד' : ' — לא עומד'}</span>`);
+function goalPanelEl() {
+  let el = $('#goalPanel'); if (el) return el;
+  el = document.createElement('section'); el.id = 'goalPanel'; el.className = 'gpanel'; el.hidden = true;
+  el.setAttribute('role', 'region'); el.setAttribute('aria-labelledby', 'gpH');
+  el.innerHTML = '<div class="gp-head"><h2 id="gpH" tabindex="-1">יעד המפה</h2><button type="button" class="ibtn gp-x" aria-label="לסגור את יעד המפה" title="סגירה">✕</button></div><div class="gp-body"></div>';
+  el.querySelector('.gp-x').onclick = () => { sfx('click'); goalPanel(false, { focus: true }); };
+  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); goalPanel(false, { focus: true }); } });
+  document.addEventListener('pointerdown', (e) => { if (gpOpen && !e.target.closest('#goalPanel, #hGoal')) goalPanel(false); }, { passive: true });
+  document.addEventListener('keydown', (e) => { if (gpOpen && e.key === 'Escape' && e.target.closest && e.target.closest('#hGoal')) goalPanel(false, { focus: true }); });
+  addEventListener('resize', () => { if (gpOpen) placeGoalPanel(); });
+  document.body.appendChild(el);
+  return el;
+}
+function placeGoalPanel() {
+  const el = $('#goalPanel'), g = $('#hGoal'), hud = $('#hud'); if (!el || !g || !hud) return;
+  const hb = hud.getBoundingClientRect(), gb = g.getBoundingClientRect();
+  const top = Math.round(Math.max(hb.bottom, gb.bottom) + 6);
+  el.style.top = top + 'px';
+  if (innerWidth > 600) {   // under the goal card, kept inside the viewport (RTL: aligned to the card's right edge)
+    const w = Math.min(420, innerWidth - 24);
+    const right = Math.max(12, Math.min(innerWidth - gb.right, innerWidth - w - 12));
+    el.style.right = right + 'px'; el.style.left = 'auto'; el.style.width = w + 'px';
+  } else { el.style.right = ''; el.style.left = ''; el.style.width = ''; }
+  el.style.maxHeight = `calc(100dvh - ${top}px - 12px - var(--safe-b, 0px))`;
+}
+function goalPanelHtml(M) {
+  const parts = M.parts.map((p) => `<div class="gp-part"><div class="gp-pl"><span>${esc(p.label)}</span><b>${p.cmp === 'le' ? `${escI(p.valueText)} · היעד: ${escI(p.targetText)}` : `${escI(p.valueText)} מתוך ${escI(p.targetText)}`}</b></div><div class="gbar" aria-hidden="true"><i style="width:${Math.max(2, Math.round(p.progress * 100))}%"></i></div></div>`).join('');
+  const gaps = M.gaps.length ? M.gaps.map((t) => `<p class="gp-gap"><span aria-hidden="true">🎯</span> ${escI(t)}</p>`).join('') : `<p class="gp-gap met">${gpTick(true)} ${escI(M.summary)}</p>`;
+  const hold = M.hold ? `<p class="gp-row"><span><span aria-hidden="true">⏳</span> ${esc(M.hold.text)}</span><b class="num">${esc(M.hold.status)}</b>${gpTick(M.hold.ok ? true : null)}</p>` : '';
+  const starLi = (s) => `<li><span class="gp-s" aria-label="${s.n === 1 ? 'כוכב אחד' : s.n === 2 ? 'שני כוכבים' : 'שלושה כוכבים'}">${'★'.repeat(s.n)}</span><span class="gp-t">${escI(s.text)}${s.now ? ` <small>${escI(s.now)}</small>` : ''}</span>${gpTick(s.ok)}` +
+    (s.gates && s.gates.length ? `<ul class="gp-gates">${s.gates.map((x) => `<li><span class="gp-t">${x.key === 'fund' ? '<span aria-hidden="true">🛟</span> ' : '<span aria-hidden="true">🙂</span> '}${escI(x.text)} <small class="num">${esc(x.now)}${x.note ? ` · ${esc(x.note)}` : ''}</small></span>${gpTick(x.ok)}</li>`).join('')}</ul>` : '') + '</li>';
+  // wave 3a (J1 P0-2): the near-goal ladder — every rung with ✓ / ✗, the next one marked with its numbers
+  const ni = M.ladder && M.ladder.length ? M.ladder.findIndex((x) => !x.met) : -1;
+  const ladder = M.ladder && M.ladder.length ? `<h3>הדרך ליעד</h3><ol class="gp-ladder">${M.ladder.map((x, i) => `<li class="${x.met ? 'ok' : i === ni ? 'next' : ''}"${i === ni ? ' aria-current="step"' : ''}><span class="gp-t"><span aria-hidden="true">${esc(x.icon)}</span> ${escI(x.title)}${i === ni && M.next ? ` <small class="num">${escI(M.next.valText)}</small>` : ''}${i === ni ? ' <small>· היעד הקרוב</small>' : ''}</span>${gpTick(x.met ? true : i === ni ? null : false)}</li>`).join('')}</ol>` : '';
+  const stars = M.stars ? `<h3>כוכבים</h3><ul class="gp-stars">${M.stars.map(starLi).join('')}</ul>` : '';
+  const T = M.totals;
+  return `<p class="gp-rule">${escI(M.rule)}</p>${parts}${gaps}${M.pending ? `<p class="gp-note">${esc(M.pending)}</p>` : ''}${hold}${ladder}${stars}${M.starsNote ? `<p class="gp-note">${esc(M.starsNote)}</p>` : ''}` +
+    `<h3>נכסים וחובות</h3><dl class="gp-tot"><div><dt>סך הנכסים</dt><dd class="num">${escI(T.assetsText)}</dd></div><div><dt>סך החובות</dt><dd class="num ${T.liabilities > 0 ? 'neg' : ''}">${escI(T.liabilitiesText)}</dd></div><div><dt>שווי נקי</dt><dd class="num">${escI(T.netWorthText)}</dd></div></dl>` +
+    '<p class="gp-note">הפירוט המלא — בדוח הכספי.</p>';
+}
+function goalModelOf(m, ctx) {
+  const w = ctx && ctx.world, st = ctx && ctx.st;
+  let thresholds = {};
+  try { if (w && st) thresholds = starThresholds(w, st.charId, m.rules); } catch (e) { /* the history world has no characters' stars */ }
+  return goalPanelModel(m, { thresholds, learn: !!(ctx && ctx.cfg && ctx.cfg.learn), startNW: st && st.history ? st.history.startNW : null, impactPending: (m.worldIndicators || {}).impactPending || 0 });
+}
+function goalPanelUpdate(m, ctx) {
+  gpData = { m, ctx };
+  const btn = $('#hGoalBtn');
+  let M = null;
+  try { M = goalModelOf(m, ctx); } catch (e) { console.warn(e); }
+  if (btn) { const t = `יעד המפה — מה חסר לניצחון${M && M.summary ? `: ${iso(M.summary)}` : ''}`; if (btn.getAttribute('aria-label') !== t) { btn.setAttribute('aria-label', t); btn.title = 'יעד המפה — מה חסר לניצחון'; } }
+  if (!gpOpen || !M) return;
+  const body = $('#goalPanel .gp-body'); if (!body) return;
+  const html = goalPanelHtml(M); if (gpHtml !== html) { gpHtml = html; body.innerHTML = html; }
+  placeGoalPanel();
+}
+/** open / close the "יעד העולם" panel (focus: move focus into it on open, back to the toggle on close) */
+export function goalPanel(open, { focus = false } = {}) {
+  const was = gpOpen;
+  gpOpen = !!open && !!gpData && !!$('#hGoalBtn') && !$('#hGoal').hidden;
+  const el = gpOpen ? goalPanelEl() : $('#goalPanel');
+  const btn = $('#hGoalBtn'); if (btn) btn.setAttribute('aria-expanded', String(gpOpen));
+  document.body.classList.toggle('gp-open', gpOpen);
+  if (!el) return;
+  if (gpOpen) { gpHtml = ''; el.hidden = false; goalPanelUpdate(gpData.m, gpData.ctx); if (focus) el.querySelector('#gpH').focus({ preventScroll: true }); }
+  else { el.hidden = true; if (was && focus && btn) btn.focus({ preventScroll: true }); }
+}
+export const goalPanelOpen = () => gpOpen;
+
+/* ============================================================ wave 2 (A2 G-07, brief §15): new debt → a short chip under the money stats
+   "חוב חדש ₪X · ₪Y בחודש": both numbers are differences of engine values (hudgoal.newDebt), computed by game.js between renders. */
+export function debtChip(d) {
+  let el = $('#debtChip');
+  if (!d) { if (el) { el.classList.remove('on'); el.textContent = ''; } return; }
+  if (!el) { el = document.createElement('p'); el.id = 'debtChip'; el.className = 'debtc'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); ($('#hud') || document.body).appendChild(el); }   // inside the HUD landmark (fixed: placed below)
+  const host = $('.hstats'); const r = host && host.getBoundingClientRect();
+  if (r && r.width) { el.style.top = Math.round(r.bottom + 6) + 'px'; el.style.left = Math.round(r.left + r.width / 2) + 'px'; }
+  el.innerHTML = `<span aria-hidden="true">🏦</span> ${escI(d.text)}`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  // no timed dismissal: it stays until the next roll (game.js) or the next card (openEvent); it never takes taps
 }
 
 /* ============================================================ v3 life row (age · energy · happiness · credit · inflation) */
@@ -618,9 +837,9 @@ export function renderSheet(m, ctx) {
   const el = $('#sheet'); if (!el) return;
   const w = ctx.world, st = ctx.st, wi = m.worldIndicators || {};
   const top = el.scrollTop;
-  const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד העולם';
+  const goalTitle = m.goalType === 'passive' ? 'מד החופש' : 'יעד המפה';
   const hold = m.goalType !== 'benchmark' && m.goalHold && m.goalHold.need > 1 ? ` היעד צריך להחזיק ${m.goalHold.need} ימי משכורת ברצף.` : '';
-  const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה ש${gw('אתה חייב', 'את חייבת')}.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
+  const goalHelp = (m.goalType === 'benchmark' ? `היעד: ${escI(goalWords(w.goalLabel))}. בסוף התקופה משווים לשווי של משקיע שקנה מדד והחזיק.` : m.goalType === 'passive' ? 'הכנסה פסיבית מול הוצאות. כשהפס מתמלא — יצאת מהמירוץ.' : m.goalType === 'netWorth' ? `היעד: ${escI(goalWords(w.goalLabel))}. שווי נקי = כל מה שיש לך פחות כל מה ש${gw('אתה חייב', 'את חייבת')}.` : m.goalType === 'passive12' ? `היעד: ${escI(goalWords(w.goalLabel))}. נמדד בממוצע של 12 ימי משכורת: הקיץ צריך לממן את החורף.` : `היעד: ${escI(goalWords(w.goalLabel))}. צריך את שניהם.`) + hold;
   let world = '';
   if (w.mechanic === 'rate') {
     world = `<div class="wbox"><div class="wl"><span>ריבית במשק</span><b class="num">${pctTxt(wi.rate)}</b></div>${spark(wi.rateHist, { color: 'var(--accent)' })}
@@ -634,6 +853,64 @@ export function renderSheet(m, ctx) {
     world = `<div class="wbox"><div class="wl"><span>נקודות השפעה</span><b class="num">${wi.impact}/${wi.impactTarget}</b></div>
       <div class="track"><i style="width:${Math.min(100, (wi.impact / Math.max(1, wi.impactTarget)) * 100)}%"></i></div>
       <p class="note">${wi.impactPerMonth ? `+${wi.impactPerMonth} בחודש` : 'עוד אין השפעה חודשית'}${wi.impactPending ? ` · עוד ${wi.impactPending} בדרך` : ''}. ${wi.angelsActive ? `${wi.angelsActive} סטארט־אפים פעילים, שווי על הנייר ${fmtM(wi.angelPaper)}.` : 'עוד לא השקעת בסטארט־אפים.'}</p></div>`;
+  }
+  else if (wi.plant && wi.panel) {   // w6: the plant box; the full panel (gauges, hazard bars, lines, actions) opens from here, the HUD chip and 💼
+    const P = wi.plant;
+    world = `<div class="wbox"><div class="wl"><span>🏭 ${esc(wi.panel.title || 'קווי ייצור')}: ${num(`${P.lines}/${P.slots}`)}</span><b class="num">${P.utilisation != null ? `ניצולת ${esc(pctI(P.utilisation))}` : 'אין קווים'}</b></div>
+      <p class="note">${P.lines ? `עלויות קבועות ${num(mS(P.fixedMonth))} בחודש · תזרים הקווים ${num(mSg(P.cfMonth), cls(P.cfMonth))}${P.runway != null ? ` · כרית ${num(String(Math.round(P.runway * 10) / 10))} חודשי קבועות` : ''}. ` : 'עוד אין לך קווי ייצור: קונים או מזמינים במשבצת "הזדמנות". '}${P.breakdowns ? `תקלות עד היום: ${num(String(P.breakdowns))}.` : ''}${P.penalties ? ` קנסות על חוזים: ${num(mS(P.penalties))}.` : ''}</p>
+      <div class="loans"><button data-act="world">🏭 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.chain && wi.panel) {   // w7: the chain box; the full panel (gauges, branches, stock, actions) opens from here, the HUD chip and 💼
+    const C = wi.chain;
+    world = `<div class="wbox"><div class="wl"><span>🛍️ ${esc(wi.panel.title || 'הרשת')}: ${num(`${C.branches}/${C.span}`)}</span><b class="num">${esc(C.liqMonths >= 99 ? 'אין קבועות' : `קופה ${mo1(C.liqMonths)} ח׳`)}</b></div>
+      <p class="note">${C.branches || C.franchises ? `${num(String(C.branches))} סניפים מול יכולת ניהול של ${num(String(C.span))} · עלויות קבועות ${num(mS(C.fixedMonth))} בחודש · קופה נזילה ${num(mS(C.liquid))} · מלאי ${num(mS(C.stock))}${C.transit ? ` + בדרך ${num(mS(C.transit))}` : ''}${C.payables ? ` · חוב לספקים ${num(mS(C.payables))}` : ''}${C.franchises ? ` · ${num(String(C.franchises))} בזכיינות` : ''}. ` : 'עוד אין לך סניפים: מיקום לסניף מגיע במשבצת "מיקום לסניף". '}${C.overSpan ? `⚠️ ${num(String(C.overSpan))} סניפים מעבר ליכולת הניהול. ` : ''}${C.lost ? `מכירות שאבדו כשנגמר המלאי: ${num(mS(C.lost))}.` : ''}</p>
+      <div class="loans"><button data-act="world">🛍️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.energy && wi.panel) {   // w9: the stations box; the full panel (gantt, calls, projects, plants, actions) opens from here
+    const EN = wi.energy;
+    world = `<div class="wbox"><div class="wl"><span>☀️ ${esc(wi.panel.title || 'התחנות')}</span><b class="num">${esc(mS(EN.income))} / ${esc(mS(EN.target))}</b></div>
+      <p class="note">הכנסה תפעולית אחרי החזר חוב, בחודש רגיל: ${num(mSg(EN.income), cls(EN.income))} מתוך ${num(mS(EN.target))}. ריבית ${num(EN.rate + '%')} · חשמל ${num(mwh(EN.px))} · ${num(String((EN.slots || {}).free || 0))} חיבורים פנויים${EN.equityCalls ? ` · הון עצמי שעוד צריך ${num(mS(EN.equityCalls))}` : ''}${EN.built ? ` · ${num(String(EN.built))} תחנות נבנו` : ''}.</p>
+      <div class="loans"><button data-act="world">☀️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.portfolio && wi.panel) {   // w10: the portfolio box; the market screen opens from here
+    const PF = wi.portfolio; const R = (wi.market || {}).regime || {};
+    world = `<div class="wbox"><div class="wl"><span>📊 ${esc(wi.panel.title || 'הבורסה והתיק')} · ${esc(R.label || '')}</span><b class="num">מינוף ${esc(pctI(PF.ltv))}</b></div>
+      <p class="note">מניות וקרן מדד ${num(mS((PF.classes || {}).daily || 0))} · קרנות ${num(mS((PF.classes || {}).monthly || 0))} · פרטי ${num(mS((PF.classes || {}).locked || 0))}${PF.debt ? ` · הלוואה כנגד התיק ${num(mS(PF.debt))}` : ''}${PF.unfunded ? ` · התחייבויות פתוחות ${num(mS(PF.unfunded))}` : ''}${PF.call ? ' · <b class="neg">⚠️ קריאת מרווח</b>' : ''}${PF.forced ? ` · ${num(String(PF.forced))} מכירות כפויות` : ''}.</p>
+      <div class="loans"><button data-act="world">📊 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.multinational && wi.panel) {   // w11: the group box; the map panel opens from here
+    const X = wi.multinational;
+    const nm = (wi.panel.rows || []).filter((r) => r.mgr).length;
+    world = `<div class="wbox"><div class="wl"><span>🌍 חברות־בנות ${num(`${X.subs}/${X.maxSubs}`)}</span><b>${nm ? num(`אמון ${pctI(X.trust)}`) : 'בלי מנהלים'}</b></div>
+      <p class="note">קשב ${num(`${X.used}/${X.slots}`)} · רווח מגודר ${num(pctI(X.hedgedShare))} · שכר מנהלים ומטה ${num(mS(X.fixedMonth))} בחודש${X.localCash ? ` · מזומן בחו"ל ${num(mS(X.localCash))}` : ''}${X.frauds ? ` · <b class="neg">${num(String(X.frauds))} הונאות (${num(mS(X.fraudLoss))})</b>` : ''} · ${num(String(X.audits))} ביקורות.</p>
+      <div class="loans"><button data-act="world">🌍 ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.holding && wi.panel) world = WV2.hdBox(WVH2, wi.holding, wi.panel.title);   // w12: the group box; the group panel opens from here
+  else if (wi.harvest && wi.panel) world = WV2.hvBox(WVH2, wi.harvest, wi.panel.title);   // w16: the farm box; the farm panel opens from here
+  else if (WV3.worldKey(wi)) world = WV3.box(WVH2, wi);   // w14 / w17 / w18 / w19 / w20: the bank / lab / insurer / company / fund box; its panel opens from here
+  else if (wi.platform && wi.panel) {   // w15: the app box; the app panel opens from here
+    const X = wi.platform;
+    world = `<div class="wbox"><div class="wl"><span>☁️ ${esc(wi.panel.title || 'האפליקציה')}${X.sold ? ' · נמכרה' : ''}</span><b>${num(X.sold ? mS(X.proceeds) : +X.runway >= 99 ? 'רווחית' : mo1(X.runway) + ' חודשי מזומן')}</b></div>
+      <p class="note">${(+X.users || 0).toLocaleString('en-US')} משתמשים · הכנסה ${num(mS(X.mrr))} בחודש · ${X.cf >= 0 ? 'רווח' : 'שריפה'} ${num(mSg(X.cf), cls(X.cf))} · החלק שלך ${num(pctI(X.stake))} = ${num(mS(X.stakeValue))} · שוק: ${esc(X.regimeLabel || '')} (×${esc(String(X.mult))}).</p>
+      <div class="loans"><button data-act="world">☁️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.league && wi.panel) {   // w13: the club box; the club panel (table, squad, stadium, actions) opens from here
+    const LG = wi.league; const La = LG.last || {};
+    world = `<div class="wbox"><div class="wl"><span>🏟️ ${esc(wi.panel.title || 'המועדון')} · ${esc(LG.divName)}</span><b class="num">מקום ${esc(String(LG.rank))}</b></div>
+      <p class="note">עונה ${num(String(LG.season))} · מחזור ${num(`${LG.round}/${LG.rounds}`)}${LG.window ? ' · 🔁 חלון העברות' : ''} · הכנסות החודש ${num(mS(La.rev || 0))} · שכר ${num(mS(LG.wages))} · שכר מול הכנסות (12 חודשים) ${num(wrT(LG.wageRatio), LG.wageRatio > LG.wageRatioTarget ? 'neg' : '')} (יעד: עד ${num(pctI(LG.wageRatioTarget))}) · הסגל בספרים ${num(mS(LG.squadBook))} · בשוק ${num(mS(LG.squadMv))}${LG.ownerLoan ? ` · הלוואת בעלים ${num(mS(LG.ownerLoan))}` : ''}.</p>
+      <div class="loans"><button data-act="world">🏟️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.proj && wi.panel) {   // w8: the projects box; the full panel (gantt, equity calls, rows, rentals, actions) opens from here
+    const PJ = wi.proj;
+    world = `<div class="wbox"><div class="wl"><span>🏗️ ${esc(wi.panel.title || 'הפרויקטים')}: ${num(String(PJ.open))}</span><b class="num">ריבית ${esc(PJ.rate + '%')}</b></div>
+      <p class="note">${num(String(PJ.open))} ${PJ.open === 1 ? 'פרויקט פתוח' : 'פרויקטים פתוחים'}. ${PJ.equityCalls ? `הון עצמי שעוד צריך: ${num(mS(PJ.equityCalls))}${PJ.runway != null ? ` · המזומן מכסה ×${num(String(Math.round(PJ.runway * 100) / 100))}` : ''}. ` : ''}ביקוש לדירות ×${num(String(PJ.demand))} · הלוואת בנייה ${num(String(PJ.loanRate))}% בחודש${PJ.completed ? ` · ${num(String(PJ.completed))} פרויקטים הושלמו` : ''}${(PJ.plots || []).length ? ` · ${num(String(PJ.plots.length))} מגרשים` : ''}${(PJ.rentals || []).length ? ` · ${num(String(PJ.rentals.length))} בניינים מושכרים` : ''}${PJ.stallMonths ? ` · חודשי עמידה עד היום: ${num(String(PJ.stallMonths))}` : ''}.</p>
+      <div class="loans"><button data-act="world">🏗️ ${esc(wi.panel.title || 'לוח המפה')}</button></div></div>`;
+  }
+  else if (wi.season) {   // w5: the season box; the full panel (strip, ring, rows, actions) opens from here, the HUD chip and 💼
+    const se = wi.season; const rw = (wi.panel && (wi.panel.gauges || []).find((g) => g.id === 'runway')) || null;
+    world = `<div class="wbox"><div class="wl"><span>${BAND_IC[se.band] || '🌴'} ${esc(MONTH_HE[se.cal - 1] || '')} · ${esc(BAND_HE[se.band] || '')}</span><b class="num">ביקוש ${esc(tourTxt(se.tour))}</b></div>
+      <p class="note">${rw && rw.value != null ? `כרית לחורף: ${num(String(Math.round(rw.value * 10) / 10))} חודשי עלויות קבועות. ` : ''}${se.line ? `קו עונתי: ${num(fmtM(se.line))} (נסגר עד אוגוסט). ` : ''}${se.fixedMonth ? `עלויות קבועות של הנכסים: ${num(fmtM(se.fixedMonth))} בחודש.` : 'עוד אין נכסים עונתיים.'}</p>
+      <div class="loans"><button data-act="world">🌴 ${esc((wi.panel && wi.panel.title) || 'לוח המפה')}</button></div></div>`;
   }
   else if (wi.ymText) {
     world = `<div class="wbox"><div class="wl"><span>🗞️ ${esc(wi.ymText)}</span>${wi.index != null ? `<b class="num">מדד ${Math.round(wi.index)}</b>` : ''}</div>${spark(wi.indexHist, { color: 'var(--accent)' })}
@@ -658,7 +935,7 @@ export function renderSheet(m, ctx) {
   const angelDone = done.length ? `<p class="note">${done.length} השקעות נסגרו: ${done.map((x) => `${esc(x.name)} ${x.mult ? '×' + x.mult : '✗'}`).join(' · ')}</p>` : '';
   el.innerHTML = `<div class="sh-head"><div><h2>הדוח הכספי</h2><p class="sub">${esc(st.charName)} · ${esc(w.name)} · חודש ${m.month}${m.mode !== 'free' ? '/' + m.maxMonths : ''}</p></div><button class="ibtn sh-close" data-act="close" aria-label="סגירת הדוח">${ICON.close}</button></div>
   <div class="freedom"><div class="fl"><span>${esc(goalTitle)}</span><span class="num">${shownPct(m)}%</span></div>
-   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
+   ${m.goalParts.map((p) => `<div class="track" title="${esc(p.label)}"><i style="width:${Math.max(1, p.progress * 100)}%"></i></div><p class="gpl"><span>${esc(p.label)}</span>${num(partText1420(p) ? partText1420(p).long : p.key === 'impact' ? `${N(p.value)} / ${N(p.target)}` : isStreak(p) ? `${Math.round(p.value)} / ${p.target} חודשים ברצף` : p.unit === 'months' && wi.holding ? `${monthsText(p.value, 'cov')} (כיסוי ${covX(p.value)}) / ${p.target} חודשים` : p.unit === 'months' ? `${monthsText(p.value, !!wi.platform)} / ${p.target} חודשים` : p.cmp === 'le' ? `${pctI(p.value)} · היעד: עד ${pctI(p.target)}` : `${fmtM(p.value)} / ${fmtM(p.target)}`)}</p>`).join('')}
    ${holdLine(m)}<p>${goalHelp}</p></div>
   ${world}
   ${m.econ ? `<div class="wbox econbox"><div class="wl"><span>📊 מד הכלכלה</span></div>${econBlockHtml(m.econ)}</div>` : ''}
@@ -674,7 +951,7 @@ export function renderSheet(m, ctx) {
   <h3>הכנסות בחודש</h3>${m.incomeLines.map((x) => row(escI(x.label), sgn(x.amount), cls(x.amount))).join('')}
   <h3>הוצאות בחודש</h3>${m.expenseLines.map((x) => row(escI(x.label), fmtM(x.amount))).join('')}
   <div class="total"><span>תזרים חודשי</span>${num(sgn(m.cashflow), cls(m.cashflow))}</div>
-  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${m.savings ? `<div class="arow cashrow"><div><span>🛟 קרן חירום (חיסכון)</span>${m.emergency ? `<small class="note">${num(String(m.emergency.months))} חודשי הוצאות${m.emergency.rate ? ` · ${num(m.emergency.rate + '%')} בשנה` : ''}</small>` : ''}</div><div class="av2">${num(fmtM(m.savings))}</div></div>` : ''}${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}
+  <h3>נכסים</h3><div class="arow cashrow"><div><span>מזומן</span></div><div class="av2">${num(fmtM(m.cash))}</div></div>${m.savings ? `<div class="arow cashrow"><div><span>🛟 קרן חירום (חיסכון)</span>${m.emergency ? `<small class="note">${num(String(m.emergency.months))} חודשי הוצאות${m.emergency.rate ? ` · ${num(m.emergency.rate + '%')} בשנה` : ''}</small>` : ''}</div><div class="av2">${num(fmtM(m.savings))}</div></div>` : ''}${assetRows + holdRows + angelRows}${assetRows || holdRows || angelRows ? '' : '<p class="empty">עוד אין נכסים שמכניסים כסף. נכס = משהו שמכניס כסף לכיס שלך.</p>'}${angelDone}${candleSrc && st && st.prices && Object.keys(st.prices).length ? '<div class="loans cdl-sheet"><button type="button" data-act="candles">📈 מחירים, נרות וחדשות</button></div>' : ''}
   ${totA != null ? row('<b>סה"כ נכסים</b>', fmtM(totA)) : ''}
   <h3>התחייבויות</h3>${m.liabilities.length ? m.liabilities.map(liabRow).join('') + (totL != null ? row('<b>סה"כ התחייבויות</b>', fmtM(totL)) : '') : '<p class="empty">אין חובות.</p>'}
   <div class="total nw"><span>שווי נקי</span>${num(fmtM(m.netWorth), cls(m.netWorth))}</div>
@@ -761,7 +1038,11 @@ export function landDice(faces) {
 }
 export function shakeDomDice(on) { const box = $('#dice'); if (box) box.classList.toggle('shaking', !!on); }
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-export function setRollEnabled(b) { const r = $('#roll'); if (r) { r.disabled = !b; r.classList.toggle('ready', !!b); } }
+export function setRollEnabled(b) {
+  const r = $('#roll'); if (r) { r.disabled = !b; r.classList.toggle('ready', !!b); }
+  // wave 3a (review MAJOR-1): the tile list waits while the roll waits (a move, a card, the end) — it can never stack with a card
+  const l = $('#tilesBtn'); if (l) { l.disabled = !b; l.setAttribute('aria-disabled', String(!b)); }
+}
 export function focusRoll() { const r = $('#roll'); if (r && !r.disabled && $('#evm').hidden && $('#gm').hidden && !lobbyOpen()) r.focus({ preventScroll: true }); }
 
 /* ============================================================ flying coins */
@@ -869,6 +1150,8 @@ const ddLevel = (ev) => (ev && ev.data && ev.data.dd ? ev.data.dd.level : -1);
  */
 export function openEvent(ev, ctx, onChoose) {
   const m = $('#evm'), c = $('#evCard');
+  if (gpOpen) goalPanel(false);   // wave 2: the card wins over the goal panel
+  debtChip(null);                 // … and over the new-debt chip (the card is the next thing to read)
   evState = { ev, ctx, onChoose, q: 0, roi: false, hint: null, imp: { open: null, ref: null, cache: new Map() }, shownAt: performance.now() };
   if (phoneQ()) { const vd = $('#verdict'); if (vd && /\bon\b/.test(vd.className)) vd.className = vd.className.replace(/\bon\b/, '').trim(); toastAside(); stickyAside(); } // phones: the new card wins
   renderEvent(true);
@@ -933,6 +1216,7 @@ function onCardClick(e) {
   const it = e.target.closest('[data-imp]');
   if (it) { evState.imp.ref = it.dataset.imp; sfx('click'); paintImpact(); return; }
   if (e.target.closest('[data-focus-open]')) { sfx('click'); evState.ctx.api && evState.ctx.api.focus && evState.ctx.api.focus(); return; }
+  const cf = e.target.closest('[data-cdl-full]'); if (cf) { sfx('click'); candlesFull(cf.dataset.cdlFull); return; }
   const q = e.target.closest('[data-q]');
   if (q) { const d = evState.ev.data; const s = q.dataset.q; evState.q = s === 'max' ? d.maxBuy : s === 'all' ? d.maxSell : s === 'zero' ? 0 : evState.q + +s; sfx('click'); tradeUpd(); return; }
   const b = e.target.closest('button[data-o]');
@@ -952,10 +1236,13 @@ function hintable(ev, M) {
   if (ev.auto || ev.type === 'trade' || ev.type === 'intro' || ev.type === 'story' || (ev.type === 'mystery' && ev.data && ev.data.kind === 'quiz')) return false;
   return !!M.canHint;
 }
-function askHint() {
-  const st = evState; if (!st) return;
+async function askHint() {
+  const st = evState; if (!st || st.hintBusy) return;
   let r = null;
-  try { r = st.ctx.api.hint(); } catch (e) { console.error(e); }
+  st.hintBusy = true;
+  try { r = await st.ctx.api.hint(); } catch (e) { console.error(e); }   // wave 3b + worlds: in a room the hint is a server intent (async)
+  st.hintBusy = false;
+  if (evState !== st) return;   // the card changed while the room answered
   if (!r || r.ok === false || !r.hint) { const e = $('#evCard .err'); if (e) e.textContent = (r && r.error) || 'אין כאן רמז'; return; }
   st.hint = { id: st.ev.id, dd: ddLevel(st.ev), res: r };
   sfx('click');
@@ -1086,25 +1373,53 @@ function effectChips(e = {}, { odds = false } = {}) {
   else if (R && typeof R === 'object' && !odds) c.push(`<em class="fx neg">⚠ ${R.label ? escI(R.label) : `סיכון ${iso(fmtM(R.amount || 0))}`}</em>`);
   return c.join('');
 }
-/** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile. */
-function planPicker(ev) {
+/** Monthly plan picker (payday): one tap per plan, current one marked, trade-offs on every tile.
+ *  wave 3a (J1 P0-3): compact tiles (icon, name, ONE number); the fund deposit stays inline; the raise and the month's focus are
+ *  under "עוד החלטות לחודש"; every tile's full chips + note are in "פירוט" (planDetails). ≤ 8 buttons on screen. */
+function planEffects(o, ev) {
+  const e0 = o.effects || {}; return { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
+}
+function planLabel(o, ev) { return o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label; }
+function planId(o, ev) { return o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5)); }
+/** the one number of a compact tile: ₪ a month when the plan changes the money, else its 🔋 */
+function planChip(e) {
+  if (e.net) return `<em class="fx ${cls(e.net)}">${iso(sgn(e.net))} בחודש</em>`;
+  if (e.energy) return `<em class="fx ${cls(e.energy)}">🔋 ${iso((e.energy > 0 ? '+' : '−') + Math.abs(Math.round(e.energy)))}</em>`;
+  return '<em class="fx">בלי שינוי</em>';
+}
+function planPicker(ev, focusHtml = '', compact = true) {
   const cur = ev.options.find((o) => o.id === 'ok');
   const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
   const raise = ev.options.find((o) => o.id === 'raise');
   const save = ev.options.find((o) => o.id === 'save');
   const rest = ev.options.filter((o) => !o.id.startsWith('plan:') && o.id !== 'ok' && o.id !== 'raise' && o.id !== 'save');
   const tile = (o) => {
-    const id = o.plan || (o.id === 'ok' ? (ev.data.plan || 'current') : o.id.slice(5));
-    const lbl = o.id === 'ok' ? (ev.data.planLabel || o.label.replace(/^להמשיך:?\s*/, '')) : o.label;
-    const e0 = o.effects || {}; const e = { ...e0, net: e0.netDelta != null ? (e0.netDelta || null) : e0.net };
+    const id = planId(o, ev); const e = planEffects(o, ev);
+    const tag = o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מתאים לכוח שלך</small>' : '';
     return `<button class="plan ${o.id === 'ok' ? 'cur' : ''} ${o.primary ? 'rec' : ''}" data-o="${esc(o.id)}" ${o.enabled ? '' : 'disabled'}>
-      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(lbl)}</b>${o.id === 'ok' ? '<small class="tagc">התוכנית שלך</small>' : o.primary ? '<small class="tagc rec">מתאים לכוח שלך עכשיו</small>' : ''}
-      <span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
+      <span class="pi" aria-hidden="true">${PLAN_ICON[id] || '📅'}</span><b>${escI(planLabel(o, ev))}</b>${tag}<span class="fxs">${compact ? planChip(e) : effectChips(e)}</span>${!compact && e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</button>`;
   };
-  return `<div class="plans">${plans.map(tile).join('')}</div>` +
-    (save ? `<button class="raise save ${save.primary ? 'primary' : ''}" data-o="save" ${save.enabled ? '' : 'disabled'}><span>🛟 ${escI(save.label)}</span><small>${save.effects && save.effects.months != null ? `אחרי זה: ${iso(String(save.effects.months))} חודשי הוצאות בצד (היעד: 3) · ` : ''}התוכנית נשארת ${escI(ev.data.planLabel || '')}</small></button>` : '') +
-    (raise ? `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>` : '') +
-    (rest.length ? optButtons({ ...ev, options: rest }) : '') + (cur ? '' : '');
+  if (!compact) {   // the education card keeps the full tiles (its plans ARE the decision)
+    const extra = (save ? saveBtn0(save, ev) : '') + (raise ? raiseBtn0(raise) : '');
+    return `<div class="plans">${plans.map(tile).join('')}</div>` + extra + (rest.length ? optButtons({ ...ev, options: rest }) : '');
+  }
+  const saveBtn = save ? saveBtn0(save, ev, true) : '';
+  const raiseBtn = raise ? raiseBtn0(raise) : '';
+  const moreBits = [raise ? `📈 העלאה${raise.primary ? ' (מומלץ)' : ''}` : '', focusHtml ? '🎯 מוקד החודש' : ''].filter(Boolean);
+  const more = moreBits.length ? `<details class="pdmore"${raise && raise.primary ? ' open' : ''}><summary>עוד החלטות לחודש: ${moreBits.join(' · ')}</summary>${raiseBtn}${focusHtml}</details>` : '';
+  return `<div class="plans compact">${plans.map(tile).join('')}</div>` + saveBtn + (rest.length ? optButtons({ ...ev, options: rest }) : '') + more + (cur ? '' : '');
+}
+function saveBtn0(save, ev, compact = false) {
+  return `<button class="raise save ${save.primary ? 'primary' : ''}" data-o="save" ${save.enabled ? '' : 'disabled'}><span>🛟 ${escI(save.label)}</span><small>${save.effects && save.effects.months != null ? `אחרי זה: ${iso(String(save.effects.months))} חודשי הוצאות בצד (היעד: 3)${compact ? '' : ' · '}` : ''}${compact ? '' : `התוכנית נשארת ${escI(ev.data.planLabel || '')}`}</small></button>`;
+}
+function raiseBtn0(raise) {
+  return `<button class="raise ${raise.primary ? 'primary' : ''}" data-o="raise" ${raise.enabled ? '' : 'disabled'}>📈 ${escI(raise.label)}${raise.chance != null ? ` <small>סיכוי ${iso(Math.round(raise.chance * 100) + '%')}</small>` : ''}</button>`;
+}
+/** "פירוט" of a payday card: the full payslip, every plan's full trade-offs, and the impact panel */
+function planDetails(ev, impactHtml0) {
+  const plans = ev.options.filter((o) => o.id.startsWith('plan:') || o.id === 'ok');
+  const li = (o) => { const e = planEffects(o, ev); return `<li><b><span aria-hidden="true">${PLAN_ICON[planId(o, ev)] || '📅'}</span> ${escI(planLabel(o, ev))}</b><span class="fxs">${effectChips(e)}</span>${e.note ? `<small class="pn">${escI(e.note)}</small>` : ''}</li>`; };
+  return `<details class="pddet"><summary>פירוט: התלוש המלא, כל תוכנית במספרים${impactHtml0 ? ', מה זה עושה לי' : ''}</summary><h4>🧾 התלוש</h4>${payslipFull}<h4>📅 התוכניות</h4><ul class="pdplans">${plans.map(li).join('')}</ul>${impactHtml0}</details>`;
 }
 /** Life-event dilemmas, T3 chain cards (tile L with data.chain) and inbox story cards (type 'story'): each option is a card
  *  with its consequences (chips), one 12/24-month total line and the "במשחק" odds; the default of an inbox item is marked and
@@ -1140,7 +1455,7 @@ function totalsLine(o) {
 /** The line under the text: personal / trade-off tag, "שלב n מתוך m", the due chip, and the chain's "במשחק" hint. */
 function storyTagsHtml(ev) {
   const d = ev.data || {};
-  const prog = ev.progress || (d.chain && d.chain.progress) || null;
+  const prog = ev.progress || (d.chain && d.chain.id != null && d.chain.progress) || null;
   const tags = [];
   if (ev.type === 'life' || ev.type === 'story') {
     if (d.personal || ev.personal) tags.push('<em class="b">החלטה אישית — אין כאן תשובה נכונה אחת</em>');
@@ -1153,7 +1468,7 @@ function storyTagsHtml(ev) {
 }
 function effectChoices(ev) {
   const d = ev.data || {};
-  const story = ev.type === 'story' || !!d.chain;
+  const story = ev.type === 'story' || !!(d.chain && d.chain.id != null);   // a T3 story chain (w7's module data.chain {ck|mk} is not one)
   const dflt = d.defaultId && ev.options.length > 1 ? ev.options.find((o) => o.id === d.defaultId) : null;   // a one-option (informational) card has no default to announce
   const choice = (o, i) => {
     const e = o.effects || {}; const od = o.odds && o.odds.text ? oddsText(o.odds.text) : '';
@@ -1189,7 +1504,7 @@ function quizView(ev) {
  /** The mentor's question as a speech bubble at the top of the card (2 lines; tap to read all). */
 function say(text) {
   if (!text) return '';
-  return `<button type="button" class="say" data-say aria-expanded="false"><span class="av sm" aria-hidden="true">אע</span><span class="sr">אבא עשיר אומר: </span><span class="st" id="evSay">${escI(text)}</span></button>`;
+  return `<button type="button" class="say" data-say aria-expanded="false"><span class="av sm" aria-hidden="true">אע</span><span class="sr">אבא עשיר אומר: </span><span class="st" id="evSay">${escI(gz(text))}</span></button>`;
 }
 function head(ev, M = null) {
   const hb = M ? hintBtnHtml(ev, M) : '';
@@ -1219,7 +1534,7 @@ const big = (n, c) => `<b class="big num ${c ?? cls(n)}">${sgn(n)}</b>`;
 function renderEvent(first) {
   const { ev, ctx } = evState; const c = $('#evCard');
   c.className = 'card ev-' + ev.type + (ev.golden ? ' golden' : '') + (first ? '' : ' pop-off');
-  if (ev.type === 'trade') { if (first || !c.querySelector('#qs')) { c.innerHTML = tradeHtml(ev); } tradeUpd(true); return; }
+  if (ev.type === 'trade') { if (first || !c.querySelector('#qs')) { c.innerHTML = tradeHtml(ev); fillCandles(ev); } tradeUpd(true); return; }
   const fn = BODY[ev.type] || (() => '');
   let body = '';
   try { body = fn(ev, ctx) || ''; } catch (e) { console.error('card body', e); }
@@ -1234,15 +1549,22 @@ function renderEvent(first) {
     : ev.type === 'market' && ev.data.kind === 'sell' && ev.data.offers.length ? optButtons(ev, (o) => o.kind !== 'sell') // sales are buttons inside the list
     : ev.type === 'business' && ev.data.mode === 'manage' ? bizActions(ev)
     : ev.type === 'business' && ev.data.mode === 'offer' && Array.isArray(ev.data.setups) && ev.data.setups.length ? bizOfferActions(ev)
-    : hasPlans ? planPicker(ev)
+    : hasPlans ? planPicker(ev, ev.type === 'payday' && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '', ev.type === 'payday')
     : hasEffects ? effectChoices(ev)
+    : ev.type === 'mech' && ev.data && ev.data.levels && ev.data.rounds ? auctionActions(ev)   // w13 the transfer market
+    : ev.type === 'mech' && ev.data && ((ev.data.rateG != null && Array.isArray(ev.data.beta)) || (ev.data.kind === 'export' && ev.data.range) || (ev.data.kind === 'water' && ev.data.quota != null)) ? WV2.riskActions(WVH2, ev)   // w12 Z / w16 H: cash · month · risk in words
+    : WV3.cardKind(ev) ? WV3.cardActions(WVH2, ev)   // w14 / w17 / w18 / w19 / w20: money now · months · the risk in words
     : (offers.length ? offerRow(offers) : '') + optButtons(ev, (o) => !/^offer:/.test(o.id) && !inDd(o), '', ev.type === 'doodad' || ev.type === 'tax');
   const bizM = ev.type === 'business' && ev.data.mode === 'manage';
-  const focus = (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
+  const focus = !(hasPlans && ev.type === 'payday') && (ev.type === 'payday' || ev.type === 'edu') && ev.data && ev.data.focus ? focusSection(ev.data.focus, M) : '';
+  const pdCompact = hasPlans && ev.type === 'payday';   // wave 3a (J1 P0-3): impact panel + payslip + plan numbers under "פירוט"
   // T3 UI-3: an inbox item can wait — no timer, the default applies at its payday
   const later = ev.type === 'story' && ctx.api && ctx.api.later ? `<button type="button" class="linkbtn later" data-later>אחר כך${ev.data && ev.data.dueText ? ` · ${esc(ev.data.dueText)}` : ''}</button>` : '';
-  const hev = bizM && ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1)) ? { ...ev, text: '' } : ev;   // T3: L1 says the numbers once
-  c.innerHTML = head(hev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + impactPanelHtml(ev, M) + '<p class="err" role="alert"></p>' + actions + later + focus;
+  const hev = (bizM && ev.data && (ev.data.l1 || (ev.data.summary && ev.data.summary.l1))) || pdCompact ? { ...ev, text: '' } : ev;   // T3: L1 says the numbers once (payday: the summary line does)
+  const imp = impactPanelHtml(ev, M);
+  const keepOpen = first ? [] : [...c.querySelectorAll('details.pdmore[open], details.pddet[open]')].map((d) => d.classList[0]);   // wave 3a: a re-render keeps them open
+  c.innerHTML = head(hev, M) + (bizM ? '' : vlineHtml(evState.verdict)) + body + shortfallLine(ev.data) + realityLine(ev.data) + hintPanelHtml(ev) + (pdCompact ? '' : imp) + '<p class="err" role="alert"></p>' + actions + later + focus + (pdCompact ? planDetails(ev, imp) : '');
+  for (const k of keepOpen) c.querySelector('details.' + k)?.setAttribute('open', '');
   markHint(c, ev);
   if (first) c.scrollTop = 0;
 }
@@ -1314,8 +1636,246 @@ function introActions(ev) {
   return `<div class="${d.step === 'glitch' ? 'choices' : 'acts col'}">${main.map(btn).join('')}</div>${d.step === 'glitch' ? `<p class="note">${escI(d.note || 'אין כאן תשובה נכונה אחת. כל דרך עולה משהו אחר.')}</p>` : ''}${skip ? `<button class="linkbtn" data-o="skip" data-intro-opt="skip">${escI(skip.label)}</button>` : ''}`;
 }
 
+let payslipFull = '';   // the payday card's full payslip (BODY.payday → the "פירוט" box of the same render)
 /* ---------- per-type bodies */
+/* ---------- w5 (season): an op-asset deal's year at a glance (engine: data.op {next12, avg, best, worst, profileLabel, planned, closedFor},
+   data.runwayNeed / runwayAfter) and the tour operator's allotment card (type 'mech', data from season.js tiles.N.describe) */
+function miniStrip(list, label) {
+  const top = Math.max(1, ...list.map((x) => Math.abs(+x.v || 0)));
+  return `<ol class="wp-strip mini12" aria-label="${esc(label)}">${list.map((x) => { const v = +x.v || 0; const h = Math.max(2, Math.round((Math.abs(v) / top) * 30));
+    return `<li class="b-${esc(x.band || 'mid')} ${v < 0 ? 'neg' : 'pos'}"><span class="wp-bar" aria-hidden="true"><i style="height:${h}px"></i></span><b class="num">${esc(moneyOf(v, 'tiny'))}</b><small>${esc(x.m)}</small><span class="sr">${esc(x.full || x.m)}: ${esc(mS(v))}</span></li>`; }).join('')}</ol>`;
+}
+function opStripHtml(d) {
+  const O = d.op; const n12 = O.next12 || [];
+  const strip = miniStrip(n12.map((x) => ({ v: x.cf, band: x.band, m: MONTH_S[(x.cal || 1) - 1], full: MONTH_HE[(x.cal || 1) - 1] })), '12 החודשים הבאים של הנכס');
+  return `<div class="mini opmini"><p class="mh">🌴 ${esc(O.profileLabel || '')}: איך נראית שנה עם הנכס הזה</p>${strip}
+    <p class="note">ממוצע ${num(mS(O.avg))} בחודש · החודש הכי חלש ${num(mS(O.worst), cls(O.worst))}${O.planned != null && O.planned !== O.avg ? ` · עם תוכנית מחירים לפי עונה בערך ${num(mS(O.planned))}` : ''}${O.closedFor ? ` · סגור ${num(String(O.closedFor))} חודשים ראשונים` : ''}${O.owner ? ` · ${gw('אתה מנהל', 'את מנהלת')} בעצמך — הכנסה מעבודה עד שיש מנהל` : ''}${O.locked ? ' · הרשת קובעת את המחירים' : ''}.</p>
+    ${d.runwayNeed != null ? `<p class="note">🛟 כרית לחורף: החודשים החלשים צריכים בערך ${num(mS(d.runwayNeed))}; אחרי הקנייה יישארו ${num(mS(Math.max(0, d.runwayAfter || 0)))}.</p>` : ''}</div>`;
+}
+/* ---------- w6 (plant): the supply-contract card (type 'mech', plant.js tiles.C.describe) and a production line's deal block (data.plant) */
+function stateGrid(list) {   // [{k, label, v}] → the "how much in each market" mini table (signed short money, the current one marked)
+  return `<div class="mt">${list.map((x) => `<div class="${x.cur ? 'cur' : ''}"><small>${esc(x.label)}</small><b class="num ${cls(x.v)}">${esc(mSg(x.v))}</b></div>`).join('')}</div>`;
+}
+function contractHtml(d) {
+  const D = d.delta || {};
+  const rows = [row('הקו', esc(d.name || ''), 'wrap'), row('הלקוח רוצה', iso(`${pctI(d.share)} מהקיבולת של משמרת אחת`), 'wrap'), row('לכמה זמן', iso(`${d.months} חודשים`)),
+    row('המחיר', iso(`${pctI(1 - (d.price ?? 1))} מתחת למחיר השוק`), 'neg wrap'),
+    `<div class="row"><span>ההפרש בתזרים, עכשיו</span>${num(mSg(D.now), 'big ' + cls(D.now))}</div>`,
+    row('קנס על חודש שלם בלי ייצור', mS(-(d.penaltyPerMonth || 0)), 'neg')];
+  if (!d.countered && d.counter) rows.push(row('הצעה נגדית', iso(`${pctI(1 - d.counter.price)} הנחה במקום ${pctI(1 - (d.price ?? 1))} · סיכוי ${pctI(d.counter.chance)}`), 'wrap'));
+  if (d.hazard != null) { const b = d.hazard < 0.02 ? 'low' : d.hazard < 0.06 ? 'mid' : 'high'; rows.push(row('סיכון לתקלה בקו', HZ_HE[b], b === 'high' ? 'neg' : '')); }
+  const mt = `<div class="mini"><p class="mh">כמה החוזה מוסיף (או מוריד) לתזרים של הקו בכל מצב שוק</p>${stateGrid([{ label: 'בגאות', v: D.boom }, { label: 'בחודש רגיל', v: D.normal }, { label: 'במיתון', v: D.recession }])}
+    ${d.withShift > 1 ? `<p class="note">החישוב כולל מעבר ל${esc(shiftHe(d.withShift))}: החוזה וההזמנות הרגילות לא נכנסים במשמרת אחת.</p>` : ''}</div>`;
+  return grid(rows) + mt + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+}
+function plantDealHtml(P, warning) {
+  const c = P.cond || {}; const same = c.lo === c.hi;
+  const band = P.hazardBand || 'mid';
+  const rows = [row('מצב הקו', same ? iso(`${c.lo} מתוך 100`) : iso(`${c.lo}–${c.hi} (לא נבדק)`), ((c.lo ?? 100) < 40 ? 'neg ' : '') + 'wrap'),
+    row(P.hazard != null ? 'סיכוי לתקלה בחודש' : 'סיכון לתקלה', P.hazard != null ? iso(`${pct1(P.hazard)} · ${HZ_HE[band]}`) : HZ_HE[band], band === 'high' ? 'neg' : ''),
+    row('עלויות קבועות', `${mS(P.fixed)} בחודש`), row('רווח גולמי על כל מכירה', pctI(P.cm))];
+  if (P.order) rows.push(row('מסירה', iso(`בעוד ${P.readyIn} חודשים — עד אז אין ייצור`), 'neg wrap'));
+  if (P.contract) rows.push(row('חוזה קיים', iso(`${pctI(P.contract.vol)} מהקיבולת · ${P.contract.months} חודשים`), 'wrap'));
+  if (P.slotsFree != null) rows.push(row('מקום במפעל', P.slotsFree > 0 ? `עוד ${P.slotsFree} קווים` : 'אין מקום', P.slotsFree > 0 ? '' : 'neg'));
+  const mt = `<div class="mini plantmini"><p class="mh">🏭 ${esc(P.label || '')}${P.cyc === 'counter' ? ' (נגד המחזור: מתחזק במיתון)' : ''}: התזרים החודשי בכל מצב שוק</p>${stateGrid([{ label: 'בגאות', v: P.cfBoom }, { label: 'בחודש רגיל', v: P.cfNormal, cur: true }, { label: 'במיתון', v: P.cfRecession }])}
+    ${P.runwayNeed != null ? `<p class="note">🛟 כרית לעלויות הקבועות: צריך בערך ${num(mS(P.runwayNeed))}; אחרי המקדמה יישארו ${num(mS(Math.max(0, P.runwayAfter || 0)), P.runwayShort ? 'neg' : '')}.</p>` : ''}
+    ${P.note ? `<p class="note">${escI(P.note)}</p>` : ''}</div>`;
+  return grid(rows) + mt + (warning && P.runwayShort ? `<p class="warn" role="note">${escI(warning)}</p>` : '');
+}
+/* ---------- w7 (chain): the site card (type 'mech', chain.js tiles.R.describe — the card stays open after a survey and redraws) and the
+   deal block of a branch / DC / e-commerce card (data.chain) */
+function siteHtml(d) {
+  const locs = d.locs || []; const M = d.mature || {}; const R = d.royalty || {};
+  const rw = d.runwayAfter >= 99 ? 'אין עלויות קבועות' : `${mo1(d.runwayAfter)} חודשי עלויות קבועות`;
+  const rows = [row('הסניף', `${d.label || ''} · אזור ${(+d.area || 0) + 1}${d.neighbours ? ` · כבר ${d.neighbours} סניפים באזור` : ''}`, 'wrap'),
+    row('המיקום', d.surveyed ? locs.map((l) => LOC_HE[l]).join(' או ') : 'עוד לא ידוע (בלי סקר זה ניחוש)', (d.surveyed ? '' : 'neg ') + 'wrap'),
+    row('שיפוץ והקמה', `${mS(d.capex)} · מקדמה ${mS(d.down)}`, 'wrap'),
+    row('שכירות', `${mS(d.rent)} בחודש${d.esc ? ` · עולה ${pctI(d.esc)} בשנה` : ''}`, 'wrap'),
+    row(`${d.fitMonths} חודשי שיפוץ (שכירות ושכר בלי מכירות)`, mS(-(d.fitCost || 0)), 'neg wrap'),
+    row('הפסדי חצי השנה הראשונה (צפי)', mS(d.rampLoss), cls(d.rampLoss) + ' wrap'),
+    row('המלאי הראשון (החשבון בהמשך)', mS(d.initStock), 'wrap'),
+    `<div class="row"><b>מזומן שהפתיחה בולעת</b><b class="big num">${esc(mS(d.cashNeed))}</b></div>`];
+  if (d.exactNeed != null) rows.push(row('בדיוק, כולל המלאי — מה שסמנכ"ל כספים רואה', mS(d.exactNeed), 'wrap'));
+  rows.push(row('קופה אחרי הפתיחה', rw, (d.runwayAfter < 4 ? 'neg ' : '') + 'wrap'),
+    row('יכולת ניהול', d.spanLeft > 0 ? `עוד ${d.spanLeft} סניפים בלי מנהל נוסף` : d.spanLeft === 0 ? 'מלאה: סניף נוסף צריך מנהל אזור' : `כבר ${-d.spanLeft} סניפים מעבר ליכולת`, (d.spanLeft <= 0 ? 'neg ' : '') + 'wrap'));
+  const mt = `<div class="mini sitemini"><p class="mh">🛍️ רווח בחודש בוגר (אחרי חצי שנה) לפי המיקום${d.surveyed ? '' : ' — והסיכוי לכל אחד'}</p><div class="mt">${locs.map((l) => `<div><small>${esc(LOC_HE[l] || l)}${!d.surveyed && d.prior && d.prior[l] != null ? ` · ${esc(pctI(d.prior[l]))}` : ''}</small><b class="num ${cls(M[l])}">${esc(mSg(M[l]))}</b>${R[l] != null ? `<small>לזכיין: ${esc(mSg(R[l]))} לך</small>` : ''}</div>`).join('')}</div>
+    <p class="note">צפוי ${num(mSg(d.expected), cls(d.expected))} · במקרה הגרוע ${num(mSg(d.worst), cls(d.worst))}</p></div>`;
+  const F = d.franchise || {};
+  const fr = `<p class="note">🤝 ${F.ok ? `זכיין מוכן לפתוח כאן: דמי כניסה ${num(mS(F.fee))} לך, ו־${esc(pctI(F.pct))} מהמכירות כל חודש — בלי השקעה ובלי מלאי, אבל האיכות שלו.` : !F.sys ? 'זכיינות: צריך קודם מערכת זכיינות (בלוח הרשת).' : 'אין זכיין שמעוניין במיקום הזה.'}</p>`;
+  const sv = !d.surveyed ? `<p class="note">🔎 סקר מיקום (${num(mS(d.surveyFee))}) משאיר שתי אפשרויות מתוך שלוש. אחרי הסקר הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + mt + fr + sv + (d.note ? `<p class="note">${escI(d.note)}</p>` : '') + (d.warning ? `<p class="warn" role="note">${escI(d.warning)}</p>` : '');
+}
+function chainDealHtml(C) {
+  if (!C || !C.ck) return '';
+  const head = C.ck === 'dc' ? `🏬 מרכז הפצה: עלות קבועה ${num(mS(C.fixed))} בחודש · ${esc(pctI(C.cogsCut))} פחות על הסחורה של כל הסניפים${C.saving ? ` — היום בערך ${num(mS(C.saving))} בחודש` : ''}`
+    : C.ck === 'ecom' ? `🌐 אתר מכירות: עלות קבועה ${num(mS(C.fixed))} בחודש · עוד ${esc(pctI(C.share))} מהרווח הגולמי של הסניפים, אחרי ${num(String(C.rampMonths))} חודשי הרצה`
+    : `🛍️ ${C.count > 1 ? `${num(String(C.count))} סניפים בבת אחת` : 'סניף במיקום ידוע'} · ${num(String(C.fit))} חודשי שיפוץ לפני הפתיחה, ואחריהם הרצה`;
+  return `<div class="mini chainmini"><p class="mh">${head}</p>${C.note ? `<p class="note">${escI(C.note)}</p>` : ''}</div>`;
+}
+/* ---------- w8 (projects): the land card (type 'mech', projects.js tiles.Q.describe — the card stays open after the permit check) and the
+   deal block of a stalled project (data.proj) */
+function landHtml(d) {
+  const P = d.permit || {}; const done = P.lo === 0 && P.hi === 0;
+  const C = d.contractors || {}; const Mg = d.margin || {}; const K = d.cost || {};
+  const rows = [row('הפרויקט', `${d.units} יחידות · מחירון ${mS(d.list)} ליחידה`, 'wrap'),
+    row('הקרקע', `${mS(d.land)}: מקדמה ${mS(d.down)}, הבנק ${mS(d.landLoan)}`, 'wrap'),
+    row('היתר בנייה', done ? 'מאושר' : `${P.lo}–${P.hi} חודשים${d.checked ? ' (אחרי בדיקה)' : ' (לא נבדק)'}`, (done || d.checked ? '' : 'neg ') + 'wrap'),
+    row('שלבים', `${d.stages} × ${d.stageMonths} חודשים · בערך ${d.months} חודשים עד המסירה`, 'wrap'),
+    row('הון עצמי', `${pctI(d.eqReq)} מהקרקע והבנייה — עוד ${mS(d.equityNeed)} אחרי המקדמה`, 'wrap'),
+    row('הלוואת הבנייה', d.noPresale ? 'אין מכירות מוקדמות: הבנק מממן נגד הון עצמי גבוה' : `משתחררת אחרי ${pctI(d.presaleReq)} מכירות על הנייר`, 'wrap'),
+    row('ריבית במשק · ביקוש', `${d.rate}% · ביקוש ×${d.demand}`, 'wrap'),
+    `<div class="row"><b>מזומן אחרי המקדמה</b><b class="big num ${d.cashAfter < d.nextCalls ? 'neg' : ''}">${esc(mS(d.cashAfter))}</b></div>`,
+    row(`הון עצמי שעוד צריך${d.active ? ` (גם ל־${d.active} הפרויקטים הפתוחים)` : ''}`, mS(d.nextCalls), (d.cashAfter < d.nextCalls ? 'neg ' : '') + 'wrap')];
+  const cell = (t, label) => `<div><small>${esc(label)}</small><b class="num">${esc(mS(K[t]))}</b><small>חריגה עד ${esc(pctI(((C[t] || {}).overrun || [0, 0])[1]))}${(C[t] || {}).failP ? ` · ${esc(pctI(C[t].failP))} סיכון לקריסה` : ''}</small><small class="${cls(Mg[t])}">רווח צפוי ${esc(mSg(Mg[t]))}</small></div>`;
+  const mt = `<div class="mini landmini"><p class="mh">🏗️ עלות הבנייה לפי הקבלן — ומה צפוי להישאר</p><div class="mt">${cell('reliable', 'קבלן אמין')}${cell('cheap', 'קבלן זול')}</div></div>`;
+  const chk = !d.checked && !done ? `<p class="note">🔎 בדיקת תב"ע (${num(mS(d.checkFee))}) מצמצמת את ההיתר ל־±2 חודשים. אחרי הבדיקה הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + mt + chk + (d.note ? `<p class="note">${escI(d.note)}</p>` : '') + (d.warning ? `<p class="warn" role="note">${escI(d.warning)}</p>` : '');
+}
+function projDealHtml(P) {
+  if (!P || P.pk == null) return '';
+  return `<div class="mini projmini"><p class="mh">🏗️ ${num(String(P.units))} יחידות · מחירון ${num(mS(P.list))} · ${num(String(P.stages))} שלבים × ${num(String(P.stageMonths))} חודשים${P.done ? ` · ${num(String(P.done))} שלבים כבר בנויים` : ''} · בנייה ${num(mS(P.cost))} · הון עצמי ${esc(pctI(P.eqReq))}</p>${P.note ? `<p class="note">${escI(P.note)}</p>` : ''}</div>`;
+}
+/* ---------- w9 (energy): the power-site card (type 'mech', energy.js tiles.V.describe — the card stays open after the resource study) and
+   the deal blocks of a grid slot / an operating plant or line / the hydrogen pilot (data.slot / data.plant.tech / data.h2), the market card's
+   power numbers (data.energy). w10 (market + portfolio): the exchange card (tiles.W: data.market), the private deal (tiles.Y: data.private),
+   a fund deal block (data.fund) and the market card's portfolio numbers (data.portfolio). Engine values only. */
+function powerSiteHtml(d) {
+  const P = d.permit || {}; const S = d.slots || {}; const H = d.partner || {}; const q = d.q || {};
+  const rows = [row('הפרויקט', `${TECH_IC[d.tech] || ''} ${TECH_HE[d.tech] || d.tech} · ${d.mw} מגה־ואט`, 'wrap'),
+    row('עלות הקמה', `${mS(d.capex)} · ${d.stages} שלבים × ${d.stageMonths} חודשים`, 'wrap'),
+    row('ייזום עכשיו', mS(d.dev), 'neg'),
+    row('הון עצמי', `${pctI(d.eqReq)} מהעלות לפני שהבנק נכנס — עוד ${mS(d.equityNeed)} אחרי הייזום`, 'wrap'),
+    row('היתרים', `${P.lo}–${P.hi} חודשים · בערך ${d.months} חודשים עד שהתחנה מחוברת`, 'wrap'),
+    row('תפוקת האתר', `${Math.round((q.lo || 0) * 100)}–${Math.round((q.hi || 0) * 100)}% מהממוצע${d.checked ? ' (אחרי סקר)' : ' (לא נבדק)'}`, (d.checked ? '' : 'neg ') + 'wrap'),
+    row('חיבור לרשת', `${S.free || 0} פנויים${S.waiting ? ` · ${S.waiting} פרויקטים כבר מחכים` : ''}${S.queued ? ` · ${S.queued} בתור` : ''}`, ((S.free || 0) <= (S.waiting || 0) ? 'neg ' : '') + 'wrap'),
+    row('ריבית במשק · חשמל', `${d.rate}% · ${mwh(d.spot)} (ממוצע ${mwh(d.avg)})`, 'wrap'),
+    `<div class="row"><b>מזומן אחרי הייזום</b><b class="big num ${d.cashAfter < d.nextCalls ? 'neg' : ''}">${esc(mS(d.cashAfter))}</b></div>`,
+    row(`הון עצמי שעוד צריך${d.active ? ` (גם ל־${d.active} הפרויקטים הפתוחים)` : ''}`, mS(d.nextCalls), (d.cashAfter < d.nextCalls ? 'neg ' : '') + 'wrap')];
+  const mt = `<div class="mini sitemini enmini"><p class="mh">☀️ התחנה בחודש רגיל, כשהיא עובדת</p><div class="mt">
+    <div><small>לפני החזר חוב</small><b class="num ${cls(d.ebitda)}">${esc(mSg(d.ebitda))}</b><small>תשואה ${esc(String(d.yieldPct))}% בשנה על העלות</small></div>
+    <div><small>שווי היוון (DCF)</small><b class="num">${esc(mS(d.dcf))}</b><small>מקום למימון מחדש ${esc(mS(d.refiRoom))}</small></div>
+    <div><small>PPA עכשיו</small><b class="num">${esc(d.tech === 'storage' ? mS(d.ppa) : mwh(d.ppa))}</b><small>סולארי בשוק מקבל ${esc(pctI(d.capture))} מהמחיר</small></div></div>
+    <p class="note">🤝 עם שותף: הוא שם ${esc(pctI(H.share))} מהייזום ומכל קריאה להון — ומקבל ${esc(pctI(H.share))} מהתחנה. ייזום ${num(mS(H.dev))} · מזומן אחרי ${num(mS(H.cashAfter), H.cashAfter < H.nextCalls ? 'neg' : '')} · הון עצמי שעוד צריך ${num(mS(H.nextCalls))}.</p></div>`;
+  const chk = !d.checked ? `<p class="note">🔎 סקר משאבים (${num(mS(d.checkFee))}) מצמצם את טווח התפוקה. אחרי הסקר הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + mt + chk + (d.note ? `<p class="note">${escI(d.note)}</p>` : '') + (d.warning ? `<p class="warn" role="note">${escI(d.warning)}</p>` : '');
+}
+function energyDealHtml(d) {
+  let x = '';
+  if (d.slot) { const S = d.slot; x += `<div class="mini enmini"><p class="mh">🔌 חיבור לרשת: ${num(String(S.free))} פנויים · ${num(String(S.waiting))} פרויקטים מחכים · ${num(String(S.queued))} בתור (חיבור מהתור לוקח ${num(String(S.queueWait))} חודשים)</p>${S.note ? `<p class="note">${escI(S.note)}</p>` : ''}</div>`; }
+  if (d.plant && d.plant.tech) { const P = d.plant; x += `<div class="mini enmini"><p class="mh">${TECH_IC[P.tech] || ''} ${esc(TECH_HE[P.tech] || '')}${P.mw ? ` · ${num(String(P.mw))} מגה־ואט` : ''} · ${esc(OFF_HE[P.offtake] || P.offtake || '')}</p>
+    ${grid([row('בחודש רגיל לפני חוב', mSg(P.ebitda), cls(P.ebitda)), row('החזר חוב', mS(-(P.debtService || 0)), 'neg'), `<div class="row"><b>נשאר לך בחודש</b>${num(mSg(P.net), 'big ' + cls(P.net))}</div>`, row('שווי היוון (DCF)', mS(P.dcf)), row('מקום למימון מחדש מיד', mS(P.refiRoom), P.refiRoom > 0 ? 'pos' : '')])}${P.note ? `<p class="note">${escI(P.note)}</p>` : ''}</div>`; }
+  if (d.h2) { const H = d.h2; x += `<div class="mini enmini"><p class="mh">🧪 שורף ${num(mS(H.burn))} בחודש · ${num(String(H.months))} חודשים · סיכוי ${num(pctI(H.p))} לשווי ${num(mS(H.payoff))}, אחרת אפס</p>${H.note ? `<p class="note">${escI(H.note)}</p>` : ''}</div>`; }
+  if (d.fund) { const F = d.fund; x += `<div class="mini pfmini"><p class="mh">🧱 קרן · נזילות חודשית · תשואה ${num(String(F.yieldPct) + '%')} בשנה${F.dur ? ` · משך ${num(String(F.dur))} שנים` : ''} · אפשר ללוות כנגדה ${num(pctI(F.ltv))}</p>
+    <p class="note">רגישות: מניות ${num(String(F.beq || 0))} · אשראי ${num(String(F.bcr || 0))} · נדל"ן ${num(String(F.bpr || 0))}. ${esc(F.redeem || '')}.</p>${F.note ? `<p class="note">${escI(F.note)}</p>` : ''}</div>`; }
+  return x;
+}
+function exchangeHtml(d) {
+  const X = d.market || {}; const R = X.regime || {}; const I = X.idx || {}; const F = X.focus;
+  const ch = I.px != null ? MV.changeOf(I) : { d: 0, pct: 0 };
+  const rows = [row('מצב השוק', `${R.label || ''}${R.sectorLabel ? ` · ${R.sectorLabel}` : ''}`, 'wrap'), row(esc(I.name || 'המדד'), `${MV.pxT(I.px)} · ${ch.d > 0 ? '▲ עלה' : ch.d < 0 ? '▼ ירד' : '— לא זז'} ${Math.round(Math.abs(ch.pct) * 10) / 10}% בחודש האחרון`, 'wrap'), row('התיק שלך בבורסה', mS(X.value || 0))];
+  if (F) { const fc = MV.changeOf(F); rows.push(row(`${esc(F.name)} (${esc(F.tk)})`, `${MV.pxT(F.px)} · ${fc.d > 0 ? '▲' : fc.d < 0 ? '▼' : '—'} ${Math.round(Math.abs(fc.pct) * 10) / 10}% · ${F.sectorLabel || ''}${F.seen ? ` · איכות ${F.seen.bandLabel}` : ''}`, 'wrap')); }
+  const news = (X.news || []).slice().reverse().slice(0, 4);
+  return grid(rows) + (news.length ? `<div class="mini"><p class="mh">📰 חדשות החודש</p><ul class="cdl-news">${news.map((x) => `<li${x.type === 'rumor' ? ' class="rumor"' : ''}>${x.type === 'rumor' ? '🗣️ שמועה: ' : ''}${esc(x.text)}</li>`).join('')}</ul></div>` : '')
+    + `<p class="mk-sim" role="note">⚠️ ${esc(MV_SIM)}</p>` + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+}
+const MV_SIM = 'סימולציה — גרף ותוצאה במשחק אינם מבטיחים תוצאה בעולם האמיתי';
+const PRIV_TYPE_HE = { pe: 'קרן פרייבט אקוויטי', vc: 'הון סיכון מאוחר', stake: 'אחזקה ישירה בחברה פרטית', prop: 'שותפות נדל"ן', credit: 'אשראי פרטי' };
+function privateHtml(d) {
+  const P = d.private || {}; const B = P.band || {};
+  const rows = [row('ההשקעה', `${PRIV_TYPE_HE[P.type] || P.type || ''} · ${mS(P.size)} (או חצי: ${mS(P.half)})`, 'wrap'),
+    row('מכפיל צפוי', `${B.lo}×–${B.hi}×${P.dd ? ' (אחרי בדיקה)' : ' (לא נבדק)'}`, (P.dd ? '' : 'neg ') + 'wrap'),
+    P.calls ? row('קריאות לכסף', `${P.calls.n} × ${mS(P.calls.each)}, כל ${P.calls.gap[0]}–${P.calls.gap[1]} חודשים — לא היום`, 'wrap') : '',
+    P.lock ? row('נעול', `${P.lock[0]}–${P.lock[1]} חודשים`, 'wrap') : '', P.distFrom ? row('חלוקות', `מחודש ${P.distFrom[0]}–${P.distFrom[1]} אחרי ההתחייבות`, 'wrap') : '',
+    row('אפשר ללוות כנגדה', `${pctI(P.ltv)} — שום דבר`, 'neg'),
+    `<div class="row"><b>נזיל (מזומן + מניות) מול התחייבויות פתוחות</b><b class="big num ${P.liquid < P.unfunded ? 'neg' : ''}">${esc(`${mS(P.liquid)} / ${mS(P.unfunded)}`)}</b></div>`,
+    row('נעול מתוך השווי, אחרי ההשקעה', pctI(P.share), P.share > 0.15 ? 'neg' : ''), row('מזומן אחרי', mS(P.cashAfter), P.cashAfter < 0 ? 'neg' : '')];
+  const chk = !P.dd ? `<p class="note">🔎 בדיקת נאותות (${num(mS(P.ddFee))}) מצמצמת את טווח המכפיל. אחרי הבדיקה הכרטיס נשאר פתוח.</p>` : '';
+  return grid(rows) + chk + (P.note ? `<p class="note">${escI(P.note)}</p>` : '');
+}
+function worldMktHtml(d) {   // a module market card's own numbers (w9 energy / w10 portfolio)
+  if (d.energy) { const X = d.energy; return grid([row('ריבית במשק', `${X.rate}%`), row('מחיר החשמל', `${mwh(X.spot)} (ממוצע ${mwh(X.avg)})`, 'wrap'), row('סולארי מקבל בשוק', pctI(X.capture)), X.ppaCut != null && X.ppaCut !== 1 ? row('תעריף לחוזים חדשים', `×${X.ppaCut}`) : '', X.months ? row('לכמה זמן', `${X.months} חודשים`) : '']); }
+  if (d.portfolio) { const X = d.portfolio; const M2 = d.market || {}; return grid([M2.regime ? row('מצב השוק', M2.regime.label || '') : '', M2.idx ? row('המדד', MV.pxT(M2.idx.px)) : '', row('ריבית במשק', `${X.rate}%`), row('מרווח אשראי', `${X.spread} נק׳ אחוז`),
+    row('מינוף (LTV)', `${pctI(X.ltv)}${X.ltv > 1 ? ' — קריאת מרווח' : ''}`, X.ltv > 1 ? 'neg' : ''), X.freezeUntil >= 0 && X.mk === 'freeze' ? row('קרנות קפואות עד', `חודש ${X.freezeUntil}`, 'neg') : '', X.mk === 'gate' ? row('קרנות אשראי נעולות עד', `חודש ${X.gateUntil}`, 'neg') : '', X.flash ? row('הירידה חוזרת', `במשכורת של חודש ${X.flash.back}`, 'pos') : '']) + `<p class="mk-sim" role="note">⚠️ ${esc(MV_SIM)}</p>`; }
+  return '';
+}
+/* ---------- w13 (league + auction): the transfer-market card (type 'mech', auction.js tiles.H; the same card re-describes after an outbid —
+   ctl.update, the ghost-tap guard stays), the sponsor / facility block of a deal card (data.league.ck), a league news card's own numbers
+   (data.league.mk), a player as a token with an age ring (age in the ring's words, never colour alone) and the live league-table strip.
+   Engine values only: the public estimate, the reserve, the levels, the rivals' count, who outbid and at what price, the guide's budget. */
+/** w13: the 12-month wage ratio — 0 before the first payday has any revenue (no data yet, never "0 %") */
+const wrT = (x) => (+x > 0 ? pctI(x) : 'אין עדיין');
+const LOT_BAND_HE = { young: 'כישרון צעיר', prospect: 'צעיר שכבר פותח', prime: 'בשיא', star: 'כוכב', veteran: 'ותיק' };
+function tokenHtml(p, { size = '' } = {}) {
+  const b = ageBand(p.age); const r = Math.round(+p.rating || +p.r || 0);
+  return `<span class="ptok ${size} age-${b.id}" role="img" aria-label="${esc(`${p.name || ''}: גיל ${p.age} (${b.he}), דירוג ${r}`)}"><b class="num">${r}</b><small class="num">${esc(String(p.age))}</small></span>`;
+}
+function leagueStrip(table, LG) {
+  const T = table || []; if (!T.length) return '';
+  const us = T.find((x) => x.us) || {};
+  const al = `הטבלה עכשיו: ${T.map((x) => `${x.pos}. ${x.name}${x.us ? ' (המועדון שלך)' : ''} ${x.pts} נק׳`).join(', ')}. ${LG && LG.div < 2 ? 'שתיים ראשונות עולות. ' : ''}${LG && LG.div > 0 ? 'שתיים אחרונות יורדות.' : ''}`;
+  return `<span class="lgstrip" role="img" aria-label="${esc(al)}" title="${esc(`מקום ${us.pos || ''} מתוך ${T.length}`)}">${T.map((x) => `<i class="${x.us ? 'us' : ''}" data-zone="${esc(x.zone || '')}">${x.us ? '★' : x.pos}</i>`).join('')}</span>`;
+}
+function auctionHtml(ev) {
+  const d = ev.data || {}; const L = d.levels || {};
+  const pips = Array.from({ length: d.rounds || 3 }, (_, i) => (i < d.round ? '●' : '○')).join('');
+  const lot = `<div class="lot"><span class="lot-tok">${tokenHtml({ name: ev.title, age: d.age, rating: d.r }, { size: 'lg' })}</span><div class="lot-t"><b>${esc(LOT_BAND_HE[d.band] || '')} · גיל ${num(String(d.age))} · דירוג ${num(String(d.r))}</b>
+    <small>פוטנציאל ${num(`${d.potLo}–${d.potHi}`)} (טווח — לא הערך האמיתי) · ${d.squadRank <= 11 ? `ייכנס להרכב: מספר ${num(String(d.squadRank))} בסגל שלך` : `מספר ${num(String(d.squadRank))} בסגל — לא בהרכב`}</small>
+    <small>שכר ${num(mS(d.wage))} בחודש × ${num(String(d.months))} חודשים = ${num(mS(d.wage * d.months))} · שווי שוק היום ${num(mS(d.mv))}</small></div></div>`;
+  const rows = [row('הערכת שווי ציבורית', mS(d.value)), row('מחיר עכשיו', `${mS(d.price)}${d.price > d.value ? ' · מעל ההערכה' : ''}`, d.price > d.value ? 'neg' : ''),
+    row('סבב', `${pips} ${d.round} מתוך ${d.rounds}`, 'wrap'),
+    row('מועדונים מתמודדים', `👥 ${d.rivals === 1 ? 'מועדון אחד' : `${d.rivals} מועדונים`} — ההערכות שלהם סודיות`, 'wrap'),
+    d.outbidBy ? row('מי הציע', `${d.outbidBy} · ${mS(d.price)}`, 'neg wrap') : '',
+    row('שכר מול הכנסות עכשיו (12 חודשים)', wrT(d.wageRatio), d.wageRatio > 0.7 ? 'neg' : '')];
+  const guide = d.budget > 0 ? `🧭 המנטור קובע מחיר מקסימלי לפני שמתחילים: עד ${num(mS(d.budget))} (92% מההערכה, אם יש כסף ושכר שאפשר לשאת). מעל זה — מוותרים.`
+    : '🧭 המנטור היה מוותר כאן: השחקן לא ייכנס להרכב, או שהשכר שלו ידחוף את השכר מעל מה שההכנסות נושאות.';
+  const lv = `<div class="mini aucmini"><p class="mh">⚽ ההצעות בסבב הזה</p><ul class="auc-lv">${[['bid', d.round === 1 ? 'מחיר הפתיחה' : 'להשוות'], ['raise', '+15%'], ['jump', '+35%']].map(([k, w]) => `<li class="${L[k] > d.value ? 'over' : ''}"><span>${esc(w)}</span><b class="num">${esc(mS(L[k]))}</b><small>${L[k] > d.value ? `⚠️ מעל ההערכה ב־${esc(mS(L[k] - d.value))}` : `✓ ${esc(mS(d.value - L[k]))} מתחת להערכה`}</small></li>`).join('')}</ul></div>`;
+  return lot + grid(rows) + lv + `<p class="note">${escI(guide)}</p>` + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+}
+/** the auction's buttons: each bid with what it takes now and every month, ⚠ over the public estimate (words, not colour), a loan when needed; walk = safe */
+function auctionActions(ev) {
+  const d = ev.data || {};
+  const b = (o, i) => { const P = o.preview || {}; const over = P.risk === 'over';
+    const sub = o.id === 'walk' ? 'בלי לשלם כלום · השחקן הבא יגיע' : `${iso(sgn(P.cash || -o.amount))} עכשיו · ${iso(sgn(P.monthly || 0))} בחודש × ${P.months || d.months}${o.loanAmount ? ` · הלוואה ${iso(mS(o.loanAmount))}` : ''}${over ? ' · ⚠️ מעל ההערכה' : ''}`;
+    return `<div class="opt"><button data-o="${esc(o.id)}" class="${o.primary ? 'primary' : ''} hasnet auc-b${over ? ' over' : ''}" ${o.enabled ? '' : `disabled aria-describedby="why${i}"`}><span>${escI(o.label)}</span><small class="net sub">${escI(sub)}</small>${o.primary ? '<small class="tagc rec">המנטור</small>' : ''}</button>${!o.enabled && o.reason ? `<small class="why" id="why${i}">${escI(o.reason)}</small>` : ''}</div>`; };
+  return `<div class="acts col auc-acts">${ev.options.map(b).join('')}</div>`;
+}
+function leagueDealHtml(X) {
+  if (!X || !X.ck) return '';
+  return `<div class="mini lgmini"><p class="mh">${X.ck === 'sponsor' ? `📣 חוזה חסות${X.months ? ` ל־${num(String(X.months))} חודשים` : ''}` : '🏟️ נכס של המועדון'} · שכר מול הכנסות עכשיו ${num(wrT(X.wageRatio), X.wageRatio > 0.7 ? 'neg' : '')}</p>${X.ck === 'sponsor' ? '<p class="note">כסף החסות נספר כהכנסה ביחס השכר — עד שהחוזה נגמר.</p>' : ''}${X.note ? `<p class="note">${escI(X.note)}</p>` : ''}</div>`;
+}
+function leagueMktHtml(X) {
+  const div = DIV_HE[X.div] || '';
+  const r = { tv: row('כסף הטלוויזיה עכשיו', `×${X.tvMult} מהבסיס`, 'pos'), fees: row('מחירי השחקנים', '+20% לחצי שנה — לקנות יקר, למכור טוב'), coach: row('הצעירים', 'חצי שנה בלי שיפור', 'neg'),
+    cup: row('נכנס לקופה', mSg(X.amount), 'pos'), derby: row('היציע', 'מלא יותר החודש', 'pos'), star: row('השכר עלה ב־30%', X.star || 'השחקן הכי טוב שלך', 'neg wrap') }[X.mk] || '';
+  return grid([r, row('הדרג שלך', div)]);
+}
+/** w11 / w15 (js/render/worldview1115.js): ui.js's own formatters, so the two worlds' HTML reads like every other card */
+const WVH = { esc, escI, num, mS, mSg, pctI, row, grid, cls, iso };
+const WVH2 = { ...WVH, sgn: mSg, tiny: (n) => money(n) };   // tiny: the HUD's own short money on phones (₪2.4M)   // w12 / w16: signed short money on the option lines
 const BODY = {
+  mech(ev) {   // a world module's tile card — w5 'N' (allotment), w6 'C' (supply contract), w7 'R' (site), w8 'Q' (land), w9 'V' (power site), w10 'W' / 'Y'
+    const d = ev.data || {};
+    if (d.tech && d.mw != null && d.slots && d.partner) return powerSiteHtml(d);   // w9
+    if (d.market && d.market.idx) return exchangeHtml(d);                          // w10 'W'
+    if (d.private && d.private.band) return privateHtml(d);                         // w10 'Y'
+    if (d.fairLo != null && d.mgr && d.slotsFree != null) return WV.acquisitionHtml(WVH, ev);   // w11 'Z' (dd re-describes the same card)
+    if ((d.kind === 'term' || d.kind === 'buyout') && d.regime && d.mult != null) return WV.investorsHtml(WVH, ev);   // w15 'H'
+    if (d.fairLo != null && d.rateG != null && Array.isArray(d.beta)) return WV2.divisionHtml(WVH2, ev);   // w12 'Z' (dd re-describes the same card)
+    if ((d.kind === 'export' && d.range) || (d.kind === 'water' && d.quota != null)) return WV2.produceHtml(WVH2, ev);   // w16 'H'
+    if (WV3.cardKind(ev)) return WV3.cardHtml(WVH2, ev);   // w14 'J' / w17 'V' / w18 'Z' / w19 'W' / w20 'W' (a check / due diligence re-describes the same card)
+    if (d.levels && d.rounds && d.value != null) return auctionHtml(ev);            // w13 'H' (auction.js: every round re-describes the same card)
+    if (d.vol != null && d.delta && typeof d.delta === 'object') return contractHtml(d);
+    if (d.site && d.mature && d.locs) return siteHtml(d);
+    if (d.pk && d.contractors && d.cost && typeof d.cost === 'object') return landHtml(d);
+    if (d.share == null || d.upfront == null) return '';
+    const rows = [row('הנכס', esc(d.name || '')), row('החדרים שהמפעיל לוקח', iso(Math.round(d.share * 100) + '%') + ` ל־${esc(d.months)} חודשים`), row('ההנחה', iso(Math.round(d.disc * 100) + '%')),
+      `<div class="row"><b>מקבלים עכשיו</b>${big(d.upfront, 'pos')}</div>`,
+      `<div class="row"><span>הערכה לחצי השנה (עם מול בלי)</span><b class="num ${cls(d.delta)}">${sgn(d.delta)}</b></div>`];
+    if (!d.countered && d.counter) rows.push(row('הצעה נגדית', iso(`${Math.round(d.counter.disc * 100)}% הנחה · סיכוי ${Math.round(d.counter.chance * 100)}%`)), row('אם המפעיל יסכים', `${mS(d.counter.upfront)} מראש · ${moneyOf(d.counter.delta, 'short').replace(/^(?=[₪])/, d.counter.delta > 0 ? '+' : '')}`, cls(d.counter.delta)));
+    if (d.runway != null) rows.push(row('כרית לחורף עכשיו', `${Math.round(d.runway * 10) / 10} חודשי עלויות קבועות`, d.runway < 3 ? 'neg' : ''));
+    const dm = Array.isArray(d.deltaMonths) && d.forecast ? `<div class="mini"><p class="mh">ההפרש החודשי בחצי השנה (תחזית לפי קצב ההזמנות)</p>${miniStrip(d.deltaMonths.map((v, k) => ({ v, band: (d.forecast[k] || {}).tour < 0.9 ? 'off' : 'mid', m: MONTH_S[((d.forecast[k] || {}).cal || 1) - 1], full: MONTH_HE[((d.forecast[k] || {}).cal || 1) - 1] })), 'ההפרש בכל חודש')}</div>` : '';
+    return grid(rows) + dm + (d.note ? `<p class="note">${escI(d.note)}</p>` : '');
+  },
   intro(ev) {   // T4 §4.2 with the engine's real fields: data.payslip {net, expenses, cashflow, cash}, data.result, data.goal
     const d = ev.data || {}; const P = d.payslip || {};
     if (d.step === 'salary') return grid([row('נטו לחשבון', fmtM(P.net ?? 0)), row('הוצאות קבועות', fmtM(-(P.expenses ?? 0)), 'neg'), `<div class="row"><b>נשאר בסוף החודש</b>${big(P.cashflow ?? 0)}</div>`]);
@@ -1336,7 +1896,12 @@ const BODY = {
     const ps = d.payslip;
     const rows = [d.gross ? row('ברוטו', sgn(d.gross)) : null, ps && ps.incomeTax ? row('מס הכנסה', fmtM(-ps.incomeTax), 'neg') : null, ps && ps.bl ? row('ביטוח לאומי ובריאות', fmtM(-ps.bl), 'neg') : null, ps && ps.pensionEmployee ? row('פנסיה (שלך)', fmtM(-ps.pensionEmployee), 'neg') : null,
       row(d.gross ? 'משכורת נטו' : 'משכורת', sgn(d.net ?? d.salary), 'pos'), row('הכנסה פסיבית', sgn(d.passive), cls(d.passive)), row('הוצאות', fmtM(-d.expenses), 'neg'), `<div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div>`];
-    return grid(rows) + (plans ? '<h3 class="ph">איך תעביר את החודש הבא?</h3>' : '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>');
+    if (!plans) return grid(rows) + '<p class="note">מעכשיו ימי משכורת יקרו לבד, בלי לעצור את המשחק — המטבעות יעופו ישר לקופה.</p>';
+    // wave 3a (J1 P0-3, brief §18): one phone screen — the bottom line + one summary line; the full payslip is under "פירוט"
+    payslipFull = grid(rows);
+    const parts = [`נטו ${fmtM(d.net ?? d.salary ?? 0)}`, d.passive ? `פסיבי ${sgn(d.passive)}` : '', `הוצאות ${fmtM(d.expenses ?? 0)}`].filter(Boolean);
+    return `<div class="pdsum"><div class="row"><b>נכנס לכיס</b>${big(d.cashflow ?? d.amount)}</div><p class="pdline">${escI(parts.join(' · '))}</p></div>` +
+      `<h3 class="ph">איך ${gw('תעביר', 'תעבירי')} את החודש הבא?</h3>`;
   },
   life(ev) {
     const d = ev.data || {};
@@ -1377,6 +1942,11 @@ const BODY = {
       extra += `<div class="mini"><p class="mh">כמה הנכס מכניס בכל ריבית?</p><div class="mt">${d.cfAt.map((x) => `<div class="${Math.abs(x.rate - d.rate) < 1 ? 'cur' : ''}"><small>${pctTxt(x.rate)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b></div>`).join('')}</div>
         <p class="note">משתנה = התזרים זז עם הריבית. קבועה = נעול, בלי הפתעות, אבל קצת יקר יותר היום.</p></div>`;
     }
+    if (d.op) extra += opStripHtml(d);   // w5: an op-asset's 12 months (strip), its weakest month and the winter runway
+    if (d.plant && !d.plant.tech) extra += plantDealHtml(d.plant, d.warning);   // w6: condition, breakdown risk, the month in a boom / normal / recession, delivery, runway
+    if (d.chain && d.chain.ck) extra += chainDealHtml(d.chain);   // w7: a branch (fit-out + ramp), a DC (−2 % on goods), e-commerce
+    if (d.proj && d.proj.pk) extra += projDealHtml(d.proj);       // w8: a stalled project (units, stages built, cost, equity)
+    extra += energyDealHtml(d) + leagueDealHtml(d.league);                                    // w9: a grid slot, an operating plant / line, the hydrogen pilot; w10: a fund
     if (d.cfAtUsd) {
       const imp = d.sens < 0;
       extra += `<div class="mini"><p class="mh">${d.usdLinked ? 'השווי צמוד לדולר.' : imp ? 'יבואן: משלם לספקים בדולרים — דולר חזק פוגע.' : 'יצואן: מוכר בדולרים — דולר חזק עוזר.'}</p><div class="mt">${d.cfAtUsd.map((x, i) => `<div class="${i === 1 ? 'cur' : ''}"><small>דולר ${usdTxt(x.usd)}</small><b class="num ${cls(x.cf)}">${sgn(x.cf)}</b><small>שווי ${fmtC(x.value)}</small></div>`).join('')}</div>
@@ -1400,6 +1970,13 @@ const BODY = {
   },
   market(ev) {
     const d = ev.data;
+    if (d.energy || d.portfolio) return worldMktHtml(d);   // w9 / w10 module market cards
+    if (d.league && d.league.mk) return leagueMktHtml(d.league);   // w13
+    if (d.mn && d.mn.mk) return WV.mnNewsHtml(WVH, d.mn);   // w11
+    if (d.pf && d.pf.mk) return WV.pfNewsHtml(WVH, d.pf);   // w15
+    if (d.hd && d.hd.mk) return WV2.hdNewsHtml(WVH2, d.hd);   // w12
+    if (d.hv && d.hv.mk) return WV2.hvNewsHtml(WVH2, d.hv);   // w16
+    if ((d.credit && d.credit.mk) || (d.trials && d.trials.mk) || (d.insure && d.insure.mk) || (d.bell && d.bell.mk) || (d.funds && d.funds.mk)) return WV3.newsHtml(WVH2, d);   // w14 / w17 / w18 / w19 / w20
     if (d.kind === 'sell') {
       if (!d.offers.length) return '<p class="empty">אין לך נכסים מהסוג הזה.</p>';
       return `<div class="sells">${d.offers.map((o) => `<div class="sellrow"><div><b>${esc(o.name)}</b><p class="note">הצעה ${num(fmtM(o.offer))}${o.debt ? ` · סוגרים חוב ${num(fmtM(o.debt))}` : ''} · נכנס לך <b class="num pos">${fmtM(o.netAfterTax ?? o.net)}</b>${o.tax ? ` <small>(אחרי מס ${num(fmtM(o.tax))})</small>` : ''}<br>רווח על ההון: ${num(sgn(o.profit), cls(o.profit))} · מוותר על ${num(sgn(o.cf), cls(o.cf))} בחודש</p></div><button data-o="sell:${esc(o.assetId.slice(1))}" class="sell">למכור</button></div>`).join('')}</div>`;
@@ -1714,12 +2291,49 @@ function compoundBox(d) {
   return `<div class="comp"><p class="mh">📈 קרן מחקה מדד — ריבית דריבית (בלי הבטחות)</p>${hist ? spark(hist, { color: 'var(--green)', w: 300, h: 40 }) : ''}${range}</div>`;
 }
 
+/* ---------- CATALOG-25 §3.9: light candle view. game.js registers the source (js/candlelog.js view model, built from the prices
+   the game really had); the UI only draws it: a compact chart in the trade card and the full view (💼 / the report / the card). */
+let candleSrc = null;
+/** fn() → Promise<view model | null> (js/candlelog.js viewModel) */
+export function setCandleSource(fn) { candleSrc = typeof fn === 'function' ? fn : null; }
+function fillCandles(ev) {
+  const host = $('#qCdl'); if (!host || !candleSrc) return;
+  const id = ev.id, tk = ev.data && ev.data.ticker;
+  Promise.resolve(candleSrc()).then((vm) => {
+    if (!vm || !evState || evState.ev.id !== id || !host.isConnected) return;
+    const s = vm.list.find((x) => x.tk === tk); if (!s) return;
+    host.innerHTML = cdlMini(s); host.hidden = false;
+    cdlMount(host.querySelector('.cdl-host'), s, { compact: true });
+  }).catch((e) => console.warn('candles', e));
+}
+/** the full view (a dialog over whatever is open); key = a listing key or a ticker (null → the first listing) */
+export async function candlesFull(key = null) {
+  if (!candleSrc) return;
+  let vm = null; try { vm = await candleSrc(); } catch (e) { console.warn('candles', e); }
+  if (!vm || !vm.list.length) { toast('אין כאן ניירות ערך למעקב'); return; }
+  const all = vm.list.concat(vm.ended);
+  let cur = (all.find((s) => s.key === key) || all.find((s) => s.tk === key) || vm.list[0]).key;
+  let chart = null;
+  const mount = (c) => { const s = all.find((x) => x.key === cur); const host = c.querySelector('.cdl-body .cdl-host'); if (chart) chart.destroy(); chart = s && host ? cdlMount(host, s, {}) : null; };
+  await modal({ tag: '📈 מחירים ונרות', color: '#2459b8', title: 'איך זזו המחירים', cls: 'cdlm', wide: true, html: cdlFull(vm, cur), dismissable: true,
+    actions: [{ label: 'סגירה', cls: 'primary' }], onOpen: (c) => mount(c),
+    onExtra: (e) => {
+      const b = e.target.closest('[data-cdl-tab]'); if (!b) return;
+      cur = b.dataset.cdlTab; sfx('click');
+      const c = $('#gmCard'); const f = c.querySelector('.cdl-full'); if (!f) return;
+      f.outerHTML = cdlFull(vm, cur); mount(c);
+      c.querySelector(`[data-cdl-tab="${CSS.escape(cur)}"]`)?.focus({ preventScroll: true });
+    } });
+  if (chart) chart.destroy();
+}
+
 /* ---------- trade window (v1.1: slider dir=ltr, clamp, ±steps, max/all/reset, repeated buy/sell, 'סיום') */
 function tradeHtml(ev) {
   const d = ev.data; const [s1, s2] = d.step || [10, 100]; const u = esc(d.unit);
   return `${head(ev)}${vlineHtml(evState && evState.verdict)}<div class="grid"><div class="row"><span>${esc(d.name)}</span><b class="big num" id="qprice">${fmtP(d.price)}</b></div>
     <div class="row"><span>יש לך</span><span class="num rtl" id="qhold"></span></div><div class="row" id="qgainRow" hidden><span>${gz('אם תמכור הכל עכשיו')}</span><b class="num" id="qgain"></b></div><div class="row"><span>מזומן</span><span class="num" id="qcash"></span></div>
     ${d.div ? `<div class="row"><span>תשלום חודשי ליחידה</span><span class="num pos">${fmtP(d.div)}</span></div>` : ''}</div>
+    <div class="cdl-mini" id="qCdl" data-tk="${esc(d.ticker)}" hidden></div>
     ${d.ticker === 'IDX' || d.kind === 'index' || d.index ? compoundBox(d) : ''}${realityLine(d)}
     ${d.wiped && d.wiped.qty ? `<p class="warn">המטבע הקודם (${esc(d.wiped.oldName)}) מת: ${N(d.wiped.qty)} יחידות ששוות היו ${num(fmtM(d.wiped.value))} — נמחקו.</p>` : ''}
     <label class="sr" for="qs">כמות ${u}</label><input type="range" id="qs" dir="ltr" min="0" step="1" value="0">
@@ -1737,7 +2351,7 @@ function tradeUpd(fromEvent = false) {
   const s1 = (d.step || [10])[0];
   // first tap must do something: start from one step (what you can afford; else what you can sell)
   if (fromEvent) evState.q = d.maxBuy > 0 ? Math.min(s1, d.maxBuy) : d.maxSell > 0 ? Math.min(s1, d.maxSell) : 0;
-  const sayEl = $('#evSay'); if (sayEl && evState.ev.mentor) sayEl.innerHTML = escI(evState.ev.mentor);
+  const sayEl = $('#evSay'); if (sayEl && evState.ev.mentor) sayEl.innerHTML = escI(gz(evState.ev.mentor));
   const lim = Math.max(d.maxBuy, d.maxSell);
   let q = Math.max(0, Math.min(Math.round(evState.q) || 0, lim)); evState.q = q;
   $('#qv').value = N(q); $('#qv').textContent = N(q);
@@ -1796,7 +2410,7 @@ export function renderRollEnergy(g, msNext) {
 
 /* ============================================================ v3: lessons unlocked */
 export function lessonToast(list, onOpen) {
-  (list || []).forEach((l, i) => {
+  (list || []).map(displayLesson).forEach((l, i) => {   // wave 3a: display overrides (js/data/lessons-meta.js LESSON_DISPLAY)
     const text = `📚 שיעור חדש בספרייה: ${l.title}`; const action = onOpen ? { label: 'לקרוא', fn: () => onOpen(l) } : null;
     if (!phoneQ()) { setTimeout(() => toast(text, { kind: 'gold', action, keep: true }), i * 1400); return; }   // §4.7: lessons are never dropped
     // phones: one floating thing at a time (the lesson waits for a coach / achievement / verdict to clear)
@@ -1808,6 +2422,7 @@ export function lessonToast(list, onOpen) {
 /** One lesson as a reading card (in-game). T4 CR-U-T4-10: S-B2 (long text → עוד ▾), S-B3 example, S-B4 where you learned it,
  *  S-B5 the game's simplification, S-B6 practice — from library.js (lobby lane; loaded lazily, every line optional). */
 export async function lessonCard(l) {
+  l = displayLesson(l);
   let LIB = null, PR = null;
   try { [LIB, PR] = await Promise.all([import('./library.js'), import('./practice.js').catch(() => null)]); } catch (e) { LIB = null; }
   const m = (LIB && LIB.meta && LIB.meta(l.id)) || {}; const ctx = l.ctx || (LIB && LIB.contextOf && LIB.contextOf(l.id)) || null;
@@ -2119,13 +2734,13 @@ export function feedback(kind, p = {}) {
     return;
   }
   if (kind === 'milestone') { const t = T5S.M[p.q]; if (t) { sfx('coin'); toast('🎯 ' + t, { kind: 'gold', keep: true }); } return; }
-  if (kind === 'worldEntry') { if (p.world) worldBanner(p.world, T5S.W1); return; }
+  if (kind === 'worldEntry') { if (p.world) worldBanner(p.world, mapNo(p.world.id) === 1 && groupOf(p.world.id) ? fillT(T5S.W2, { g: groupOf(p.world.id).name }) : T5S.W1); return; }   // the first map of a world says the world
   if (kind === 'achievement') return achievementToast(p);
   if (kind === 'lesson') return lessonToast(p.list || [], p.open);
   if (kind === 'verdict') return verdict(p.decision || p, p.opts || {});
   if (kind === 'toast') return toast(p.text, p);
 }
-const T5S = { U1: 'העסק התקדם!', U2: 'שלב {n} מתוך 3 · {label}', D1: '{name}: חזרה לשלב "{label}". כדאי להציץ בלוח העסק.', W1: 'עולם חדש נפתח',
+const T5S = { U1: 'העסק התקדם!', U2: 'שלב {n} מתוך 3 · {label}', D1: '{name}: חזרה לשלב "{label}". כדאי להציץ בלוח העסק.', W1: 'מפה חדשה נפתחה', W2: 'עולם חדש: {g}',
   M: { 1: 'רבע מהדרך לחופש!', 2: 'חצי מהדרך לחופש!', 3: 'שלושה רבעים מהדרך. כמעט שם!' } };
 /** T5 §4.2: hold B / C / D (true) or release them (false) */
 export function holdFeedback(on) { fbHold = !!on; if (!fbHold) { pumpOv(); if (tq.length && !tBusy) nextToast(); } }
@@ -2296,9 +2911,571 @@ export function renderNext(g, { show = true } = {}) {
   if (!g || g.done || !anchor || !show) { if (el) el.hidden = true; return; }
   if (!el) { el = document.createElement('div'); el.id = 'hNext'; el.className = 'hcard hnext'; el.setAttribute('role', 'status'); anchor.insertAdjacentElement('afterend', el); }
   const pct = g.target ? Math.max(2, Math.min(100, Math.round(((g.value || 0) / g.target) * 100))) : 0;
-  const val = g.target ? (g.unit === '₪' ? `${money(g.value || 0)} / ${money(g.target)}` : `${N(g.value || 0)} / ${N(g.target)}`) : '';
-  const sig = `${g.id}|${g.title}|${val}`; if (el.dataset.sig === sig && !el.hidden) return; el.dataset.sig = sig;
-  el.hidden = false;
-  el.innerHTML = `<span aria-hidden="true">🎯</span><span class="nt"><b>${esc(g.title || '')}</b>${val ? `<small class="num">${esc(val)}</small>` : ''}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
-  el.setAttribute('aria-label', `המטרה הבאה: ${g.title || ''}${val ? `, ${val}` : ''}`);
+  const val = g.valText || (g.target ? (g.unit === '₪' ? `${money(g.value || 0)} / ${money(g.target)}` : `${N(g.value || 0)} / ${N(g.target)}`) : '');
+  const ms = g.step != null && g.of;   // wave 3a: a rung of the near-goal ladder (js/hudgoal.js nextMilestone) — tap opens the goal panel
+  const sig = `${g.id}|${g.title}|${val}|${g.step}`; if (el.dataset.sig === sig && !el.hidden) return; el.dataset.sig = sig;
+  el.hidden = false; el.classList.toggle('ms', !!ms);
+  const sub = ms ? `<small><span class="nk">היעד הקרוב</span> · ${escI(g.valNum || val)}${g.valUnit ? ' ' + esc(g.valUnit) : ''} · שלב ${g.step} מתוך ${g.of}</small>` : val ? `<small class="num">${esc(val)}</small>` : '';
+  el.innerHTML = `<span aria-hidden="true">${esc(g.icon || '🎯')}</span><span class="nt"><b>${esc(g.title || '')}</b>${sub}</span>${g.target ? `<i class="nbar" aria-hidden="true"><i style="width:${pct}%"></i></i>` : ''}`;
+  el.setAttribute('aria-label', `${ms ? `היעד הקרוב (שלב ${g.step} מתוך ${g.of})` : 'המטרה הבאה'}: ${g.title || ''}${val ? `, ${val}` : ''}`);
+  if (ms && !el._wired) { el._wired = true; el.addEventListener('click', () => { if (el.classList.contains('ms') && typeof goalPanel === 'function') goalPanel(!goalPanelOpen(), { focus: true }); }); }
+}
+
+/* ============================================================ 3D upgrade wave 1 (team ג): tile sheet, tile list, board tools, turn chip */
+/** The small accessible sheet for one board tile (data from js/render/tiles.js tileSheet()): icon, full name, what happens there,
+ *  "you are here" (gz: masculine / feminine) / "עוד N צעדים". Opened by a tap / click / Enter on a tile (3D raycast or 2D button) or from the tile list. */
+export function tileSheet(d, { onList = null } = {}) {
+  if (!d) return Promise.resolve();
+  const html = `<div class="tsheet"><span class="tsicon" aria-hidden="true">${esc(d.emoji || '')}</span>
+    <p class="d">${escI(d.desc || '')}</p>
+    <p class="twhere${d.here ? ' here' : ''}"><b>${esc(gz(d.where))}</b>${d.short && d.short !== d.name ? `<small> · על הלוח: ${esc(d.short)}</small>` : ''}</p></div>`;
+  const acts = [{ label: 'סגירה', cls: 'primary' }];
+  if (onList) acts.push({ label: 'כל המשבצות', v: 'list' });
+  return modal({ tag: `משבצת ${d.index + 1}`, color: '#2f6fdb', title: d.name, html, actions: acts, dismissable: true, cls: 'tinfo' })
+    .then((v) => { if (v === 'list' && onList) onList(); return v; });
+}
+/** The text alternative of the board: every tile as a button (index, icon, short name, distance) → resolves with the chosen index. */
+export function tileList(items, { pos = 0 } = {}) {
+  let chosen = null;
+  const rows = items.map((t) => `<li><button type="button" data-tile="${t.index}" class="${t.index === pos ? 'here' : ''}"${t.index === pos ? ' aria-current="location"' : ''}>
+    <span class="tn num" aria-hidden="true">${t.index + 1}</span><span aria-hidden="true">${esc(t.emoji)}</span><b>${esc(t.name)}</b><small>${esc(gz(t.where))}</small></button></li>`).join('');
+  return modal({ tag: 'הלוח', color: '#2f6fdb', title: 'המשבצות בלוח', html: `<ol class="tlist" aria-label="המשבצות, לפי סדר המשחק">${rows}</ol>`, actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true, cls: 'tlistc',
+    onOpen: (c) => { setTimeout(() => { const h = c.querySelector('.tlist button.here'); if (h) { h.scrollIntoView({ block: 'center' }); h.focus({ preventScroll: true }); } }, 60); },
+    onExtra: (e) => { const b = e.target.closest('button[data-tile]'); if (!b) return; chosen = Number(b.dataset.tile); sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
+    .then(() => chosen);
+}
+/** Floating board tools over the free board area: "מבט ראשי" (3D only) and the tile list. Created once; game.js wires them. */
+export function boardTools({ onHome, onList } = {}) {
+  let box = $('#boardTools');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'boardTools'; box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'כלי הלוח');
+    box.innerHTML = `<button id="homeViewBtn" class="ibtn" type="button" aria-label="מבט ראשי: חזרה לזווית ההתחלתית" title="מבט ראשי"><span aria-hidden="true">🎯</span></button>
+      <button id="tilesBtn" class="ibtn" type="button" aria-label="רשימת המשבצות בלוח" title="המשבצות בלוח"><span aria-hidden="true">📋</span></button>`;
+    document.body.appendChild(box);
+  }
+  const h = $('#homeViewBtn'), l = $('#tilesBtn');
+  if (onHome) h.onclick = () => { sfx('click'); onHome(); };
+  if (onList) l.onclick = () => { sfx('click'); onList(); };
+  return box;
+}
+/** Place the board tools and the turn chip inside the free board rect (game.js frame()). r = null keeps the last rect (HUD resize).
+ *  wave 3a (review MINOR-1): the tools never sit under the HUD, the mentor bar or the report — a landscape phone has a short free
+ *  rect, so the first free spot of a few candidates is used (bottom corner → just under the HUD → the other corner → beside it). */
+const BLOCKERS = '#hud, #bar, #sheet, #hLifeMore, #goalPanel, #toast';   // a long toast (a lesson with "לקרוא") also takes the spot
+const COVERS = '#start, #evm, #gm, #loading, #coach, #story, #recover';
+let dockT = 0, dockN = 0;
+export function placeBoardUi(r, { kind = '3d', show = true } = {}) {
+  const box = $('#boardTools'); const s = document.documentElement.style;
+  if (r) { s.setProperty('--fr-x0', Math.round(r.x0) + 'px'); s.setProperty('--fr-x1', Math.round(r.x1) + 'px'); s.setProperty('--fr-y0', Math.round(r.y0) + 'px'); s.setProperty('--fr-y1', Math.round(r.y1) + 'px'); }
+  if (!box) return;
+  box.hidden = !show; box.dataset.kind = kind; const h = $('#homeViewBtn'); if (h) h.hidden = kind !== '3d';
+  if (show) { dockN = 0; dockTools(box); }
+}
+function dockTools(box) {
+  try {
+    const cs = getComputedStyle(document.documentElement); const px = (k, d) => { const v = parseFloat(cs.getPropertyValue(k)); return Number.isFinite(v) ? v : d; };
+    const x0 = px('--fr-x0', 0), x1 = px('--fr-x1', innerWidth), y0 = px('--fr-y0', 0), y1 = px('--fr-y1', innerHeight);
+    const n = [...box.querySelectorAll('.ibtn')].filter((b) => !b.hidden).length || 1; const W = n * 44 + (n - 1) * 8, H = 44;
+    const prev = box.style.visibility; box.style.visibility = 'hidden';   // elementFromPoint skips the tools themselves
+    let covered = false;
+    const hits = (x, y) => {   // how many of 5 probe points of the tools' box at (x, y) land on the HUD / bar / report (5 = off screen)
+      if (x < 0 || y < 0 || x + W > innerWidth || y + H > innerHeight) return 5;
+      let k = 0;
+      for (const [px2, py2] of [[x + 2, y + 2], [x + W - 2, y + 2], [x + 2, y + H - 2], [x + W - 2, y + H - 2], [x + W / 2, y + H / 2]]) {
+        const e = document.elementFromPoint(px2, py2); if (e && e.closest(COVERS)) covered = true;
+        if (e && e.closest(BLOCKERS)) k++;
+      }
+      return k;
+    };
+    const blocked = (x, y) => hits(x, y) > 0;
+    const hudB = Math.max(0, ...[...document.querySelectorAll('#hud > *')].filter((e) => e.offsetParent).map((e) => { const q = e.getBoundingClientRect(); return q.right > x0 && q.left < x0 + 10 + W + 54 ? q.bottom : 0; }));
+    const cands = [[x0 + 10, y1 - 52], [x0 + 10, hudB + 6], [x1 - 10 - W, y1 - 52], [x1 - 10 - W, hudB + 6], [x0 + 10, y0 + 6], [x0 + 10 + 54 * 2, hudB + 6]];
+    // a landscape phone leaves no 44 px band between the HUD rows and the bar: beside the HUD's own tool row is free board
+    const ht = document.querySelector('#hud .htools'); if (ht && ht.offsetParent) { const q = ht.getBoundingClientRect(); cands.push([q.right + 8, q.top + (q.height - H) / 2], [q.left - 8 - W, q.top + (q.height - H) / 2]); }
+    let pick = cands.find(([x, y]) => y >= 0 && !blocked(x, y));
+    if (!pick) { let best = 9; for (const c of cands) { const k = hits(c[0], c[1]); if (k < best) { best = k; pick = c; } } pick = pick || cands[0]; }
+    box.style.visibility = prev;
+    // a lobby / card / dialog / loading screen covers the board: the HUD under it cannot be measured — try again shortly
+    if (covered) { clearTimeout(dockT); if (dockN++ < 40) dockT = setTimeout(() => dockTools(box), 500); return; }
+    dockN = 0;
+    box.style.left = Math.round(pick[0]) + 'px'; box.style.top = Math.round(pick[1]) + 'px';
+    box.dataset.dock = String(cands.indexOf(pick));
+  } catch (e) { box.style.visibility = ''; }
+}
+/* wave 3a (review MAJOR-1): Esc closes the tile list / tile sheet wherever focus is (they are always the top dialog) */
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const c = $('#gmCard'); const m = $('#gm');
+  if (!m || m.hidden || !c || !(c.classList.contains('tlistc') || c.classList.contains('tinfo')) || m.contains(document.activeElement)) return;
+  c.querySelector('.acts button[data-i="0"]')?.click();
+});
+let chipT = 0;
+/** §13 the short turn state: "זורקים…" / "זזים N צעדים" / "נחתת על …". role=status, aria-live polite (always in the DOM, so it is
+ *  announced); `quiet` updates the text without announcing it (the dice and the landing already have their own announcements).
+ *  null clears it. Reduced motion: no fade (css). */
+export function turnChip(text, { quiet = false, ms = 0 } = {}) {
+  let el = $('#turnChip');
+  if (!el) { el = document.createElement('p'); el.id = 'turnChip'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true'); document.body.appendChild(el); }
+  clearTimeout(chipT);
+  if (text === undefined) return el;
+  if (!text) { el.setAttribute('aria-live', 'off'); el.classList.remove('on'); chipT = setTimeout(() => { el.textContent = ''; el.setAttribute('aria-live', 'polite'); }, reduced() ? 0 : 220); return el; }
+  el.setAttribute('aria-live', quiet ? 'off' : 'polite');
+  el.textContent = text; el.classList.add('on');
+  if (ms) chipT = setTimeout(() => turnChip(null), ms);
+  return el;
+}
+
+/* ============================================================ wave 3a (J1 P0-1): summarise a free run after the ★ limit */
+/** the one-time offer (and the confirm of the HUD 🏁 button) → 'sum' | 'go' | undefined */
+export function summaryOffer({ limit, month } = {}) {
+  return modal({ tag: '🏁 הכוכבים', color: '#b45309', title: `עבר מועד הכוכבים (חודש ${limit})`,
+    html: `<p class="d">${escI(`עכשיו חודש ${month}. מכאן כבר אי אפשר לקבל כוכבים בריצה הזאת — אבל אפשר להמשיך לנסות לצאת מהמירוץ.`)}</p>
+      <p class="d">רוצה לסכם עכשיו ולראות מה למדת? הסיכום מראה את הגרף, את ההחלטות שהשפיעו ואת "רגעי ההחלטה" — ו<b>מסיים את הריצה הזאת</b>.</p>`,
+    actions: [{ label: '🏁 לסכם את הריצה', cls: 'primary', v: 'sum' }, { label: 'להמשיך לשחק', v: 'go' }], dismissable: true, cls: 'sumoffer' });
+}
+/** the HUD's 🏁 button (in the tool row) while a summary is possible; hidden otherwise */
+export function sumRunBtn(show, onClick) {
+  let b = $('#sumRunBtn');
+  if (!show) { if (b) b.hidden = true; return; }
+  const row = $('#hud .htools'); if (!row) return;
+  if (!b) { b = document.createElement('button'); b.id = 'sumRunBtn'; b.type = 'button'; b.className = 'ibtn'; b.textContent = '🏁'; b.setAttribute('aria-label', 'לסכם את הריצה (עבר מועד הכוכבים)'); b.title = 'לסכם את הריצה'; row.insertBefore(b, row.firstChild); }
+  b.hidden = false; b.onclick = () => { sfx('click'); onClick && onClick(); };
+}
+
+/* ============================================================ wave 3a (J1 P0-4, brief §18): "💼 ניהול כסף" — one entry for the money actions */
+/** the hub button beside "הדוח שלי" in the control bar (always on screen, never behind "⋯") */
+export function moneyHubBtn(onClick) {
+  let b = $('#hubBtn');
+  if (!b) {
+    const at = $('#sheetBtn'); if (!at) return null;
+    b = document.createElement('button'); b.id = 'hubBtn'; b.type = 'button'; b.className = 'chip hubbtn';
+    b.innerHTML = '<span aria-hidden="true">💼</span><span class="hb-t"> ניהול כסף</span>'; b.setAttribute('aria-haspopup', 'dialog'); b.title = 'ניהול כסף';
+    at.insertAdjacentElement('afterend', b);
+  }
+  b.onclick = () => { sfx('click'); onClick && onClick(); };
+  return b;
+}
+/** the hub sheet (model: js/hudgoal.js moneyHubModel) → the chosen act id, or undefined */
+export function moneyHub(H) {
+  let chosen;
+  const row = (r) => `<li class="mh-row" data-row="${esc(r.id)}"><div class="mh-h"><span class="mh-i" aria-hidden="true">${esc(r.icon)}</span><div><b>${esc(r.title)}</b><small>${escI(r.value)}</small></div></div>
+    <div class="mh-acts">${r.acts.map((a) => `<button type="button" class="chip" data-hub="${esc(a.act)}" ${a.on ? '' : 'disabled'}>${escI(a.label)}</button>`).join('')}</div></li>`;
+  return modal({ tag: '💼 ניהול כסף', color: '#0f766e', title: 'הכסף שלך', cls: 'mhub',
+    html: `<p class="d">מזומן עכשיו: <b class="num">${escI(H.cashText)}</b>. כל פעולה פותחת את החשבון שלה לפני שהיא קורית.</p><ul class="mh-list">${H.rows.map(row).join('')}</ul>${(H.more || []).length ? `<div class="mh-more">${H.more.map((a) => `<button type="button" class="chip" data-hub="${esc(a.act)}">${escI(a.label)}</button>`).join('')}</div>` : ''}`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    onExtra: (e) => { const b = e.target.closest('button[data-hub]'); if (!b || b.disabled) return; chosen = b.dataset.hub; sfx('click'); $('#gmCard .acts button[data-i="0"]')?.click(); } })
+    .then(() => chosen);
+}
+
+/* ============================================================ worlds wave 1: the generic world panel (metrics().worldIndicators.panel)
+   DESIGN §4.2: a module describes its panel (gauges, a 12-month strip, a ring, rows, actions with ids / labels / enabled / reason /
+   suggested); this renders ANY such descriptor without world-specific rules. w5 = "עונות ותפוסה". Actions go through E.worldAction
+   (game.js passes onAct); the sheet stays open and redraws from a fresh descriptor after each action. */
+const TIER_HE = { budget: 'זול', standard: 'רגיל', premium: 'יוקרה' };
+const PROF_HE = { beach: 'חוף', winterSun: 'שמש חורף', flat: 'כל השנה', waterpark: 'פארק מים', mixed: 'חוף + כנסים' };
+const xT = (x) => '×' + (Math.round(+x * 100) / 100).toFixed(2);
+function gaugeHtml(g, pid = '') {
+  const has = g.value != null && Number.isFinite(+g.value);
+  const min = g.min ?? 0, max = g.max ?? Math.max(g.ref ? g.ref * 2 : 1, has ? +g.value : 1);
+  const pos = (x) => Math.max(0, Math.min(100, ((x - min) / Math.max(1e-9, max - min)) * 100));
+  // w6 gauges: utilisation %, cost coverage ×1.52, runway in months (w5: demand ×, runway). w7: liquidity months, span % of capacity
+  // (high is bad), stock cover months (ref = the player's cover rule), brand 0–100. w8: cash ÷ equity still owed ×, the rate %, demand ×.
+  const xRun = pid === 'proj' && g.id === 'runway';
+  // w9: operating income (₪) vs the target, the rate %, the spot price (₪/MWh) vs its 12-month average, solar capture %; w10: net worth (₪) vs the
+  // target, LTV % (over 100 % = a margin call), liquid in two days (₪) vs what is owed
+  if (g.unit === '₪' || g.id === 'spot' || g.id === 'capture' || g.id === 'ltv') {
+    const has2 = g.value != null && Number.isFinite(+g.value);
+    const f2 = (x) => (g.unit === '₪' ? mS(x) : g.id === 'spot' ? `₪${N(x)}` : pctI(x));
+    const min2 = g.min ?? 0, max2 = g.max ?? Math.max(g.ref ? g.ref * (g.unit === '₪' ? 1.25 : 1.6) : 1, has2 ? +g.value : 1);
+    const pos2 = (x) => Math.max(0, Math.min(100, ((x - min2) / Math.max(1e-9, max2 - min2)) * 100));
+    const bad = g.id === 'ltv' ? +g.value > g.ref : g.id === 'liquid' ? +g.value < g.ref : g.id === 'capture' ? +g.value < g.ref : g.id === 'spot' ? false : +g.value < g.ref;
+    const ref = g.id === 'ltv' ? `מעל ${f2(g.ref)} = קריאת מרווח` : g.id === 'liquid' ? `החובות וההתחייבויות: ${f2(g.ref)}` : g.id === 'spot' ? `ממוצע 12 חודשים: ${f2(g.ref)}` : g.id === 'capture' ? `מתחת ל־${f2(g.ref)} = מחיר צהריים נמוך לסולארי` : `היעד: ${f2(g.ref)}`;
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="${esc(g.id || '')}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(has2 ? f2(g.value) : 'אין עדיין')}</b></div>
+    <div class="wp-gbar" aria-hidden="true"><i style="width:${has2 ? pos2(+g.value) : 0}%"></i>${g.ref != null ? `<s style="inset-inline-start:${pos2(g.ref)}%"></s>` : ''}</div>
+    ${g.ref != null ? `<small>${esc(ref)}${bad ? (g.id === 'ltv' ? ' · גבוה' : ' · נמוך') : ''}</small>` : ''}</div>`;
+  }
+  const fmtG = (x) => (g.id === 'tour' || g.id === 'demand' ? (g.id === 'tour' ? tourTxt(x) : xT(x)) : g.id === 'util' || g.id === 'span' ? pctI(x) : g.id === 'coverage' || xRun ? xT(x)
+    : g.id === 'runway' || g.id === 'liq' || g.id === 'cover' ? `${Math.round(+x * 10) / 10} חודשים` : g.id === 'rate' ? `${Math.round(+x * 100) / 100}%` : g.id === 'brand' ? String(Math.round(+x)) : String(Math.round(+x * 100) / 100));
+  const txt = !has ? (g.id === 'liq' || xRun ? '—' : 'אין עדיין') : fmtG(g.value);
+  const highBad = g.id === 'span' || g.id === 'rate';   // over the span / a rate above normal is the bad side
+  const low = has && g.ref != null && (highBad ? +g.value > g.ref : +g.value < g.ref);
+  const refTxt = g.id === 'tour' || g.id === 'demand' || g.id === 'rate' ? `רגיל = ${esc(fmtG(g.ref))}` : g.id === 'span' ? 'עד 100% — מעבר לזה כל הסניפים מוכרים פחות' : g.id === 'cover' ? `היעד שלך: ${esc(fmtG(g.ref))}`
+    : `${!has && g.id === 'liq' ? 'אין עלויות קבועות · ' : !has && xRun ? 'אין קריאות פתוחות · ' : ''}כדאי לפחות ${esc(g.id === 'runway' && !xRun ? String(g.ref) : fmtG(g.ref))}`;
+  return `<div class="wp-g${low ? ' low' : ''}" data-g="${esc(g.id || '')}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(txt)}</b></div>
+    <div class="wp-gbar" aria-hidden="true"><i style="width:${has ? pos(+g.value) : 0}%"></i>${g.ref != null ? `<s style="inset-inline-start:${pos(g.ref)}%"></s>` : ''}</div>
+    ${g.ref != null ? `<small>${refTxt}${low ? (highBad ? ' · גבוה' : ' · נמוך') : ''}</small>` : ''}</div>`;
+}
+function stripHtml(S) {
+  const ms = (S && S.months) || []; if (!ms.length) return '';
+  const top = Math.max(1, ...ms.map((x) => Math.abs(+x.cf || 0)));
+  return `<section class="wp-sec"><h3>${esc(S.label || '12 החודשים הבאים')}</h3><ol class="wp-strip">${ms.map((x, i) => {
+    const v = +x.cf || 0; const h = Math.max(3, Math.round((Math.abs(v) / top) * 46));
+    return `<li class="b-${esc(x.band || 'mid')} ${v < 0 ? 'neg' : 'pos'}${i === 0 ? ' now' : ''}"><span class="wp-bar" aria-hidden="true"><i style="height:${h}px"></i></span><b class="num">${esc(moneyOf(v, 'tiny'))}</b><small>${esc(MONTH_S[(x.cal || 1) - 1])}${i === 0 ? ' · עכשיו' : ''}</small><span class="sr">${esc(MONTH_HE[(x.cal || 1) - 1])}: ${esc(mS(v))}, ${esc(BAND_HE[x.band] || '')}</span></li>`;
+  }).join('')}</ol><p class="wp-legend"><span class="b-peak">☀️ עונה</span><span class="b-mid">🌤️ רגיל</span><span class="b-off">🌧️ שפל</span></p></section>`;
+}
+function ringHtml(R, target) {
+  if (!R) return '';
+  const n = R.window || 12; const vals = (R.values || []).slice(-n); const sum = vals.reduce((s, x) => s + (+x || 0), 0); const avg = Math.round(sum / n);
+  const top = Math.max(1, target || 0, ...vals.map((x) => Math.abs(+x || 0)));
+  const segs = []; const r = 42, cx = 50, cy = 50, gap = 0.06;
+  for (let i = 0; i < n; i++) {
+    const v = i < vals.length ? +vals[i] || 0 : null; const a0 = -Math.PI / 2 + (i / n) * Math.PI * 2 + gap, a1 = -Math.PI / 2 + ((i + 1) / n) * Math.PI * 2 - gap;
+    const p = (a, rr) => `${(cx + Math.cos(a) * rr).toFixed(2)} ${(cy + Math.sin(a) * rr).toFixed(2)}`;
+    const k = v == null ? 0 : Math.max(0.15, Math.min(1, Math.abs(v) / top));
+    segs.push(`<path d="M${p(a0, r)} A${r} ${r} 0 0 1 ${p(a1, r)}" class="${v == null ? 'empty' : v < 0 ? 'neg' : target && v >= target ? 'met' : 'pos'}" style="opacity:${v == null ? 1 : (0.35 + 0.65 * k).toFixed(2)}"/>`);
+  }
+  return `<section class="wp-sec wp-ringsec"><h3>${esc(R.label || 'ממוצע 12 החודשים')}</h3><div class="wp-ring"><svg viewBox="0 0 100 100" aria-hidden="true">${segs.join('')}</svg>
+    <div class="wp-rc"><b class="num">${esc(mS(avg))}</b><small>${target ? `מתוך ${esc(mS(target))}` : 'בחודש'}</small></div></div>
+    <p class="note">${vals.length < n ? `נספרו ${vals.length} מתוך ${n} חודשים — חודש שעוד לא היה נספר כאפס.` : `ממוצע ${n} ימי המשכורת האחרונים.`} כל חודש נכנס לממוצע — גם החורף.</p></section>`;
+}
+/** w6: one bar per line (panel.bars) — the breakdown risk. Exact chance when the module shows it (the operations engineer), else the band. */
+function barsHtml(B) {
+  const items = (B && B.items) || []; if (!items.length) return '';
+  const exact = items.some((x) => x.value != null);
+  const W = { low: 18, mid: 50, high: 88 };
+  return `<section class="wp-sec"><h3>${esc(B.label || 'סיכון לתקלה')}</h3><ul class="wp-bars">${items.map((x) => {
+    const w = x.value != null ? Math.max(3, Math.min(100, Math.round(Math.sqrt(Math.min(1, +x.value / 0.3)) * 100))) : W[x.band] || 50;
+    const t = x.value != null ? `${pct1(x.value)} · ${HZ_HE[x.band] || ''}` : HZ_HE[x.band] || '';
+    return `<li class="hz-${esc(x.band || 'mid')}" data-asset="${esc(x.assetId || '')}"><span class="wb-n">${esc(x.name || '')}</span><span class="wb-bar" aria-hidden="true"><i style="width:${w}%"></i></span><b class="num">${esc(t)}</b></li>`;
+  }).join('')}</ul>${exact ? '' : '<p class="note">את הסיכוי המדויק רואה רק מי שמכירה כל רעד במכונה (מהנדסת התפעול). כאן רואים את הרמה: מצב נמוך = יותר תקלות.</p>'}</section>`;
+}
+/** w6: the plant line on top of the panel (worldIndicators.plant) */
+function plantLine(P) {
+  if (!P) return '';
+  const sh = (P.shocks || []).map((x) => x.n).filter(Boolean);
+  return `<p class="wp-now">🏭 <b>${num(`${P.lines}/${P.slots}`)}</b> קווים${P.lines ? ` · עלויות קבועות ${num(mS(P.fixedMonth))} בחודש · תזרים הקווים ${num(mSg(P.cfMonth), cls(P.cfMonth))}` : ''}${P.breakdowns ? ` · תקלות עד היום ${num(String(P.breakdowns))}` : ''}${P.penalties ? ` · קנסות ${num(mS(P.penalties))}` : ''}${P.grant ? ' · 🎁 מענק אוטומציה' : ''}${P.noShift3Until ? ` · 🌙 בלי משמרת לילה עד חודש ${num(String(P.noShift3Until))}` : ''}${sh.length ? ` · ${sh.map((x) => esc(x)).join(' · ')}` : ''}</p>`;
+}
+/** w6: the lines (panel.rows of plant.js): condition (light + pips + number), maintenance, shift, utilisation, this month, value, debt, state badges */
+function plantRowsHtml(rows) {
+  if (!rows || !rows.length) return '<p class="empty">עוד אין לך קווי ייצור. קו CNC, מכונת הזרקה או מפעל מזון יופיעו כאן עם המצב, הניצולת והסיכון לתקלה שלהם.</p>';
+  return `<section class="wp-sec"><h3>הקווים שלך החודש</h3><ul class="wp-rows">${rows.map((r) => {
+    const uPct = r.cap > 0 ? Math.round((+r.util || 0) / r.cap * 100) : 0;
+    const badges = [r.pending ? `<em class="b">⏳ מגיע בחודש ${esc(r.readyAt)}</em>` : '', r.down ? `<em class="b warn">🔧 בתקלה עד חודש ${esc(r.downUntil)}</em>` : '', r.mothball ? '<em class="b">💤 מושבת</em>' : '',
+      r.contract ? `<em class="b ok">📝 חוזה ${pctI(r.contract.vol)} עד חודש ${esc(r.contract.until)}</em>` : '', r.auto ? '<em class="b">🤖 אוטומציה</em>' : '', r.solar ? '<em class="b">☀️ סולארי</em>' : '', r.lease ? '<em class="b">מבנה בשכירות</em>' : ''].join('');
+    const cond = r.pending ? '' : `<span class="wp-cond" aria-label="מצב ${esc(r.cond)} מתוך 100, ${esc(LIGHT_HE[r.condLight] || '')}"><span aria-hidden="true">${LIGHT_DOT[r.condLight] || ''} ${pipsOf(r.condPips)}</span> מצב <b class="num">${esc(r.cond)}</b></span>`;
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${esc(r.pending || r.mothball ? 'off' : r.down ? 'red' : r.condLight || '')}"><div class="wp-rh"><b>${esc(r.name)}</b><small>${esc(r.label || '')}</small>${badges}</div>
+      <div class="wp-rm">${cond}${r.pending ? '' : `<span>תחזוקה ${esc(MAINT_HE[r.maint] || r.maint || '')}</span><span>${esc(shiftHe(r.shift))}</span><span>${r.down || r.mothball ? 'לא מייצר' : `ניצולת <b class="num">${uPct}%</b>`}</span>`}
+      <span class="${cls(r.cfNow)}">החודש ${num(mSg(r.cfNow))}</span><span>שווי ${num(mS(r.value))}</span>${r.debt ? `<span>חוב ${num(mS(r.debt))}</span>` : ''}${r.penalty ? `<span class="neg">קנס ${num(mS(r.penalty))}</span>` : ''}</div></li>`;
+  }).join('')}</ul></section>`;
+}
+/* ---------- w7 (chain) panel: the chain line and the branch rows; w8 (projects): the projects line, the timeline (gantt), the equity-call
+   calendar, the project rows, rentals and plots. Engine values only (worldIndicators.chain / .proj and panel.*); amounts via E.money. */
+function chainLine(C) {
+  if (!C) return '';
+  const sh = (C.shocks || []).map((x) => x.n).filter(Boolean);
+  return `<p class="wp-now">🛍️ <b>${num(`${C.branches}/${C.span}`)}</b> סניפים מול יכולת הניהול (${num(String(C.managers))} מנהלי אזור${C.franchises ? ` · ${num(String(C.franchises))} בזכיינות` : ''}) · עלויות קבועות ${num(mS(C.fixedMonth))} בחודש · קופה ${num(mS(C.liquid))} · מלאי ${num(mS(C.stock))}${C.transit ? ` + בדרך ${num(mS(C.transit))}` : ''}${C.payables ? ` · חוב לספקים ${num(mS(C.payables))}` : ''} · עלות הסחורה ${esc(pctI(C.cogs))} · תשלום לספקים אחרי ${num(String(C.terms))} יום${C.dc ? ' · 🏬 מרכז הפצה' : ''}${C.ecom ? ' · 🌐 אתר' : ''}${C.fill < 0.98 ? ` · ⚠️ המלאי מכסה רק ${esc(pctI(C.fill))} מהביקוש` : ''}${C.lost ? ` · מכירות שאבדו ${num(mS(C.lost))}` : ''}${C.markdowns ? ` · הנחות על עודפים ${num(mS(C.markdowns))}` : ''}${sh.length ? ` · ${sh.map((x) => esc(x)).join(' · ')}` : ''}</p>`;
+}
+function chainRowsHtml(rows) {
+  if (!rows || !rows.length) return '<p class="empty">עוד אין לך סניפים. מיקום לסניף מגיע במשבצת "מיקום לסניף", וסניפים במיקום ידוע — במשבצת "הזדמנות".</p>';
+  return `<section class="wp-sec"><h3>הסניפים שלך החודש</h3><ul class="wp-rows">${rows.map((r) => {
+    const badges = [!r.own ? '<em class="b">🤝 זכיינות</em>' : '', !r.open ? `<em class="b warn">🚧 בשיפוץ עד חודש ${esc(r.openAt)}</em>` : '', r.count > 1 ? `<em class="b">${esc(r.count)} סניפים</em>` : '',
+      r.badFranchisee ? '<em class="b warn">⚠️ זכיין בעייתי</em>' : '', r.lost > 0 ? '<em class="b warn">📭 נגמר המלאי</em>' : ''].join('');
+    const stage = `<span class="wp-cond" aria-label="שלב הרצה ${esc(r.stage)} מתוך 4: ${esc(STAGE4[r.stage] || '')}"><span aria-hidden="true">${pips4(r.stage)}</span> ${esc(STAGE4[r.stage] || '')}${r.open && r.ramp < 1 ? ` <b class="num">${esc(pctI(r.ramp))}</b>` : ''}</span>`;
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${!r.open ? 'off' : r.badFranchisee ? 'red' : r.stage >= 4 ? 'green' : 'amber'}"><div class="wp-rh"><b>${esc(r.name)}</b><small>${esc(r.label || '')} · אזור ${esc((+r.area || 0) + 1)}${r.locLabel ? ` · ${esc(r.locLabel)}` : r.own ? ' · מיקום עוד לא ידוע' : ''}</small>${badges}</div>
+      <div class="wp-rm">${stage}${r.open ? `<span>מכירות ${num(mS(r.sales))}</span>` : ''}${r.royalty != null ? `<span>תמלוגים ${num(mS(r.royalty))}</span>` : ''}<span class="${cls(r.cfNow)}">החודש ${num(mSg(r.cfNow))}</span>${r.own ? `<span>בחודש בוגר ${num(mSg(r.mature), cls(r.mature))}</span><span>שכירות ${num(mS(r.rent))}</span>` : ''}${r.neighbours ? `<span>${num(String(r.neighbours))} שכנים באזור</span>` : ''}<span>שווי ${num(mS(r.value))}</span>${r.debt ? `<span>חוב ${num(mS(r.debt))}</span>` : ''}</div></li>`;
+  }).join('')}</ul></section>`;
+}
+function projsLine(PJ) {
+  if (!PJ) return '';
+  const sh = (PJ.shocks || []).map((x) => x.n).filter(Boolean);
+  return `<p class="wp-now">🏗️ <b>${num(String(PJ.open))}</b> פרויקטים פתוחים · ריבית ${num(PJ.rate + '%')} · הלוואת בנייה ${num(PJ.loanRate + '%')} בחודש (מצטברת לחוב) · ביקוש ×${num(String(PJ.demand))}${PJ.completed ? ` · ${num(String(PJ.completed))} הושלמו (${num(mSg(PJ.profit), cls(PJ.profit))})` : ''}${PJ.forcedSales ? ` · ⚠️ ${num(String(PJ.forcedSales))} נמכרו בכפייה` : ''}${PJ.holdingPaid ? ` · עלויות המתנה ${num(mS(PJ.holdingPaid))}` : ''}${sh.length ? ` · ${sh.map((x) => esc(x)).join(' · ')}` : ''}</p>`;
+}
+/** w8: the timeline of every project — a bar of the permit + one cell per stage (filled = built), its state in words. Accessible: a list;
+ *  every bar is an img whose name says the same as the words under it (the bar adds nothing a screen reader misses). */
+/** a permit range the module shows — w9's projects carry a placeholder (± 99 months) until the permit lands: shown as "unknown", never its numbers */
+const permitOk = (p) => !!(p && Number.isFinite(+p.lo) && Number.isFinite(+p.hi) && p.hi - p.lo <= 36);
+function ganttHtml(G) {
+  if (!G || !G.length) return '';
+  return `<section class="wp-sec"><h3>לוח זמנים</h3><ol class="wp-gantt">${G.map((r) => {
+    const n = Math.max(1, r.stages | 0); const pct = Math.max(0, Math.min(1, +r.pct || 0));
+    const state = r.phase === 'permit' ? `ממתין להיתר${permitOk(r.permit) ? `: עוד ${r.permit.lo}–${r.permit.hi} חודשים` : r.permit ? ' (עוד לא ידוע מתי)' : ''}` : r.phase === 'done' ? 'הושלם' : `שלב ${Math.min(n, (r.stage | 0) + 1)} מתוך ${n} · ${Math.round(pct * 100)}%`;
+    const flags = [r.paused ? '⏸ מושהה' : '', r.delayed ? '⏳ עיכוב באתר' : '', r.phase === 'build' && r.gate === false ? '🔒 הבנק מחכה למכירות' : '', r.slot === false ? '🔌 בלי חיבור לרשת — הבנק לא מממן' : ''].filter(Boolean);
+    const cells = Array.from({ length: n }, (_, i) => { const f = Math.max(0, Math.min(1, pct * n - i)); return `<i class="gs${f >= 1 ? ' done' : f > 0 ? ' part' : ''}" style="--f:${Math.round(f * 100)}%"></i>`; }).join('');
+    return `<li data-asset="${esc(r.assetId)}"><span class="gn">${esc(r.name)}</span><span class="gbarw" role="img" aria-label="${esc(`${r.name}: ${state}${flags.length ? ', ' + flags.join(', ') : ''}`)}"><i class="gp${r.phase === 'permit' ? ' on' : ''}">📋</i>${cells}</span><small class="gst">${esc(state)}${flags.length ? ` · ${esc(flags.join(' · '))}` : ''}</small></li>`;
+  }).join('')}</ol><p class="note">📋 = ההיתר; כל משבצת = שלב. משבצת מלאה = שלב שכבר נבנה.</p></section>`;
+}
+/** w8: the equity-call calendar — what each project still needs from your cash and from when; the total against the cash */
+function callsHtml(calls, PJ, month) {
+  if (!calls || !calls.length) return '';
+  const sum = calls.reduce((s, x) => s + (+x.amount || 0), 0);
+  return `<section class="wp-sec"><h3>קריאות להון עצמי</h3><ul class="wp-calls">${calls.map((c) => `<li data-asset="${esc(c.assetId)}"><span>${esc(c.name)}</span><small>${c.from > month ? `מחודש ${esc(c.from)}` : 'כבר עכשיו'}</small><b class="num">${esc(mS(c.amount))}</b></li>`).join('')}
+    <li class="tot"><span>סך הכול</span><small>${PJ && PJ.runway != null ? `המזומן מכסה ×${esc(String(PJ.runway))}` : ''}</small><b class="num">${esc(mS(sum))}</b></li></ul>
+    <p class="note">הון עצמי נגבה מהמזומן שלך בכל יום משכורת שבו שלב צריך אותו. בלי מזומן — השלב עומד, והריבית ממשיכה לרוץ.</p></section>`;
+}
+function projRowsHtml(rows) {
+  if (!rows || !rows.length) return '<p class="empty">עוד אין לך פרויקטים. קרקע מגיעה במשבצת "קרקע לפרויקט"; פרויקט תקוע או מגרש — במשבצת "הזדמנות".</p>';
+  return `<section class="wp-sec"><h3>הפרויקטים שלך</h3><ul class="wp-rows">${rows.map((r) => {
+    const badges = [`<em class="b">${esc(PHASE_HE[r.phase] || r.phase || '')}</em>`, r.paused ? '<em class="b warn">⏸ מושהה</em>' : '', r.delayed ? '<em class="b warn">⏳ עיכוב באתר</em>' : '', r.failed ? '<em class="b warn">הקבלן פשט רגל</em>' : '',
+      (r.stallRun || 0) > 0 ? `<em class="b warn">⛔ עומד ${esc(r.stallRun)} מתוך ${esc(r.callIn)} — אחר כך הבנק קורא להלוואה</em>` : '', r.partner ? `<em class="b">🤝 שותף ${esc(pctI(r.partner))}</em>` : '', r.combo ? '<em class="b">קומבינציה</em>' : '', r.selfFund ? '<em class="b">מממן שלבים מההון שלך</em>' : '',
+      r.plan === 'hold' ? '<em class="b ok">🔑 משאיר להשכרה</em>' : ''].join('');
+    const sold = r.noPresale ? '<span>בלי מכירות מוקדמות</span>' : `<span class="${r.gate ? 'pos' : ''}">נמכרו ${num(`${r.presold}/${r.units}`)} (${esc(pctI(r.presoldPct))}) · יעד ${esc(pctI(r.target))}${r.gate ? ' · 🔓 הבנק בפנים' : ` · 🔒 הבנק מחכה ל־${esc(pctI(r.gateReq))}`}</span>`;
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${(r.stallRun || 0) > 0 || r.paused ? 'red' : r.phase === 'permit' ? 'off' : r.delayed ? 'amber' : 'green'}"><div class="wp-rh"><b>${esc(r.name)}</b><small>${esc(CTR_HE[r.tier] || '')} · ${esc(String(r.units))} יחידות</small>${badges}</div>
+      <div class="wp-rm"><span>${r.phase === 'permit' ? (r.permit ? `היתר בעוד ${esc(r.permit.lo)}–${esc(r.permit.hi)} חודשים` : 'ממתין להיתר') : `שלב ${num(`${Math.min(r.stages, r.stage + 1)}/${r.stages}`)} · ${esc(pctI(r.pct))}`}</span>${sold}${r.monthCost ? `<span>שלב בחודש ${num(mS(r.monthCost))}</span>` : ''}${r.equityGap ? `<span class="neg">הון עצמי שעוד צריך ${num(mS(r.equityGap))}</span>` : ''}<span>הלוואה ${num(mS(r.loan))}</span>${r.mezz ? `<span>מזנין ${num(mS(r.mezz))}</span>` : ''}${r.deposits ? `<span>מקדמות בליווי ${num(mS(r.deposits))}</span>` : ''}<span>ריבית שנצברה ${num(mS(r.interest))}</span><span>שווי לפי עלות ${num(mS(r.value))}</span><span>חוב ${num(mS(r.debt))}</span><span class="${cls(r.projected)}">רווח צפוי ${num(mSg(r.projected))}</span></div></li>`;
+  }).join('')}</ul></section>`;
+}
+function rentPlotHtml(PJ, P) {
+  const rent = (P && P.rentals) || []; const plots = (PJ && PJ.plots) || [];
+  if (!rent.length && !plots.length) return '';
+  return `<section class="wp-sec"><h3>מושכר ומגרשים</h3><ul class="wp-rows">${rent.map((r) => `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="green"><div class="wp-rh"><b>${esc(r.name)}</b><em class="b ok">🔑 מושכר</em></div><div class="wp-rm"><span>${num(String(r.units))} דירות</span><span class="pos">שכירות נטו ${num(mS(r.noi))} בחודש</span><span>שווי ${num(mS(r.value))}</span><span>משכנתא ${num(mS(r.debt))}</span></div></li>`).join('')}${plots.map((r) => `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="off"><div class="wp-rh"><b>${esc(r.name)}</b><em class="b">🚧 מגרש</em></div><div class="wp-rm"><span>שווי ${num(mS(r.value))}</span><span>אפשר להתחיל פרויקט או למכור — למטה</span></div></li>`).join('')}</ul></section>`;
+}
+function rowsHtml(rows, P) {
+  if (P && P.id === 'plant') return plantRowsHtml(rows);
+  if (P && P.id === 'chain') return chainRowsHtml(rows);   // w7
+  if (P && P.id === 'proj') return projRowsHtml(rows);     // w8
+  if (P && P.id === 'energy') return energyRowsHtml(rows); // w9
+  if (!rows || !rows.length) return '<p class="empty">עוד אין לך נכסים עונתיים. מלון, ספא או מרכז כנסים יופיעו כאן עם התפוסה שלהם.</p>';
+  return `<section class="wp-sec"><h3>הנכסים שלך החודש</h3><ul class="wp-rows">${rows.map((r) => {
+    const pct = r.closed ? 0 : Math.round((+r.occ || 0) * 100); const k = Math.round((r.closed ? 0 : (+r.occDecile || 0)) / 2);
+    const badges = [r.closed ? '<em class="b warn">סגור עכשיו</em>' : '', r.wing ? '<em class="b warn">אגף סגור</em>' : '', r.locked ? '<em class="b">חוזה ניהול</em>' : '',
+      r.owner ? `<em class="b warn">${gw('אתה מנהל', 'את מנהלת')} בעצמך</em>` : '', r.allot ? `<em class="b ok">הקצאה ${Math.round((r.allot.share || 0) * 100)}% עד חודש ${esc(r.allot.until)}</em>` : ''].join('');
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}"><div class="wp-rh"><b>${esc(r.name)}</b>${badges}</div>
+      <div class="wp-rm"><span class="wp-occ" aria-label="תפוסה ${pct}%"><span aria-hidden="true">${r.closed ? '🔒' : '▮'.repeat(k) + '▯'.repeat(5 - k)}</span> <b class="num">${pct}%</b></span>
+      <span>${esc(PROF_HE[r.profile] || r.profile || '')}</span><span>מחיר עכשיו: ${esc(TIER_HE[r.tier] || r.tier || '')}</span><span>מוניטין <b class="num">${esc(r.rep)}</b></span><span>${r.staff === 'seasonal' ? 'צוות עונתי' : 'צוות קבוע'}</span>
+      <span>תוכנית: עונה ${esc(TIER_HE[r.peak] || '')} · שפל ${esc(TIER_HE[r.off] || '')}</span><span class="${cls(r.cfNow)}">החודש ${num(sgn(r.cfNow))}</span></div></li>`;
+  }).join('')}</ul></section>`;
+}
+function actionsHtml(acts, rows) {
+  if (!acts || !acts.length) return '';
+  const name = (id) => ((rows || []).find((r) => r.assetId === id) || {}).name || '';
+  const groups = new Map();
+  for (const a of acts) { const g = a.assetId || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(a); }
+  const btn = (a, i) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${a.current ? ' cur' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} ${a.current ? 'aria-pressed="true"' : ''}${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.current ? '✓ ' : a.suggested ? '💡 ' : ''}${escI(a.assetId && name(a.assetId) ? a.label.replace(name(a.assetId) + ': ', '') : a.label)}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
+  const idx = new Map(acts.map((a, i) => [a, i]));
+  // w6: radio-like actions (maintenance policy, shifts) sit together on one labelled row; the rest flow after them
+  const body = (list) => { const out = []; let k = 0;
+    while (k < list.length) { const id = list[k].id; let j = k; while (j < list.length && list[j].id === id) j++;
+      const run = list.slice(k, j);
+      out.push(run.length > 1 && WP_SEG[id] ? `<div class="wp-seg" role="group" aria-label="${esc(WP_SEG[id])}"><span class="wp-segl">${esc(WP_SEG[id])}</span>${run.map((a) => btn(a, idx.get(a))).join('')}</div>` : run.map((a) => btn(a, idx.get(a))).join(''));
+      k = j; }
+    return out.join(''); };
+  return `<section class="wp-sec"><h3>מה אפשר לעשות עכשיו</h3>${[...groups].map(([g, list]) => `<div class="wp-ag"><h4>${esc(g ? name(g) : 'כל העסק')}</h4><div class="wp-acts">${body(list)}</div></div>`).join('')}
+    <p class="note">💡 = מה שהמנטור היה בוחר עכשיו. כל פעולה נכנסת לחודש הזה מיד (בלי להטיל קוביות).</p></section>`;
+}
+/* ---------- w9 (energy) panel: the line on top, the projects (rows), the plants (DCF, LTV, refinancing room, DSCR), sites, the pilot */
+function energyLine(EN) {
+  if (!EN) return '';
+  const sh = (EN.shocks || []).map((x) => ({ heat: '🔥 גל חום', sand: '🌪️ סופת חול', curtail: '⛔ הגבלת רשת', ppaCut: 'קיצוץ בתעריף' }[x.t] || '')).filter(Boolean);
+  return `<p class="wp-now">☀️ הכנסה תפעולית אחרי החזר חוב ${num(mSg(EN.income), cls(EN.income))} מתוך ${num(mS(EN.target))} בחודש · ריבית ${num(EN.rate + '%')} (בנייה ${num(String(Math.round(EN.buildRate * 1200) / 100) + '%')} בשנה) · חשמל ${num(mwh(EN.px))}${EN.spike ? ' <b>(קפיצה)</b>' : ''} · ממוצע ${num(mwh(EN.avg))} · סולארי מקבל ${num(pctI(EN.capture))} מהמחיר · PPA לסולארי עכשיו ${num(mwh(EN.ppaNow))}
+    · 🔌 ${num(String((EN.slots || {}).free || 0))} חיבורים פנויים${(EN.slots || {}).waiting ? ` · ${num(String(EN.slots.waiting))} פרויקטים מחכים לחיבור` : ''}${((EN.slots || {}).queue || []).length ? ` · בתור: ${EN.slots.queue.map((q) => `חודש ${num(String(q.at))}`).join(', ')}` : ''}
+    ${EN.refis ? ` · מימון מחדש ×${num(String(EN.refis))} (${num(mS(EN.refiCash))})` : ''}${EN.lpNext ? ` · חלוקה למשקיעים בחודש ${num(String(EN.lpNext))}` : ''}${EN.squeeze ? ` · <b class="neg">⚠️ ${num(`${EN.squeeze}/${EN.squeezeLimit}`)} חודשים שהתחנות לא מכסות את החוב</b>` : ''}${sh.length ? ` · ${sh.map((x) => esc(x)).join(' · ')}` : ''}</p>`;
+}
+function energyRowsHtml(rows) {
+  if (!rows || !rows.length) return '';
+  return `<section class="wp-sec"><h3>הפרויקטים בבנייה</h3><ul class="wp-rows">${rows.map((r) => {
+    const badges = [`<em class="b">${esc(PHASE_HE[r.phase] || r.phase || '')}</em>`, r.slot ? '<em class="b ok">🔌 מחובר לרשת</em>' : '<em class="b warn">🔌 בלי חיבור לרשת</em>', r.paused ? '<em class="b warn">⏸ מושהה</em>' : '', r.delayed ? '<em class="b warn">⏳ עיכוב באתר</em>' : '',
+      (r.stallRun || 0) > 0 ? `<em class="b warn">⛔ עומד ${esc(r.stallRun)} מתוך ${esc(r.callIn)} — אחר כך הבנק מוכר אותו</em>` : '', r.stake < 1 ? `<em class="b">🤝 ${esc(pctI(r.stake))} שלך</em>` : '', r.offtake ? `<em class="b">בסיום: ${esc(OFF_HE[r.offtake] || r.offtake)}</em>` : ''].join('');
+    return `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${(r.stallRun || 0) > 0 || r.paused || !r.slot ? 'red' : r.phase === 'permit' ? 'off' : r.delayed ? 'amber' : 'green'}"><div class="wp-rh"><b>${TECH_IC[r.tech] || ''} ${esc(r.name)}</b><small>${esc(TECH_HE[r.tech] || '')} · ${num(String(r.mw))} מגה־ואט</small>${badges}</div>
+      <div class="wp-rm"><span>${r.phase === 'permit' ? (permitOk(r.permit) ? `היתרים בעוד ${esc(r.permit.lo)}–${esc(r.permit.hi)} חודשים` : 'ממתין להיתרים — עוד לא ידוע מתי') : `שלב ${num(`${Math.min(r.stages, r.stage + 1)}/${r.stages}`)} · ${esc(pctI(r.pct))}`}</span><span>עלות הקמה ${num(mS(r.capex))}</span>${r.equityGap ? `<span class="neg">הון עצמי שעוד צריך ${num(mS(r.equityGap))}</span>` : ''}<span>הלוואת בנייה ${num(mS(r.loan))}</span><span>ריבית שנצברה ${num(mS(r.interest))}</span>${r.costToComplete ? `<span>עד הסוף ${num(mS(r.costToComplete))}</span>` : ''}${r.q ? `<span>תפוקת האתר ${num(`${Math.round(r.q.lo * 100)}–${Math.round(r.q.hi * 100)}%`)}</span>` : ''}<span>שווי ${num(mS(r.value))}</span><span>חוב ${num(mS(r.debt))}</span></div></li>`;
+  }).join('')}</ul></section>`;
+}
+function plantsHtml(rows, EN) {
+  const sites = (EN && EN.sites) || []; const h2 = (EN && EN.h2) || [];
+  if (!(rows || []).length && !sites.length && !h2.length) return '<section class="wp-sec"><h3>התחנות שלך</h3><p class="empty">עוד אין לך תחנות שעובדות. אתר לפרויקט מגיע במשבצת "אתר אנרגיה"; תחנה שעובדת וחיבור לרשת — במשבצת "הזדמנות".</p></section>';
+  const pl = (rows || []).map((r) => `<li class="wp-row" data-asset="${esc(r.assetId)}" data-light="${r.down ? 'red' : r.cf < 0 ? 'amber' : 'green'}"><div class="wp-rh"><b>${TECH_IC[r.tech] || ''} ${esc(r.name)}</b><small>${esc(TECH_HE[r.tech] || '')}${r.mw ? ` · ${num(String(r.mw))} מגה־ואט` : ''}</small><em class="b">${esc(OFF_HE[r.offtake] || r.offtake || '')}${r.offtake === 'ppa' && r.ppa ? ` · ${r.tech === 'storage' ? esc(mS(r.ppa)) + ' למגה־ואט בחודש' : esc(mwh(r.ppa))}` : ''}</em>${r.stake < 1 ? `<em class="b">🤝 ${esc(pctI(r.stake))} שלך</em>` : ''}${r.down ? '<em class="b warn">⛔ מושבתת החודש</em>' : ''}${r.suggestedRefi ? '<em class="b ok">💡 שווה לממן מחדש</em>' : ''}</div>
+    <div class="wp-rm">${r.mwh ? `<span>${num(N(r.mwh))} מגה־ואט שעה · ${num(mwh(r.price))}</span>` : ''}<span>הכנסות ${num(mS(r.rev))}</span><span>תפעול ${num(mS(r.opex))}</span><span>החזר חוב ${num(mS(r.debtService))}</span><span class="${cls(r.cf)}">נשאר החודש ${num(mSg(r.cf), cls(r.cf))}</span><span class="${cls(r.runRate)}">בחודש רגיל ${num(mSg(r.runRate), cls(r.runRate))}</span>${r.dscr != null ? `<span>כיסוי החוב ×${num(String(r.dscr))}</span>` : ''}
+      <span>שווי היוון (DCF) ${num(mS(r.dcf))}</span><span>חוב ${num(mS(r.debt))}${r.ltv != null ? ` · ${num(pctI(r.ltv))} מהשווי (עד ${num(pctI(r.ltvMax))})` : ''}</span><span class="${r.refiRoom >= 1000000 ? 'pos' : ''}">מקום למימון מחדש ${num(mS(r.refiRoom))}</span><span>עוד ${num(String(r.tenor))} חודשי החזר</span></div></li>`).join('');
+  const st = sites.map((x) => `<li class="wp-row" data-asset="${esc(x.assetId)}" data-light="off"><div class="wp-rh"><b>🏜️ ${esc(x.name)}</b><em class="b">קרקע לפרויקט</em></div><div class="wp-rm"><span>${esc(TECH_HE[x.tech] || '')} · ${num(String(x.mw))} מגה־ואט</span><span>אפשר להתחיל בהיתרים — למטה</span></div></li>`).join('');
+  const hh = h2.map((x) => `<li class="wp-row" data-asset="${esc(x.assetId)}" data-light="${x.done ? (x.hit ? 'green' : 'red') : 'amber'}"><div class="wp-rh"><b>🧪 ${esc(x.name)}</b><em class="b${x.done && !x.hit ? ' warn' : ''}">${x.done ? (x.hit ? 'הצליח' : 'נסגר') : 'בניסוי'}</em></div><div class="wp-rm">${x.done ? '' : `<span class="neg">שורף ${num(mS(x.burn))} בחודש</span><span>התוצאה בחודש ${num(String(x.revealAt))}</span>`}</div></li>`).join('');
+  return `<section class="wp-sec"><h3>התחנות שלך</h3><ul class="wp-rows">${pl}${st}${hh}</ul><p class="note">"בחודש רגיל" = מה שנספר ליעד: תפוקה ממוצעת, מחיר ממוצע של 12 חודשים, אחרי החזר החוב. "נשאר החודש" = מה שבאמת נכנס.</p></section>`;
+}
+/** the season HUD numbers (w5 worldIndicators.season) as one line on top of the panel */
+function seasonLine(se) {
+  if (!se) return '';
+  return `<p class="wp-now">${BAND_IC[se.band] || ''} <b>${esc(MONTH_HE[se.cal - 1] || '')}</b> · ${esc(BAND_HE[se.band] || '')} · ביקוש בעיר ${num(tourTxt(se.tour))}${se.festival ? ' · 🎪 פסטיבל החודש' : ''}${se.line ? ` · קו עונתי ${num(fmtM(se.line))} מתוך ${num(fmtM(se.lineMax))}` : ''}${(se.shocks || []).length ? ` · ${se.shocks.map((x) => esc(x.n)).filter(Boolean).join(' · ')}` : ''}</p>`;
+}
+/** w6–w8: actions that cannot be undone ask for a second tap (sell a line / the building, close / convert a branch, a clearance sale, sell
+ *  the DC, a project, a plot or a rental); radio-like groups get a row label */
+const WP_CONFIRM = new Set(['sellLine', 'leaseback', 'close', 'convert', 'clearance', 'dcLeaseback', 'sellProj', 'sellPlot', 'sellRent',
+  'sellStake', 'sellPlant', 'sellSlot', 'sellNow', 'secondary', 'sell', 'wageCut', 'raise', 'bridge', 'pivot']);   // w15: a round / a bridge sell part of the company (the first tap shows the dilution); a pivot loses 40 % of the users   // w13: a player's sale; the wage cut (the star leaves for free)   // w9 / w10: a stake, a plant, a slot, a fund now (−5 %), a private stake (−25 %)
+const WP_SEG = { maint: 'תחזוקה', shift: 'משמרות', cover: 'מלאי: חודשי כיסוי', presale: 'יעד מכירות מוקדמות', develop: 'להתחיל פרויקט', offtake: 'בסיום: איך מוכרים את החשמל' };
+/* ---------- w13 (league) panel "המועדון והטבלה": the club line, the gauges (wages ÷ revenue in %, the rank with the cliff, strength vs the
+   tier, the stands' fill), the table (an accessible <table>: the zones are words + ▲ / ▼, our row named), the squad as tokens with an age ring
+   (market value vs book, wage, contract, injured / on loan / academy / in the eleven) with each player's own actions, then the club's actions.
+   Actions keep their index in panel.actions (data-wact), so the panel's one handler (two taps for a sale) serves them. */
+function leagueGauge(g) {
+  const v = +g.value || 0;
+  if (g.id === 'wageRatio') { const bad = v > g.ref; const pos = Math.min(100, (v / (g.max || 1.2)) * 100);
+    return `<div class="wp-g${bad ? ' low' : ''}" data-g="wageRatio"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(wrT(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${pos}%"></i><s style="inset-inline-start:${(g.ref / (g.max || 1.2)) * 100}%"></s></div><small>היעד: עד ${esc(pctI(g.ref))} · מעל 80% בסוף העונה = קנס${bad ? ' · גבוה' : ''}</small></div>`; }
+  if (g.id === 'rank') { const up = v <= g.ref; const pos = ((8 - v) / 7) * 100;
+    return `<div class="wp-g${v >= 7 ? ' low' : ''}" data-g="rank"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">מקום ${esc(String(v))} מתוך 8</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${pos}%"></i><s style="inset-inline-start:${((8 - g.ref) / 7) * 100}%"></s></div><small>${up ? '▲ באזור העלייה (מקום 1–2)' : v >= 7 ? '▼ באזור הירידה (מקום 7–8)' : 'באמצע — מקום 1–2 עולים, 7–8 יורדים'}</small></div>`; }
+  if (g.id === 'strength') { const d = Math.round((v - g.ref) * 10) / 10;
+    return `<div class="wp-g${d < 0 ? ' low' : ''}" data-g="strength"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(String(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, (v - 35) / 50 * 100))}%"></i><s style="inset-inline-start:${Math.max(0, Math.min(100, (g.ref - 35) / 50 * 100))}%"></s></div><small>ממוצע הדרג ${esc(String(g.ref))} · ${d >= 0 ? `+${d} מעליו` : `${d} מתחתיו`}</small></div>`; }
+  const bad = v < g.ref;
+  return `<div class="wp-g${bad ? ' low' : ''}" data-g="${esc(g.id)}"><div class="wp-gl"><span>${esc(g.label)}</span><b class="num">${esc(pctI(v))}</b></div><div class="wp-gbar" aria-hidden="true"><i style="width:${Math.min(100, v * 100)}%"></i><s style="inset-inline-start:${g.ref * 100}%"></s></div><small>רגיל: ${esc(pctI(g.ref))}${bad ? ' · נמוך' : ''}</small></div>`;
+}
+function leagueLine(LG) {
+  if (!LG) return '';
+  const La = LG.last || {}; const P = LG.payoff || {};
+  return `<p class="wp-now">🏟️ <b>${esc(LG.divName)}</b> · עונה ${num(String(LG.season))} · מחזור ${num(`${LG.round}/${LG.rounds}`)}${LG.window ? ' · <b>🔁 חלון העברות פתוח</b> (מכירה בלי הנחה)' : ' · מחוץ לחלון: מכירה ב־10% פחות'} · הכנסות החודש ${num(mS(La.rev || 0))} (כרטיסים ${num(mS(La.gate || 0))}, טלוויזיה ${num(mS(La.tv || 0))}, מרצ׳נדייז ${num(mS(La.merch || 0))}) · שכר ${num(mS(LG.wages))} · תפעול ${num(mS(La.ops || 0))} · נשאר ${num(mSg(La.cf || 0), cls(La.cf || 0))}
+    · ${P.up ? `עלייה: הכנסות ×${num(String(P.up))}` : 'בדרג העליון'}${P.down ? ` · ירידה: ×${num(String(P.down))}` : ''} · פרס על מקום 1 ${num(mS((LG.prize || [])[0] || 0))}, מקום 3 ${num(mS((LG.prize || [])[2] || 0))}
+    · ${num(String(LG.seats))} מקומות${LG.build ? ` · 🏗️ מרחיבים: שלב ${num(String(LG.build.stage))} מתוך 2 עד חודש ${num(String(LG.build.at))}` : ''}${LG.train ? ' · מתחם אימונים' : ''}${LG.academy ? ' · אקדמיה' : ''}${LG.naming && LG.naming.until >= 0 ? ` · שם האצטדיון נמכר (${LG.naming.mode === 'now' ? 'כסף מראש' : '8% מהכרטיסים'})` : ''}${LG.ffp ? ` · <b class="neg">⚠️ ${num(String(LG.ffp))} קנסות יציבות</b>` : ''}${LG.sold ? ` · נמכרו ${num(String(LG.sold))} (${num(mSg(LG.soldGain), cls(LG.soldGain))} מול הספרים)` : ''}</p>`;
+}
+function leagueTableHtml(T, LG) {
+  if (!T || !T.length) return '';
+  const zone = (z) => (z === 'up' ? '▲ עולה' : z === 'down' ? '▼ יורדת' : '');
+  return `<section class="wp-sec"><h3>הטבלה · ${esc((LG && LG.divName) || '')}</h3><table class="lgtbl"><caption class="sr">טבלת הליגה: מקום, מועדון, נקודות ואזור. שתיים ראשונות עולות דרג, שתיים אחרונות יורדות.</caption>
+    <thead><tr><th scope="col">מקום</th><th scope="col">מועדון</th><th scope="col">נק׳</th><th scope="col">אזור</th></tr></thead><tbody>${T.map((x) => `<tr class="${x.us ? 'us' : ''}" data-zone="${esc(x.zone || '')}"><td class="num">${esc(String(x.pos))}</td><th scope="row">${x.us ? '★ ' : ''}${esc(x.name)}${x.us ? ' <small>(שלך)</small>' : ''}</th><td class="num">${esc(String(x.pts))}</td><td>${esc(zone(x.zone))}</td></tr>`).join('')}</tbody></table>
+    <p class="note">בין מקום 2 למקום 3 עובר הצוק: שתי הראשונות עולות וההכנסות קופצות, השלישית נשארת.</p></section>`;
+}
+function squadHtml(P, acts) {
+  const rows = P.rows || []; if (!rows.length) return '';
+  const byP = new Map(); acts.forEach((a, i) => { if (a.param && /^p\d+$/.test(a.param) && ['sell', 'renew', 'loanOut'].includes(a.id)) { if (!byP.has(a.param)) byP.set(a.param, []); byP.get(a.param).push([a, i]); } });
+  const AL = { sell: 'למכור', renew: 'לחדש חוזה', loanOut: 'להשאיל' };
+  const btn = ([a, i], r) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" data-pid="${esc(r.pid)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(a.label)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${esc(AL[a.id] || a.id)}${a.id === 'sell' && a.price != null ? ` <small class="num">${esc(mS(a.price))}</small>` : ''}</button>`;
+  return `<section class="wp-sec"><h3>הסגל (${num(String(rows.length))} שחקנים) · השווי הנקי סופר את הספרים, לא את השוק</h3><ul class="wp-rows squad">${rows.map((r) => {
+    const b = ageBand(r.age);
+    const badges = [r.starter ? '<em class="b ok">בהרכב</em>' : '', r.injured ? '<em class="b warn">🩹 פצוע</em>' : '', r.loaned ? '<em class="b">↔ בהשאלה</em>' : '', r.academy ? '<em class="b">🌱 אקדמיה</em>' : '', r.monthsLeft <= 6 ? `<em class="b warn">⏳ ${esc(String(r.monthsLeft))} חודשים לסוף החוזה</em>` : ''].join('');
+    const gain = r.mv - r.book;
+    return `<li class="wp-row prow" data-pid="${esc(r.pid)}" data-light="${r.injured ? 'red' : r.starter ? 'green' : 'off'}"><div class="wp-rh">${tokenHtml(r)}<div class="pr-n"><b>${esc(r.name)}</b><small>גיל ${esc(String(r.age))} · ${esc(b.he)} · דירוג ${esc(String(r.rating))} · פוטנציאל ${esc(`${r.potLo}–${r.potHi}`)}</small></div>${badges}</div>
+      <div class="wp-rm"><span>בשוק ${num(mS(r.mv))}</span><span>בספרים ${num(mS(r.book))}</span><span class="${cls(gain)}">${gain >= 0 ? 'רווח במכירה' : 'הפסד במכירה'} ${num(mSg(gain), cls(gain))}</span><span>שכר ${num(mS(r.wage))} בחודש</span><span>חוזה עד חודש ${num(String(r.until))}</span></div>
+      ${(byP.get(r.pid) || []).length ? `<div class="wp-acts pr-acts">${byP.get(r.pid).map((x) => btn(x, r)).join('')}</div>` : ''}</li>`;
+  }).join('')}</ul><p class="note">הטבעת סביב הדירוג = הגיל: צעיר עד 21, עולה עד 24, בשיא עד 28, אחרי השיא עד 30, ותיק. מכירה מבקשת לחיצה שנייה.</p></section>`;
+}
+function leagueActsHtml(acts) {
+  const list = acts.map((a, i) => [a, i]).filter(([a]) => !(a.param && /^p\d+$/.test(a.param)));
+  if (!list.length) return '';
+  return `<section class="wp-sec"><h3>המועדון והאצטדיון</h3><div class="wp-acts">${list.map(([a, i]) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'}${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(a.label)}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`).join('')}</div>
+    <p class="note">💡 = מה שהמנטור היה בוחר עכשיו. כל פעולה נכנסת לחודש הזה מיד (בלי להטיל קוביות).</p></section>`;
+}
+/** w11 / w15 panel buttons: the action's index in panel.actions (data-wact), 💡 the mentor's pick, a sub-line (price / CAC / dilution) */
+function wvBtn(a, i, label, sub) {
+  return `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${WP_CONFIRM.has(a.id) || WV2.needsArm(a) || WV3.needsArm(a) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'} aria-label="${esc(`${a.suggested ? '💡 ' : ''}${label}${sub ? ` ${sub}` : ''}${!a.enabled && a.reason ? ` · ${a.reason}` : ''}${label !== a.label ? ` — ${a.label}` : ''}`)}"${a.reason ? ` title="${esc(a.reason)}"` : ''}>${a.suggested ? '💡 ' : ''}${escI(label)}${sub ? ` <small>${escI(sub)}</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`;
+}
+function leaguePanelHtml(P, LG) {
+  const acts = P.actions || [];
+  return `${leagueLine(LG)}<div class="wp-gauges">${(P.gauges || []).map(leagueGauge).join('')}</div>${leagueTableHtml(P.table, LG)}${squadHtml(P, acts)}${leagueActsHtml(acts)}`;
+}
+export function worldPanelHtml(P, { season = null, target = 0, plant = null, chain = null, proj = null, energy = null, league = null, multinational = null, platform = null, holding = null, harvest = null, month = 0, ...rest } = {}) {
+  if (!P) return '';
+  { const h3 = WV3.panelHtml(WVH2, P, { ...rest, month }, wvBtn); if (h3 != null) return h3; }   // w14 credit / w17 trials / w18 insure / w19 bell / w20 funds
+  if (P.id === 'league') return leaguePanelHtml(P, league);   // w13
+  if (P.id === 'multinational') return WV.mnPanelHtml(WVH, P, multinational, wvBtn);   // w11
+  if (P.id === 'platform') return WV.pfPanelHtml(WVH, P, platform, wvBtn);   // w15
+  if (P.id === 'holding') return WV2.hdPanelHtml(WVH2, P, holding, wvBtn);   // w12
+  if (P.id === 'harvest') return WV2.hvPanelHtml(WVH2, P, harvest, wvBtn);   // w16
+  const names = [...(P.rows || []), ...(P.rentals || []), ...((proj && proj.plots) || []), ...(P.plants || []), ...((energy && energy.sites) || []), ...((energy && energy.h2) || [])];   // w8 / w9: actions on rentals, plots, plants, sites are named too
+  return `${seasonLine(season)}${plantLine(plant)}${chainLine(chain)}${projsLine(proj)}${P.id === 'energy' ? energyLine(energy) : ''}<div class="wp-gauges">${(P.gauges || []).map((g) => gaugeHtml(g, P.id)).join('')}</div>${stripHtml(P.strip)}${ringHtml(P.ring, target)}${barsHtml(P.bars)}${P.id === 'proj' || P.id === 'energy' ? ganttHtml(P.gantt) + callsHtml(P.calls, proj, month) : ''}${rowsHtml(P.rows, P)}${P.id === 'proj' ? rentPlotHtml(proj, P) : ''}${P.id === 'energy' ? plantsHtml(P.plants, energy) : ''}${actionsHtml(P.actions, names)}`;
+}
+/**
+ * Open the world panel. get() → {panel, season, target} (fresh each time); onAct(action) → Promise<{ok, error?, toast?}>.
+ * Resolves when the player closes it.
+ */
+export function worldPanel(get, onAct) {
+  let D = get(); if (!D || !D.panel) return Promise.resolve();
+  let busyAct = false;
+  const draw = (c) => { const b = c.querySelector('.wp-body'); if (b) { const st = c.scrollTop; b.innerHTML = worldPanelHtml(D.panel, D); c.scrollTop = st; } };
+  return modal({ tag: D.panel.title || 'לוח המפה', color: ({ plant: '#9a3412', chain: '#9b1c24', proj: '#854d0e', energy: '#155e75', market: '#a16207', league: '#7f1d1d', multinational: '#92400e', platform: '#4c1d95', holding: '#14532d', harvest: '#075985', ...WV3.PANEL_COLOR })[D.panel.id] || '#0e7490', title: D.panel.title || 'לוח המפה', cls: 'wpanel', wide: true,
+    html: `<div class="wp-body">${worldPanelHtml(D.panel, D)}</div><p class="wp-msg" aria-live="polite"></p>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    // a long sheet opens at its top (the modal focuses "סגירה" at the bottom, which scrolled phones to the end): focus the title instead
+    onOpen: (c) => setTimeout(() => { const h = c.querySelector('#gmTitle'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } c.scrollTop = 0; }, 80),
+    onExtra: async (e) => {
+      const b = e.target.closest('button[data-wact]'); if (!b || b.disabled || busyAct) return;
+      const a = (D.panel.actions || [])[+b.dataset.wact]; if (!a) return;
+      const c0 = $('#gmCard');
+      if ((WP_CONFIRM.has(a.id) || WV2.needsArm(a) || WV3.needsArm(a)) && b.dataset.arm !== '1') {   // the first tap only arms the button (a sale cannot be undone; w12 a restructuring; w16 a hedge's deposit)
+        c0?.querySelectorAll('button[data-arm="1"]').forEach((x) => { x.dataset.arm = ''; x.classList.remove('arm'); });
+        b.dataset.arm = '1'; b.classList.add('arm'); sfx('click');
+        const at = WV3.armText(a, D, WVH2) || WV.armText({ ...a, amountText: a.amount != null ? mS(a.amount) : '' }, D.platform) || WV2.armText(a, D, WVH2);   // w14 / w17 / w18 / w19 / w20 first: their sales, floats, stops and the gate   // w15: the dilution before the confirming tap · w12 / w16: the sale, the ★ cap, the hedge's deposit
+        const m0 = c0?.querySelector('.wp-msg'); if (m0) { m0.textContent = at || `אי אפשר לבטל את זה. לחיצה נוספת על הכפתור מאשרת: ${a.label}`; m0.className = 'wp-msg neg'; }
+        // the same words right under the armed button's group (the live line sits at the panel's end, out of view on a long panel)
+        c0?.querySelectorAll('.wp-armnote').forEach((x) => x.remove()); const host = b.closest('.wp-seg, .wp-acts'); if (host && m0) { const n = document.createElement('p'); n.className = 'wp-armnote neg'; n.setAttribute('aria-hidden', 'true'); n.textContent = m0.textContent; host.after(n); }
+        return;
+      }
+      busyAct = true; sfx('click');
+      let r = null; try { r = await onAct(a); } catch (x) { r = { ok: false, error: x && x.message }; }
+      busyAct = false;
+      const c = $('#gmCard'); if (!c || !c.classList.contains('wpanel')) return;
+      D = get() || D; draw(c);
+      const msg = c.querySelector('.wp-msg'); if (msg) { msg.textContent = r && r.ok === false ? (r.error || 'לא אפשרי עכשיו') : (r && r.toast) || 'בוצע'; msg.className = 'wp-msg ' + (r && r.ok === false ? 'neg' : 'pos'); }
+      const same = c.querySelector(`button[data-wact="${b.dataset.wact}"]`); (same && !same.disabled ? same : c.querySelector('.acts button.primary'))?.focus();
+    } });
+}
+export const worldPanelOpen = () => !!document.querySelector('#gm:not([hidden]) #gmCard.wpanel');
+
+/* ============================================================ w10 מרכז הפיננסים: the market screen ("הבורסה והתיק")
+   get() → panelData (panel + worldIndicators.market / .portfolio); onAct(action) → E.worldAction; api = game.js marketApi (the engine's pure
+   market.preview / qtyFor / tradeBlock, cash, month). A trade is ALWAYS previewed: the form computes market.preview for the exact quantity
+   and the confirm button sends that quantity ("<id>:<b|s>:<qty>") — the costs on screen are the costs the engine charges. */
+const MKF = { mS, mSg, ex: (n) => fmtM(Math.round(+n || 0)) };
+export function marketPanel(get, onAct, api = {}) {
+  let D = get(); if (!D || !D.panel) return Promise.resolve();
+  const view = { tab: 'list', sel: null, side: 'b', unit: 'cash', amount: 0 };
+  let chart = null; let busyAct = false;
+  const coOf = (id) => { if (!id) return null; const MK = D.market || {}; if (id === 'IDX') return MK.idx; if (/^g\d+$/.test(id)) { const g = (MK.grave || [])[+id.slice(1)]; return g ? { ...g, sectorLabel: (MK.sectors || {})[g.sector] || '', status: g.reason } : null; } return (MK.cos || []).find((c) => c.id === id) || null; };
+  const actBtns = (pred) => { const acts = (D.panel.actions || []).map((a, i) => [a, i]).filter(([a]) => pred(a)); if (!acts.length) return '';
+    return `<div class="wp-acts">${acts.map(([a, i]) => `<button type="button" class="chip wp-act${a.suggested ? ' sug' : ''}${a.urgent ? ' urgent' : ''}${WP_CONFIRM.has(a.id) ? ' risky' : ''}" data-wact="${i}" data-aid="${esc(a.id)}" ${a.enabled ? '' : 'disabled'}>${a.suggested ? '💡 ' : ''}${escI(a.label)}${a.preview && a.preview.qty ? `<small> · עמלה ${esc(mS(a.preview.commission))} · מרווח ${esc(mS(a.preview.spreadCost))}${a.preview.tax ? ` · מס ${esc(mS(a.preview.tax))}` : ''} · ${a.preview.side === 'b' ? 'יוצא' : 'נכנס'} ${esc(mS(a.preview.total))}</small>` : a.preview && a.preview.ltvAfter != null ? `<small> · מינוף אחרי ${esc(pctI(a.preview.ltvAfter))} · ריבית ${esc(mS(a.preview.monthly))} בחודש</small>` : ''}${!a.enabled && a.reason ? `<small> · ${esc(a.reason)}</small>` : ''}</button>`).join('')}</div>`; };
+  const series = (c) => (c ? marketSeries(c, { news: (D.market || {}).news || [], live: c.status == null || c.status === 'listed' || c.status === 'halted', month: D.month }) : null);
+  const body = () => {
+    const MK = D.market || {}; const PF = D.portfolio || {};
+    const live = (MK.cos || []).filter((c) => c.status === 'listed' || c.status === 'halted');
+    const counts = { list: live.length + 1, closed: (MK.cos || []).length - live.length + (MK.grave || []).length, funds: (PF.funds || []).length + (PF.privates || []).length };
+    let main = '';
+    if (view.tab === 'list') main = MV.listHtml(MK, MKF, view.sel, D.month);
+    else if (view.tab === 'closed') main = MV.closedHtml(MK, MKF, view.sel);
+    else if (view.tab === 'funds') main = MV.fundsHtml(PF, MKF, actBtns);
+    else main = `<section class="wp-sec"><h3>מינוף, הגנה ומה המנטור היה עושה</h3>${actBtns((a) => !a.assetId)}<p class="note">💡 = מה שהמנטור היה בוחר עכשיו. מסחר במניה — מתוך הכרטיס שלה (העלויות מופיעות לפני האישור).</p></section>`;
+    const c = (view.tab === 'list' || view.tab === 'closed') ? coOf(view.sel) : null;
+    let detail = '';
+    if (c) {
+      const ro = c.status != null && c.status !== 'listed' && c.status !== 'halted';
+      const res = !ro && c.id !== 'IDX' ? actBtns((a) => a.coId === c.id && (a.id === 'research' || (a.id === 'trade' && a.guide))) : '';
+      const block = ro ? null : api.block ? api.block(c.id) : null;
+      detail = MV.detailHtml(c, series(c), MK, MKF, { readOnly: ro, research: res ? `<h4 class="cdl-h3">🔎 מחקר והצעות המנטור</h4>${res}` : '', trade: ro ? '' : MV.tradeFormHtml(c, view, api.cash ? api.cash() : 0, MKF, block) });
+    }
+    return `${MV.headHtml(MK, PF, D.month)}<div class="wp-gauges">${(D.panel.gauges || []).map((g) => gaugeHtml(g, 'market')).join('')}</div>${MV.ladderHtml(D.panel.ladder, MKF, PF)}${MV.tabsHtml(view.tab, counts)}${detail}${main}`;
+  };
+  const pv = () => {
+    const c = coOf(view.sel); const box = $('#mkPv'); if (!c || !box) return;
+    const side = view.side === 's' && c.held && c.held.qty ? 's' : 'b'; const amt = Math.max(0, Math.floor(+view.amount || 0));
+    const qty = side === 's' ? Math.min(amt, c.held.qty) : view.unit === 'qty' ? amt : (api.qtyFor ? api.qtyFor(c.id, amt) : 0);
+    const P = amt && api.preview ? api.preview(c.id, side, qty) : null;
+    box.innerHTML = MV.previewHtml(P ? { ...P, side } : amt ? { side, qty: 0 } : null, c, MKF, api.cash ? api.cash() : 0);
+  };
+  const mount = (card) => {
+    if (chart) { chart.destroy(); chart = null; }
+    const host = card.querySelector('.mk-detail .cdl-host'); const c = coOf(view.sel);
+    if (host && c) chart = cdlMount(host, series(c), { label: `נרות חודשיים של ${c.name} (${c.tk}). חיצים לבחירת חודש` });
+    pv();
+  };
+  const draw = (card, keepScroll = true) => { const b = card.querySelector('.wp-body'); if (!b) return; const st = card.scrollTop; b.innerHTML = body(); if (keepScroll) card.scrollTop = st; mount(card); };
+  const act = async (a, card) => {
+    if (busyAct) return; busyAct = true; sfx('click');
+    let r = null; try { r = await onAct(a); } catch (x) { r = { ok: false, error: x && x.message }; }
+    busyAct = false;
+    const c = $('#gmCard'); if (!c || !c.classList.contains('mpanel')) return;
+    D = get() || D; if (a.id === 'trade') view.amount = 0;
+    if (view.sel && !coOf(view.sel)) view.sel = null;   // a company that left the list (its claims paid) — back to the list
+    draw(c);
+    const msg = c.querySelector('.wp-msg'); if (msg) { msg.textContent = r && r.ok === false ? (r.error || 'לא אפשרי עכשיו') : (r && r.toast) || 'בוצע'; msg.className = 'wp-msg ' + (r && r.ok === false ? 'neg' : 'pos'); }
+    void card;
+  };
+  return (api.ready ? api.ready() : Promise.resolve()).catch(() => null).then(() => modal({ tag: 'הבורסה והתיק', color: '#a16207', title: D.panel.title || 'הבורסה והתיק', cls: 'wpanel mpanel', wide: true,
+    html: `<div class="wp-body">${body()}</div><p class="wp-msg" aria-live="polite"></p>`,
+    actions: [{ label: 'סגירה', cls: 'primary' }], dismissable: true,
+    onOpen: (c) => {
+      mount(c);
+      c.oninput = (e) => { if (e.target.id === 'mkAmt') { view.amount = +e.target.value || 0; pv(); } };
+      setTimeout(() => { const h = c.querySelector('#gmTitle'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } c.scrollTop = 0; }, 80);
+    },
+    onExtra: async (e) => {
+      const c = $('#gmCard');
+      const t = e.target.closest('[data-mtab]'); if (t) { view.tab = t.dataset.mtab; view.sel = null; sfx('click'); draw(c, false); c.querySelector(`[data-mtab="${view.tab}"]`)?.focus({ preventScroll: true }); return; }
+      const co = e.target.closest('[data-mco]'); if (co) { const id = co.dataset.mco; view.sel = view.sel === id ? null : id; view.side = 'b'; view.unit = 'cash'; view.amount = 0; sfx('click'); draw(c); if (view.sel) { const d = c.querySelector('#mkDetail'); d?.scrollIntoView({ block: 'start' }); d?.querySelector('.cdl-chart')?.focus({ preventScroll: true }); } return; }
+      const sd = e.target.closest('[data-mside]'); if (sd && !sd.disabled) { view.side = sd.dataset.mside; view.amount = 0; draw(c); c.querySelector(`[data-mside="${view.side}"]`)?.focus({ preventScroll: true }); return; }
+      const un = e.target.closest('[data-munit]'); if (un) { view.unit = un.dataset.munit; view.amount = 0; draw(c); c.querySelector(`[data-munit="${view.unit}"]`)?.focus({ preventScroll: true }); return; }
+      const q = e.target.closest('[data-mq]'); if (q) { view.amount = +q.dataset.mq || 0; const inp = c.querySelector('#mkAmt'); if (inp) inp.value = String(view.amount); pv(); return; }
+      const go = e.target.closest('[data-mgo]'); if (go && !go.disabled && go.dataset.mgo) {
+        if (go.classList.contains('risky') && go.dataset.arm !== '1') { go.dataset.arm = '1'; go.classList.add('arm'); const m0 = c.querySelector('.wp-msg'); if (m0) { m0.textContent = 'מכירה אי אפשר לבטל. לחיצה נוספת מאשרת.'; m0.className = 'wp-msg neg'; } return; }
+        await act({ id: 'trade', param: go.dataset.mgo }, c); return; }
+      const b = e.target.closest('button[data-wact]'); if (!b || b.disabled) return;
+      const a = (D.panel.actions || [])[+b.dataset.wact]; if (!a) return;
+      if (WP_CONFIRM.has(a.id) && b.dataset.arm !== '1') {
+        c.querySelectorAll('button[data-arm="1"]').forEach((x) => { x.dataset.arm = ''; x.classList.remove('arm'); });
+        b.dataset.arm = '1'; b.classList.add('arm'); sfx('click');
+        const m0 = c.querySelector('.wp-msg'); if (m0) { m0.textContent = `אי אפשר לבטל את זה. לחיצה נוספת על הכפתור מאשרת: ${a.label}`; m0.className = 'wp-msg neg'; }
+        return;
+      }
+      await act(a, c);
+    } })).then((v) => { if (chart) chart.destroy(); const c = $('#gmCard'); if (c) c.oninput = null; return v; });
 }

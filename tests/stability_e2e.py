@@ -22,8 +22,10 @@ ERRS = []         # unexpected page / console errors, per scenario
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 
 S = {  # exact Hebrew strings from the spec
-    'N1': 'הדפדפן הזה לא תומך בתלת־ממד, אז פתחנו את המשחק במצב קל. המשחק עצמו זהה.',
-    'N2': 'לא הצלחנו לטעון את התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.',
+    # team ב (BRIEF §8): one notice per real cause — texts from js/render/overlay.js STR
+    'N1': 'התלת־ממד (WebGL) לא זמין בדפדפן הזה כרגע, למשל כשהאצת החומרה כבויה. פתחנו את המשחק במצב קל, והמשחק עצמו זהה.',
+    'N2': 'לא הצלחנו להוריד את קבצי התלת־ממד, אז עברנו למצב קל. המשחק עצמו זהה.',
+    'N2s': 'התלת־ממד נטען לאט מדי ברשת הזאת, אז בינתיים עברנו למצב קל. המשחק עצמו זהה.',
     'N4': 'מצב קל פועל: לוח שטוח ומהיר, אותו משחק בדיוק.',
     'N5': 'לא הצלחנו להציג את הלוח, אבל אפשר להמשיך לשחק: הקוביות, הכרטיסים והדוח עובדים כרגיל.',
     'N6': 'חלק מהציורים לא נטענו, ובמקומם מופיעים סימנים פשוטים. זה לא משפיע על המשחק.',
@@ -60,7 +62,8 @@ PROBE = r"""(() => {
   setInterval(tick, 100);
   const hook = () => {
     const t = document.getElementById('toast'); if (!t) { setTimeout(hook, 50); return; }
-    new MutationObserver(() => { const s = (t.firstChild && t.firstChild.nodeType === 3 ? t.firstChild.textContent : t.textContent) || '';
+    // the main line only: a toast may add a second line (.tsub, e.g. "פרטים טכניים") and an action button
+    new MutationObserver(() => { const m = t.querySelector('.tmain'); const s = (m ? m.textContent : t.firstChild && t.firstChild.nodeType === 3 ? t.firstChild.textContent : t.textContent) || '';
       if (t.className.includes('on') && s && window.__toasts[window.__toasts.length - 1] !== s) window.__toasts.push(s); })
       .observe(t, { childList: true, characterData: true, subtree: true, attributes: true });
   };

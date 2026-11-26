@@ -63,6 +63,22 @@
 body[data-world=w2]{--accent-ink:light-dark(#9d1784,#ff4fd8)}
 body[data-world=w3]{--accent-ink:light-dark(#0b5f78,#38bdf8)}
 body[data-world=w4]{--accent-ink:light-dark(#6d28d9,#22d3ee)}
+body[data-world=w5]{--accent-ink:light-dark(#9a3412,#ff9f7f)}
+body[data-world=w6]{--accent-ink:light-dark(#9a3412,#fb923c)}
+body[data-world=w7]{--accent-ink:light-dark(#9b1c24,#ff8a93);--accent:#ec5562}   /* w7: the UI fill is a lighter red than the 3D awning #e63946 so --ink on it stays ≥ 4.5 */
+body[data-world=w8]{--accent-ink:light-dark(#854d0e,#facc15)}
+body[data-world=w9]{--accent-ink:light-dark(#155e75,#67e8f9)}
+body[data-world=w10]{--accent-ink:light-dark(#7a5a0a,#facc15)}   /* w10: the doc's #a16207 is 3.8:1 on --paper3 — a darker gold */
+body[data-world=w13]{--accent-ink:light-dark(#7f1d1d,#fca5a5);--accent:#f05252}   /* w13: the club red #dc2626 is the 3D accent / tile H; the UI fill is #f05252 so --ink on it stays ≥ 4.5 */
+body[data-world=w11]{--accent-ink:light-dark(#92400e,#fbbf24)}   /* w11: the doc's ink #b45309 is 3.98:1 on --paper3 — a darker amber; the fill #f59e0b keeps --ink at 7.9:1 */
+body[data-world=w15]{--accent-ink:light-dark(#4c1d95,#c4b5fd);--accent:#a78bfa}   /* w15: #7c3aed is the 3D accent / tile H (white ink 5.7:1); the UI fill is #a78bfa so --ink on it stays ≥ 4.5 */
+body[data-world=w12]{--accent-ink:light-dark(#14532d,#86efac);--accent:#4ade80}   /* w12: #166534 is the 3D accent / tile Z (white ink 7.1:1); the UI fill is #4ade80 so --ink on it stays ≥ 4.5 */
+body[data-world=w16]{--accent-ink:light-dark(#075985,#7dd3fc);--accent:#38bdf8}   /* w16: #0284c7 is the 3D accent / tile H; the UI fill is #38bdf8 so --ink on it stays ≥ 4.5 */
+body[data-world=w14]{--accent-ink:light-dark(#334155,#cbd5e1);--accent:#94a3b8}   /* w14: #475569 is the 3D accent / tile J (white 7.6:1); the UI fill is #94a3b8 so --ink on it stays ≥ 4.5 */
+body[data-world=w17]{--accent-ink:light-dark(#115e59,#5eead4);--accent:#2dd4bf}   /* w17: #0d9488 is the 3D accent / tile V; the UI fill is #2dd4bf so --ink on it stays ≥ 4.5 */
+body[data-world=w18]{--accent-ink:light-dark(#3730a3,#a5b4fc);--accent:#818cf8}   /* w18: #4f46e5 is the 3D accent (tile Z #312e81); the UI fill is #818cf8 so --ink on it stays ≥ 4.5 */
+body[data-world=w19]{--accent-ink:light-dark(#7c2d12,#fdba74);--accent:#fbbf24}   /* w19: brass #b45309 is the 3D accent / tile W; the UI fill is #fbbf24 */
+body[data-world=w20]{--accent-ink:light-dark(#155e75,#22d3ee);--accent:#22d3ee}   /* w20: screen cyan #22d3ee is the 3D accent and the UI fill (tile W #0e7490) */
 body[data-world=h]{--accent-ink:light-dark(#7a5520,#c8a24a);--accent:#c8a24a;--accent2:#c8a24a}
 
 /* ============================================================ base */
