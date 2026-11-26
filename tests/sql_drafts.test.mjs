@@ -4,7 +4,7 @@
 // RPCs are called like PostgREST would (SECURITY DEFINER functions, raised codes). It also drives the Edge Function's write path
 // (supabase/functions/room/room_store.js + room_core.js + the pinned engine) against these tables. Nothing touches a real Supabase.
 //   RR_PGLITE=/path/to/node_modules/@electric-sql/pglite node tests/sql_drafts.test.mjs
-// Without PGlite the suite prints SKIP and exits 0 (it is not vendored; install it anywhere: npm i @electric-sql/pglite).
+// Without PGlite the suite prints SKIP and exits 0 (it is not vendored; install the package @electric-sql/pglite anywhere).
 // What this does NOT prove (live-only): PostgREST mapping, grants as seen by the anon key, response.status commit semantics,
 // real concurrency of FOR UPDATE under load, Supabase's actual extension schema.
 import assert from 'node:assert/strict';
