@@ -133,6 +133,8 @@ PARAMS.update({
     'rr_admin_delete_chat': AUTH + ('p_msg',),
     'rr_admin_reports': AUTH,
     'rr_admin_mod_log': AUTH + ('p_before',),
+    # account deletion (supabase/migrations/20261127_delete_account.sql) — js/net.js deleteAccount
+    'rr_delete_account': AUTH + ('p_confirm',),
 })
 PARAMS_NEXT = {}
 OPTIONAL = {'p_ref', 'p_challenge', 'p_pawn', 'p_meta', 'p_group', 'p_char', 'p_since', 'p_conn', 'p_before', 'p_description', 'p_rules',
@@ -219,6 +221,7 @@ class FakeBackend:
         self.calls = collections.Counter(); self.log = []; self.blocked = []; self.unexpected = []
         self.requests = []          # (fn | 'verify', body) unredacted, in order — test-side inspection only
         self.admins = set(); self.admin_code = 'TEST-ADMN-CODE'; self.admin_used = False   # migration 20261123_admin
+        self.deletions = []                               # 20261127_delete_account: game.account_deletions (no personal data)
         self.bans = {}; self.mod_log = []                 # draft 20261126_admin_mod_chat: player → {reason, by, until (dt | None), at}; append-only log
         self.meta = {}              # free-form data a suite stores with dump() (e.g. which seeded player is "A")
         self.verify_queue = []; self._fail = {}; self._fail_net = {}; self._over = {}
@@ -814,7 +817,44 @@ class FakeBackend:
     def _rr_claim_energy(self, b):
         p = self._auth(b); mine = [x for x in self.gifts if x['to'] == p['id'] and not x['claimed']]
         for x in mine: x['claimed'] = True
-        return {'total': sum(x['amount'] for x in mine), 'from': [{'nickname': self.P[x['from']]['nickname'], 'kind': x['kind'], 'amount': x['amount']} for x in mine]}
+        return {'total': sum(x['amount'] for x in mine), 'from': [{'nickname': self.P[x['from']]['nickname'] if x['from'] in self.P else None, 'kind': x['kind'], 'amount': x['amount']} for x in mine]}
+    # ---- account deletion — supabase/migrations/20261127_delete_account.sql (public.rr_delete_account → game.delete_player).
+    # Mirrors: auth, admin refused, confirm = the current nickname (trimmed), owned groups → the oldest remaining member (groups v2: the
+    # oldest admin first), a sole-member group deleted with its challenges and their results, every gift he sent kept for the
+    # receivers (from → None), then everything of his removed. Live rooms are not modelled here (the `rooms` flag is off; the SQL test
+    # tests/account_delete_sql.test.mjs covers them).
+    def _rr_delete_account(self, b):
+        p = self._auth(b); pid = p['id']
+        if pid in self.admins: self._err('admin_cannot_delete')
+        c = b.get('p_confirm')
+        if not isinstance(c, str) or c.strip() != p['nickname']: self._err('confirm_mismatch')
+        tr = dl = 0
+        for g in [g for g in list(self.G.values()) if g['owner'] == pid]:
+            rest = [m for m in g['members'] if m != pid]
+            if not rest:
+                gone = {cid for cid, ch in self.C.items() if ch['group'] == g['id']}
+                for cid in gone: del self.C[cid]
+                for rid in [rid for rid, r in self.R.items() if r.get('challenge') in gone]: del self.R[rid]
+                del self.G[g['id']]; dl += 1; continue
+            admins = [m for m in rest if g.setdefault('roles', {}).get(m) == 'admin']
+            g['owner'] = (admins or rest)[0]; g['roles'].pop(g['owner'], None); tr += 1
+            self._glog(g, 'owner', None, g['owner'], {'auto': True, 'why': 'account_deleted'})
+        for g in self._groups_of(pid):
+            g['members'].remove(pid); g.setdefault('roles', {}).pop(pid, None); g.setdefault('handles', {}).pop(pid, None); g.setdefault('bans', {}).pop(pid, None)
+        for g in self.G.values():
+            for e in g.get('log', []):
+                if e.get('actor') == pid: e['actor'] = None
+                if e.get('target') == pid: e['target'] = None
+        for rid in [rid for rid, r in self.R.items() if r['player'] == pid]: del self.R[rid]
+        for x in self.gifts:
+            if x['from'] == pid and x['to'] != pid: x['from'] = None      # every gift he sent stays (pending ⚡ + the referral cap's count)
+        self.gifts = [x for x in self.gifts if pid not in (x['from'], x['to'])]
+        self.feed = [f for f in self.feed if f['player'] != pid]
+        self.bans.pop(pid, None); self.join_fails.pop(pid, None)
+        for k in [k for k in self.events_today if pid in k]: del self.events_today[k]
+        del self.P[pid]
+        self.deletions.append({'via': 'app', 'groups_transferred': tr, 'groups_deleted': dl, 'at': self.iso()})
+        return {'deleted': True, 'groups_transferred': tr, 'groups_deleted': dl}
     # ---- owner (admin) — supabase/migrations/20261123_admin.sql
     def _rr_admin_status(self, b):
         p = self._auth(b); return {'admin': p['id'] in self.admins}

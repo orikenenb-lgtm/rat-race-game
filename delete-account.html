@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מחיקת חשבון — מירוץ העכברים | Delete your account — Rat Race</title>
+<meta name="description" content="איך מוחקים את החשבון במשחק מירוץ העכברים ואת כל המידע שלו (Kinan Studio). How to delete your Rat Race account and all its data.">
+<style>
+  :root { color-scheme: light dark; --bg: #fffaf0; --fg: #1f1a14; --muted: #6b5d4b; --card: #ffffff; --line: #e8dcc6; --accent: #8a5a00;
+    --red: #b3261e; --red-bg: #fde8e8; --ok: #13744a; --ok-bg: #e3f6ec; --focus: #2f6fdb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #17130e; --fg: #f3ece1; --muted: #c2b39d; --card: #221c15; --line: #3a3024; --accent: #f2b632;
+    --red: #ff8a80; --red-bg: #3a1717; --ok: #3ccf8a; --ok-bg: #173527; --focus: #7aa7ff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 18px 48px; }
+  section, .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px; margin: 0 0 22px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 20px 0 6px; }
+  .card h2 { margin-top: 0; }
+  .meta { color: var(--muted); margin: 0 0 12px; }
+  ul, ol { padding-inline-start: 1.3em; margin: 6px 0; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  nav { text-align: center; margin: 0 0 18px; }
+  nav a { margin: 0 10px; }
+  [lang="en"] { direction: ltr; text-align: left; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  button, input { font: inherit; }
+  input[type="text"], input:not([type]) { width: 100%; min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); font-size: 16px; }
+  label { display: block; margin: 10px 0 4px; }
+  .btn, .chip { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+  .mail { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 10px; background: var(--accent); color: var(--bg); font-weight: 700; text-decoration: none; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  .note { color: var(--muted); font-size: 15px; margin: 6px 0 0; }
+  .err { color: var(--red); font-size: 15px; margin: 6px 0 0; }
+  .err:empty { display: none; }
+  .ok { padding: 10px 12px; border-radius: 10px; background: var(--ok-bg); color: var(--ok); font-weight: 700; }
+  /* the account-deletion flow (js/account.js — the same markup as in the game) */
+  .lb-note { color: var(--muted); font-size: 15px; margin: 6px 0 0; }
+  .lb-sub { font-size: 1rem; margin: 14px 0 2px; }
+  .chip.danger { border-color: var(--red); color: var(--red); font-weight: 700; }
+  .acct-box { margin-top: 10px; }
+  .acct-p { margin: 4px 0; }
+  .acct-nick { unicode-bidi: isolate; }
+  .acct-form label.acct-check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+  .acct-check input { width: 24px; height: 24px; flex: none; accent-color: var(--red); }
+  .acct-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .acct-next, .acct-danger { min-height: 44px; padding: 0 18px; border-radius: 10px; font-weight: 800; cursor: pointer; }
+  .acct-next { background: transparent; border: 1.5px solid var(--red); color: var(--red); }
+  .acct-danger { background: var(--red); color: var(--bg); border: 0; }
+  .acct-danger:disabled { opacity: .7; cursor: progress; }
+  .acct-warn { margin: 0; padding: 12px; border-radius: 10px; background: var(--red-bg); font-weight: 700; }
+  .acct-done { margin: 0; padding: 12px; border-radius: 10px; background: var(--ok-bg); color: var(--ok); font-weight: 700; }
+  [hidden] { display: none !important; }
+  .sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+<nav><a href="#he">עברית</a> · <a href="#en" lang="en">English</a> · <a href="./">למשחק</a></nav>
+
+<section id="he" lang="he" dir="rtl">
+  <h1>מחיקת חשבון — מירוץ העכברים</h1>
+  <p class="meta">Kinan Studio · עודכן: 27 בנובמבר 2026</p>
+
+  <h2>מתוך המשחק</h2>
+  <ol>
+    <li>במסך הראשי של המשחק לוחצים למעלה על <b>הכינוי שלך</b> (הפרופיל).</li>
+    <li>גוללים לסוף העמוד, לכרטיס <b>„מחיקת החשבון”</b>, ולוחצים <b>„מחיקת החשבון…”</b>.</li>
+    <li>מקלידים את הכינוי שלך, לוחצים <b>„המשך”</b> ואז <b>„כן, למחוק לצמיתות”</b>.</li>
+  </ol>
+  <p>המחיקה מתבצעת מיד בשרת.</p>
+
+  <h2>בלי האפליקציה</h2>
+  <p>אם שיחקת בדפדפן הזה, אפשר למחוק כאן, בטופס שלמטה. יש לך <b>קוד שחזור</b> (בפרופיל: „להעביר את השחקן למכשיר אחר”)? אפשר להדביק אותו כאן ולמחוק. אפשר גם לבקש מחיקה במייל.</p>
+</section>
+
+<div class="card" id="webTool">
+  <h2>מחיקה מהדפדפן הזה</h2>
+  <p class="sr" id="webStatus" role="status"></p>
+  <noscript><p class="note">כדי למחוק מכאן צריך JavaScript. אפשר לבקש מחיקה במייל (למטה).</p></noscript>
+  <p class="note" id="webLoading">בודקים אם יש בדפדפן הזה חשבון של המשחק…</p>
+  <div id="webNone" hidden>
+    <p>בדפדפן הזה אין חשבון של המשחק.</p>
+    <form id="webRestore" novalidate>
+      <label for="webCode">יש לך קוד שחזור? הדבק אותו כאן</label>
+      <div class="row"><input id="webCode" name="code" dir="ltr" autocomplete="off" spellcheck="false" aria-describedby="webCodeErr webCodeNote"><button class="btn" type="submit">להמשיך</button></div>
+      <p class="err" id="webCodeErr" role="alert"></p>
+      <p class="note" id="webCodeNote">הקוד נבדק מול השרת ואז מופיע טופס המחיקה. אם לא תמחק, החשבון יישאר מחובר בדפדפן הזה.</p>
+    </form>
+  </div>
+  <div id="webHas"></div>
+</div>
+
+<div class="card" id="mail">
+  <h2>בקשה במייל</h2>
+  <p>שולחים מייל ל־<a href="mailto:orikenen.b@gmail.com">orikenen.b@gmail.com</a> עם <b>הכינוי שלך במשחק</b>.</p>
+  <ol>
+    <li>כינויים גלויים לכולם, אז קודם מוודאים שהחשבון שלך: נשלח לך במייל חוזר <b>מילת אימות חד־פעמית</b>.</li>
+    <li>משנים את הכינוי במשחק למילה הזו (פרופיל ← „שינוי כינוי”), או פשוט מוחקים מתוך המשחק.</li>
+    <li>אחרי זה נמחק את החשבון תוך <b>30 יום</b> לכל היותר (בדרך כלל הרבה יותר מהר) ונאשר לך במייל.</li>
+  </ol>
+  <label for="mailNick">הכינוי שלך (לא חובה — נכנס לגוף המייל)</label>
+  <input id="mailNick" dir="auto" maxlength="20" autocomplete="off">
+  <p style="margin-top:12px"><a class="mail" id="mailLink" href="mailto:orikenen.b@gmail.com?subject=%D7%91%D7%A7%D7%A9%D7%94%20%D7%9C%D7%9E%D7%97%D7%99%D7%A7%D7%AA%20%D7%97%D7%A9%D7%91%D7%95%D7%9F%20%E2%80%94%20%D7%9E%D7%99%D7%A8%D7%95%D7%A5%20%D7%94%D7%A2%D7%9B%D7%91%D7%A8%D7%99%D7%9D%20%2F%20Account%20deletion%20request%20%E2%80%94%20Rat%20Race">לכתוב מייל לבקשת מחיקה</a></p>
+  <p class="note">אין לך יותר גישה למשחק (מכשיר שאבד, בלי קוד שחזור)? כתוב לנו מה אתה זוכר על החשבון (למשל שמות של הקבוצות שלך ובערך מתי נרשמת). נחליט לפי המקרה, וייתכן שלא נוכל לאמת. לעולם לא נבקש סיסמה או קוד שחזור — אין סיסמאות במשחק, ואת קוד השחזור לא שולחים לאף אחד.</p>
+</div>
+
+<section lang="he" dir="rtl">
+  <h2>מה נמחק</h2>
+  <ul>
+    <li>הכינוי שלך והמזהה האקראי של השחקן.</li>
+    <li>כל התוצאות: האתגר היומי, השבועי ואתגרי הקבוצות, כולל משחקים שנשמרו בשרת.</li>
+    <li>ההתקדמות שנשמרה בשרת: כוכבים, הישגים, רצף ימים, הכלי שבחרת.</li>
+    <li>החברות שלך בקבוצות, העדכונים שלך בפיד של החברים, וזריקות ⚡ שחיכו לך.</li>
+    <li>קבוצה שאתה מנהל עוברת לחבר הוותיק ביותר שנשאר בה. קבוצה שאתה החבר היחיד בה נמחקת עם האתגרים שלה.</li>
+    <li>במכשיר: מחיקה מתוך המשחק או מהעמוד הזה מוחקת מהדפדפן את פרטי החשבון. אפשר לבחור למחוק גם את ההתקדמות במכשיר (כוכבים, משחקים שמורים, שיעורים).</li>
+  </ul>
+  <h2>מה נשאר</h2>
+  <ul>
+    <li>שום מידע אישי עליך. הכינוי שלך לא יופיע יותר בשום טבלה.</li>
+    <li>שם של קבוצה או של אתגר שיצרת בקבוצה שממשיכה להתקיים נשאר אצל חברי הקבוצה, בלי שום קישור אליך. זריקות ⚡ ששלחת וחבר עוד לא אסף נשארות אצלו, בלי השם שלך.</li>
+    <li>רשומה סטטיסטית אחת שמחיקה התבצעה (תאריך ומספר הקבוצות שהועברו), בלי כינוי ובלי מזהה.</li>
+    <li>ספקי האחסון (GitHub Pages ו־Supabase) עשויים לשמור רישומים טכניים רגילים, כמו כתובת IP, ועותקי גיבוי שנמחקים לפי מחזור הגיבוי שלהם.</li>
+  </ul>
+  <h2>חשוב לדעת</h2>
+  <ul>
+    <li><b>המחיקה סופית.</b> אי אפשר לשחזר את החשבון, גם לא עם קוד השחזור.</li>
+    <li>אפשר תמיד להמשיך לשחק כאורח או לבחור כינוי חדש (חשבון חדש, מאפס).</li>
+    <li>פרטים נוספים ב<a href="privacy.html">מדיניות הפרטיות</a>.</li>
+  </ul>
+</section>
+
+<section id="en" lang="en" dir="ltr">
+  <h1>Delete your account — Rat Race (מירוץ העכברים)</h1>
+  <p class="meta">by Kinan Studio · Last updated: 27 November 2026</p>
+
+  <h2>In the game</h2>
+  <ol>
+    <li>On the game's main screen, tap <b>your nickname</b> at the top (your profile).</li>
+    <li>Scroll to the bottom, to the <b>“מחיקת החשבון” (Delete account)</b> card, and tap <b>“מחיקת החשבון…”</b>.</li>
+    <li>Type your nickname, tap <b>“המשך” (Continue)</b>, then <b>“כן, למחוק לצמיתות” (Yes, delete permanently)</b>.</li>
+  </ol>
+  <p>The account is deleted on the server immediately.</p>
+
+  <h2>Without the app</h2>
+  <ul>
+    <li><b>In this browser:</b> if you played in this browser, or you have your <b>recovery code</b> (profile → “להעביר את השחקן למכשיר אחר”), use the form above (in Hebrew): type your nickname, tap “המשך”, then “כן, למחוק לצמיתות”.</li>
+    <li><b>By email:</b> write to <a href="mailto:orikenen.b@gmail.com?subject=Account%20deletion%20request%20%E2%80%94%20Rat%20Race">orikenen.b@gmail.com</a> with your <b>in-game nickname</b>. Nicknames are public, so we first check the account is yours: we reply with a <b>one-time word</b>; change your nickname in the game to that word (profile → “שינוי כינוי”), or simply delete in the game. We then delete the account within <b>30 days</b> at the latest (usually much sooner) and confirm by email.</li>
+    <li><b>Lost access</b> (lost device, no recovery code)? Tell us what you remember about the account (for example your groups' names, roughly when you joined). We decide case by case and may not be able to verify it. We never ask for a password or your recovery code — the game has no passwords, and the recovery code is never sent to anyone.</li>
+  </ul>
+
+  <h2>What is deleted</h2>
+  <ul>
+    <li>Your nickname and your random player ID.</li>
+    <li>All your results: daily, weekly and group challenges, including games saved on the server.</li>
+    <li>Your server-side progress: stars, achievements, daily streak, chosen game piece.</li>
+    <li>Your group memberships, your posts in friends' feeds, and ⚡ gifts waiting for you.</li>
+    <li>A group you own passes to its longest-standing remaining member. A group where you are the only member is deleted with its challenges.</li>
+    <li>On the device: deleting in the game or on this page removes the account from that browser; you can choose to remove the progress stored on the device as well.</li>
+  </ul>
+  <h2>What is kept</h2>
+  <ul>
+    <li>No personal data about you. Your nickname no longer appears on any leaderboard.</li>
+    <li>Names of groups or challenges you created in a group that continues stay with its members, no longer linked to you. ⚡ gifts you sent that a friend has not collected yet stay with them, without your name.</li>
+    <li>One statistical record that a deletion happened (date and number of groups handed over), with no nickname and no ID.</li>
+    <li>Our hosting providers (GitHub Pages and Supabase) may keep standard technical logs, such as IP addresses, and backup copies that expire on their normal backup cycle.</li>
+  </ul>
+  <h2>Good to know</h2>
+  <ul>
+    <li><b>Deletion is permanent.</b> The account cannot be restored, not even with the recovery code.</li>
+    <li>You can always keep playing as a guest or pick a new nickname (a new account, from zero).</li>
+    <li>More in the <a href="privacy.html">privacy policy</a>.</li>
+  </ul>
+</section>
+</main>
+<script type="module" src="js/delete-page.js"></script>
+</body>
+</html>
