@@ -11,12 +11,13 @@ Google Play דורש שני דברים: (1) אפשר למחוק את החשבו�
   - אם שיחקו בדפדפן הזה, אפשר למחוק ישר מהעמוד.
   - עם קוד שחזור אפשר למחוק מכל דפדפן.
   - בכל מקרה אפשר לשלוח מייל. מבטיחים לטפל בבקשה תוך 30 יום.
+  - כינויים גלויים לכולם, ולכן במייל מוחקים רק אחרי הוכחה שהחשבון של השולח. עונים לו עם מילה חד־פעמית, והוא משנה את הכינוי במשחק למילה הזו.
 - **הקבוצות:** קבוצה שהשחקן מנהל עוברת לחבר הוותיק ביותר. קבוצה שהוא החבר היחיד בה נמחקת.
 - **מה צריך ממך, לפי הסדר:**
   1. לאשר את הפעלת המיגרציה בשרת.
   2. למזג את האתר.
   3. למלא שתי תשובות ב־Play Console (§2 למטה).
-- **בקשה במייל:** מטפלים בה עם שאילתה אחת (§4).
+- **בקשה במייל:** קודם אימות במילה חד־פעמית, אחר כך שאילתה אחת (§4).
 
 ## 1. What was built
 
@@ -27,6 +28,13 @@ Google Play דורש שני דברים: (1) אפשר למחוק את החשבו�
 | public page (Hebrew RTL + English, no analytics) | `delete-account.html`, `js/delete-page.js` |
 | privacy policy: deletion section links the page (he + en), mentions in-app deletion | `privacy.html` |
 | tests | `tests/account_delete_sql.test.mjs` (PGlite), `tests/account_local.test.mjs`, `tests/account_delete_e2e.py`, `tests/fakebackend.py` (+ `fakebackend_test.py`) |
+
+Client behaviour worth knowing:
+- **Nickname changed on another device:** opening the box asks the server for the current nickname (`net.refreshNickname`). A server `confirm_mismatch` does the same, then returns to step 1 with the new name.
+- **Server answers `unauthorized`:** the account was already deleted elsewhere. This device forgets the identity too, so no dead account is left behind.
+- **HTTP 404 PGRST202** (site released before the migration): the message is "המחיקה עוד לא זמינה…" with the e-mail address.
+- **Other open tabs of the game:** they reload as soon as `rr-player` disappears, so they cannot save the old progress back.
+- **The admin:** sees a short note instead of the card. The server refuses an admin anyway.
 
 ### RPC contract
 
@@ -50,9 +58,11 @@ Success returns exactly `{"deleted": true, "groups_transferred": n, "groups_dele
 - **Data safety → "Do you provide a way for users to request that their data is deleted?"** Yes. Users can delete in the app and on the web page; e-mail requests are handled within 30 days.
 - **"Is all of the user data collected by your app encrypted in transit?"** Yes (HTTPS only).
 - **Account creation:** the app creates an account (nickname + random id, no e-mail or password). In-app deletion is available: Profile → מחיקת החשבון.
-- **Data types the deletion covers.** This is a suggestion; the owner confirms the full Data safety form. All of these are deleted on request:
-  - Personal info → *User IDs*: the nickname and the random player id.
-  - App activity → *In-app actions* and *Other user-generated content*: results, progress, group membership, feed events.
+- **Data types.** The owner confirms the full form. All of these are deleted on request:
+  - Personal info → **Name**: the nickname. It is chosen by the player and need not be a real name, but it is shown to other players, so declare it.
+  - Personal info → **User IDs**: the random player id.
+  - App activity → *In-app actions* and *Other user-generated content*: results, progress, group memberships and names, feed events.
+- **Backup retention: OPEN.** Check the Supabase plan's backup retention before quoting a number anywhere.
 
 ### What is deleted
 
@@ -85,10 +95,11 @@ All of it is deleted at once, on the server.
 | retained | why |
 |---|---|
 | Names of groups and titles of challenges he created inside groups that continue (`challenges.created_by` → null). | They are shared content that the other members' results hang on. Nothing links them to him any more. |
-| Unclaimed ⚡ gifts or referral bonuses he sent (`from_id` → null; the receiver sees "חבר"). | They belong to the receiver. |
+| Every ⚡ gift or referral bonus he sent (`from_id` → null; the receiver sees "חבר"), claimed or not. | Pending ones belong to the receiver. Every row also keeps counting toward `rr_register2`'s referral cap (5 a day per referrer), so "register with ?ref, delete, repeat" cannot farm ⚡ past the cap (tested). |
 | `players.referred_by` of the friends he invited is set to null. | That is the other players' row; only the link goes. |
 | `game.account_deletions`: date, `app`/`manual`, and counts of groups transferred, groups deleted and rooms handed over. | Proof that requests are executed. It holds no id and no nickname. |
 | Moderation draft only: `game.mod_log` rows about him keep the random player id. | Append-only admin record by design. The nickname is not stored there, and the id matches no account any more. |
+| Free text written by the admin: ban reasons (`mod_log.data.reason`) and the groups v2 `group_log` removal reason. | This text is never scrubbed. **Admins must not write nicknames or other personal details there.** |
 | Hosting providers' technical logs (IP) and automatic backups. | These are the providers' normal operation. **Open: the owner must check the Supabase plan's backup retention** before quoting a number. |
 
 **Edge case (documented, tested):** results that **former** members left on the challenges of a group that gets deleted are deleted with it, because the group's only remaining member was him. This is the same as the live `rr_leave_group` when the last member leaves. Those former members already could not see the group.
@@ -122,44 +133,64 @@ If it copies a nickname into text or json, it must also extend `game.delete_play
 
 ## 4. E-mail requests: manual procedure (MCP `execute_sql`, owner)
 
-Reply within 30 days. Never ask for the recovery code by e-mail; it is a secret. The nickname plus one detail is enough.
+Nicknames are public, so a nickname alone proves nothing. Delete only after the sender proves control of the account. Reply within 30 days.
+
+1. **Reply with a one-time word.** Example reply: "כדי לוודא שהחשבון שלך, שנה בפרופיל את הכינוי ל־`מחק־4821` (פרופיל ← שינוי כינוי) ותענה למייל הזה. אפשר גם פשוט למחוק מתוך המשחק."
+   - Make the word unique each time: a short word plus 4 random digits, within 20 characters.
+   - Never ask for the recovery code; it is a secret.
+2. **When they answer, find the account by the one-time word** (read-only). Exactly one row means proof of control. Zero rows means: wait, or ask again.
 
 ```sql
--- 1. find (read-only). Several rows with the same nickname → ask the sender for a detail (a group name, roughly when they joined).
 select p.id, p.nickname, p.created_at, p.total_stars, game.is_admin(p.id) as admin,
-       (select string_agg(g.name, ', ' order by g.name) from game.group_members m join game.groups g on g.id = m.group_id where m.player_id = p.id) as groups,
-       (select count(*) from game.results r where r.player_id = p.id) as results
-  from game.players p where p.nickname = btrim('<nickname from the e-mail>') order by p.created_at;
+       (select string_agg(g.name, ', ' order by g.name) from game.group_members m join game.groups g on g.id = m.group_id where m.player_id = p.id) as groups
+  from game.players p where p.nickname = btrim('<the one-time word>');
+```
 
--- 2. delete exactly that id (same logic as the in-app button: groups handed over / deleted, everything of his removed).
+3. **Delete exactly that id.** This is the same logic as the in-app button: groups are handed over or deleted, and everything of his is removed.
+
+```sql
 begin;
-select game.delete_player('<id from step 1>'::uuid, 'manual');   -- → {"deleted":true,"groups_transferred":n,"groups_deleted":m}
+select game.delete_player('<id from step 2>'::uuid, 'manual');   -- → {"deleted":true,"groups_transferred":n,"groups_deleted":m}
 select count(*) from game.players where id = '<id>';              -- → 0
 commit;                                                            -- or: rollback;  (nothing changes)
 ```
 
+4. **Answer the e-mail:** "החשבון נמחק" / "Your account has been deleted". Keep no copy of the nickname or the word in your notes.
+
+**Lost access** (no device, no recovery code, so they cannot rename): this is a judgement call.
+- Ask for what only the owner would know, such as the names of their groups or roughly when they joined.
+- Compare it with the read-only query by the old nickname: the query from step 2 with `p.nickname = '<old nickname>'`, plus `p.created_at`.
+- Delete only when it matches clearly. When in doubt, decline politely and explain why: deleting someone else's account cannot be undone.
+
+**Errors:**
 - `admin_cannot_delete`: that is the owner's own account. Remove the `game.admins` row on purpose first.
 - `unauthorized`: the id does not exist (already deleted).
-- Answer the e-mail: "החשבון נמחק" / "Your account has been deleted". Keep no copy of the nickname in your notes.
 
-## 5. Verification (2026-11-27, worktree `work/account-delete`)
+## 5. Verification (2026-11-27, worktree `work/account-delete`, after the review fixes)
 
-- `tests/account_delete_sql.test.mjs` (PGlite): **68/68**.
+- `tests/account_delete_sql.test.mjs` (PGlite): **72/72**.
   - Live stack; additive check (23 objects added, 0 changed); grants; anon role; atomic; ROLLBACK.
-  - The contract on four stacks: live / drafts before / drafts after / rooms + moderation.
+  - The contract on four stacks: live / drafts before / drafts after / rooms + moderation, including the referral cap after delete-and-repeat.
   - groups v2 admin preference in both orders; rooms + moderation in four orders; foreign-key catalog guard.
-- Real PostgreSQL 17 + PostgREST 13 (local `tools/staging`, migration applied before the drafts):
+- Real PostgreSQL 17 + PostgREST 13 (local `tools/staging`, migration applied before the drafts; this was the first version of the migration):
   - grants: service_role through default privileges;
   - the HTTP error bodies;
   - the lock: a parallel call waits, then `unauthorized`;
   - `game.delete_player` is not reachable through REST (PGRST202).
-- `tests/account_local.test.mjs` **7/7**; `tests/fakebackend_test.py --no-browser` **20/20**; `tests/account_delete_e2e.py` **70/70** (desk 1300, phone 390, 360 layout, page with and without identity).
+- `tests/account_local.test.mjs` **7/7**; `tests/fakebackend_test.py --no-browser` **20/20**; `backend_contract.mjs` (fake) **185/185**.
+- `tests/account_delete_e2e.py` **81/81**:
+  - desk 1300 and phone 390 (with a second open tab), plus a 360 layout pass;
+  - nickname renamed on another device;
+  - account already deleted elsewhere;
+  - RPC missing (404);
+  - admin note;
+  - the page with and without an identity, plus the verification text;
+  - privacy links.
 - Regressions:
-  - `backend_contract.mjs`: **185/185** against the fake.
   - progress 57, saves 105, flags 16, groups 126, ckpt_roundtrip 242, admin_unlock 19: all pass.
-  - `node tools/build-edge.mjs --check`: green (the engine pin is unchanged).
+  - `build-edge --check`: green.
   - `guard_lint`: 0 violations.
-  - `lobby_e2e.py`: **46/46**.
-  - `p0b_unrecorded_win.py`: **21/21**. A first run timed out at the start of part B while other suites ran in parallel. Run alone it passes, and so does `origin/main`.
+  - `lobby_e2e`: **46/46**.
+  - `p0b_unrecorded_win`: **21/21**.
 - `tests/run_all.sh` rows: `account_local` (tier 0), `account_delete_sql` (tier 1), `account_delete_e2e` (tier 2).
 - Screenshots: `docs/full-upgrade/shots/account-delete/`.
