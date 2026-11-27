@@ -94,6 +94,9 @@ const ERR = {
   bad_reason: 'סיבה: 2–200 תווים',
   room_not_open: 'החדר כבר לא פתוח',
   player_not_in_room: 'השחקן כבר לא בחדר',
+  // account deletion (20261127_delete_account.sql; docs/full-upgrade/ACCOUNT_DELETION.md)
+  confirm_mismatch: 'הכינוי שהקלדת לא תואם לכינוי של החשבון',
+  admin_cannot_delete: 'את החשבון של מנהל המשחק אי אפשר למחוק מכאן. כתבו לנו במייל.',
 };
 
 let me = null;
@@ -105,7 +108,7 @@ async function rpc(fn, args = {}) {
   let r;
   try {
     r = await fetch(`${SB}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { apikey: SBK, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
-  } catch (e) { throw new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.'); }
+  } catch (e) { const er = new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.'); er.code = 'offline'; throw er; }
   const j = await r.json().catch(() => null);
   if (!r.ok) { const e = new Error(ERR[j?.message] || 'משהו השתבש בשרת. נסה שוב.'); e.code = j?.message; throw e; }
   return j;
@@ -138,6 +141,14 @@ export const net = {
   async rename(nickname) { const r = await rpc('rr_rename', { ...auth(), p_nickname: nickname }); me.nickname = r.nickname; store(); return me; },
   /** {id,nickname,stars:{w1..w4},total_stars,achievements[],pawn,daily_streak,best_streak,last_daily} */
   profile: () => rpc('rr_profile', auth()),
+  /** Deletes the account and its data on the server (confirm = the current nickname; the server checks it again). On success the
+   *  identity is forgotten here too ('rr-player'); other local keys are js/account.js clearLocal's job.
+   *  → {deleted:true, groups_transferred, groups_deleted}; throws code confirm_mismatch / admin_cannot_delete / unauthorized / offline. */
+  async deleteAccount(confirm) {
+    const r = await rpc('rr_delete_account', { ...auth(), p_confirm: String(confirm ?? '') });
+    me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+    return r;
+  },
   /** merges on the server (max stars per world, union of achievements); returns profile */
   /** meta = {games, wins, best:{w1:months…}} — server keeps max games/wins and min best months */
   syncProgress: ({ stars, achievements, pawn, meta }) => rpc('rr_sync_progress2', { ...auth(), p_stars: stars || {}, p_achievements: achievements || [], p_pawn: pawn || null, p_meta: meta || null }),

@@ -38,9 +38,11 @@ render_api|0|all|node|tests/render_api.test.mjs:T1|none|n/a|n/a|300|node tests/r
 contrast|0|all|node|tests/contrast.test.mjs:T5|none|n/a|n/a|300|node tests/contrast.test.mjs
 preload|0|all|node|tests/preload.test.mjs:T7|none|n/a|n/a|120|node tests/preload.test.mjs
 build_edge_check|0|all|node|tools/build-edge.mjs:engine|none|n/a|n/a|120|node tools/build-edge.mjs --check
+account_local|0|all|node|tests/account_local.test.mjs:lobby|none|n/a|n/a|120|node tests/account_local.test.mjs
 fakebackend_test|0|all|python|tests/fakebackend_test.py:T7|fake|replay|swiftshader|900|python3 tests/fakebackend_test.py
 backend_contract|0|all|node|tests/backend_contract.mjs:T7|fake|replay|n/a|900|node tests/backend_contract.mjs
 verify|1|engine,backend,tests|node|tests/verify.test.mjs:engine|none|n/a|n/a|1200|node tests/verify.test.mjs
+account_delete_sql|1|backend,tests|node|tests/account_delete_sql.test.mjs:backend|pglite|n/a|n/a|1200|node tests/account_delete_sql.test.mjs
 determinism|1|engine,backend,tests|node|tests/determinism.test.mjs:engine|none|n/a|n/a|1800|node tests/determinism.test.mjs
 engine|1|engine,backend,tests|node|tests/engine.test.mjs:engine|none|n/a|n/a|5400|node tests/engine.test.mjs
 t2|1|engine,backend,tests|node|tests/t2.test.mjs:engine (T2)|none|n/a|n/a|1800|node tests/t2.test.mjs
@@ -53,6 +55,7 @@ lobby_smoke|1|all|browser|tests/lobby_smoke.py:T7|fake|n/a|swiftshader|900|pytho
 admin_e2e|2|all|browser|tests/admin_e2e.py:owner|fake|n/a|swiftshader|900|python3 tests/admin_e2e.py $L
 game_e2e_w1|1|engine,shell,rendering,ui,lobby,tests|browser|tests/game_e2e.py:game|none|n/a|swiftshader|2400|python3 tests/game_e2e.py w1 8 --base=$G --prefix=run_
 lobby_e2e|2|lobby,backend,tests,engine,shell|browser|tests/lobby_e2e.py:T7|fake|accept|swiftshader|2400|python3 tests/lobby_e2e.py $L
+account_delete_e2e|2|lobby,backend,tests|browser|tests/account_delete_e2e.py:lobby|fake|accept|swiftshader|1200|python3 tests/account_delete_e2e.py $L
 lobby_v21|2|lobby,backend,tests,engine,shell|browser|tests/lobby_v21.py:T7|fake|accept|swiftshader|2400|python3 tests/lobby_v21.py $L
 lobby_v3|2|lobby,backend,tests,engine,shell|browser|tests/lobby_v3.py:T7|fake|replay|swiftshader|3000|python3 tests/lobby_v3.py $L
 lobby_v3b|2|lobby,backend,tests,engine,shell|browser|tests/lobby_v3b.py:T7|fake|scripted|swiftshader|3600|python3 tests/lobby_v3b.py $L

@@ -248,6 +248,26 @@ def verify_status_codes_scripted_accept():
     assert fb3.verify({'anything': 1}) == (503, {'error': 'engine_unavailable'}) and fb3.verify({})[1]['verified'] is True
 
 @test
+def delete_account_mirrors_sql():
+    # = supabase/migrations/20261127_delete_account.sql (the SQL itself: tests/account_delete_sql.test.mjs)
+    fb = mk(); a = reg(fb, 'טסט־מוחק'); b = reg(fb, 'טסט־ב'); c = reg(fb, 'טסט־ג'); adm = reg(fb, 'טסט־מנהל'); fb.admins.add(adm['id'])
+    g1 = ok(fb, 'rr_create_group', **A(a), p_name='טסט אחת'); ok(fb, 'rr_join_group', **A(b), p_code=g1['code']); ok(fb, 'rr_join_group', **A(c), p_code=g1['code'])
+    g2 = ok(fb, 'rr_create_group', **A(a), p_name='טסט לבד')
+    g3 = ok(fb, 'rr_create_group', **A(b), p_name='טסט של ב'); ok(fb, 'rr_join_group', **A(a), p_code=g3['code'])
+    ok(fb, 'rr_send_energy', **A(a), p_group=g3['id'], p_nickname=b['nickname'])
+    err(fb, 'rr_delete_account', 'unauthorized', p_id=a['id'], p_secret='x', p_confirm=a['nickname'])
+    for bad in ('', 'טסט', b['nickname'], None): err(fb, 'rr_delete_account', 'confirm_mismatch', **A(a), p_confirm=bad)
+    err(fb, 'rr_delete_account', 'admin_cannot_delete', **A(adm), p_confirm=adm['nickname'])
+    out = ok(fb, 'rr_delete_account', **A(a), p_confirm=' ' + a['nickname'] + ' ')
+    assert out == {'deleted': True, 'groups_transferred': 1, 'groups_deleted': 1}, out
+    assert fb.G[g1['id']]['owner'] == b['id'] and fb.G[g1['id']]['members'] == [b['id'], c['id']]
+    assert g2['id'] not in fb.G and fb.G[g3['id']]['members'] == [b['id']]
+    cl = ok(fb, 'rr_claim_energy', **A(b)); assert cl['total'] == 3 and cl['from'][0]['nickname'] is None, cl
+    err(fb, 'rr_delete_account', 'unauthorized', **A(a), p_confirm=a['nickname'])
+    assert a['id'] not in json.dumps({k: getattr(fb, k) for k in ('P', 'G', 'R', 'gifts', 'feed')}, default=str)
+    assert fb.deletions and set(fb.deletions[0]) == {'via', 'groups_transferred', 'groups_deleted', 'at'}
+
+@test
 def dump_load_roundtrip():
     fb = mk(); a = fb.seed_player('טסט־שמור', stars={'w1': 3}); g = fb.seed_group(a); c = fb.seed_challenge(g, world='w2', char='chef')
     path = os.path.join(tempfile.mkdtemp(), 'state.json'); fb.dump(path)

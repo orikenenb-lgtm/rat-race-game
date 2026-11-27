@@ -19,6 +19,7 @@ import { PRACTICE } from './practice.js';
 import { flag } from './flags.js';
 import { metaOf } from './worlds/meta.js';            // worlds wave 0: the 12-world map is meta only (P.worldMap()); rules load on demand
 import { groupOf, mapNo, mapLabel, groupLabel } from './worlds-groups.js';   // 2026-11-25: every level is a מפה inside one of 6 עולמות
+import { deleteSectionHtml, mountDelete, clearLocal } from './account.js';   // Google Play: delete the account from inside the game
 
 /* ============================================================ small helpers */
 const $ = (s, r = document) => r.querySelector(s);
@@ -396,6 +397,7 @@ function runEndRepair() {
   return repaired.length > 0;
 }
 function boot() {
+  deletedNotice();
   runEndRepair();
   migrateReveal();   // T4 §4.6: once — existing players → rr2-reveal.all (no tutorial, gradual HUD or hints)
   // CR-33: the in-game graph starts loading right AFTER this first render (a task later), so it never delays the home itself
@@ -881,7 +883,7 @@ async function claimGifts() {
     if (total > 0) {
       EN.add(total, 'gift');
       const from = (r && r.from) || [];
-      const lines = from.length ? from.map((f) => f.kind === 'admin' ? `🛡️ המנהל שלח לך ${EN.label(f.amount)} ⚡` : f.kind === 'referral' ? `${f.nickname} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
+      const lines = from.length ? from.map((f) => f.kind === 'admin' ? `🛡️ המנהל שלח לך ${EN.label(f.amount)} ⚡` : f.kind === 'referral' ? `${f.nickname || 'חבר'} הצטרף בזכותך: +${EN.label(f.amount)} ⚡` : `${f.nickname || 'חבר'} שלח לך ${EN.label(f.amount)} ⚡`) : [`קיבלת ${EN.label(total)} ⚡`];
       lines.slice(0, 3).forEach((t, i) => setTimeout(() => toast('🎁 ' + t), i * 2700));
       sfx('coin'); refreshEnergyChips();
     }
@@ -1659,10 +1661,26 @@ function renderProfile() {
         <div class="pf-code"><button class="chip" data-act="code-show">👁️ להציג את הקוד</button><button class="chip" data-act="code-copy">📋 להעתיק</button></div><div id="pfCode" class="pf-codebox" hidden></div>` : '<p class="lb-note">יש לך שחקן במכשיר אחר? הדבק כאן את קוד השחזור שלו.</p>'}
       <form class="lb-form" data-form="restore"><label for="pfRestore">שחזור מקוד</label><div class="inl"><input id="pfRestore" name="code" placeholder="הדבק קוד שחזור" dir="ltr" autocomplete="off"><button>לשחזר</button></div><p class="err" aria-live="polite"></p></form>
     </section>
+    ${me ? deleteSectionHtml(me.nickname, { idp: 'pfDelete' }) : ''}
+    <p class="lb-note pf-legal"><a href="privacy.html" target="_blank" rel="noopener">מדיניות פרטיות</a> · <a href="delete-account.html" target="_blank" rel="noopener">מחיקת חשבון</a></p>
   </div>`);
+  mountDelete($('#pfDelete'), { net, onDeleted: afterDelete });
   refreshMuted();
   loadAdminList('');
   adminMod();
+}
+/** account deleted on the server (js/account.js already cleaned this browser): restart the page so no module keeps the old identity or
+ *  progress in memory; the next boot says what happened (DEL_FLAG). Cleans once more right before leaving (a timer may have saved). */
+const DEL_FLAG = 'rr2-acct-deleted';
+function afterDelete({ device }) {
+  stopEnergyTicker(); stopGroupRefresh();
+  safe(() => sessionStorage.setItem(DEL_FLAG, device ? 'device' : 'server'));
+  setTimeout(() => { clearLocal({ device }); location.replace(location.pathname); }, 1500);
+}
+function deletedNotice() {
+  const v = safe(() => sessionStorage.getItem(DEL_FLAG)); if (!v) return;
+  safe(() => sessionStorage.removeItem(DEL_FLAG));
+  setTimeout(() => toast(v === 'device' ? 'החשבון וההתקדמות במכשיר נמחקו.' : 'החשבון נמחק. אפשר להמשיך לשחק כאורח.'), 400);
 }
 /** the owner's moderation panel (js/admin.js, loaded on demand for an admin only — every call is checked by the server) */
 function adminMod() {

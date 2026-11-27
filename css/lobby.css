@@ -1107,3 +1107,23 @@ body.lb-lobby-open { overflow: hidden; }
 .pf-mod-banf { margin-top: 8px; }
 .pf-mod-banf select, .pf-mod-banf input { min-height: 44px; font: inherit; font-size: 16px; }
 .pf-mod-log li { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+
+/* ---------------- account deletion (js/account.js — the same markup on /delete-account.html, styled there on its own) */
+.acct .acct-open { margin-top: 10px; }
+.acct-box { margin-top: 10px; }
+.acct-list { margin: 4px 0; padding-inline-start: 1.2em; font-size: 15px; }
+.acct-list li { margin: 3px 0; }
+.acct-p { font-size: 15px; margin: 4px 0; }
+.acct-nick { color: var(--ink); unicode-bidi: isolate; }
+.lb-shell .acct-form label.acct-check { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; color: var(--ink); font-size: 15px; min-height: 44px; cursor: pointer; }
+.lb-shell .acct-check input { width: 24px; height: 24px; min-height: 24px; flex: none; padding: 0; accent-color: var(--red); }
+.acct-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.lb-shell .acct-acts .chip, .lb-shell .acct .acct-open { min-height: 44px; }
+.acct-next, .acct-danger { min-height: 44px; padding: 0 18px; border-radius: 12px; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; }
+.acct-next { background: var(--paper2); border: 1.5px solid var(--red); color: var(--red); }
+.acct-danger { background: var(--red); color: light-dark(#fff, #1d0b09); border: 0; }
+.acct-danger:disabled { opacity: .7; cursor: progress; }
+.acct-warn { margin: 0; padding: 12px; border-radius: 12px; background: light-dark(#fde8e8, #3a1717); color: var(--ink); font-weight: 700; }
+.acct-done { margin: 0; padding: 12px; border-radius: 12px; background: light-dark(#e3f6ec, #173527); color: var(--green); font-weight: 700; }
+.pf-legal { text-align: center; }
+.pf-legal a { color: inherit; }
