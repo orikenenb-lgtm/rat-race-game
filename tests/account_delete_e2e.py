@@ -103,6 +103,9 @@ async def lobby_case(b, vp, label, device):
     if not device:
         await pg.focus('#pfDeleteDev'); await pg.keyboard.press('Space')
         check(not await pg.is_checked('#pfDeleteDev'), f'{label}: the device box toggles with the keyboard (Space)')
+    tab2 = None
+    if device:   # a second open tab of the game must not keep (and re-save) the deleted identity / wiped progress
+        tab2 = await ctx.new_page(); await tab2.goto(BASE); await tab2.wait_for_selector('.lb-home'); await tab2.evaluate('window.__tab2 = 1')
     await pg.fill('#pfDeleteNick', A['nickname']); await pg.press('#pfDeleteNick', 'Enter'); await pg.wait_for_selector('[data-step="2"]:not([hidden])')
     async with pg.expect_navigation(timeout=15000):
         await pg.click('[data-acct="confirm"]')
@@ -122,8 +125,74 @@ async def lobby_case(b, vp, label, device):
     else:
         check(await ls(pg, 'rr2-save-free-w1') == DEVICE['rr2-save-free-w1'] and await ls(pg, 'rr2-ghosts') == '[]', f'{label}: box off → device progress + saves kept')
         check('אפשר להמשיך לשחק כאורח' in toast, f'{label}: notice after reload: {toast}')
+    if tab2:
+        try: await tab2.wait_for_function('!window.__tab2', timeout=10000); reloaded = True
+        except Exception: reloaded = False  # noqa: BLE001
+        await tab2.wait_for_selector('.lb-home', timeout=15000); await tab2.wait_for_timeout(2500)
+        t2 = await tab2.evaluate("import('./js/net.js').then((m) => m.net.hasMe())")
+        prog2 = json.loads(await ls(pg, 'rr2-progress') or '{}')
+        check(reloaded and t2 is False and await ls(pg, 'rr-player') is None and not (prog2.get('stars') or {}).get('w1'),
+              f'{label}: the other open tab reloaded as a guest and did not save the old progress back (w1 stars {(prog2.get("stars") or {}).get("w1")})')
     check(A['id'] not in fb.P and fb.G[G['id']]['owner'] == B['id'] and solo['id'] not in fb.G, f'{label}: server: account gone, group → {B["nickname"]}, solo group deleted')
     check(fb.deletions[-1]['groups_transferred'] == 1 and fb.deletions[-1]['groups_deleted'] == 1, f'{label}: audit {fb.deletions[-1]}')
+    await ctx.close()
+
+async def open_box(pg, p):
+    await pg.goto(BASE); await pg.wait_for_selector('.lb-home'); await with_identity(pg, p); await pg.wait_for_selector('.lb-home')
+    await pg.click('[data-act="profile"]'); await pg.wait_for_selector('.lb-profile')
+
+async def edge_cases(b):
+    # 1. renamed on another device: the box takes the server's nickname; a rename after opening → server refusal → refreshed, then works
+    A = fb.seed_player(f'טסט־ישן{TAG}')
+    ctx, pg = await page(b, DESK, 'renamed')
+    await open_box(pg, A)
+    fb.handle('rr_rename', {'p_id': A['id'], 'p_secret': A['secret'], 'p_nickname': f'טסט־חדש{TAG}'})      # "device B"
+    await pg.click('#pfDelete [data-acct="open"]')
+    await pg.wait_for_function('(n) => document.querySelector("#pfDelete .acct-nick").textContent === n', arg=f'טסט־חדש{TAG}', timeout=8000)
+    check(json.loads(await ls(pg, 'rr-player'))['nickname'] == f'טסט־חדש{TAG}', 'renamed elsewhere: opening the box takes the server nickname (label + stored identity)')
+    await pg.fill('#pfDeleteNick', f'טסט־ישן{TAG}'); await pg.press('#pfDeleteNick', 'Enter'); await pg.wait_for_timeout(200)
+    check('לא תואם' in await pg.inner_text('#pfDeleteErr1'), 'renamed elsewhere: the old nickname is refused')
+    await pg.fill('#pfDeleteNick', f'טסט־חדש{TAG}'); await pg.press('#pfDeleteNick', 'Enter'); await pg.wait_for_selector('#pfDelete [data-step="2"]:not([hidden])')
+    check(f'טסט־חדש{TAG}' in await pg.inner_text('#pfDeleteSure'), 'step 2 names the current nickname')
+    fb.handle('rr_rename', {'p_id': A['id'], 'p_secret': A['secret'], 'p_nickname': f'טסט־שלישי{TAG}'})   # renamed again while the box is open
+    await pg.click('#pfDelete [data-acct="confirm"]')
+    await pg.wait_for_function('(n) => document.querySelector("#pfDeleteErr1").textContent.includes(n)', arg=f'טסט־שלישי{TAG}', timeout=8000)
+    check(await pg.is_visible('#pfDelete [data-step="1"]') and await pg.inner_text('#pfDelete .acct-nick') == f'טסט־שלישי{TAG}' and A['id'] in fb.P,
+          'server confirm_mismatch → back to step 1 with the refreshed nickname, nothing deleted')
+    await pg.fill('#pfDeleteNick', f'טסט־שלישי{TAG}'); await pg.press('#pfDeleteNick', 'Enter'); await pg.wait_for_selector('#pfDelete [data-step="2"]:not([hidden])')
+    async with pg.expect_navigation(timeout=15000): await pg.click('#pfDelete [data-acct="confirm"]')
+    await pg.wait_for_selector('.lb-home', timeout=15000)
+    check(A['id'] not in fb.P and await ls(pg, 'rr-player') is None, 'renamed elsewhere: deleted with the current nickname')
+    await ctx.close()
+    # 2. already deleted on another device → this device forgets it (no dead identity), says so
+    C = fb.seed_player(f'טסט־נמחק{TAG}')
+    ctx, pg = await page(b, PHONE, 'gone')
+    await open_box(pg, C)
+    await pg.click('#pfDelete [data-acct="open"]'); await pg.fill('#pfDeleteNick', C['nickname']); await pg.press('#pfDeleteNick', 'Enter')
+    await pg.wait_for_selector('#pfDelete [data-step="2"]:not([hidden])')
+    fb.handle('rr_delete_account', {'p_id': C['id'], 'p_secret': C['secret'], 'p_confirm': C['nickname']})   # "device B" deleted it
+    async with pg.expect_navigation(timeout=15000): await pg.click('#pfDelete [data-acct="confirm"]')
+    await pg.wait_for_function("document.getElementById('lb-toast') && document.getElementById('lb-toast').textContent.includes('כבר לא היה קיים')", timeout=8000)
+    check(await ls(pg, 'rr-player') is None and await pg.evaluate("import('./js/net.js').then((m) => m.net.hasMe())") is False,
+          'already deleted elsewhere (unauthorized) → identity removed here, guest, notice shown')
+    await ctx.close()
+    # 3. the site before the migration: rr_delete_account answers 404 PGRST202 → a specific Hebrew message, nothing removed
+    D = fb.seed_player(f'טסט־אין־שרת{TAG}')
+    fb.override('rr_delete_account', lambda f, body: FB.Raw(404, {'code': 'PGRST202', 'message': 'Could not find the function public.rr_delete_account(p_confirm, p_id, p_secret) in the schema cache', 'details': None, 'hint': None}))
+    ctx, pg = await page(b, PHONE, 'no-rpc')
+    await open_box(pg, D)
+    await pg.click('#pfDelete [data-acct="open"]'); await pg.fill('#pfDeleteNick', D['nickname']); await pg.press('#pfDeleteNick', 'Enter')
+    await pg.wait_for_selector('#pfDelete [data-step="2"]:not([hidden])'); await pg.click('#pfDelete [data-acct="confirm"]')
+    await pg.wait_for_function("document.querySelector('#pfDeleteErr2').textContent.includes('עוד לא זמינה')", timeout=8000)
+    check(await ls(pg, 'rr-player') is not None and D['id'] in fb.P and 'orikenen.b@gmail.com' in await pg.inner_text('#pfDeleteErr2'),
+          'RPC missing (site before migration) → "המחיקה עוד לא זמינה…", nothing removed')
+    del fb._over['rr_delete_account']
+    await ctx.close()
+    # 4. the admin: no delete flow, a short note instead (the server refuses anyway)
+    E = fb.seed_player(f'טסט־מנהל{TAG}'); fb.admins.add(E['id'])
+    ctx, pg = await page(b, DESK, 'admin')
+    await open_box(pg, E); await pg.wait_for_selector('#pfDeleteAdmin', timeout=10000)
+    check(await pg.locator('#pfDelete').count() == 0 and 'מנהל המשחק' in await pg.inner_text('#pfDeleteAdmin'), 'admin: no delete card, a short "admin cannot be deleted" note')
     await ctx.close()
 
 async def small_layout(b):
@@ -151,6 +220,8 @@ async def web_page(b):
           f'mailto: Hebrew + English subject and body with the nickname ({sub})')
     txt = await pg.inner_text('main')
     check(all(s in txt for s in ('30 יום', '30 days', 'סופית', 'permanent', 'מה נמחק', 'What is deleted', 'מה נשאר', 'What is kept', 'פרופיל')), 'page: what is deleted / kept, permanent, 30-day timeline, menu path — both languages')
+    check(all(s in txt for s in ('מילת אימות', 'one-time word', 'Lost access', 'נחליט לפי המקרה')), 'page: e-mail requests need proof of ownership (one-time word); lost-access path — both languages')
+    check(await pg.get_attribute('#webTool', 'aria-live') is None and 'אין חשבון' in await pg.inner_text('#webStatus'), 'page: the live region is the status line only')
     check(await no_hscroll(pg), 'page 390: no horizontal scroll')
     await pg.screenshot(path=SHOT + 'web_no_identity_phone.png', full_page=True)
     await pg.fill('#webCode', 'not-a-code'); await pg.press('#webCode', 'Enter'); await pg.wait_for_timeout(300)
@@ -197,6 +268,7 @@ async def main():
         await lobby_case(b, DESK, 'desk', device=True)
         await lobby_case(b, PHONE, 'phone', device=False)
         await small_layout(b)
+        await edge_cases(b)
         await web_page(b)
         await b.close()
     try: [FB.assert_clean(s) for s in SINKS]; check(True, f'guard clean: no request left the fake (rr_delete_account calls {fb.calls["rr_delete_account"]})')

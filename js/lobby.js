@@ -1661,7 +1661,7 @@ function renderProfile() {
         <div class="pf-code"><button class="chip" data-act="code-show">👁️ להציג את הקוד</button><button class="chip" data-act="code-copy">📋 להעתיק</button></div><div id="pfCode" class="pf-codebox" hidden></div>` : '<p class="lb-note">יש לך שחקן במכשיר אחר? הדבק כאן את קוד השחזור שלו.</p>'}
       <form class="lb-form" data-form="restore"><label for="pfRestore">שחזור מקוד</label><div class="inl"><input id="pfRestore" name="code" placeholder="הדבק קוד שחזור" dir="ltr" autocomplete="off"><button>לשחזר</button></div><p class="err" aria-live="polite"></p></form>
     </section>
-    ${me ? deleteSectionHtml(me.nickname, { idp: 'pfDelete' }) : ''}
+    ${!me ? '' : P.isAdmin() ? '<section class="lb-card pf-delete" id="pfDeleteAdmin"><h2>מחיקת החשבון</h2><p class="lb-note">את החשבון של מנהל המשחק אי אפשר למחוק מתוך המשחק (השרת מסרב). אם צריך, עושים את זה ידנית בשרת.</p></section>' : deleteSectionHtml(me.nickname, { idp: 'pfDelete' })}
     <p class="lb-note pf-legal"><a href="privacy.html" target="_blank" rel="noopener">מדיניות פרטיות</a> · <a href="delete-account.html" target="_blank" rel="noopener">מחיקת חשבון</a></p>
   </div>`);
   mountDelete($('#pfDelete'), { net, onDeleted: afterDelete });
@@ -1672,15 +1672,23 @@ function renderProfile() {
 /** account deleted on the server (js/account.js already cleaned this browser): restart the page so no module keeps the old identity or
  *  progress in memory; the next boot says what happened (DEL_FLAG). Cleans once more right before leaving (a timer may have saved). */
 const DEL_FLAG = 'rr2-acct-deleted';
-function afterDelete({ device }) {
+function afterDelete({ device, gone }) {
   stopEnergyTicker(); stopGroupRefresh();
-  safe(() => sessionStorage.setItem(DEL_FLAG, device ? 'device' : 'server'));
+  safe(() => sessionStorage.setItem(DEL_FLAG, gone ? 'gone' : device ? 'device' : 'server'));
   setTimeout(() => { clearLocal({ device }); location.replace(location.pathname); }, 1500);
 }
 function deletedNotice() {
   const v = safe(() => sessionStorage.getItem(DEL_FLAG)); if (!v) return;
   safe(() => sessionStorage.removeItem(DEL_FLAG));
-  setTimeout(() => toast(v === 'device' ? 'החשבון וההתקדמות במכשיר נמחקו.' : 'החשבון נמחק. אפשר להמשיך לשחק כאורח.'), 400);
+  setTimeout(() => toast(v === 'device' ? 'החשבון וההתקדמות במכשיר נמחקו.' : v === 'gone' ? 'החשבון כבר לא היה קיים בשרת, והוסר מהמכשיר הזה.' : 'החשבון נמחק. אפשר להמשיך לשחק כאורח.'), 400);
+}
+/** Another tab of this game deleted the account (or wiped the device): this tab must not keep the old identity / progress in memory
+ *  and save it back — reload at once (the reload reads the cleaned storage). */
+function watchOtherTabs() {
+  addEventListener('storage', (ev) => {
+    if (ev.storageArea !== localStorage) return;
+    if ((ev.key === 'rr-player' && ev.oldValue && !ev.newValue) || ev.key === null) { stopEnergyTicker(); stopGroupRefresh(); location.reload(); }
+  });
 }
 /** the owner's moderation panel (js/admin.js, loaded on demand for an admin only — every call is checked by the server) */
 function adminMod() {
@@ -2424,6 +2432,7 @@ function install() {
   const r = root(); if (!r) return;
   installed = true;
   window.__rrLobby = true;   // game.js: the end card renders ui.endAnalysisHtml itself (no MutationObserver)
+  watchOtherTabs();
   r.addEventListener('click', onClick);
   r.addEventListener('submit', onSubmit);
   r.addEventListener('change', onChange);

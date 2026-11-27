@@ -255,6 +255,9 @@ def delete_account_mirrors_sql():
     g2 = ok(fb, 'rr_create_group', **A(a), p_name='טסט לבד')
     g3 = ok(fb, 'rr_create_group', **A(b), p_name='טסט של ב'); ok(fb, 'rr_join_group', **A(a), p_code=g3['code'])
     ok(fb, 'rr_send_energy', **A(a), p_group=g3['id'], p_nickname=b['nickname'])
+    n = reg(fb, 'טסט־חווה', ref=b['id'])          # a referral bonus to b from a player who then deletes: still counted for b's daily cap
+    ok(fb, 'rr_delete_account', **A(n), p_confirm=n['nickname'])
+    assert sum(1 for x in fb.gifts if x['to'] == b['id'] and x['kind'] == 'referral' and x['from'] is None) == 1
     err(fb, 'rr_delete_account', 'unauthorized', p_id=a['id'], p_secret='x', p_confirm=a['nickname'])
     for bad in ('', 'טסט', b['nickname'], None): err(fb, 'rr_delete_account', 'confirm_mismatch', **A(a), p_confirm=bad)
     err(fb, 'rr_delete_account', 'admin_cannot_delete', **A(adm), p_confirm=adm['nickname'])
@@ -262,10 +265,10 @@ def delete_account_mirrors_sql():
     assert out == {'deleted': True, 'groups_transferred': 1, 'groups_deleted': 1}, out
     assert fb.G[g1['id']]['owner'] == b['id'] and fb.G[g1['id']]['members'] == [b['id'], c['id']]
     assert g2['id'] not in fb.G and fb.G[g3['id']]['members'] == [b['id']]
-    cl = ok(fb, 'rr_claim_energy', **A(b)); assert cl['total'] == 3 and cl['from'][0]['nickname'] is None, cl
+    cl = ok(fb, 'rr_claim_energy', **A(b)); assert cl['total'] == 8 and all(f['nickname'] is None for f in cl['from']), cl
     err(fb, 'rr_delete_account', 'unauthorized', **A(a), p_confirm=a['nickname'])
     assert a['id'] not in json.dumps({k: getattr(fb, k) for k in ('P', 'G', 'R', 'gifts', 'feed')}, default=str)
-    assert fb.deletions and set(fb.deletions[0]) == {'via', 'groups_transferred', 'groups_deleted', 'at'}
+    assert len(fb.deletions) == 2 and set(fb.deletions[0]) == {'via', 'groups_transferred', 'groups_deleted', 'at'}
 
 @test
 def dump_load_roundtrip():

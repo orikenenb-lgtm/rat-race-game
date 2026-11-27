@@ -97,6 +97,7 @@ const ERR = {
   // account deletion (20261127_delete_account.sql; docs/full-upgrade/ACCOUNT_DELETION.md)
   confirm_mismatch: 'הכינוי שהקלדת לא תואם לכינוי של החשבון',
   admin_cannot_delete: 'את החשבון של מנהל המשחק אי אפשר למחוק מכאן. כתבו לנו במייל.',
+  missing_rpc: 'האפשרות הזו עוד לא זמינה בשרת. נסו שוב מאוחר יותר.',
 };
 
 let me = null;
@@ -110,7 +111,11 @@ async function rpc(fn, args = {}) {
     r = await fetch(`${SB}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { apikey: SBK, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
   } catch (e) { const er = new Error('אין חיבור לשרת. בדוק את האינטרנט ונסה שוב.'); er.code = 'offline'; throw er; }
   const j = await r.json().catch(() => null);
-  if (!r.ok) { const e = new Error(ERR[j?.message] || 'משהו השתבש בשרת. נסה שוב.'); e.code = j?.message; throw e; }
+  if (!r.ok) {
+    const e = new Error(ERR[j?.message] || 'משהו השתבש בשרת. נסה שוב.'); e.code = j?.message;
+    if (j?.code === 'PGRST202') { e.code = 'missing_rpc'; e.status = r.status; }   // the function is not on this server (yet)
+    throw e;
+  }
   return j;
 }
 
@@ -146,8 +151,16 @@ export const net = {
    *  → {deleted:true, groups_transferred, groups_deleted}; throws code confirm_mismatch / admin_cannot_delete / unauthorized / offline. */
   async deleteAccount(confirm) {
     const r = await rpc('rr_delete_account', { ...auth(), p_confirm: String(confirm ?? '') });
-    me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+    net.forget();
     return r;
+  },
+  /** forget the identity on this device only (after a deletion, or when the server no longer knows it) */
+  forget() { me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } },
+  /** the nickname may have been changed on another device (rr_rename there): take the server's. → current nickname */
+  async refreshNickname() {
+    const p = await rpc('rr_profile', auth());
+    if (me && p && typeof p.nickname === 'string' && p.nickname && p.nickname !== me.nickname) { me.nickname = p.nickname; store(); }
+    return me ? me.nickname : null;
   },
   /** merges on the server (max stars per world, union of achievements); returns profile */
   /** meta = {games, wins, best:{w1:months…}} — server keeps max games/wins and min best months */

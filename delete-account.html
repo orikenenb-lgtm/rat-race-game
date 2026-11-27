@@ -53,6 +53,7 @@
   .acct-warn { margin: 0; padding: 12px; border-radius: 10px; background: var(--red-bg); font-weight: 700; }
   .acct-done { margin: 0; padding: 12px; border-radius: 10px; background: var(--ok-bg); color: var(--ok); font-weight: 700; }
   [hidden] { display: none !important; }
+  .sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -75,8 +76,9 @@
   <p>אם שיחקת בדפדפן הזה, אפשר למחוק כאן, בטופס שלמטה. יש לך <b>קוד שחזור</b> (בפרופיל: „להעביר את השחקן למכשיר אחר”)? אפשר להדביק אותו כאן ולמחוק. אפשר גם לבקש מחיקה במייל.</p>
 </section>
 
-<div class="card" id="webTool" aria-live="polite">
+<div class="card" id="webTool">
   <h2>מחיקה מהדפדפן הזה</h2>
+  <p class="sr" id="webStatus" role="status"></p>
   <noscript><p class="note">כדי למחוק מכאן צריך JavaScript. אפשר לבקש מחיקה במייל (למטה).</p></noscript>
   <p class="note" id="webLoading">בודקים אם יש בדפדפן הזה חשבון של המשחק…</p>
   <div id="webNone" hidden>
@@ -93,11 +95,16 @@
 
 <div class="card" id="mail">
   <h2>בקשה במייל</h2>
-  <p>שולחים מייל ל־<a href="mailto:orikenen.b@gmail.com">orikenen.b@gmail.com</a> עם <b>הכינוי שלך במשחק</b>. נמחק את החשבון תוך <b>30 יום</b> לכל היותר (בדרך כלל הרבה יותר מהר) ונאשר לך במייל חוזר.</p>
+  <p>שולחים מייל ל־<a href="mailto:orikenen.b@gmail.com">orikenen.b@gmail.com</a> עם <b>הכינוי שלך במשחק</b>.</p>
+  <ol>
+    <li>כינויים גלויים לכולם, אז קודם מוודאים שהחשבון שלך: נשלח לך במייל חוזר <b>מילת אימות חד־פעמית</b>.</li>
+    <li>משנים את הכינוי במשחק למילה הזו (פרופיל ← „שינוי כינוי”), או פשוט מוחקים מתוך המשחק.</li>
+    <li>אחרי זה נמחק את החשבון תוך <b>30 יום</b> לכל היותר (בדרך כלל הרבה יותר מהר) ונאשר לך במייל.</li>
+  </ol>
   <label for="mailNick">הכינוי שלך (לא חובה — נכנס לגוף המייל)</label>
   <input id="mailNick" dir="auto" maxlength="20" autocomplete="off">
   <p style="margin-top:12px"><a class="mail" id="mailLink" href="mailto:orikenen.b@gmail.com?subject=%D7%91%D7%A7%D7%A9%D7%94%20%D7%9C%D7%9E%D7%97%D7%99%D7%A7%D7%AA%20%D7%97%D7%A9%D7%91%D7%95%D7%9F%20%E2%80%94%20%D7%9E%D7%99%D7%A8%D7%95%D7%A5%20%D7%94%D7%A2%D7%9B%D7%91%D7%A8%D7%99%D7%9D%20%2F%20Account%20deletion%20request%20%E2%80%94%20Rat%20Race">לכתוב מייל לבקשת מחיקה</a></p>
-  <p class="note">אם יש כמה שחקנים עם אותו כינוי, נבקש פרט מזהה נוסף (למשל שם של קבוצה שלך או בערך מתי נרשמת). לא נבקש סיסמה — אין סיסמאות במשחק.</p>
+  <p class="note">אין לך יותר גישה למשחק (מכשיר שאבד, בלי קוד שחזור)? כתוב לנו מה אתה זוכר על החשבון (למשל שמות של הקבוצות שלך ובערך מתי נרשמת). נחליט לפי המקרה, וייתכן שלא נוכל לאמת. לעולם לא נבקש סיסמה או קוד שחזור — אין סיסמאות במשחק, ואת קוד השחזור לא שולחים לאף אחד.</p>
 </div>
 
 <section lang="he" dir="rtl">
@@ -140,7 +147,8 @@
   <h2>Without the app</h2>
   <ul>
     <li><b>In this browser:</b> if you played in this browser, or you have your <b>recovery code</b> (profile → “להעביר את השחקן למכשיר אחר”), use the form above (in Hebrew): type your nickname, tap “המשך”, then “כן, למחוק לצמיתות”.</li>
-    <li><b>By email:</b> write to <a href="mailto:orikenen.b@gmail.com?subject=Account%20deletion%20request%20%E2%80%94%20Rat%20Race">orikenen.b@gmail.com</a> with your <b>in-game nickname</b>. We delete the account within <b>30 days</b> at the latest (usually much sooner) and confirm by email. If several players share that nickname, we may ask for one more detail (for example the name of one of your groups). We never ask for a password — the game has none.</li>
+    <li><b>By email:</b> write to <a href="mailto:orikenen.b@gmail.com?subject=Account%20deletion%20request%20%E2%80%94%20Rat%20Race">orikenen.b@gmail.com</a> with your <b>in-game nickname</b>. Nicknames are public, so we first check the account is yours: we reply with a <b>one-time word</b>; change your nickname in the game to that word (profile → “שינוי כינוי”), or simply delete in the game. We then delete the account within <b>30 days</b> at the latest (usually much sooner) and confirm by email.</li>
+    <li><b>Lost access</b> (lost device, no recovery code)? Tell us what you remember about the account (for example your groups' names, roughly when you joined). We decide case by case and may not be able to verify it. We never ask for a password or your recovery code — the game has no passwords, and the recovery code is never sent to anyone.</li>
   </ul>
 
   <h2>What is deleted</h2>

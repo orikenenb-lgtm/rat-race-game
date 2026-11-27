@@ -22,22 +22,25 @@ function showHas() {
   const box = $('#webHas');
   box.innerHTML = `<p>בדפדפן הזה יש חשבון של המשחק: <b dir="auto"></b></p>` + deleteSectionHtml(me.nickname, { idp: 'webDel', cls: 'web-del' });
   box.querySelector('p b').textContent = me.nickname;
-  mountDelete($('#webDel'), { net, onDeleted: () => { const p = box.querySelector(':scope > p'); if (p) p.hidden = true; } });
+  mountDelete($('#webDel'), { net, onDeleted: () => { const p = box.querySelector(':scope > p'); if (p) p.hidden = true; $('#mailNick').value = ''; } });
 }
 function showNone() {
   $('#webHas').innerHTML = '';
   $('#webNone').hidden = false;
 }
-function init() {
+const status = (t) => { const el = $('#webStatus'); if (el) el.textContent = t; };
+async function init() {
+  if (net.hasMe()) { try { await net.refreshNickname(); } catch (e) { /* offline / unknown: the flow handles it */ } }   // renamed elsewhere?
   $('#webLoading').hidden = true;
-  if (net.hasMe() && net.me().nickname) showHas(); else showNone();
+  if (net.hasMe() && net.me().nickname) { showHas(); status('בדפדפן הזה יש חשבון של המשחק: ' + net.me().nickname); }
+  else { showNone(); status('בדפדפן הזה אין חשבון של המשחק.'); }
   $('#webRestore').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const err = $('#webCodeErr'); err.textContent = '';
     const code = ev.target.code.value.trim();
     if (!code) { err.textContent = 'הדבק את קוד השחזור.'; ev.target.code.focus(); return; }
     const b = ev.target.querySelector('button'); b.disabled = true;
-    try { await net.restore(code); showHas(); setTimeout(() => { const o = document.querySelector('#webDel [data-acct="open"]'); if (o) o.focus(); }, 30); }
+    try { await net.restore(code); showHas(); status('קוד השחזור התקבל. אפשר למחוק את החשבון ' + net.me().nickname + '.'); setTimeout(() => { const o = document.querySelector('#webDel [data-acct="open"]'); if (o) o.focus(); }, 30); }
     catch (e) { err.textContent = !navigator.onLine ? 'אין חיבור לאינטרנט. נסה שוב כשיש חיבור.' : 'קוד השחזור לא תקין, או שהחשבון כבר נמחק.'; ev.target.code.focus(); }
     finally { b.disabled = false; }
   });

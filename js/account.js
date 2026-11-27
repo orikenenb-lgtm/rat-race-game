@@ -60,7 +60,9 @@ export const STR = {
   mismatch: 'הכינוי שהקלדת לא תואם לכינוי של החשבון. הקלד אותו בדיוק כמו שהוא מופיע.',
   empty: 'הקלד את הכינוי שלך כדי לאשר.',
   offline: 'אין חיבור לאינטרנט. כדי למחוק את החשבון צריך חיבור לשרת. שום דבר לא נמחק — נסה שוב כשיש חיבור.',
-  gone: 'השרת לא מכיר את החשבון הזה. ייתכן שהוא כבר נמחק ממכשיר אחר.',
+  gone: 'השרת לא מכיר את החשבון הזה — כנראה הוא כבר נמחק ממכשיר אחר. הסרנו אותו גם מהמכשיר הזה, ואפשר להמשיך לשחק כאורח.',
+  unavailable: 'המחיקה עוד לא זמינה. נסו שוב מאוחר יותר, או בקשו מחיקה במייל orikenen.b@gmail.com.',
+  renamed: (n) => `הכינוי של החשבון השתנה במכשיר אחר. הכינוי הנוכחי: ${n}`,
   done: 'החשבון נמחק. המידע שלך הוסר מהשרת.',
   doneDev: 'גם ההתקדמות במכשיר הזה נמחקה.',
   doneKeep: 'ההתקדמות במכשיר הזה נשארה. אפשר להמשיך לשחק כאורח.',
@@ -109,9 +111,22 @@ export function mountDelete(sec, { net, onDeleted = null, online = () => (typeof
   const step = (n) => { steps.forEach((s) => { s.hidden = s.dataset.step !== String(n); }); };
   const focus = (el) => setTimeout(() => { try { el.focus(); } catch (e) { /* ignore */ } }, 30);
   const nick = () => String((net.me() || {}).nickname || '');
+  /** the nickname may have changed on another device: ask the server (silently; offline keeps the local one). → changed? */
+  const refresh = async () => {
+    const before = nick();
+    try { if (net.refreshNickname && online()) await net.refreshNickname(); } catch (e) { /* offline / server: keep the local one */ }
+    sec.querySelectorAll('.acct-nick').forEach((el) => { el.textContent = nick(); });
+    return nick() !== before;
+  };
   const show = (on) => {
     box.hidden = !on; openB.setAttribute('aria-expanded', String(on)); openB.hidden = on;
-    if (on) { step(1); err1.textContent = ''; err2.textContent = ''; input.value = ''; focus(input); } else focus(openB);
+    if (on) { step(1); err1.textContent = ''; err2.textContent = ''; input.value = ''; focus(input); refresh(); } else focus(openB);
+  };
+  const finish = (device, result, gone) => {
+    const removed = clearLocal({ device });
+    const done = $('#' + sec.id + 'Done'); done.textContent = gone ? STR.gone : `${STR.done} ${device ? STR.doneDev : STR.doneKeep}`;
+    step(3); openB.hidden = true; focus(done);
+    if (onDeleted) onDeleted({ device, result, removed, gone: !!gone });
   };
   openB.addEventListener('click', () => show(true));
   sec.addEventListener('click', async (ev) => {
@@ -127,15 +142,16 @@ export function mountDelete(sec, { net, onDeleted = null, online = () => (typeof
     try { result = await net.deleteAccount(input.value.trim()); }
     catch (e) {
       b.disabled = false; b.textContent = label; b.removeAttribute('aria-busy');
-      err2.textContent = e && e.code === 'offline' ? STR.offline : e && e.code === 'unauthorized' ? STR.gone : e && e.code === 'confirm_mismatch' ? STR.mismatch : (e && e.message) || STR.offline;
-      if (e && e.code === 'confirm_mismatch') { step(1); err1.textContent = STR.mismatch; focus(input); } else focus(b);
-      return;
+      const code = e && e.code;
+      if (code === 'unauthorized') { if (net.forget) net.forget(); return finish(false, null, true); }   // already deleted elsewhere: no dead identity here
+      if (code === 'confirm_mismatch') {                                     // renamed on another device since this page loaded
+        const changed = await refresh();
+        step(1); input.value = ''; err1.textContent = changed ? STR.renamed(nick()) : STR.mismatch; focus(input); return;
+      }
+      err2.textContent = code === 'offline' ? STR.offline : code === 'missing_rpc' ? STR.unavailable : (e && e.message) || STR.offline;
+      focus(b); return;
     }
-    const device = !!dev.checked;
-    const removed = clearLocal({ device });
-    const done = $('#' + sec.id + 'Done'); done.textContent = `${STR.done} ${device ? STR.doneDev : STR.doneKeep}`;
-    step(3); openB.hidden = true; focus(done);
-    if (onDeleted) onDeleted({ device, result, removed });
+    finish(!!dev.checked, result, false);
   });
   form.addEventListener('submit', (ev) => {
     ev.preventDefault(); ev.stopPropagation();
@@ -145,7 +161,8 @@ export function mountDelete(sec, { net, onDeleted = null, online = () => (typeof
     if (v !== nick()) { err1.textContent = STR.mismatch; input.setAttribute('aria-invalid', 'true'); return focus(input); }
     input.removeAttribute('aria-invalid');
     if (!online()) { err1.textContent = STR.offline; return; }
-    step(2); focus($('#' + sec.id + 'Sure'));
+    const sure = $('#' + sec.id + 'Sure'); sure.textContent = STR.sure(nick());
+    step(2); focus(sure);
   });
   sec.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !box.hidden && steps[2].hidden) { ev.stopPropagation(); show(false); } });
 }

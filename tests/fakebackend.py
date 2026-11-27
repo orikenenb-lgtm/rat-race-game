@@ -820,7 +820,7 @@ class FakeBackend:
         return {'total': sum(x['amount'] for x in mine), 'from': [{'nickname': self.P[x['from']]['nickname'] if x['from'] in self.P else None, 'kind': x['kind'], 'amount': x['amount']} for x in mine]}
     # ---- account deletion — supabase/migrations/20261127_delete_account.sql (public.rr_delete_account → game.delete_player).
     # Mirrors: auth, admin refused, confirm = the current nickname (trimmed), owned groups → the oldest remaining member (groups v2: the
-    # oldest admin first), a sole-member group deleted with its challenges and their results, unclaimed gifts he sent kept for the
+    # oldest admin first), a sole-member group deleted with its challenges and their results, every gift he sent kept for the
     # receivers (from → None), then everything of his removed. Live rooms are not modelled here (the `rooms` flag is off; the SQL test
     # tests/account_delete_sql.test.mjs covers them).
     def _rr_delete_account(self, b):
@@ -847,7 +847,7 @@ class FakeBackend:
                 if e.get('target') == pid: e['target'] = None
         for rid in [rid for rid, r in self.R.items() if r['player'] == pid]: del self.R[rid]
         for x in self.gifts:
-            if x['from'] == pid and x['to'] != pid and not x['claimed']: x['from'] = None
+            if x['from'] == pid and x['to'] != pid: x['from'] = None      # every gift he sent stays (pending ⚡ + the referral cap's count)
         self.gifts = [x for x in self.gifts if pid not in (x['from'], x['to'])]
         self.feed = [f for f in self.feed if f['player'] != pid]
         self.bans.pop(pid, None); self.join_fails.pop(pid, None)
