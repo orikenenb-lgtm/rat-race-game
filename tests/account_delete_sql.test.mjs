@@ -274,9 +274,11 @@ async function contract(label, order) {
     const board = (await call('rr_group', { ...au(B), p_group: G1.id })).body.challenges[0].board;
     assert.deepEqual(board.map((r) => r.nickname).sort(), [B.nickname, C.nickname].sort());
   });
-  await test(`${label}: B keeps the unclaimed ⚡ A sent (from = null, "a friend"); A's inbox and claimed history are gone; C.referred_by → null`, async () => {
+  await test(`${label}: every gift A sent stays with its receiver (from = null): B's pending ⚡, C's claimed one; A's inbox is gone; C.referred_by → null`, async () => {
     assert.equal(unclaimedAB, 1);
     assert.equal(await n(`select count(*)::int as n from game.energy_gifts where from_id is null and to_id = $1 and claimed_at is null`, [B.id]), 1);
+    assert.equal(await n(`select count(*)::int as n from game.energy_gifts where from_id is null and to_id = $1 and claimed_at is not null`, [C.id]), 1);
+    assert.equal(await n(`select count(*)::int as n from game.energy_gifts where to_id = $1`, [A.id]), 0);
     const cl = (await call('rr_claim_energy', au(B))).body; assert.equal(cl.total, 3); assert.equal(cl.from[0].nickname, null);
     assert.equal((await rows(d, `select referred_by from game.players where id = $1`, [C.id]))[0].referred_by, null);
   });
@@ -292,12 +294,21 @@ async function contract(label, order) {
     assert.equal((await call('rr_profile', au(A))).code, 'unauthorized');
     assert.equal(await dataHash(d), h);
   });
+  await test(`${label}: referral cap survives "register with ?ref, delete, repeat": the bonus row stays counted for the referrer`, async () => {
+    const today = async () => n(`select count(*)::int as n from game.energy_gifts where to_id = $1 and kind = 'referral' and day = (now() at time zone 'Asia/Jerusalem')::date`, [D.id]);
+    for (let i = 0; i < 7; i++) {
+      const N = (await call('rr_register2', { p_nickname: 'טסט־חוות' + i, p_ref: D.id })).body;
+      assert.ok((await call('rr_delete_account', { ...au(N), p_confirm: N.nickname })).ok);
+    }
+    assert.equal(await today(), 5, 'capped at 5 a day, also after the referred accounts were deleted');
+    assert.equal((await call('rr_claim_energy', au(D))).body.total, 25);
+  });
   await test(`${label}: a fresh player with nothing deletes cleanly (0 / 0); the owner's manual path (game.delete_player 'manual') works`, async () => {
     const E = await reg(d, 'טסט־ריק'); assert.deepEqual((await call('rr_delete_account', { ...au(E), p_confirm: E.nickname })).body, { deleted: true, groups_transferred: 0, groups_deleted: 0 });
     const F = await reg(d, 'טסט־במייל'); await call('rr_create_group', { ...au(F), p_name: 'טסט של מייל' }); await call('rr_join_group', { ...au(D), p_code: (await call('rr_my_groups', au(F))).body[0].code });
     const [r] = await rows(d, `select game.delete_player($1, 'manual') as r`, [F.id]); assert.deepEqual(r.r, { deleted: true, groups_transferred: 1, groups_deleted: 0 });
     assert.deepEqual(await where(d, F.nickname), []);
-    assert.deepEqual((await rows(d, `select via from game.account_deletions order by id`)).map((x) => x.via), ['app', 'app', 'manual']);
+    assert.deepEqual((await rows(d, `select via from game.account_deletions order by id`)).map((x) => x.via), ['app', ...Array(7).fill('app'), 'app', 'manual']);
   });
   return { d, w };
 }

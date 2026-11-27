@@ -15,8 +15,9 @@
 --       NO player id, NO nickname, nothing that points back to the person.
 --
 -- What game.delete_player does, in this order (one transaction; the players row is locked first)
---   1. pending (unclaimed) ⚡ gifts and referral bonuses he SENT to other players are kept for them: from_id → null (the
---      receiver's inbox shows "a friend"). Everything else of his in energy_gifts goes with the cascade.
+--   1. every ⚡ gift / referral bonus he SENT to another player stays with the receiver, from_id → null (the inbox shows "a friend"):
+--      pending ones are not lost, and the rows keep counting in rr_register2's daily referral cap (5 per referrer per day) —
+--      deleting them would let "register with ?ref, delete, repeat" farm ⚡ past the cap. Gifts TO him go with the cascade.
 --   2. every group he OWNS (locked FOR UPDATE): ownership passes to the oldest remaining member (joined_at, then player id);
 --      with the groups v2 draft applied: the oldest ADMIN first, else the oldest member — the same rule as v2's own leave
 --      (game.group_drop) — and the member roles are kept in step (one 'owner' row) + one group_log row 'owner' {auto, why}.
@@ -33,7 +34,7 @@
 --      ON DELETE SET NULL: challenges.created_by, players.referred_by (other players' "who invited me"), and the drafts'
 --      group_log actor/target, challenges.cancelled_by, bans.by_id. Other players' results, memberships and groups are untouched.
 --   5. one game.account_deletions row (no personal data).
--- Retained after deletion (documented in ACCOUNT_DELETION.md): content he created INSIDE groups that live on (group names of
+-- Retained after deletion (documented in ACCOUNT_DELETION.md): the gift rows he sent (from_id null, see 1.); content he created INSIDE groups that live on (group names of
 -- groups handed over, challenge titles) — no longer linked to him; with the moderation draft, game.mod_log keeps the admin's
 -- actions about him under the random player id (no nickname; the id matches no account any more; append-only by design).
 --
@@ -82,17 +83,18 @@ begin
   if not found then raise exception 'unauthorized' using errcode = '28000'; end if;
   if game.is_admin(p_id) then raise exception 'admin_cannot_delete'; end if;
 
-  -- 1. unclaimed gifts / referral bonuses he sent stay with their receivers
-  update game.energy_gifts set from_id = null where from_id = p_id and to_id <> p_id and claimed_at is null;
+  -- 1. gifts / referral bonuses he sent stay with their receivers (pending ones, and the referral cap's count)
+  update game.energy_gifts set from_id = null where from_id = p_id and to_id <> p_id;
 
   -- 2. groups he owns
   v_v2 := exists (select 1 from pg_attribute where attrelid = 'game.group_members'::regclass and attname = 'role' and attnum > 0 and not attisdropped);
   for v_g in select id from game.groups where owner_id = p_id order by created_at, id for update loop
     if v_v2 then
       execute 'select player_id from game.group_members where group_id = $1 and player_id <> $2
-                order by (role = ''admin'') desc, joined_at, player_id limit 1' into v_next using v_g, p_id;
+                order by (role = ''admin'') desc, joined_at, player_id limit 1 for update' into v_next using v_g, p_id;
     else
-      select player_id into v_next from game.group_members where group_id = v_g and player_id <> p_id order by joined_at, player_id limit 1;
+      select player_id into v_next from game.group_members where group_id = v_g and player_id <> p_id order by joined_at, player_id limit 1
+        for update;                                                           -- the next owner cannot leave half-way
     end if;
     if v_next is null then
       delete from game.groups where id = v_g;
